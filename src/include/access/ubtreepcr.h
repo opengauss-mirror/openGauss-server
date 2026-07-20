@@ -370,7 +370,8 @@ extern UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid r
     UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
     OffsetNumber offset, Buffer buf, TransactionId oldXid, UBTreeUndoInfo undoinfo, IndexTuple itup);
 extern int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid,
-    Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
+    Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid,
+    bool is_sync_rollback);
 /*
  * prototypes for functions in ubtpcrsearch.cpp
  */
@@ -484,7 +485,8 @@ bool UBTreeIndexIsPCRType(Relation rel);
 extern char *getIndexType(List *defList);
 
 extern int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid,
-    Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
+    Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid,
+    bool is_sync_rollback);
 extern bool UBTreePCRIsKeyEqual(Relation idxrel, IndexTuple itup, BTScanInsert itupKey);
 
 /* parallel index scan funcs */

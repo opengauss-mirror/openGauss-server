@@ -577,6 +577,7 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
     xact_cxt->ActiveLobRelid = InvalidOid;
     xact_cxt->isSelectInto = false;
     xact_cxt->callPrint = false;
+    xact_cxt->m_undozone_array = NULL;
 }
 
 static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
@@ -2115,12 +2116,10 @@ void knl_thread_init(knl_thread_role role)
     knl_t_heartbeat_init(&t_thrd.heartbeat_cxt);
     knl_t_streaming_init(&t_thrd.streaming_cxt);
     knl_t_ts_compaction_init(&t_thrd.ts_compaction_cxt);
-    if (g_instance.attr.attr_storage.enable_ustore) {
-        KnlTUndoInit(&t_thrd.undo_cxt);
-        KnlTUndolauncherInit(&t_thrd.undolauncher_cxt);
-        KnlTUndorecyclerInit(&t_thrd.undorecycler_cxt);
-        KnlTUstoreInit(&t_thrd.ustore_cxt);
-    }
+    KnlTUndoInit(&t_thrd.undo_cxt);
+    KnlTUndolauncherInit(&t_thrd.undolauncher_cxt);
+    KnlTUndorecyclerInit(&t_thrd.undorecycler_cxt);
+    KnlTUstoreInit(&t_thrd.ustore_cxt);
     KnlTRollbackRequestsInit(&t_thrd.rollback_requests_cxt);
     knl_t_security_policy_init(&t_thrd.security_policy_cxt);
     knl_t_security_ledger_init(&t_thrd.security_ledger_cxt);

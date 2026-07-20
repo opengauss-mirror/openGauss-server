@@ -795,6 +795,35 @@ static bool check_trigger_deferable(Relation rel)
     return deferablesCheck;
 }
 
+static bool optstream_check_trigger_owns_merge(Query* query, Relation rel)
+{
+    bool merge_check = false;
+#ifndef ENABLE_MULTIPLE_NODES
+    ListCell* cell = NULL;
+    foreach(cell, query->mergeActionList)
+    {
+        MergeAction *merge_action = (MergeAction *)lfirst(cell);
+        if (merge_action->commandType == CMD_UPDATE &&
+            check_trigger_deferable(rel) &&
+            pgxc_has_trigger_for_event(TRIGGER_TYPE_UPDATE, rel->trigdesc)) {
+            merge_check = true;
+            break;
+        }
+        if (merge_action->commandType == CMD_INSERT &&
+            pgxc_has_trigger_for_event(TRIGGER_TYPE_INSERT, rel->trigdesc)) {
+            merge_check = true;
+            break;
+        }
+        if (merge_action->commandType == CMD_DELETE &&
+            pgxc_has_trigger_for_event(TRIGGER_TYPE_DELETE, rel->trigdesc)) {
+            merge_check = true;
+            break;
+        }
+    }
+#endif
+    return merge_check;
+}
+
 static bool table_contain_unsupport_feature(Oid relid, Query* query)
 {
     Relation rel;
@@ -822,7 +851,8 @@ static bool table_contain_unsupport_feature(Oid relid, Query* query)
             ((query->commandType == CMD_INSERT && pgxc_has_trigger_for_event(TRIGGER_TYPE_INSERT, rel->trigdesc)) ||
             (query->commandType == CMD_UPDATE && check_trigger_deferable(rel) &&
             pgxc_has_trigger_for_event(TRIGGER_TYPE_UPDATE, rel->trigdesc)) ||
-            (query->commandType == CMD_DELETE && pgxc_has_trigger_for_event(TRIGGER_TYPE_DELETE, rel->trigdesc)))) {
+            (query->commandType == CMD_DELETE && pgxc_has_trigger_for_event(TRIGGER_TYPE_DELETE, rel->trigdesc)) ||
+            (query->commandType == CMD_MERGE && optstream_check_trigger_owns_merge(query, rel)))) {
             sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                 NOTPLANSHIPPING_LENGTH,
                 "Table %s with trigger can not be shipped",

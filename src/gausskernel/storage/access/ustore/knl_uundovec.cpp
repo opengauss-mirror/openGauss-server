@@ -573,6 +573,14 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
         return UNDO_RET_FAIL;
     }
 
+    bool need_alloc_zone_for_stream =
+        IsUnderPostmaster && !RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery && StreamThreadAmI();
+    if (need_alloc_zone_for_stream) {
+        TransactionId fxid = GetCurrentTransactionId();
+        undo::AllocateUndoZone(fxid);
+        pg_memory_barrier();
+    }
+
     Assert(urecvec->Size() > 0);
     UndoRecordSetUInfo(urecvec);
 

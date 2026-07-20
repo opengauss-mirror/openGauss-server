@@ -225,7 +225,7 @@ typedef struct RmgrData {
     int (*rm_undo)(URecVector *urecvector, int startIdx, int endIdx,
                     TransactionId xid, Oid reloid, Oid partitionoid,
                     BlockNumber blkno, bool isFullChain, 
-                    int preRetCode, Oid *preReloid, Oid *prePartitionoid);
+                    int preRetCode, Oid *preReloid, Oid *prePartitionoid, bool is_sync_rollback);
     void (*rm_undo_desc) (StringInfo buf, UndoRecord *record);
     const char* (*rm_type_name)(uint8 subtype);
 } RmgrData;

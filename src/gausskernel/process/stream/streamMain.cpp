@@ -418,6 +418,12 @@ static void execute_stream_plan(StreamProducer* producer)
     start_xact_command();
 
     producer->setUpStreamTxnEnvironment();
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->is_dml()) {
+        u_sess->stream_cxt.global_obj->save_proc(t_thrd.proc);
+        u_sess->stream_cxt.global_obj->save_use_combo_cid();
+    }
+#endif
 
     PlannedStmt* planstmt = producer->getPlan();
     CommandDest dest = producer->getDest();
@@ -525,6 +531,10 @@ static void execute_stream_plan(StreamProducer* producer)
      */
     (void)PortalRun(portal, FETCH_ALL, isTopLevel, receiver, receiver, completionTag);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    EndCommand(completionTag, dest);
+#endif
+
     (*receiver->rDestroy)(receiver);
 
     PortalDrop(portal, false);
@@ -582,6 +592,19 @@ static void execute_stream_end(StreamProducer* producer)
                 }
                 producer->netStatusSave(i);
             }
+        }
+        StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+        Assert(stream_node_group);
+        if (stream_node_group->get_need_copyback_undozone()) {
+            /* producer copy undozone data to streamnodegroup */
+            int rc = memcpy_s(&producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context),
+                &t_thrd.undo_cxt, sizeof(knl_t_undo_context));
+            securec_check(rc, "\0", "\0");
+            TransactionState s = GetCurrentTransactionState();
+            rc = memcpy_s(&producer->m_producer_undozone->trans_mgr_ptr, sizeof(TransactionStateData),
+                s, sizeof(TransactionStateData));
+            securec_check(rc, "\0", "\0");
+            stream_node_group->stream_return_undo(producer->m_producer_undozone, u_sess->stream_cxt.smp_id);
         }
     }
     producer->finalizeLocalStream();
@@ -784,6 +807,10 @@ void StreamExit()
     ResetToLocalVfdCache();
 
     closeAllVfds();
+
+    ReleaseUndoBuffers();
+    undo::ReleaseSlotBuffer();
+    undo::InitUndoCxt();
 
     /* ShutdownPostgres would release buffer under AbortOutOfAnyTransaction */
     ShutdownPostgres(0, 0);

@@ -719,6 +719,11 @@ extern void PartitionDecrementReferenceCount(Partition part);
 #define RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION \
     g_instance.attr.attr_storage.max_concurrent_autonomous_transactions > 0
 
+#ifndef ENABLE_MULTIPLE_NODES
+#define RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION_SMP(relation) \
+    (!RelationCreateInCurrXact(relation) && g_instance.attr.attr_storage.max_concurrent_autonomous_transactions > 0)
+#endif
+
 /*
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket

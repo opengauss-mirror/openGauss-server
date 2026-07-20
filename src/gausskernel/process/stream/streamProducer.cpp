@@ -75,6 +75,8 @@
 
 extern void StreamSaveTxnContext(StreamTxnContext* stc);
 extern void StreamRestoreTxnContext(StreamTxnContext* stc);
+extern void init_stream_undozone_data_from(StreamUndoZoneData* dest_undozone_data,
+    StreamUndoZoneData *src_undozone_data);
 
 StreamProducer::StreamProducer(
     StreamKey key, PlannedStmt* pstmt, Stream* snode, MemoryContext context, int socketNum, StreamTransType transType)
@@ -146,6 +148,7 @@ StreamProducer::StreamProducer(
     m_econtext = NULL;
     initStringInfo(&m_tupleBuffer);
     initStringInfo(&m_tupleBufferWithCheck);
+    m_producer_undozone = NULL;
 
     /* use the origianl exec_nodes to setup bucketmap for redistribution case */
     if (EXEC_IN_RECURSIVE_MODE(snode) && snode->origin_consumer_nodes != NULL) {
@@ -192,6 +195,7 @@ StreamProducer::~StreamProducer()
     m_distributeKey = NULL;
     m_distributeIdx = NULL;
     m_skewState = NULL;
+    m_producer_undozone = NULL;
 }
 
 /*
@@ -206,29 +210,27 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
 {
     AutoContextSwitch streamCxtGuard(m_memoryCxt);
 
-    bool isIUDParallel =
-        (m_plan->commandType == CMD_INSERT ||
-        m_plan->commandType == CMD_DELETE ||
-        m_plan->commandType == CMD_UPDATE) &&
-        m_plan->planTree->type == T_Stream;
-
     /*
      * Each Stream thread has a copy of PlannedStmt which comes from top consumer.
      * Differ them by assigning different plan tree(left tree of stream node).
      */
     m_plan->planTree = (Plan*)copyObject(m_streamNode->scan.plan.lefttree);
     m_plan->num_streams = 0;
+
 #ifndef ENABLE_MULTIPLE_NODES
-    if (m_plan->resultRelations) {
-        m_plan->resultRelations = (List*)copyObject(m_plan->resultRelations);
+    if (!((m_plan->commandType == CMD_INSERT ||
+        m_plan->commandType == CMD_UPDATE ||
+        m_plan->commandType == CMD_DELETE ||
+        m_plan->commandType == CMD_MERGE)
+        && IsA(m_plan->planTree, ModifyTable))) {
+        m_plan->commandType = CMD_SELECT;
+        m_plan->hasReturning = false;
+        m_plan->resultRelations = NIL;
     }
-    if (m_plan->rtable) {
-        m_plan->rtable = (List*)copyObject(m_plan->rtable);
-    }
-#endif
-    m_plan->commandType = isIUDParallel ? m_plan->commandType : CMD_SELECT;
+#else
     m_plan->hasReturning = false;
-    m_plan->resultRelations = isIUDParallel ? m_plan->resultRelations : NIL;
+    m_plan->resultRelations = NIL;
+#endif
 
     m_databaseName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
     /*  Use the login username but not the current username in stream for inner connection. */
@@ -304,6 +306,17 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
     m_nodeGroup = u_sess->stream_cxt.global_obj;
     registerGroup();
     m_sync_guc_variables = KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, sync_guc_variables);
+    m_producer_undozone = (StreamUndoZoneData *)palloc(sizeof(StreamUndoZoneData));
+
+    for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+        UndoPersistence upersistence = static_cast<UndoPersistence>(i);
+        m_producer_undozone->undo_cxt.zids[upersistence] = INVALID_ZONE_ID;
+        m_producer_undozone->undo_cxt.prevXid[upersistence] = InvalidTransactionId;
+        m_producer_undozone->undo_cxt.slots[upersistence] = NULL;
+        m_producer_undozone->undo_cxt.slotPtr[upersistence] = INVALID_UNDO_REC_PTR;
+    }
+    m_producer_undozone->undo_cxt.transUndoSize = 0;
+    m_producer_undozone->undo_cxt.fetchRecord = false;
 
     /* flag this stream object as already init. */
     m_init = true;
@@ -706,6 +719,9 @@ void StreamProducer::BindingRedisFunction()
                 break;
             case UUIDOID:
                 m_hashFun[i] = &computeHashT<UUIDOID, LOCATOR_TYPE_HASH, vectorized>;
+                break;
+            case TIDOID:
+                m_hashFun[i] = &computeHashT<TIDOID, LOCATOR_TYPE_HASH, vectorized>;
                 break;
             default:
                 ereport(ERROR,
@@ -1223,6 +1239,24 @@ void StreamProducer::redistributeBatchChannelForSlice(VectorBatch* batch)
     }
 }
 
+void StreamProducer::redistribute_ctid_tuple_channel(TupleTableSlot* tuple)
+{
+    bool isNull = false;
+    Datum data;
+    uint64 hashValue = 0;
+
+    data = tableam_tslot_getattr(tuple, m_distributeIdx[0] + 1, &isNull);
+    if (!isNull) {
+        hashValue = m_hashFun[0](data);
+    } else {
+        hashValue = u_sess->stream_cxt.smp_id * BUCKETDATALEN;
+    }
+
+    m_locator[0] =
+        ChannelLocalizer<LOCAL_DISTRIBUTE>(hashValue, m_parallel_desc.consumerDop,
+        list_length(m_consumerNodes->nodeList));
+}
+
 /*
  * @Description: Calculate the destination consumer for a tuple
  *
@@ -1446,11 +1480,20 @@ void StreamProducer::DispatchRowRedistrFunctionByRedisType()
             m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, REMOTE_DIRECT_DISTRIBUTE>;
             break;
 #endif
-        case LOCAL_DISTRIBUTE:
-            if (m_hasExprKey) {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<LOCAL_DISTRIBUTE>;
-            } else {
-                m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
+        case LOCAL_DISTRIBUTE: {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (len == 1 && m_desc->attrs[m_distributeIdx[0]].atttypid == TIDOID) {
+                        m_channelCalFun = &StreamProducer::redistribute_ctid_tuple_channel;
+                } else {
+#endif
+                    if (m_hasExprKey) {
+                        m_channelCalFun = &StreamProducer::redistributeTupleChannelWithExpr<LOCAL_DISTRIBUTE>;
+                    } else {
+                        m_channelCalFun = &StreamProducer::redistributeTupleChannel<len, LOCAL_DISTRIBUTE>;
+                    }
+#ifndef ENABLE_MULTIPLE_NODES
+                }
+#endif
             }
             break;
 
@@ -1618,6 +1661,11 @@ CommandDest StreamProducer::getDest()
     return m_dest;
 }
 
+void StreamProducer::copy_undozone_from_main_worker(StreamUndoZoneData* undozone_data)
+{
+    init_stream_undozone_data_from(m_producer_undozone, undozone_data);
+}
+
 /*
  * @Description: Set up the write transaction status for the stream thread
  *
@@ -1625,6 +1673,19 @@ CommandDest StreamProducer::getDest()
  */
 void StreamProducer::setUpStreamTxnEnvironment()
 {
+    /* undo zone */
+    StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+    Assert(stream_node_group != NULL);
+    if (stream_node_group->get_need_copyback_undozone()) {
+        int rc = memcpy_s(&t_thrd.undo_cxt, sizeof(knl_t_undo_context),
+            &m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context));
+        securec_check(rc, "\0", "\0");
+        TransactionState s = GetCurrentTransactionState();
+        rc = memcpy_s(s, sizeof(TransactionStateData),
+            &m_producer_undozone->trans_mgr_ptr, sizeof(TransactionStateData));
+        securec_check(rc, "\0", "\0");
+    }
+
     /*  resotre transaction context. */
     StreamRestoreTxnContext(&m_streamTxnCxt);
 
@@ -1938,24 +1999,30 @@ void StreamProducer::initSharedContext()
     m_sharedContextInit = true;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 /*
- * @Description: send IUD rows through shared memory.
+ * @Description:send command tag to consumer for iud smp.
  *
  * @return: void
  */
-void StreamProducer::streamSendRowsToConsumer(int rows)
-{
+ void StreamProducer::end_command(const char* commandTag)
+ {
+    if (u_sess->stream_cxt.producer_obj &&
+        STREAM_IS_LOCAL_NODE(u_sess->stream_cxt.producer_obj->getParallelDesc().distriType) &&
+        (u_sess->stream_cxt.producer_obj->m_plan->commandType == CMD_INSERT ||
+        u_sess->stream_cxt.producer_obj->m_plan->commandType == CMD_UPDATE ||
+        u_sess->stream_cxt.producer_obj->m_plan->commandType == CMD_DELETE ||
+        u_sess->stream_cxt.producer_obj->m_plan->commandType == CMD_MERGE)) {
         StringInfoData msgbuf;
-        StreamSharedContext* sharedContext = u_sess->stream_cxt.producer_obj->getSharedContext();
-        sharedContext->rows = rows;
-        pq_beginmessage(&msgbuf, 'R');
+        pq_beginmessage(&msgbuf, 'C');
+        uint32 sendlen = htonl((uint32)(strlen(commandTag) + 1 + 4));
+        appendBinaryStringInfo(&msgbuf, (const char*)&sendlen, 4);
+        appendBinaryStringInfo(&msgbuf, commandTag, strlen(commandTag) + 1);
         gs_message_by_memory(
-            &msgbuf,
-            u_sess->stream_cxt.producer_obj->getSharedContext(),
-            u_sess->stream_cxt.producer_obj->getNth());
+            &msgbuf, u_sess->stream_cxt.producer_obj->getSharedContext(), u_sess->stream_cxt.producer_obj->getNth());
+    }
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
 #ifdef USE_SPQ
 void StreamProducer::serializeStream(VectorBatch* batch, int index)
 {

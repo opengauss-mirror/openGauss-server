@@ -139,6 +139,9 @@ Pointer UGetMultiInsertXlrec(XLogReaderState *record, CommitSeqNo* curCSN)
     XlUndoHeader *xlundohdr = (XlUndoHeader *)(recData);
     Size headerLen = SizeOfXLUndoHeader + sizeof(UndoRecPtr);
 
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        headerLen += sizeof(bool);
+    }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         headerLen += sizeof(UndoRecPtr);
     }

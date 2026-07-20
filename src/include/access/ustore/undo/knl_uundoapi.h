@@ -43,7 +43,7 @@ void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo);
 
 void RecoveryUndoSystemMeta();
 
-void AllocateUndoZone();
+void AllocateUndoZone(TransactionId cur_xid);
 
 void UpdateRollbackFinish(UndoSlotPtr slotPtr);
 void RedoRollbackFinish(UndoSlotPtr slotPtr, XLogRecPtr lsn);

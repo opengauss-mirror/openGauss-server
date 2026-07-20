@@ -107,6 +107,11 @@ UndoRecPtr AllocateUndoSpace(TransactionId xid, UndoPersistence upersistence, ui
         t_thrd.undo_cxt.slotPtr[upersistence] = ptr;
     }
     UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[upersistence];
+
+    if (StreamThreadAmI() && !BufferIsPinned(slotBuf.Buf())) {
+        slotBuf.PrepareTransactionSlot(slotPtr, UNDOSLOTBUFFER_KEEP);
+    }
+
     xlundometa->slotPtr = UNDO_PTR_GET_OFFSET(slotPtr);
     ereport(DEBUG1, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("space %d xid %lu allocate space undo ptr from %lu to %lu size %lu"),
@@ -659,13 +664,13 @@ void RecoveryUndoSystemMeta(void)
     }
 }
 
-void AllocateUndoZone()
+void AllocateUndoZone(TransactionId cur_xid)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     if (!g_instance.attr.attr_storage.enable_ustore) {
         return;
     }
-    AllocateZonesBeforeXid();
+    AllocateZonesBeforeXid(cur_xid);
 #endif
 }
 
@@ -743,6 +748,9 @@ void OnUndoProcExit(int code, Datum arg)
     if (!g_instance.attr.attr_storage.enable_ustore) {
         return;
     }
+    if (StreamThreadAmI()) {
+        return;
+    }
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("on undo exit, thrd: %d"), t_thrd.myLogicTid)));
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
@@ -761,6 +769,21 @@ void OnUndoProcExit(int code, Datum arg)
 
         t_thrd.undo_cxt.zids[upersistence] = INVALID_ZONE_ID;
         UndoZoneGroup::ReleaseZone(zid, upersistence);
+    }
+    if (t_thrd.xact_cxt.m_undozone_array == NULL) {
+        return;
+    }
+    for (int i = 0; i < MAX_QUERY_DOP; i++) {
+        StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+        for (auto j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
+            UndoPersistence upersistence = static_cast<UndoPersistence>(j);
+            int zid = m_undozone->undo_cxt.zids[upersistence];
+            if (!IS_VALID_ZONE_ID(zid)) {
+                continue;
+            }
+            m_undozone->undo_cxt.zids[upersistence] = INVALID_ZONE_ID;
+            UndoZoneGroup::ReleaseZone(zid, upersistence);
+        }
     }
 }
 

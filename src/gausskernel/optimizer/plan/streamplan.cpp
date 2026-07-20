@@ -1581,6 +1581,13 @@ Plan* create_local_gather(Plan* plan)
     Stream* stream_node = NULL;
     Plan* stream_plan = NULL;
     double size = (PLAN_LOCAL_ROWS(plan)) * (plan->plan_width) / 8192.0;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool is_dml_smp = (IsA(plan, ModifyTable) && ((ModifyTable*)plan)->returningLists == NULL);
+    /* DML smp not support returning, would not return rows to stream node */
+    if (is_dml_smp) {
+        size = 0;
+    }
+#endif
 
     /* No need to add local gather under a unparallel plan. */
     if (plan->dop <= 1)
@@ -1630,6 +1637,12 @@ Plan* create_local_gather(Plan* plan)
     stream_plan->exec_nodes->baselocatortype = LOCATOR_TYPE_RROBIN;
     stream_plan->hasUniqueResults = plan->hasUniqueResults;
     copy_plan_costsize(stream_plan, plan);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (is_dml_smp) {
+        stream_plan->plan_rows = 0.0;
+        stream_plan->plan_width = 0;
+    }
+#endif
     stream_plan->total_cost += LOCAL_SEND_KDATA_COST * size / plan->dop + LOCAL_RECEIVE_KDATA_COST * size;
     stream_plan->dop = 1;
 

@@ -169,6 +169,7 @@ struct PGPROC {
     BackendId backendId; /* This backend's backend ID (if assigned) */
     Oid databaseId;      /* OID of database this backend is using */
     Oid roleId;          /* OID of role using this backend */
+    knl_thread_role role;
 
     /* Backend or session working version number. */
     uint32 workingVersionNum;
@@ -317,6 +318,8 @@ struct PGPROC {
     PGPROC     *lockGroupLeader;    /* lock group leader, if I'm a member */
     dlist_head  lockGroupMembers;   /* list of members, if I'm a leader */
     dlist_node  lockGroupLink;  /* my member link, if I'm a member */
+
+    void* global_obj; /* StreamNodeGroup, for getting stream & worker proc under DML SMP */
 
     /*
      * All PROCLOCK objects for locks held or awaited by this backend are

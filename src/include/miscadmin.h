@@ -188,6 +188,7 @@ extern const uint32 INSERT_ON_CONFLICT_VERSION_NUMBER;
 
 extern const uint32 SUPPORT_CREATE_ACCESS_METHOD_VERSION_NUM;
 #define SUPPORT_CREATE_AM (t_thrd.proc->workingVersionNum >= SUPPORT_CREATE_ACCESS_METHOD_VERSION_NUM)
+extern const uint32 SMP_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

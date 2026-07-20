@@ -60,7 +60,7 @@ int GetUndoApplySize()
 }
 
 bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
-    bool isTopTxn, bool isVerify)
+    bool isTopTxn, bool isVerify, bool is_async_rollback)
 {
     if (isVerify && u_sess->attr.attr_storage.ustore_verify_level < USTORE_VERIFY_FAST) {
         return true;
@@ -173,7 +173,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
                     currRelfilenode != uur->Relfilenode() || currBlkno != uur->Blkno())) {
                     preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(uheapUrecvec, startIndex, i - 1, fullXid,
                         currReloid, currPartitionoid, currBlkno, containsFullChain,
-                        preRetCode, &preReloid, &prePartitionoid);
+                        preRetCode, &preReloid, &prePartitionoid, !is_async_rollback);
                     startIndex = i;
                 }
                 currReloid = uur->Reloid();
@@ -186,7 +186,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
             /* Apply the remaining ones */
             preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(
                 uheapUrecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
-                currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid);
+                currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid, !is_async_rollback);
         }
 
         preReloid = InvalidOid;
@@ -203,7 +203,7 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
                 currTablespace = uur->Tablespace();
                 preRetCode = RmgrTable[RM_UBTREE3_ID].rm_undo(ubtreeUrecvec, i, i, fullXid,
                     currReloid, currPartitionoid, currBlkno, containsFullChain,
-                    preRetCode, &preReloid, &prePartitionoid);
+                    preRetCode, &preReloid, &prePartitionoid, !is_async_rollback);
             }
         }
 
@@ -221,21 +221,21 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
 }
 
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
-    UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel)
+    UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel, bool is_async_rollback, undo::TransactionSlot *slot)
 {
     Assert(toUrecptr != INVALID_UNDO_REC_PTR && fromUrecptr != INVALID_UNDO_REC_PTR);
     Assert(slotPtr != INVALID_UNDO_REC_PTR);
     Assert(fullXid  != InvalidTransactionId);
-    if (!VerifyAndDoUndoActions(fullXid, fromUrecptr, toUrecptr, isTopTxn, false)) {
+    if (!VerifyAndDoUndoActions(fullXid, fromUrecptr, toUrecptr, isTopTxn, false, is_async_rollback)) {
         return;
     }
 
     if (isTopTxn) {
-        if (plevel != UNDO_PERSISTENT_BUTT) {
-            undo::TransactionSlot *slot = static_cast<undo::TransactionSlot *>(t_thrd.undo_cxt.slots[plevel]);
+        if (!is_async_rollback && plevel != UNDO_PERSISTENT_BUTT && slot != NULL) {
             UndoRecPtr prev = undo::GetPrevUrp(slot->EndUndoPtr());
             if (prev != fromUrecptr || slot->StartUndoPtr() != toUrecptr) {
-                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), isTopTxn, true);
+                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), isTopTxn, true,
+                    is_async_rollback);
             }
         }
         undo::UpdateRollbackFinish(slotPtr);
@@ -282,7 +282,7 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
 
         preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, 0, urecvec->Size() - 1, xid, relOid, partitionOid,
             BufferGetBlockNumber(buffer), IS_VALID_UNDO_REC_PTR(urp) ? false : true,
-            preRetCode, &preReloid, &prePartitionoid);
+            preRetCode, &preReloid, &prePartitionoid, false);
 
         DELETE_EX(urecvec);
     } while (true);
@@ -339,9 +339,42 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
+bool _get_valid_blkprev_undo_record(UndoRecord* record, TransactionId xid, BlockNumber blkno, bool is_sync_rollback)
+{
+    if (record->Blkprev() == INVALID_UNDO_REC_PTR) {
+        return false;
+    }
+
+    DECLARE_NODE_COUNT();
+    TransactionId subxid = record->sub_xid();
+    record->Reset2Blkprev();
+    UndoTraversalState rc = FetchUndoRecord(record, NULL, InvalidBlockNumber, InvalidOffsetNumber,
+        InvalidTransactionId, false, NULL);
+    if (rc != UNDO_TRAVERSAL_COMPLETE) {
+        return false;
+    }
+
+    if (record->Blkno() != blkno) {
+        return false;
+    }
+
+    if (record->Xid() != xid) {
+        return false;
+    }
+
+    if (record->ContainSubXact() && record->sub_xid() == subxid && is_sync_rollback) {
+        return true;
+    }
+
+    if (!is_sync_rollback || (is_sync_rollback && !IsSubTransaction())) {
+        return true;
+    }
+
+    return false;
+}
 
 int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
-    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid)
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid, bool is_sync_rollback)
 {
     if (preReloid != NULL && prePartitionoid != NULL) {
         if (*preReloid == reloid && *prePartitionoid == partitionoid && preRetCode == ROLLBACK_OK_NOEXIST) {
@@ -451,8 +484,24 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     Offset xlogCopyStartOffset = BLCKSZ;
     Offset xlogCopyEndOffset = 0;
 
-    for (int i = startIdx; i <= endIdx; i++) {
-        UndoRecord *undorecord = (*urecvec)[i];
+    /*
+     * we start from the last record until the whole
+     * xid is all rollback on this page
+     */
+    UndoRecord *undorecord = (*urecvec)[startIdx];
+    undorecord->SetUrp(slotUrecPtr);
+    UndoTraversalState rc = FetchUndoRecord(undorecord, NULL, InvalidBlockNumber, InvalidOffsetNumber,
+        InvalidTransactionId, false, NULL);
+    if (rc != UNDO_TRAVERSAL_COMPLETE) {
+        UnlockReleaseBuffer(buffer);
+        UHeapUndoActionsCloseRelation(&relationData);
+        return ROLLBACK_ERR;
+    }
+
+    CommandId last_record_cid = undorecord->Cid();
+    TransactionId last_record_xid = undorecord->Xid();
+
+    do {
         uint8 undotype = undorecord->Utype();
         if (undorecord->Blkno() != blkno) {
             ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
@@ -493,6 +542,9 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
         if (undorecord->Offset() <= MaxOffsetNumber && undorecord->Offset() > xlogMaxLPOffset) {
             xlogMaxLPOffset = undorecord->Offset();
         }
+
+        last_record_cid = undorecord->Cid();
+        last_record_xid = undorecord->Xid();
 
         switch (undotype) {
             case UNDO_INSERT: {
@@ -570,7 +622,7 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
             default:
                 ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
         }
-    }
+    } while (_get_valid_blkprev_undo_record(undorecord, xid, blkno, is_sync_rollback));
 
     /*
      * If this is the first undo record created by this top transaction xid,
@@ -583,13 +635,6 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
      * TD xid to InvalidTransactionId to indicate that the
      * "rollback of this xid on this block is complete."
      */
-    if (slotPrevUrp != lastUndoRecord->Blkprev()) {
-        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("rollback xid %lu, oid %u, blk %u. slotPrevUrp %lu != lastBlkprev %lu, "
-            "check whether subtransactions have been rolled back.",
-            lastUndoRecord->Xid(), lastUndoRecord->Reloid(), lastUndoRecord->Blkno(),
-            slotPrevUrp, lastUndoRecord->Blkprev())));
-    }
     if (isFullChain || !IS_VALID_UNDO_REC_PTR(slotPrevUrp)) {
         xid = InvalidTransactionId;
     } else if (IS_VALID_UNDO_REC_PTR(slotPrevUrp)) {

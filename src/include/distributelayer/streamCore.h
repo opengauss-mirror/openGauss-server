@@ -169,8 +169,6 @@ typedef struct StreamSharedContext {
     bool vectorized;
     struct hash_entry** poll_entrys;
     struct hash_entry*** quota_entrys;
-
-    int rows;
 } StreamSharedContext;
 
 typedef struct StreamSyncParam {
@@ -377,6 +375,11 @@ public:
     {
         return m_canceled;
     }
+    /* handle combo cid */
+    void save_use_combo_cid();
+
+    void sync_combo_cid(int usedComboCids);
+    void sync_combocid_key();
 
     /* Save the first error data of producer */
     void saveProducerEdata();
@@ -399,6 +402,12 @@ public:
     ErrorData* m_producerEdata;
     volatile uint32** parallel_indexscan_map;
     volatile int parallel_indexscan_size;
+
+    StreamUndoZoneData **group_undozone_array;
+    pthread_rwlock_t combid_lock;
+
+    bool m_is_dml;
+
     /* MPP with-recursive support */
     static void SyncConsumerNextPlanStep(int controller_plannodeid, int step);
     static void SyncProducerNextPlanStep(int controller_plannodeid, int producer_plannodeid, int step, int tuple_count,
@@ -417,6 +426,7 @@ public:
     void AddSyncController(SyncController* controller);
     SyncController* GetSyncController(int controller_plannodeid);
     void MarkSyncControllerStopFlagAll();
+    void save_proc(PGPROC* proc);
 
     inline pthread_mutex_t* GetStreamMutext()
     {
@@ -440,6 +450,16 @@ public:
         return m_recursiveVfdInvalid;
     }
 
+    inline void set_need_copyback_undozone()
+    {
+        m_need_copyback_undozone = true;
+    }
+
+    inline bool get_need_copyback_undozone() const
+    {
+        return m_need_copyback_undozone;
+    }
+
     inline pthread_mutex_t* GetIndexSmpMutex()
     {
         return &m_index_smp_mutex;
@@ -454,7 +474,7 @@ public:
     {
         return m_streamArray;
     }
-#ifndef ENABLE_MULTIPLE_NODES
+
     inline void MarkStreamQuitStatus(StreamObjStatus status)
     {
         m_quitStatus = status;
@@ -464,6 +484,7 @@ public:
     {
         return m_quitStatus;
     }
+
     /* Send stop signal to all stream threads in node group. */
     void SigStreamThreadClose();
 
@@ -474,9 +495,40 @@ public:
     void DestroyStreamDesc(const uint64& queryId, Plan* node);
 
     struct PortalData *m_portal;
-#endif
+
     /* Mark recursive vfd is invalid before aborting transaction. */
     static void MarkRecursiveVfdInvalid();
+
+    void stream_return_undo(StreamUndoZoneData* producer_undodata, int smp_id);
+
+    inline int get_size() const
+    {
+        return m_size;
+    }
+
+    inline int get_stream_num() const
+    {
+        return m_streamNum;
+    }
+    inline bool is_dml() const
+    {
+        return m_is_dml;
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    inline uint32 get_proc_size() const
+    {
+        pg_memory_barrier();
+        return m_proc_cnt;
+    }
+
+    inline PGPROC* get_proc(int idx)
+    {
+        return m_proc_array[idx];
+    }
+#endif
+    int** m_combcid_array;
+    struct ComboCidKeyData*** m_combcid_key;
+    int* m_combosize;
 
 private:
     /* Set the executor stop flag to true. */
@@ -547,13 +599,17 @@ private:
 
     /* Mutex for stream connect sync. */
     static pthread_mutex_t m_streamConnectSyncLock;
-#ifndef ENABLE_MULTIPLE_NODES
+
     /* Mark Stream query quit status. */
     StreamObjStatus m_quitStatus;
-#endif
+
     static HTAB* m_streamDescHashTbl;
 
     int m_spiLevel;
+
+    bool m_need_copyback_undozone;
+    uint32 m_proc_cnt;
+    PGPROC** m_proc_array; // length is worker thread + stream threads
 };
 
 extern bool IsThreadProcessStreamRecursive();

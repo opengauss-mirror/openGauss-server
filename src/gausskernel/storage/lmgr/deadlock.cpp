@@ -32,6 +32,7 @@
 #include "storage/lock/lock.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
+#include "distributelayer/streamCore.h"
 
 /* One edge in the waits-for graph */
 typedef struct EDGE {
@@ -535,6 +536,43 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
     return false;
 }
 
+static bool deadlock_find_stream_waitcycle_member(PGPROC *proc, int num_lock_modes,
+    PGPROC *check_proc, PROCLOCK *proclock, int conflict_mask, int depth, LOCK *lock,
+    EDGE *soft_edges, /* output argument */
+    int *n_soft_edges) /* output argument */
+{
+    if (proc->global_obj == NULL) {
+        return false;
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    Assert(proc->role != STREAM_WORKER && proc->role != THREADPOOL_STREAM);
+    /* smp's worker thread also wait for it's stream thread,
+     * so we need connect worker and it's stream thread lock chain */
+    for (int i = 1; i< ((StreamNodeGroup*)proc->global_obj)->get_proc_size(); i++) {
+        PGPROC* cur_stream_proc = ((StreamNodeGroup*)proc->global_obj)->get_proc(i);
+        for (int lock_mode = 1; lock_mode <= num_lock_modes; lock_mode++) {
+            if (cur_stream_proc != check_proc &&
+                (proclock->holdMask & LOCKBIT_ON((unsigned int)lock_mode)) &&
+                (conflict_mask & LOCKBIT_ON(lock_mode))) {
+                /* This proc hard-blocks checkProc */
+                if (FindLockCycleRecurse(cur_stream_proc, depth + 1, soft_edges, n_soft_edges)) {
+                    /* fill deadlockDetails[] */
+                    DEADLOCK_INFO *info = &t_thrd.storage_cxt.deadlockDetails[depth];
+
+                    info->locktag = lock->tag;
+                    info->lockmode = check_proc->waitLockMode;
+                    info->pid = check_proc->pid;
+
+                    return true;
+                }
+            }
+        }
+    }
+#endif
+
+    return false;
+}
+
 static bool FindLockCycleRecurseMember(PGPROC *checkProc,
                            PGPROC *checkProcLeader,
                            int depth,
@@ -656,6 +694,10 @@ static bool FindLockCycleRecurseMember(PGPROC *checkProc,
                     /* We're done looking at this proclock */
                     break;
                 }
+            }
+            if (deadlock_find_stream_waitcycle_member(proc, numLockModes, checkProc,
+                proclock, conflictMask, depth, lock, softEdges, nSoftEdges)) {
+                return true;
             }
         }
 

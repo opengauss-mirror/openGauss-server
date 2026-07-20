@@ -335,8 +335,20 @@ ParallelDesc StreamObj::getParallelDesc()
     return m_parallel_desc;
 }
 
+void init_stream_undozone_data_from(StreamUndoZoneData* dest_undozone_data, StreamUndoZoneData *src_undozone_data)
+{
+    int rc = memcpy_s(&dest_undozone_data->undo_cxt, sizeof(knl_t_undo_context),
+        &src_undozone_data->undo_cxt, sizeof(knl_t_undo_context));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(&dest_undozone_data->trans_mgr_ptr, sizeof(TransactionStateData),
+        &src_undozone_data->trans_mgr_ptr, sizeof(TransactionStateData));
+    securec_check(rc, "\0", "\0");
+}
+
 StreamNodeGroup::StreamNodeGroup()
-    : m_size(0),
+    : group_undozone_array(NULL),
+      m_portal(NULL),
+      m_size(0),
       m_streamNum(1),
       m_createThreadNum(0),
       m_streamEnter(0),
@@ -344,7 +356,9 @@ StreamNodeGroup::StreamNodeGroup()
       m_canceled(false),
       m_needClean(false),
       m_errorStop(false),
-      m_recursiveVfdInvalid(false)
+      m_recursiveVfdInvalid(false),
+      m_quitStatus(STREAM_UNDEFINED),
+      m_need_copyback_undozone(false)
 {
     pthread_mutex_init(&m_mutex, NULL);
     pthread_mutex_init(&m_recursiveMutex, NULL);
@@ -370,6 +384,18 @@ StreamNodeGroup::StreamNodeGroup()
     m_spiLevel = u_sess->SPI_cxt._connected;
     parallel_indexscan_map = NULL;
     parallel_indexscan_size = 0;
+
+    if (!IsInitdb) {
+        group_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
+        for (int i = 0; i < MAX_QUERY_DOP; i++) {
+            group_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
+        }
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    m_proc_array = NULL;
+    m_proc_cnt = (uint32)0;
+    PthreadRwLockInit(&combid_lock, NULL);
+#endif
 }
 
 StreamNodeGroup::~StreamNodeGroup()
@@ -390,6 +416,7 @@ void StreamNodeGroup::Init(int threadNum)
 
     /* all stream thead + top consumer thread. */
     m_quitWaitCond = m_size;
+    m_is_dml = false;
 #ifdef ENABLE_MULTIPLE_NODES
     bool found = false;
     AutoMutexLock streamLock(&m_streamNodeGroupLock);
@@ -403,6 +430,14 @@ void StreamNodeGroup::Init(int threadNum)
     element->value = this;
     element->key = gs_thread_self();
     streamLock.unLock();
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    m_proc_array = (PGPROC**)palloc0(sizeof(PGPROC*) * m_size);
+    m_proc_array[m_proc_cnt] = t_thrd.proc;
+    pg_atomic_fetch_add_u32(&m_proc_cnt, 1);
+    m_combcid_array = (int**)palloc0(sizeof(int*) * (MAX_QUERY_DOP +1));
+    m_combcid_key = (ComboCidKeyData***)palloc0(sizeof(struct ComboCidKeyData**) * (MAX_QUERY_DOP +1));
+    m_combosize = NULL;
 #endif
 }
 
@@ -457,6 +492,44 @@ void StreamNodeGroup::StartUp()
 
     m_streamDescHashTbl =
         hash_create("stream desc hash", STREAM_DESC_HASH_NUMBER, &nodectl, HASH_ELEM | HASH_FUNCTION | HASH_SHRCTX);
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+void StreamNodeGroup::save_proc(PGPROC* proc)
+{
+    AutoMutexLock streamLock(&m_mutex);
+    streamLock.lock();
+    m_proc_array[m_proc_cnt] = proc;
+    pg_atomic_fetch_add_u32(&m_proc_cnt, 1);
+    streamLock.unLock();
+}
+#endif
+void StreamNodeGroup::save_use_combo_cid()
+{
+    if (u_sess->stream_cxt.producer_obj->m_plan->planTree != NULL &&
+        IsA(u_sess->stream_cxt.producer_obj->m_plan->planTree, ModifyTable)) {
+    }
+    Assert(u_sess->stream_cxt.producer_dop <= MAX_QUERY_DOP);
+    m_combcid_array[u_sess->stream_cxt.smp_id + 1] = &u_sess->utils_cxt.usedComboCids;
+    m_combcid_key[u_sess->stream_cxt.smp_id + 1] = &u_sess->utils_cxt.comboCids;
+}
+
+void StreamNodeGroup::sync_combo_cid(int usedComboCids)
+{
+    for (int i = 0; i <= MAX_QUERY_DOP; i++) {
+        if (m_combcid_array[i] != NULL) {
+            *m_combcid_array[i] = usedComboCids;
+        }
+    }
+}
+
+void StreamNodeGroup::sync_combocid_key()
+{
+    for (int i = 0; i < MAX_QUERY_DOP; i++) {
+        if (m_combcid_key[i] != NULL) {
+            *m_combcid_key[i] = u_sess->utils_cxt.comboCids;
+        }
+    }
 }
 
 /*
@@ -967,6 +1040,12 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* Destroy the stream node group. */
     if (u_sess->stream_cxt.global_obj != NULL) {
+        if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && t_thrd.xact_cxt.m_undozone_array != NULL) {
+            for (int i = 0; i < MAX_QUERY_DOP; i++) {
+                StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+                init_stream_undozone_data_from(m_undozone, u_sess->stream_cxt.global_obj->group_undozone_array[i]);
+            }
+        }
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->stream_cxt.global_obj->m_portal != NULL) {
             u_sess->stream_cxt.global_obj->m_portal->streamInfo.Reset();
@@ -1011,6 +1090,10 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
                 (uint64)u_sess->stream_cxt.global_obj, (uint64)u_sess->stream_cxt.stream_runtime_mem_cxt)));
             return;
         }
+    }
+    /* clear thread flag */
+    if (t_thrd.proc != NULL) {
+        t_thrd.proc->global_obj = NULL;
     }
 
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
@@ -2022,5 +2105,22 @@ bool InitStreamObject(PlannedStmt* planStmt)
         return true;
     }
     return false;
+}
+
+void StreamMarkStop()
+{
+    u_sess->exec_cxt.executorStopFlag = true;
+}
+
+/* copy producer undozone data back to streamNodeGroup */
+void StreamNodeGroup::stream_return_undo(StreamUndoZoneData* producer_undozone_data, int smp_id)
+{
+    StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+    Assert(stream_node_group != NULL);
+    StreamUndoZoneData** m_undozone_array = stream_node_group->group_undozone_array;
+    Assert(m_undozone_array != NULL);
+    StreamUndoZoneData* m_stream_undozone = m_undozone_array[smp_id];
+
+    init_stream_undozone_data_from(m_stream_undozone, producer_undozone_data);
 }
 #endif

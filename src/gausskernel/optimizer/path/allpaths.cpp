@@ -1274,6 +1274,15 @@ static bool is_cscan_filter_func_for_redis(Node* node)
     return expression_tree_walker(node, (bool (*)())is_cscan_filter_func_for_redis, (void*)NULL);
 }
 
+static inline bool use_smp()
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    return u_sess->attr.attr_sql.enable_force_smp;
+#else
+    return false;
+#endif
+}
+
 /*
  * set_plain_rel_pathlist
  *	  Build access paths for a plain relation (no subquery, no inheritance)
@@ -1283,6 +1292,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
     List* baserestrictinfo = NIL;
     List* quals = NIL;
     bool has_vecengine_unsupport_expr = false;
+    bool enable_parallel_seqscan = use_smp();
     ListCell* lc = NULL;
 
     Relids      required_outer;
@@ -1358,7 +1368,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
             }
             case REL_ROW_ORIENTED: {
                 add_path(root, rel, create_seqscan_path(root, rel, required_outer));
-                if (can_parallel)
+                if (can_parallel || enable_parallel_seqscan) /* try add parallel path */
                     add_path(root, rel, create_seqscan_path(root, rel, required_outer, u_sess->opt_cxt.query_dop));
 #ifdef ENABLE_HTAP
                 try_add_imcstorescan_path(root, rel, rte, u_sess->opt_cxt.query_dop, can_parallel);

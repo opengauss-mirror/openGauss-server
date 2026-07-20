@@ -77,7 +77,7 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93097;
+const uint32 GRAND_VERSION_NUM = 93098;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
@@ -85,6 +85,7 @@ const uint32 GRAND_VERSION_NUM = 93097;
  ********************************************/
 const uint32 LOCKS_WAITSTART_VERSION_NUM = 93097;
 const uint32 SUPPORT_CREATE_ACCESS_METHOD_VERSION_NUM = 93094;
+const uint32 SMP_VERSION_NUM = 93098;
 const uint32 NEON_VERSION_NUM = 93090;
 const uint32 WITH_ORDINALITY_VERSION_NUM = 93089;
 const uint32 OGAI_VERSION_NUM = 93088;

@@ -3111,6 +3111,7 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
         Assert(TUPLE_IS_HEAP_TUPLE(tup));
     }
 #endif
+    Assert(!StreamThreadAmI() || relation->rd_id > FirstBootstrapObjectId);
     /*
      * Fill in tuple header fields, assign an OID, and toast the tuple if
      * necessary.
@@ -4675,6 +4676,9 @@ TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
 
     Assert(ItemPointerIsValid(tid));
 
+    /* Don't allow any write/lock operator in stream. */
+    Assert(!StreamThreadAmI() || relation->rd_id > FirstBootstrapObjectId);
+
     /*
      * Forbid this during a parallel operation, lest it allocate a combocid.
      * Other workers might need that combocid for visibility checks, and we
@@ -5242,6 +5246,9 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     char relreplident;
     LockTupleMode mode;
     Assert(ItemPointerIsValid(otid));
+
+    /* Don't allow any write/lock operator in stream. */
+    Assert(!StreamThreadAmI() || relation->rd_id > FirstBootstrapObjectId);
 
     /*
      * Forbid this during a parallel operation, lest it allocate a combocid.
@@ -6516,7 +6523,13 @@ TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer,
     BlockNumber block;
 
     /* Don't allow any write/lock operator in stream. */
+#ifndef ENABLE_MULTIPLE_NODES
+    AssertEreport(!StreamThreadAmI() ||
+        (relation->rd_att && relation->rd_att->constr && relation->rd_att->constr->has_on_update),
+        MOD_STREAM, "Unsupported lock tuple in stream.");
+#else
     AssertEreport(!StreamThreadAmI(), MOD_STREAM, "Unsupported lock tuple in stream.");
+#endif
 
     /* Not support tuple concurrent update to avoid distributed deadlock. */
     if (!u_sess->attr.attr_common.allow_concurrent_tuple_update) {

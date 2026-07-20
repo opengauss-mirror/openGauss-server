@@ -1935,8 +1935,8 @@ ldelete:
                     // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
                     // reinitialized successful now.
                     //
-                    if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                        estate->es_plannedstmt->num_streams > 0) {
+                    if (IS_PGXC_DATANODE && ((u_sess->exec_cxt.under_stream_runtime &&
+                        estate->es_plannedstmt->num_streams > 0) || DO_STREAM_DML_EPQ)) {
                         ereport(ERROR, (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
                             errmsg("concurrent update under Stream mode is not yet supported")));
                     }
@@ -2505,8 +2505,8 @@ lreplace:
                             // but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
                             // reinitialized successful now.
                             //
-                            if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                estate->es_plannedstmt->num_streams > 0) {
+                            if (IS_PGXC_DATANODE && ((u_sess->exec_cxt.under_stream_runtime &&
+                                estate->es_plannedstmt->num_streams > 0) || DO_STREAM_DML_EPQ)) {
                                 ereport(ERROR,
                                     (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
                                         errmsg("concurrent update under Stream mode is not yet supported")));
@@ -2824,12 +2824,11 @@ lreplace:
                                 // update, but we wrap the left tree of Stream node in backend thread. So the child plan
                                 // cannot be reinitialized successful now.
                                 //
-                                if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                    estate->es_plannedstmt->num_streams > 0) {
+                                if (IS_PGXC_DATANODE && ((u_sess->exec_cxt.under_stream_runtime &&
+                                    estate->es_plannedstmt->num_streams > 0) || DO_STREAM_DML_EPQ)) {
                                     ereport(ERROR, (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
                                         errmsg("concurrent update under Stream mode is not yet supported")));
                                 }
-
 
                                 /*
                                  * Recheck the tuple using EPQ. For MERGE, we leave this
@@ -3068,8 +3067,8 @@ ldelete:
                                     // update, but we wrap the left tree of Stream node in backend thread. So the child
                                     // plan cannot be reinitialized successful now.
                                     //
-                                    if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
-                                        estate->es_plannedstmt->num_streams > 0) {
+                                    if (IS_PGXC_DATANODE && ((u_sess->exec_cxt.under_stream_runtime &&
+                                        estate->es_plannedstmt->num_streams > 0) || DO_STREAM_DML_EPQ)) {
                                         ereport(ERROR,
                                             (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
                                                 errmsg("concurrent update under Stream mode is not yet supported")));

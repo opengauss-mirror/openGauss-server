@@ -150,12 +150,12 @@ void UHeapResetPreparedUndo();
 UndoRecPtr UHeapPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
     UndoRecPtr prevurpInOneXact, BlockNumber blk = InvalidBlockNumber, XlUndoHeader *xlundohdr = NULL,
-    undo::XlogUndoMeta *xlundometa = NULL);
+    undo::XlogUndoMeta *xlundometa = NULL, SubTransactionId subxid = InvalidSubTransactionId);
 UndoRecPtr UHeapPrepareUndoMultiInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, Buffer buffer, int nranges, TransactionId xid, CommandId cid,
     UndoRecPtr prevurpInOneBlk, UndoRecPtr prevurpInOneXact, URecVector **urecvec_ptr, UndoRecPtr *first_urecptr,
     UndoRecPtr *urpvec, BlockNumber blk = InvalidBlockNumber, XlUndoHeader *xlundohdr = NULL,
-    undo::XlogUndoMeta *xlundometa = NULL);
+    undo::XlogUndoMeta *xlundometa = NULL, SubTransactionId subxid = InvalidSubTransactionId);
 UndoRecPtr UHeapPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, Buffer buffer, OffsetNumber offnum, TransactionId xid, SubTransactionId subxid,
     CommandId cid, UndoRecPtr prevurpInOneBlk, UndoRecPtr prevurpInOneXact, _in_ TD *oldtd, UHeapTuple oldtuple,

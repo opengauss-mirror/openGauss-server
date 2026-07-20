@@ -295,6 +295,10 @@ typedef struct knl_session_attr_sql {
     bool enable_default_local_index;
     bool group_by_error;
 #endif
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_force_smp;
+    bool enable_smp_dml;
+#endif
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
