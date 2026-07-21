@@ -114,5 +114,10 @@ extern UNIONALL_SHIPPING_TYPE precheck_shipping_union_all(Query *subquery, Node 
 /* judge if it is possible to optimize ROWNUM */
 extern bool ContainRownumQual(const Query *parse);
 
+/*
+ * prototypes for preptopk.cpp
+ */
+extern void preprocess_union_all_diskann_topk(PlannerInfo* root);
+
 
 #endif /* PREP_H */

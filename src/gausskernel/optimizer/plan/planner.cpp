@@ -1702,6 +1702,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     DEBUG_QRW("After preprocess rownum");
 #endif
 
+    /* Push ORDER BY + LIMIT to UNION ALL leaves for DiskANN vector TopK */
+    preprocess_union_all_diskann_topk(root);
+    DEBUG_QRW("After union all diskann top-k pushdown");
+
     /*
      * Check to see if any subqueries in the jointree can be merged into this
      * query.
