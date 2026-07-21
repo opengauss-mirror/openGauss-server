@@ -557,8 +557,8 @@ void SonicHashAgg::initAggInfo()
         m_aggIdx[j] = aggIdx;
 
         /* mark count(col), count(*) */
-        if (m_runtime->aggInfo[j].vec_agg_function.flinfo->fn_addr == int8inc_any ||
-            m_runtime->aggInfo[j].vec_agg_function.flinfo->fn_addr == int8inc) {
+        Oid aggFuncOid = m_runtime->aggInfo[j].vec_agg_function.flinfo->fn_oid;
+        if (aggFuncOid == F_INT8INC || aggFuncOid == F_INT8INC_ANY) {
             m_aggCount[j] = true;
         }
 
