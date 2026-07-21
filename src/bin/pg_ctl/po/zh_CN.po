@@ -2093,8 +2093,8 @@ msgstr ""
 "常用选项:\n"
 
 #: pg_ctl.cpp:3769
-msgid "  -b,  --mode=MODE\t the mode of building the datanode or coordinator.MODE can be \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
-msgstr "- b,  --mode=MODE\t 构建datanode或协调器的模式.MODE可以是 \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
+msgid "  -b MODE                the mode of building the datanode or coordinator.MODE can be \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
+msgstr "  -b MODE                构建datanode或协调器的模式.MODE可以是 \"full\", \"incremental\", \"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", \"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"
 
 
 #: pg_ctl.cpp:3773

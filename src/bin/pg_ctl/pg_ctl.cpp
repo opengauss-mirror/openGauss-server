@@ -3757,7 +3757,7 @@ static void do_help(void)
 #endif
 
     printf(_("\nCommon options:\n"));
-    printf(_("  -b,  --mode=MODE	 the mode of building the datanode or coordinator."
+    printf(_("  -b MODE                the mode of building the datanode or coordinator."
              "MODE can be \"full\", \"incremental\", "
              "\"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", "
              "\"cross_cluster_incremental\", \"cross_cluster_standby_full\", \"check\"\n"));
