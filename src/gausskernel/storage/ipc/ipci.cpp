@@ -85,6 +85,7 @@
 #include "ddes/dms/ss_txnstatus.h"
 #include "ddes/dms/ss_dms_auxiliary.h"
 
+
 #ifdef USE_SPQ
 #include "executor/node/nodeShareInputScan.h"
 #endif

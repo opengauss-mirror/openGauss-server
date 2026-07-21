@@ -1048,10 +1048,10 @@ static void usage(const char* progname)
 #endif
 }
 
-static bool HexStringToInt(char* hex_string, int* result)
+static bool HexStringToInt(const char* hex_string, int* result)
 {
     int num = 0;
-    char* temp = hex_string;
+    const char* temp = hex_string;
     int onechar = 0;
     int index = 0;
 
@@ -4090,9 +4090,28 @@ static int parse_pg_control_file(char* filename)
 }
 
 /* parse clog file */
+static const char* get_file_basename(const char* path)
+{
+    const char* slash = NULL;
+
+    if (path == NULL) {
+        return NULL;
+    }
+
+    slash = strrchr(path, '/');
+#ifdef WIN32
+    const char* backslash = strrchr(path, '\\');
+    if (backslash != NULL && (slash == NULL || backslash > slash)) {
+        slash = backslash;
+    }
+#endif
+    return slash == NULL ? path : slash + 1;
+}
+
 static int parse_clog_file(char* filename)
 {
     FILE* fd = NULL;
+    const char* segment_name = NULL;
     int segnum = 0;
     /* one segment file has 8k*8bit/2*32 xids */
     uint32 segnum_xid = BLCKSZ * CLOG_XACTS_PER_BYTE * SLRU_PAGES_PER_SEGMENT;
@@ -4107,7 +4126,8 @@ static int parse_clog_file(char* filename)
     char* xid_status_name[] = {"IN_PROGRESS", "COMMITTED", "ABORTED", "SUB_COMMITTED"};
     char buffer[BLCKSZ];
 
-    if (!HexStringToInt(filename, &segnum)) {
+    segment_name = get_file_basename(filename);
+    if (segment_name == NULL || !HexStringToInt(segment_name, &segnum)) {
         fprintf(stderr, "%s input error \n", filename);
         return false;
     }
@@ -4151,6 +4171,7 @@ static int parse_clog_file(char* filename)
 static int parse_csnlog_file(char* filename)
 {
     FILE* fd = NULL;
+    const char* segment_name = NULL;
     int segnum = 0;
     /* one segment file has 1k*2048 xids */
     uint32 segnum_xid = CSNLOG_XACTS_PER_PAGE * SLRU_PAGES_PER_SEGMENT;
@@ -4163,7 +4184,8 @@ static int parse_csnlog_file(char* filename)
     int entry = 0;
     char buffer[BLCKSZ];
 
-    if (!HexStringToInt(filename, &segnum)) {
+    segment_name = get_file_basename(filename);
+    if (segment_name == NULL || !HexStringToInt(segment_name, &segnum)) {
         fprintf(stderr, "%s input error \n", filename);
         return false;
     }

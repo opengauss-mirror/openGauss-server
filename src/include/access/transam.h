@@ -237,7 +237,9 @@ extern TransactionId TransactionIdLatest(TransactionId mainxid, int nxids, const
 extern XLogRecPtr TransactionIdGetCommitLSN(TransactionId xid);
 extern bool LatestFetchTransactionIdDidAbort(TransactionId transactionId);
 extern bool LatestFetchCSNDidAbort(TransactionId transactionId);
-
+/* USE_UB_TXN_CACHE - BEGIN */
+extern CLogXidStatus TransactionLogFetch(TransactionId transactionId);
+/* USE_UB_TXN_CACHE - END */
 /* in transam/varsup.c */
 #ifdef PGXC /* PGXC_DATANODE */
 extern void SetNextTransactionId(TransactionId xid, bool updateLatestCompletedXid);

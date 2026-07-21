@@ -36,6 +36,7 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/csnlog.h"
+#include "access/ubmem_buf.h"
 #include "access/nbtree.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"
@@ -494,6 +495,35 @@ static int CBSwitchoverDemote(void *db_handle)
     return DMS_ERROR;
 }
 
+static bool UBReformMemSync(void)
+{
+    int old_primary_id = SS_PRIMARY_ID;
+    int new_primary_id = SS_MY_INST_ID;
+    const int UB_SYNC_MAX_RETRIES = 5;
+    const long UB_SYNC_RETRY_WAIT_US = 100000L;
+    bool synced = false;
+
+    for (int ntries = 0; ntries < UB_SYNC_MAX_RETRIES; ntries++) {
+        synced = UBSMemSyncFromOldPrimary(old_primary_id, new_primary_id);
+        if (synced) {
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform][UB SYNC] UB transaction cache sync SUCCESS: "
+                       "old_primary=%d, new_primary=%d, attempt=%d/%d",
+                       old_primary_id, new_primary_id, ntries + 1, UB_SYNC_MAX_RETRIES)));
+            break;
+        }
+
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform][UB SYNC] UB transaction cache sync attempt %d/%d FAILED",
+                   ntries + 1, UB_SYNC_MAX_RETRIES)));
+
+        CHECK_FOR_INTERRUPTS();
+        pg_usleep(UB_SYNC_RETRY_WAIT_US);
+    }
+
+    return synced;
+}
+
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
     g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
@@ -504,6 +534,14 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Starting to promote standby.")));
+
+    if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        bool synced = UBReformMemSync();
+        if (!synced) {
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[SS reform][SS switchover][UB SYNC] UB transaction cache sync FAILED")));
+        }
+    }
 
     SSNotifySwitchoverPromote();
 
@@ -849,7 +887,7 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
 }
 
 static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
-    unsigned long long seq)
+    unsigned long long seq, unsigned long long *page_lfn)
 {
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
@@ -1284,9 +1322,14 @@ static void CBDMSMemFree(void *pointer)
 static void *CBDrcMemAlloc(size_t size)
 {
     void *ptr = NULL;
+    if (AllocSizeIsValid(size)) {
+        ptr = MemoryContextAlloc(DMSDrcContext, size);
+    } else {
+        ptr = palloc_huge(DMSDrcContext, size);
+    }
     ptr = palloc_huge(DMSDrcContext, size);
     if (ptr == NULL) {
-        ereport(FATAL, (errmsg("Failed to allocate memory for DMSDrcContext.")));
+        ereport(FATAL, (errmsg("Failed to allocate memory for DMSDemContext.")));
     }
     return ptr;
 }
@@ -1513,12 +1556,8 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
     dms_context_t dms_ctx;
     InitDmsBufContext(&dms_ctx, buf_desc->tag);
     dms_ctrl_info_t ctrl_info = { 0 };
-
     errno_t err = memcpy_s(ctrl_info.pageid, DMS_PAGEID_SIZE, &buf_desc->tag, sizeof(BufferTag));
     securec_check_c(err, "\0", "\0");
-    ctrl_info.is_edp = false;
-    ctrl_info.lock_mode = buf_ctrl->lock_mode;
-    ctrl_info.in_rcy = buf_ctrl->in_rcy;
     if ((buf_ctrl->state & BUF_NEED_LOAD) || !(pg_atomic_read_u64(&buf_desc->state) & BM_VALID)) {
         ctrl_info.lsn = SS_MAX_UINT64;
         ctrl_info.is_dirty = true;
@@ -1526,7 +1565,11 @@ static int32 SSBufRebuildOneDrcInternal(BufferDesc *buf_desc, unsigned char thre
         ctrl_info.lsn = (unsigned long long)BufferGetLSN(buf_desc);
         ctrl_info.is_dirty = SSBufferIsDirty(buf_desc);
     }
-
+    ctrl_info.is_edp = false;
+    ctrl_info.lock_mode = buf_ctrl->lock_mode;
+    ctrl_info.in_rcy = buf_ctrl->in_rcy;
+    int threadIndex = (int)thread_index;
+    g_instance.dms_cxt.reform_check_status[threadIndex] = buf_desc->buf_id;
     int ret = dms_buf_res_rebuild_drc_parallel(&dms_ctx, &ctrl_info, thread_index);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][%u/%u/%u/%d %d-%u] rebuild page: failed.",
@@ -1794,7 +1837,7 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
     return GS_SUCCESS;
 }
 
-static int CBFlushCopy(void *db_handle, char *pageid)
+static int CBFlushCopy(void *db_handle, char *pageid, unsigned char thread_index)
 {
     /* 
      * only two occasions
@@ -1841,6 +1884,8 @@ static int CBFlushCopy(void *db_handle, char *pageid)
             Assert(0);
         }
     }
+    int threadIndex = (int)thread_index;
+    g_instance.dms_cxt.reform_check_status[threadIndex] = buffer;
     
     /*
      *  when remote DB instance reboot, this round reform fail
@@ -1880,6 +1925,13 @@ static void SSFailoverPromoteNotify()
                       "set restart_failover_flag to %s when DB restart.",
                       g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag ? "true" : "false")));
     } else {
+        if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+            bool synced = UBReformMemSync();
+            if (!synced) {
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[SS reform][SS failover][UB SYNC] UB transaction cache sync FAILED")));
+            }
+        }
         SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] SSFailoverPromoteNotify:"
                       "send signal to PM to initialize startup thread when DB alive")));
@@ -2142,6 +2194,16 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
     }
 }
 
+void InitReformCheckStatus()
+{
+    int max_threads = g_instance.attr.attr_storage.dms_attr.parallel_thread_num;
+
+    g_instance.dms_cxt.reform_check_status = (int*)palloc(max_threads * sizeof(int));
+    for (int i = 0; i < max_threads; i++) {
+        g_instance.dms_cxt.reform_check_status[i] = InvalidBuffer;
+    }
+}
+
 static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_cxt)
 {
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform start enter: pmState=%d, SSClusterState=%d, demotion=%d-%d, rec=%d",
@@ -2169,6 +2231,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     g_instance.dms_cxt.SSRecoveryInfo.startup_need_exit_normally = false;
     g_instance.dms_cxt.resetSyscache = true;
     g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
+    lastDynLogTime = 0;
+    lastLsn = InvalidXLogRecPtr;
+    InitReformCheckStatus();
     FailoverStartNotify(rs_cxt);
 
     reform_info->reform_start_time = GetCurrentTimestamp();
@@ -2181,6 +2246,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     }
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
+    if (ENABLE_UB && g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
+        UBTxnCacheResetReformMeta();
+    }
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
@@ -2221,6 +2289,28 @@ static int CBReformDoneNotify(void *db_handle)
 
     if (SS_DISASTER_CLUSTER) {
         SSDisasterUpdateHAmode();
+    }
+
+    /*
+     * Before reform finishes, standby nodes in switchover/failover need to
+     * detach the old primary UB mapping and attach the current primary one.
+     * Standby only remaps and refreshes local pointers, without touching the
+     * actual shared memory contents.
+     */
+    if (ENABLE_UB && SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER) &&
+        !UBTxnCacheAttachPrimary()) {
+        return DMS_ERROR;
+    }
+
+    /*
+     * Before reform finishes, standby nodes in switchover/failover need to
+     * detach the old primary UB mapping and attach the current primary one.
+     * Standby only remaps and refreshes local pointers, without touching the
+     * actual shared memory contents.
+     */
+    if (ENABLE_UB && SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER) &&
+        !UBTxnCacheAttachPrimary()) {
+        return DMS_ERROR;
     }
    
     /* SSClusterState and in_reform must be set atomically */
@@ -2508,6 +2598,81 @@ unsigned char CBDmsGetInterceptType(unsigned int sid)
     return 0;
 }
 
+void checkReformStatus(unsigned int current_step) {
+    for (uint32 i = 0; i < (uint32)g_instance.attr.attr_storage.dms_attr.parallel_thread_num; i++) {
+        if (t_thrd.dms_cxt.reform_check_status[i] == g_instance.dms_cxt.reform_check_status[i]) {
+            ereport(ERROR, (errmodule(MOD_DMS),
+                errmsg("[SS reform] Reform %s has been hanging for more than 2 minutes, db exit now.",
+                       (current_step == DMS_REFORM_STEP_REBUILD) ? "Rebuild" : "Repair")));
+            print_all_stack();
+            _exit(0);
+        }
+        t_thrd.dms_cxt.reform_check_status[i] = g_instance.dms_cxt.reform_check_status[i];
+    }
+}
+
+
+static void CBReformHealthCheck(void *db_handle, unsigned int current_step, unsigned int current_role,
+    long long dyn_log_time)
+{
+    if (lastDynLogTime == 0) {
+        lastDynLogTime = dyn_log_time;
+    }
+
+    XLogRecPtr currentLsn;
+
+    switch (current_step) {
+        case DMS_REFORM_STEP_DONE:
+            if (g_instance.dms_cxt.SSXminInfo.snapshot_available) {
+                return;
+            }
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            ereport(ERROR, (errmodule(MOD_DMS),
+                errmsg("[SS reform] Reform Done has been hanging for more than 2 minutes, db exit now.")));
+            print_all_stack();
+            _exit(0);
+            break;
+
+        case DMS_REFORM_STEP_RECOVERY:
+            currentLsn = GetXLogReplayRecPtr(NULL, NULL);
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_CHECK_INTERVFAL) {
+                return;
+            }
+            if (lastLsn == currentLsn) {
+                ereport(ERROR, (errmodule(MOD_DMS),
+                    errmsg("[SS reform] Reform Recovery has been hanging for more than 5 minutes, db exit now.")));
+                print_all_stack();
+                _exit(0);
+            }
+            lastLsn = currentLsn;
+            break;
+
+        case DMS_REFORM_STEP_REBUILD:
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            checkReformStatus(DMS_REFORM_STEP_REBUILD);
+            break;
+
+        case DMS_REFORM_STEP_REPAIR:
+            if (dyn_log_time - lastDynLogTime <
+                DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
+                return;
+            }
+            checkReformStatus(DMS_REFORM_STEP_REPAIR);
+            break;
+
+        default:
+            break;
+    }
+
+}
+
 void DmsInitCallback(dms_callback_t *callback)
 {
     // used in reform
@@ -2546,8 +2711,8 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->mem_free = CBMemFree;
     callback->mem_reset = CBMemReset;
 
-    callback->dms_malloc_prot = CBDMSMemAlloc;
-    callback->dms_free_prot = CBDMSMemFree;
+    callback->dms_malloc_prot = CBDrcMemAlloc;
+    callback->dms_free_prot = CBDrcMemFree;
 
     callback->drc_malloc_prot = CBDrcMemAlloc;
     callback->drc_free_prot = CBDrcMemFree;
@@ -2586,4 +2751,5 @@ void DmsInitCallback(dms_callback_t *callback)
 
     callback->get_session_type = CBDmsGetSessionType;
     callback->get_intercept_type = CBDmsGetInterceptType;
+    callback->reform_check_opengauss = CBReformHealthCheck;
 }

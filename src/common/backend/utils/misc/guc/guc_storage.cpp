@@ -225,6 +225,7 @@ static bool check_ss_interconnect_url(char **newval, void **extra, GucSource sou
 static bool check_ss_ock_log_path(char **newval, void **extra, GucSource source);
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source);
 static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source);
+static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
@@ -1134,6 +1135,45 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"enable_ub",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable UB feature."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ub,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ub_debug_log",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable UB transaction cache debug logging."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.ub_debug_log,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ub_sigbus_handler",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable UB SIGBUS handler for ESB instruction."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.ub_sigbus_handler,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        
         {{"ss_enable_aio",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -1220,6 +1260,18 @@ static void InitStorageConfigureNamesBool()
             NULL,
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.dms_attr.enable_reform_trace,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_mes_elapsed_switch",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable MES elapsed time and command statistics (mes_elapsed_switch); requires restart"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.ss_mes_elapsed_switch,
             false,
             NULL,
             NULL,
@@ -4202,6 +4254,20 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"ss_init_clog_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the max clog size scanned when initializing recovery clog/csnlog dump."),
+            NULL,
+            GUC_SUPERUSER_ONLY | GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.dms_attr.init_clog_size,
+            100 * 1024,
+            1 * 1024,
+            1024 * 1024,
+            NULL,
+            NULL,
+            NULL},
         {{"ss_txnstatus_cache_size",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -5225,6 +5291,20 @@ static void InitStorageConfigureNamesString()
             check_ss_interconnect_type,
             NULL,
             NULL},
+        {{"ss_shm_ub_comm_cpu_bind",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Per-queue CPU affinity for SHM ub_comm when interconnect is SHM. "
+                "9 slots (one per MES priority 0-7 plus prio6 mirror). "
+                "Format: [id,id,...] or [lo~hi]; -1 per slot means no bind."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.ss_shm_ub_comm_cpu_bind,
+            "",
+            check_ss_shm_ub_comm_cpu_bind,
+            NULL,
+            NULL},
         {{"ss_rdma_work_config",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -5378,6 +5458,17 @@ static void InitStorageConfigureNamesString()
             &g_instance.attr.attr_storage.uwal_log_path,
             "",
             check_uwal_log_path,
+            NULL,
+            NULL},
+        {{"ubs_mem_path",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Sets file path of libubsm_sdk.so."),
+            NULL},
+            &g_instance.attr.attr_storage.ubs_mem_path,
+            "libubsm_sdk.so",
+            NULL,
             NULL,
             NULL},
         {{NULL,
@@ -6820,7 +6911,41 @@ static bool check_most_available_sync_param(bool* newval, void** extra, GucSourc
 
 static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source)
 {
-    return (strcmp("TCP", *newval) == 0 || strcmp("RDMA", *newval) == 0);
+    return (strcmp("TCP", *newval) == 0 || strcmp("RDMA", *newval) == 0 || strcmp("UBC", *newval) == 0 ||
+            strcmp("SHM", *newval) == 0);
+}
+
+static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource source)
+{
+    (void)extra;
+    (void)source;
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        return true;
+    }
+    const char *s = *newval;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
+        s++;
+    }
+    if (*s != '[') {
+        GUC_check_errdetail("Value must start with '['.");
+        return false;
+    }
+    s++;
+    const char *rb = strchr(s, ']');
+    if (rb == NULL) {
+        GUC_check_errdetail("Value must end with ']'.");
+        return false;
+    }
+    for (const char *p = s; p < rb; p++) {
+        if (*p == ' ' || *p == '\t' || *p == ',' || *p == '~' || *p == '-' ||
+            (*p >= '0' && *p <= '9')) {
+            continue;
+        }
+        GUC_check_errdetail("Unexpected character '%c' inside brackets; "
+            "allowed: digits, commas, tildes, minus, spaces.", *p);
+        return false;
+    }
+    return true;
 }
 
 static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)

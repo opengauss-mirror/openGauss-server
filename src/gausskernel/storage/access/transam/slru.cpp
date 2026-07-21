@@ -1119,7 +1119,7 @@ static int SlruSelectLRUPage(SlruCtl ctl, int64 pageno)
         }
 
         /* See if page already has a buffer assigned */
-        for (slotno = 0; slotno < shared->num_slots; slotno++) {
+        for (slotno = bankstart; slotno < bankend; slotno++) {
             if (shared->page_number[slotno] == pageno && shared->page_status[slotno] != SLRU_PAGE_EMPTY) {
                 Assert(0 <= slotno && slotno < shared->num_slots);
                 return slotno;

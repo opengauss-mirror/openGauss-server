@@ -24,6 +24,10 @@
  */
 
 #include "utils/builtins.h"
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <sys/sysinfo.h>
 #include "utils/palloc.h"
@@ -45,6 +49,13 @@
 #define FIXED_NUM_OF_INST_IP_PORT 3
 #define BYTES_PER_KB 1024
 #define NON_PROC_NUM 4
+
+/*
+ * ss_shm_ub_comm_cpu_bind: max expanded CPU ids (after ~ ranges) before trimming to DMS_SHM_UB_COMM_QUEUE_NUM;
+ * max bytes copied from inside [...] into stack (must leave room for terminating NUL).
+ */
+#define DMS_SHM_UB_CPU_BIND_EXPAND_CAP 256
+#define DMS_SHM_UB_CPU_BIND_INNER_MAX 512
 
 const int MAX_CPU_STR_LEN = 5;
 const int DEFAULT_DIGIT_RADIX = 10;
@@ -117,8 +128,12 @@ static inline dms_conn_mode_t convertInterconnectType()
 {
     if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "TCP")) {
         return DMS_CONN_MODE_TCP;
-    } else {
+    } else if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "RDMA")){
         return DMS_CONN_MODE_RDMA;
+    } else if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "UBC")) {
+        return DMS_CONN_MODE_UBC;
+    } else if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "SHM")) {
+        return DMS_CONN_MODE_SHM;
     }
 }
 
@@ -287,6 +302,167 @@ static void setRdmaWorkConfig(dms_profile_t *profile)
     }
 }
 
+static void MesShmUbCpuIdsInit(int *ids)
+{
+    const size_t nbytes = sizeof(int) * (size_t)DMS_SHM_UB_COMM_QUEUE_NUM;
+    errno_t rc = memset_s(ids, nbytes, 0xFF, nbytes);
+    securec_check_c(rc, "\0", "\0");
+}
+
+static const char *MesShmUbSkipSpace(const char *p)
+{
+    if (p == NULL) {
+        return NULL;
+    }
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+        p++;
+    }
+    return p;
+}
+
+/* One integer per token; actual CPU ID validity is checked later against get_nprocs_conf(). */
+static bool MesShmUbParseOneBoundLong(const char *tok, long *out)
+{
+    const char *p = MesShmUbSkipSpace(tok);
+    errno = 0;
+    char *end = NULL;
+    long v = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || v < INT_MIN || v > INT_MAX) {
+        return false;
+    }
+    end = (char *)MesShmUbSkipSpace(end);
+    if (*end != '\0') {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+static bool MesShmUbAppendRangeExpanded(long lo, long hi, int *tmp, int *pn)
+{
+    int ncpus = get_nprocs_conf();
+    if (lo > hi) {
+        long t = lo;
+        lo = hi;
+        hi = t;
+    }
+    for (long id = lo; id <= hi; id++) {
+        if (id < 0 || id >= (long)ncpus) {
+            return false;
+        }
+        if (*pn >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        tmp[(*pn)++] = (int)id;
+    }
+    return true;
+}
+
+/*
+ * One comma-separated segment: either a single bound integer (optional -1) or "low~high" with exactly one '~'.
+ * Expanded CPU ids are appended to tmp.
+ */
+static bool MesShmUbParseCommaTokenToTmp(char *tok, int *tmp, int *pn)
+{
+    int ncpus = get_nprocs_conf();
+    char *tilde = strchr(tok, '~');
+    if (tilde == NULL) {
+        long v = 0;
+        if (!MesShmUbParseOneBoundLong(tok, &v)) {
+            return false;
+        }
+        if (v != -1L && (v < 0 || v >= (long)ncpus)) {
+            return false;
+        }
+        if (*pn >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        tmp[(*pn)++] = (int)v;
+        return true;
+    }
+    if (strchr(tilde + 1, '~') != NULL) {
+        return false;
+    }
+    *tilde = '\0';
+    long lo = 0;
+    long hi = 0;
+    if (!MesShmUbParseOneBoundLong(tok, &lo) || !MesShmUbParseOneBoundLong(tilde + 1, &hi)) {
+        return false;
+    }
+    return MesShmUbAppendRangeExpanded(lo, hi, tmp, pn);
+}
+
+static bool MesShmUbParseCpuBindInner(char *inner, int *ids)
+{
+    int tmp[DMS_SHM_UB_CPU_BIND_EXPAND_CAP];
+    int n = 0;
+    char *saveptr = NULL;
+
+    for (char *tok = strtok_r(inner, ",", &saveptr); tok != NULL; tok = strtok_r(NULL, ",", &saveptr)) {
+        if (!MesShmUbParseCommaTokenToTmp(tok, tmp, &n)) {
+            return false;
+        }
+    }
+    if (n == 0) {
+        return false;
+    }
+    if (n > DMS_SHM_UB_COMM_QUEUE_NUM) {
+        ereport(WARNING,
+                (errmsg("ss_shm_ub_comm_cpu_bind: %d CPU IDs provided but only %d queues, excess entries ignored", n,
+                        DMS_SHM_UB_COMM_QUEUE_NUM)));
+    }
+    int nfill = (n > DMS_SHM_UB_COMM_QUEUE_NUM) ? DMS_SHM_UB_COMM_QUEUE_NUM : n;
+    for (int i = 0; i < nfill; i++) {
+        ids[i] = tmp[i];
+    }
+    return true;
+}
+
+static bool MesShmUbParseCpuBindString(const char *raw, int *ids)
+{
+    MesShmUbCpuIdsInit(ids);
+    if (IS_NULL_STR(raw)) {
+        return true;
+    }
+    const char *p = MesShmUbSkipSpace(raw);
+    if (*p != '[') {
+        return false;
+    }
+    p++;
+    const char *rb = strchr(p, ']');
+    if (rb == NULL) {
+        return false;
+    }
+    size_t innerLen = (size_t)(rb - p);
+    if (innerLen >= DMS_SHM_UB_CPU_BIND_INNER_MAX) {
+        return false;
+    }
+    char buf[DMS_SHM_UB_CPU_BIND_INNER_MAX];
+    errno_t rc = memcpy_s(buf, sizeof(buf), p, innerLen);
+    securec_check_c(rc, "\0", "\0");
+    buf[innerLen] = '\0';
+
+    return MesShmUbParseCpuBindInner(buf, ids);
+}
+
+/* ss_shm_ub_comm_cpu_bind: SHM ub_comm per-queue CPU bind; only when interconnect is SHM. */
+static void setShmUbCommCpuConfig(dms_profile_t *profile)
+{
+    knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
+    MesShmUbCpuIdsInit(profile->mes_shm_ub_comm_cpu_ids);
+    if (profile->pipe_type != DMS_CONN_MODE_SHM) {
+        return;
+    }
+
+    if (!IS_NULL_STR(dms_attr->ss_shm_ub_comm_cpu_bind)) {
+        if (!MesShmUbParseCpuBindString(dms_attr->ss_shm_ub_comm_cpu_bind, profile->mes_shm_ub_comm_cpu_ids)) {
+            ereport(WARNING, (errmsg("invalid ss_shm_ub_comm_cpu_bind \"%s\", SHM ub_comm CPU bind disabled",
+                dms_attr->ss_shm_ub_comm_cpu_bind)));
+            MesShmUbCpuIdsInit(profile->mes_shm_ub_comm_cpu_ids);
+        }
+    }
+}
+
 static void setScrlConfig(dms_profile_t *profile)
 {
     knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
@@ -402,6 +578,7 @@ static void setDMSProfile(dms_profile_t* profile)
     knl_instance_attr_dms* dms_attr = &g_instance.attr.attr_storage.dms_attr;
     profile->enable_dyn_trace = dms_attr->enable_dyn_trace;
     profile->enable_reform_trace = dms_attr->enable_reform_trace;
+    profile->elapsed_switch = dms_attr->ss_mes_elapsed_switch ? 1U : 0U;
     profile->resource_catalog_centralized = (unsigned int)dms_attr->enable_catalog_centralized;
     profile->inst_id = (uint32)dms_attr->instance_id;
     profile->page_size = BLCKSZ;
@@ -414,6 +591,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->pipe_type = convertInterconnectType();
     profile->conn_created_during_init = FALSE;
     setRdmaWorkConfig(profile);
+    setShmUbCommCpuConfig(profile);
     setScrlConfig(profile);
     SetOckLogPath(dms_attr, profile->ock_log_path);
     profile->inst_map = 0;

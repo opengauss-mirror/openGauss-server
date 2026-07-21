@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -222,6 +222,7 @@
 #include "funcapi.h"
 #include "utils/memprot.h"
 #include "pgstat.h"
+#include "storage/matrix_mem.h"
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
@@ -278,6 +279,15 @@
 #endif
 
 #include "utils/postinit.h"
+
+/* USE_UB_TXN_CACHE - BEGIN */
+#include "access/clog.h"
+#include "access/csnlog.h"
+#include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_xmin.h"
+#include "access/ubmem_buf.h"
+#include "access/ub_sigbus_handler.h"
+/* USE_UB_TXN_CACHE - END */
 
 extern void InitGlobalSeq();
 extern void auto_explain_init(void);
@@ -2715,7 +2725,7 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     InitDolpinProtoIfNeeded();
-    
+
     /*
         * Set up an on_proc_exit function that's charged with closing the sockets
         * again at postmaster shutdown.  You might think we should have done this
@@ -2881,6 +2891,10 @@ int PostmasterMain(int argc, char* argv[])
     /* ignore SIGXFSZ, so that ulimit violations work like disk full */
 #ifdef SIGXFSZ
     (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
+#endif
+
+#ifdef __aarch64__
+    MatrixMemFuncInit(g_instance.attr.attr_storage.ubs_mem_path);
 #endif
 
 #ifdef ENABLE_BBOX
@@ -3095,6 +3109,34 @@ int PostmasterMain(int argc, char* argv[])
         SSGrantDSSWritePermission();
     }
 
+    /*
+    * Initialize UB shared memory.
+    */
+/* USE_UB_TXN_CACHE - BEGIN */
+    if (ENABLE_UB) {
+            if (!UBMemRegionInit()) {
+                ereport(FATAL, (errmsg("Failed to initialize UB memory region")));
+            }
+            ereport(LOG, (errmsg("[postmaster]success initialize UB memory region")));
+            if (!UBSMemLogBufferCreate()) {
+                ereport(FATAL, (errmsg("Failed to create UB shared memory")));
+            }
+            ereport(LOG, (errmsg("[postmaster]success create UB shared memory")));
+            UBCLogShmemInit();
+            UBCSNLogShmemInit();
+            UBOldestXminShmemInit();
+            UBSnapshotShmemInit();
+            ereport(LOG, (errmsg("[postmaster]success init UB shared memory")));
+    }
+/* USE_UB_TXN_CACHE - END */
+#if defined(__aarch64__)
+    if (ENABLE_UB) {
+        if (register_sigbus_handler() != 0) {
+            ereport(FATAL, (errmsg("[postmaster] register_sigbus_handler() failed!!!")));
+        }
+        ereport(LOG, (errmsg("[postmaster] register_sigbus_handler() success!!!")));
+    }
+#endif
     /*
      * Save backend variables for DCF call back thread, 
      * the saved backend variables will be restored in
@@ -6587,12 +6629,45 @@ static void PrepareDemoteResponse(void)
 
     if (ENABLE_DMS) {
         ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
+        XLogRecPtr insertEnd = InvalidXLogRecPtr;
+        XLogRecPtr flushPtr = InvalidXLogRecPtr;
         if (g_instance.dms_cxt.SSClusterState != NODESTATE_PRIMARY_DEMOTING &&
             (dms_reform_failed() || dms_reform_last_failed() || reform_info->in_reform == false)) {
             ereport(LOG,
                 (errmsg("[SS switchover] primary demoting: current switchover round failed caused by"
                 " remote instance; new round of reform has been running concurrently, exit now")));
             _exit(0);
+        }
+        /*
+         * During DD switchover the old primary is restarted as a standby
+         * without resetting shared memory. If the last committed WAL is still
+         * only in wal buffers here, the startup thread will recover from a
+         * stale EndOfLog and the demoted primary can miss the last committed
+         * transaction. Force WAL durable before advertising demote success.
+         */
+        insertEnd = GetXLogInsertEndRecPtr();
+        flushPtr = GetFlushRecPtr();
+        if (XLByteLT(flushPtr, insertEnd)) {
+            ereport(LOG,
+                (errmsg("[SS switchover] primary demoting: flushing pending WAL before restart, "
+                        "insertEnd=%X/%X flush=%X/%X",
+                        (uint32)(insertEnd >> 32), (uint32)insertEnd,
+                        (uint32)(flushPtr >> 32), (uint32)flushPtr)));
+            XLogWaitFlush(insertEnd);
+            flushPtr = GetFlushRecPtr();
+            if (XLByteLT(flushPtr, insertEnd)) {
+                ereport(WARNING,
+                    (errmsg("[SS switchover] primary demoting: WAL flush is still behind after wait, "
+                            "insertEnd=%X/%X flush=%X/%X",
+                            (uint32)(insertEnd >> 32), (uint32)insertEnd,
+                            (uint32)(flushPtr >> 32), (uint32)flushPtr)));
+            } else {
+                ereport(LOG,
+                    (errmsg("[SS switchover] primary demoting: WAL flush caught up, "
+                            "insertEnd=%X/%X flush=%X/%X",
+                            (uint32)(insertEnd >> 32), (uint32)insertEnd,
+                            (uint32)(flushPtr >> 32), (uint32)flushPtr)));
+            }
         }
         ereport(LOG,
             (errmsg("[SS switchover] primary demoting: shutdown ckpt done, demote success. restart now")));
@@ -9828,6 +9903,9 @@ extern void HLLT_Coverage_SaveCoverageData();
 void ExitPostmaster(int status)
 {
     /* should cleanup shared memory and kill all backends */
+    if (ENABLE_UB) {
+        (void)UBSMemFinalize();
+    }
 
     /*
      * Not sure of the semantics here.	When the Postmaster dies, should the
@@ -9871,6 +9949,10 @@ void ExitPostmaster(int status)
     /* Save llt data to disk before postmaster exit */
 #ifdef ENABLE_LLT
     HLLT_Coverage_SaveCoverageData();
+#endif
+
+#ifdef __aarch64__
+    MatrixMemFuncUnInit();
 #endif
 
     // flush stdout buffer before _exit

@@ -30,6 +30,8 @@
 #include "storage/lock/s_lock.h"
 #include "datatype/timestamp.h"
 #include "ddes/dms/dms_api.h"
+#include "access/ubmem_buf.h"
+#include <atomic>
 
 typedef struct st_snap_xmin_key {
     uint64 xmin;
@@ -72,5 +74,23 @@ bool RecordSnapshotBeforeSend(uint8 inst_id, uint64 xmin);
 uint64 SSGetGlobalOldestXmin(uint64 globalxmin);
 void SSUpdateNodeOldestXmin(uint8 inst_id, unsigned long long oldest_xmin);
 void SSSyncOldestXminWhenReform(uint8 reformer_id);
+
+/* USE_UB_TXN_CACHE - BEGIN */
+
+#define UB_OLDEST_XMIN_SLOTS 128
+
+typedef std::atomic<uint64> UBOldestXminSlot;
+
+typedef struct {
+    UBOldestXminSlot slots[UB_OLDEST_XMIN_SLOTS];
+} UBOldestXminBuffer;
+
+extern void UBOldestXminBufferInit(UBOldestXminBuffer *buf);
+extern bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 oldest_xmin);
+extern uint64 UBOldestXminBufferGetSlot(UBOldestXminBuffer *buf, uint32 node_id);
+extern size_t UBOldestXminBufferSize(void);
+extern void UBOldestXminShmemInit(void);
+
+/* USE_UB_TXN_CACHE - END */
 
 #endif

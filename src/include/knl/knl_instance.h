@@ -76,6 +76,7 @@
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_xmin.h"
 #include "ddes/dms/ss_dms_callback.h"
+#include "storage/matrix_mem.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -921,6 +922,14 @@ typedef struct knl_g_shmem_context {
     int MaxReserveBackendId;
     int ThreadPoolGroupNum;
     int numaNodeNum;
+    /* USE_UB_TXN_CACHE - BEGIN */
+    char *UBTxnCachePtr;
+    void *UBClogBufPtr;
+    void *UBCSNLogBufPtr;
+    void *UBOldestXminBufPtr;
+    void *UBSnapshotBufPtr;
+    void *UBLocalMapRecordsPtr;
+    /* USE_UB_TXN_CACHE - END */
 } knl_g_shmem_context;
 
 typedef struct knl_g_executor_context {
@@ -1312,6 +1321,7 @@ typedef struct knl_g_dms_context {
     char dmsInstAddr[MAX_REPLNODE_NUM][DMS_MAX_IP_LEN];
     char conninfo[MAXPGPATH];
     ss_dfx_stats_t SSDFxStats;
+    int* reform_check_status;
     ss_xmin_info_t SSXminInfo;
     ss_fake_seesion_context_t SSFakeSessionCxt;
 } knl_g_dms_context;
@@ -1322,6 +1332,11 @@ typedef struct knl_g_spq_context {
     struct HTAB* adp_connects;
 } knl_g_spq_context;
 #endif
+
+typedef struct knl_g_matrix_mem_context {
+    MatrixMemFunc matrix_mem_func;
+    bool matrix_mem_inited;
+} knl_g_matrix_mem_context;
 
 typedef struct knl_instance_context {
     knl_virtual_role role;
@@ -1439,6 +1454,7 @@ typedef struct knl_instance_context {
     struct HTAB* tmpTab;
     knl_g_hypo_context hypo_cxt;
 
+    knl_g_matrix_mem_context matrix_mem_cxt;
     knl_g_segment_context segment_cxt;
     knl_g_pldebug_context pldebug_cxt;
     knl_g_spi_plan_context spi_plan_cxt;

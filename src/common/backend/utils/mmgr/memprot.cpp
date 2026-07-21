@@ -998,6 +998,13 @@ void gs_memprot_init(Size size)
         int avail_mem = g_instance.attr.attr_memory.max_process_memory - g_instance.attr.attr_storage.cstore_buffers -
                         udf_memory - (size >> BITS_IN_KB);
 
+#ifdef ENABLE_HTAP
+        double percent = g_instance.attr.attr_memory.htap_borrow_mem_percent / 100;
+        double pre_occupy = (double)g_instance.attr.attr_memory.max_imcs_cache * percent;
+#else
+        double pre_occupy = 0;
+#endif
+
         if (avail_mem < MIN_PROCESS_LIMIT) {
             ereport(WARNING,
                 (errmsg(

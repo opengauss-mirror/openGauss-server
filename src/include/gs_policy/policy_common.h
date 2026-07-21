@@ -22,6 +22,8 @@
  */
 #ifndef _GS_POLICY_COMMON_H
 #define _GS_POLICY_COMMON_H
+#include <vector>
+#include <string>
 #include "nodes/parsenodes.h"
 #include "nodes/plannodes.h"
 

@@ -79,6 +79,11 @@
 #include "port/pg_crc32c.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_txnstatus.h"
+/* USE_UB_TXN_CACHE - BEGIN */
+#include "access/clog.h"
+#include "access/csnlog.h"
+#include "ddes/dms/ss_xmin.h"
+/* USE_UB_TXN_CACHE - END */
 
 #define MAX_PATH_LEN 1024
 #define BYTES_PATH_LEN 20
@@ -3453,6 +3458,7 @@ typedef struct knl_t_dms_context {
     bool enable_page_read_cancel;
     SSPageReadCancelCause page_read_cancel_cause;
     SSPageReadCancelPoint page_read_cancel_point;
+    int* reform_check_status;
 } knl_t_dms_context;
 
 typedef struct knl_t_dms_auxiliary_context {
@@ -3480,6 +3486,11 @@ typedef struct knl_t_invalidation_message_context {
     int in_progress_list_maxlen;
     bool b_can_not_process; /* Currently unable to process invalid messages */
 } knl_t_invalidation_message_context;
+
+typedef struct KnlTRackMemCleanerContext {
+    volatile sig_atomic_t gotSighup;
+    volatile sig_atomic_t shutdownRequested;
+} KnlTRackMemCleanerContext;
 
 /* thread context. */
 typedef struct knl_thrd_context {
@@ -3636,6 +3647,7 @@ typedef struct knl_thrd_context {
 #endif
     knl_t_dms_auxiliary_context dms_aux_cxt;
     knl_t_invalidation_message_context inval_msg_cxt;
+    KnlTRackMemCleanerContext rackMemCleanerCxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

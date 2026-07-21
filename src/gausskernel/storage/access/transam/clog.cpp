@@ -52,6 +52,10 @@
 #include "storage/proc.h"
 #include "storage/file/fio_device.h"
 #include "storage/procarray.h"
+/* USE_UB_TXN_CACHE - BEGIN */
+#include "access/ubmem_buf.h"
+#include "access/ub_sigbus_handler.h"
+/* USE_UB_TXN_CACHE - END */
 #ifdef USE_ASSERT_CHECKING
 #include "utils/builtins.h"
 #endif /* USE_ASSERT_CHECKING */
@@ -358,7 +362,6 @@ static void CLogSetPageStatusInternal(TransactionId xid, int nsubxids, const Tra
      * we think.
      */
     slotno = SimpleLruReadPage(ClogCtl(pageno), pageno, XLogRecPtrIsInvalid(lsn), xid);
-
     /* Set the main transaction id, if any. */
     if (TransactionIdIsValid(xid)) {
         /* Subtransactions first, if needed ... */
@@ -371,12 +374,28 @@ static void CLogSetPageStatusInternal(TransactionId xid, int nsubxids, const Tra
 
         /* ... then the main transaction */
         CLogSetStatusBit(xid, status, lsn, slotno);
+/* USE_UB_TXN_CACHE - BEGIN */
+        if (ENABLE_UB) {
+            UBCLogBuffer *ubCLogBuf = (UBCLogBuffer *)g_instance.shmem_cxt.UBClogBufPtr;
+            if (ubCLogBuf != nullptr) {
+                UBCLogBufferSetSlot(ubCLogBuf, xid, status);
+            }
+        }
+/* USE_UB_TXN_CACHE - END */
     }
 
     /* Set the subtransactions */
     for (i = 0; i < nsubxids; i++) {
         Assert(ClogCtl(pageno)->shared->page_number[slotno] == (int64)TransactionIdToPage(subxids[i]));
         CLogSetStatusBit(subxids[i], status, lsn, slotno);
+        /* USE_UB_TXN_CACHE - BEGIN */
+        if (ENABLE_UB) {
+            UBCLogBuffer *ubCLogBuf = (UBCLogBuffer *)g_instance.shmem_cxt.UBClogBufPtr;
+            if (ubCLogBuf != nullptr) {
+                UBCLogBufferSetSlot(ubCLogBuf, subxids[i], status);
+            }
+        }
+        /* USE_UB_TXN_CACHE - END */
     }
 
     ClogCtl(pageno)->shared->page_dirty[slotno] = true;
@@ -1404,3 +1423,104 @@ void SSCLOGShmemClear(void)
     }
 }
 
+/*
+ * @Description: Initialization of UB shared memory for CLOG
+ */
+
+/* USE_UB_TXN_CACHE - BEGIN */
+
+void UBCLogBufferInit(UBCLogBuffer *buf)
+{
+    const size_t CHUNK_SIZE = 1024 * 1024 * 1024;
+    size_t total_size = sizeof(buf->slots);
+    size_t offset = 0;
+    
+    while (offset < total_size) {
+        size_t chunk = (total_size - offset) < CHUNK_SIZE ? (total_size - offset) : CHUNK_SIZE;
+        errno_t rc = memset_s((char *)buf->slots + offset, chunk, 0xFFFF, chunk);
+        securec_check_c(rc, "\0", "\0");
+        offset += chunk;
+    }
+    EXECUTE_ESB();
+}
+
+void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus status)
+{
+    if (buf == NULL) {
+        return;
+    }
+    if (status < CLOG_XID_STATUS_IN_PROGRESS || status > CLOG_XID_STATUS_SUB_COMMITTED) {
+        return;
+    }
+    if (!UBCLogIsValidXid(xid)) {
+        return;
+    }
+
+    uint64 slot_idx = UBCLogCalSlotIndex(xid);
+    uint16 expected_timeline = (uint16)UBCLogExpectedTimeline(xid);
+    uint16 slot_val = UBCLogSlotMake(status, expected_timeline);
+    buf->slots[slot_idx].store(slot_val, std::memory_order_release);
+    EXECUTE_ESB();
+}
+
+size_t UBCLogBufferSize(void)
+{
+    return sizeof(UBCLogBuffer);
+}
+
+void UBCLogShmemInit(void)
+{
+    char *base = g_instance.shmem_cxt.UBTxnCachePtr;
+    if (base == nullptr) {
+        ereport(FATAL, (errmsg("UB shared memory not initialized")));
+        return;
+    }
+    UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
+    uint64 offset = ctrl->clog_offset.load(std::memory_order_acquire);
+    UBCLogBuffer *buf = (UBCLogBuffer *)(base + offset);
+    g_instance.shmem_cxt.UBClogBufPtr = buf;
+}
+
+bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status)
+{
+    if (status == nullptr) {
+        ereport(WARNING, (errmsg("UB CLOG: status pointer is null")));
+        return false;
+    }
+
+    if (SS_IN_REFORM) {
+        return false;
+    }
+
+    UBCLogBuffer *ubCLogBuf = (UBCLogBuffer *)g_instance.shmem_cxt.UBClogBufPtr;
+    if (ubCLogBuf == nullptr) {
+        ereport(WARNING, (errmsg("UB CLOG buffer not initialized on primary")));
+        return false;
+    }
+
+    if (!UBCLogIsValidXid(xid)) {
+        return false;
+    }
+
+    uint64 slot_idx = UBCLogCalSlotIndex(xid);
+    uint16 expected_timeline = (uint16)UBCLogExpectedTimeline(xid);
+    uint16 slot_val = ubCLogBuf->slots[slot_idx].load(std::memory_order_acquire);
+    EXECUTE_ESB();
+
+    if (slot_val == 0xFFFF) {
+        return false;
+    }
+
+    if (UBCLogSlotGetTimeline(slot_val) == expected_timeline) {
+        *status = (CLogXidStatus)UBCLogSlotGetStatus(slot_val);
+        /*
+         * UB reform switchover can observe a partially updated xid state at the
+         * copy boundary. Only trust definitive statuses from UB; fall back to
+         * DMS/SLRU for in-progress and sub-committed states.
+         */
+        return UBCLogStatusIsDefinitive(*status);
+    }
+    return false;
+}
+
+/* USE_UB_TXN_CACHE - END */
