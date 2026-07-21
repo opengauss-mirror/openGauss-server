@@ -19,6 +19,7 @@
       - [使用build.sh编译代码](#使用buildsh编译代码)
       - [使用命令编译代码](#使用命令编译代码)
   - [编译安装包](#编译安装包)
+  - [运行Fastcheck](#运行fastcheck)
 - [快速入门](#快速入门)
 - [文档](#文档)
 - [社区](#社区)
@@ -779,6 +780,68 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 - 生成的安装包存放目录：**./package**。
 - 编译日志： **make_compile.log**
 - 安装包打包日志： **./package/make_package.log**
+
+### 运行Fastcheck
+
+Fastcheck用于快速执行回归测试。运行前需要先准备openGauss源码、对应平台的binarylibs，并完成数据库编译和安装。
+
+1. 配置环境变量。
+
+   ```
+   export CODE_BASE=/data/openGauss-server
+   export BINARYLIBS=/data/openGauss-third_party_binarylibs
+   export GAUSSHOME=$CODE_BASE/dest/
+   export GCC_PATH=$BINARYLIBS/buildtools/openeuler_aarch64/gcc7.3/
+   export CC=$GCC_PATH/gcc/bin/gcc
+   export CXX=$GCC_PATH/gcc/bin/g++
+   export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
+   export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
+   ```
+
+   其中`CODE_BASE`为openGauss-server源码目录，`BINARYLIBS`为三方库目录，`GCC_PATH`需要根据binarylibs中实际的GCC版本和平台目录调整，例如gcc7.3或gcc10.3。
+
+2. 准备测试用例文件。
+
+   将测试SQL文件放到`src/test/regress/sql`目录，将期望输出文件放到`src/test/regress/expected`目录。例如新增`testname`用例时，需要准备：
+
+   ```
+   $CODE_BASE/src/test/regress/sql/testname.sql
+   $CODE_BASE/src/test/regress/expected/testname.out
+   ```
+
+   放入文件后请检查文件权限和文件格式，必要时使用`chmod`、`chown`和`dos2unix`处理。
+
+3. 将用例加入调度文件。
+
+   编辑`src/test/regress/parallel_schedule0`，添加如下内容：
+
+   ```
+   test: testname
+   ```
+
+4. 配置、编译并安装openGauss。
+
+   ```
+   cd $CODE_BASE
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib
+   make -sj
+   make install -sj
+   ```
+
+   如果使用gcc10.3版本，请将`--gcc-version`和`GCC_PATH`调整为对应版本。
+
+5. 执行Fastcheck。
+
+   ```
+   cd $CODE_BASE/src/test/regress
+   make fastcheck_single
+   ```
+
+   执行结束后，根据屏幕输出和`src/test/regress/results`、`src/test/regress/regression.diffs`中的结果确认用例是否通过。
+
+> **提示**
+>
+> 如果还没有确定期望输出，可以先临时创建只包含目标用例的`parallel_schedule`文件并执行一次`make fastcheck_single`，再根据生成的diff整理`expected/testname.out`。
 
 ## 快速入门
 
