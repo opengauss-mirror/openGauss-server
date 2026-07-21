@@ -4063,6 +4063,11 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
     PG_TRY();
     {
         do {
+            if (!g_instance.dms_cxt.dmsInited || SS_IN_REFORM) {
+                skipAcquire = true;
+                break;
+            }
+
             if (lockmode < AccessExclusiveLock && SS_NORMAL_STANDBY) {
                 ret = dms_latch_timed_s(&dlatch, sid, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false, NULL);
             } else if (lockmode >= AccessExclusiveLock && SS_NORMAL_PRIMARY) {

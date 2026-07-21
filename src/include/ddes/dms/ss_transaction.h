@@ -142,4 +142,53 @@ bool SSCanFetchLocalSnapshotTxnRelatedInfo();
 int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len);
 int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len);
 
+/* USE_UB_TXN_CACHE - BEGIN */
+#include <atomic>
+#include <string.h>
+
+#define UB_SNAPSHOT_BUFFER_SLOTS 1
+
+typedef struct UBSnapshotSlot {
+    std::atomic<TransactionId> xmin;
+    std::atomic<TransactionId> xmax;
+    std::atomic<CommitSeqNo> snapshotcsn;
+    std::atomic<uint64> version;
+} UBSnapshotSlot;
+
+typedef struct UBSnapshotBuffer {
+    UBSnapshotSlot slots[UB_SNAPSHOT_BUFFER_SLOTS];
+} UBSnapshotBuffer;
+
+static inline void UBSnapshotSlotSet(UBSnapshotSlot *slot,
+                                       TransactionId xmin,
+                                       TransactionId xmax,
+                                       CommitSeqNo csn)
+{
+    slot->version.fetch_add(1, std::memory_order_release);
+    
+    slot->xmin.store(xmin, std::memory_order_relaxed);
+    slot->xmax.store(xmax, std::memory_order_relaxed);
+    slot->snapshotcsn.store(csn, std::memory_order_relaxed);
+    
+    std::atomic_thread_fence(std::memory_order_release);
+    slot->version.fetch_add(1, std::memory_order_relaxed);
+}
+
+extern bool UBSnapshotSlotGet(UBSnapshotSlot *slot,
+                               TransactionId *xmin,
+                               TransactionId *xmax,
+                               CommitSeqNo *csn);
+
+extern void UBSnapshotBufferInit(UBSnapshotBuffer *buf);
+extern void UBSnapshotBufferSetSlot(UBSnapshotBuffer *buf,
+                                     TransactionId xmin,
+                                     TransactionId xmax,
+                                     CommitSeqNo csn);
+extern bool UBGetSnapshotFromPrimary(TransactionId *xmin,
+                                      TransactionId *xmax,
+                                      CommitSeqNo *csn);
+extern Size UBSnapshotBufferSize(void);
+extern void UBSnapshotShmemInit(void);
+
+/* USE_UB_TXN_CACHE - END */
 #endif

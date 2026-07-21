@@ -30,7 +30,10 @@
 #include "ddes/dms/ss_dms.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "knl/knl_instance.h"
-
+/* USE_UB_TXN_CACHE - BEGIN */
+#include "access/ubmem_buf.h"
+#include "access/ub_sigbus_handler.h"
+/* USE_UB_TXN_CACHE - END */
 extern void CalculateLocalLatestSnapshot(bool forceCalc);
 
 uint32 SSSnapshotXminKeyHashCode(const ss_snap_xmin_key_t *key)
@@ -59,6 +62,48 @@ uint64 GetOldestXminInNodeTable()
         SpinLockRelease(&item->item_lock);
     }
     return min_xmin;
+}
+
+
+bool UBSyncOldestXminInNodeTable()
+{
+/* USE_UB_TXN_CACHE - BEGIN */
+    if (SS_IN_REFORM) {
+        return false;
+    }
+    UBOldestXminBuffer *ubBuf = (UBOldestXminBuffer *)g_instance.shmem_cxt.UBOldestXminBufPtr;
+    if (ubBuf == nullptr) {
+        return false;
+    }
+
+    ss_xmin_info_t *xmin_info = &g_instance.dms_cxt.SSXminInfo;
+    bool synced = false;
+
+    for (uint32 node_id = 0; node_id < DMS_MAX_INSTANCES; node_id++) {
+        uint64 ub_oldest_xmin = ubBuf->slots[node_id].load(std::memory_order_acquire);
+        EXECUTE_ESB();
+        if (ub_oldest_xmin == 0) {
+            continue;
+        }
+
+        ss_node_xmin_item_t *item = &xmin_info->node_table[node_id];
+        SpinLockAcquire(&item->item_lock);
+
+        if (!item->active || ub_oldest_xmin > item->notify_oldest_xmin) {
+            item->notify_oldest_xmin = ub_oldest_xmin;
+            synced = true;
+
+            if (!item->active) {
+                item->active = true;
+                SpinLockAcquire(&xmin_info->bitmap_active_nodes_lock);
+                xmin_info->bitmap_active_nodes |= (1ULL << node_id);
+                SpinLockRelease(&xmin_info->bitmap_active_nodes_lock);
+            }
+        }
+        SpinLockRelease(&item->item_lock);
+    }
+    return synced;
+/* USE_UB_TXN_CACHE - END */
 }
 
 void MaintXminInPrimary(void)
@@ -100,6 +145,11 @@ void MaintXminInPrimary(void)
         LWLockRelease(partition_lock);
     }
     xmin_info->snap_oldest_xmin = snap_xmin;
+/* USE_UB_TXN_CACHE - BEGIN */
+    if (ENABLE_UB) {
+        UBSyncOldestXminInNodeTable();
+    }
+/* USE_UB_TXN_CACHE - END */
     uint64 new_global_xmin = GetOldestXminInNodeTable();
     if (TransactionIdPrecedes(snap_xmin, new_global_xmin)) {
         new_global_xmin = snap_xmin;
@@ -124,6 +174,15 @@ void MaintXminInStandby(void)
     }
     uint64 oldest_xmin = MaxTransactionId;
     GetOldestGlobalProcXmin(&oldest_xmin);
+/* USE_UB_TXN_CACHE - BEGIN */
+    UBOldestXminBuffer *ubBuf = (UBOldestXminBuffer *)g_instance.shmem_cxt.UBOldestXminBufPtr;
+    if (ENABLE_UB && ubBuf != nullptr) {
+        uint32 node_id = (uint32)SS_MY_INST_ID;
+        if (UBOldestXminBufferSetSlot(ubBuf, node_id, oldest_xmin)) {
+            return;
+        }
+    }
+/* USE_UB_TXN_CACHE - END */
     dms_context_t dms_cxt = {0};
     InitDmsContext(&dms_cxt);
     dms_send_opengauss_oldest_xmin(&dms_cxt, oldest_xmin, SS_PRIMARY_ID);
@@ -256,3 +315,76 @@ void SSSyncOldestXminWhenReform(uint8 reformer_id)
         } while (ret != DMS_SUCCESS);
     }
 }
+
+/* USE_UB_TXN_CACHE - BEGIN */
+
+void UBOldestXminBufferInit(UBOldestXminBuffer *buf)
+{
+    for (int i = 0; i < UB_OLDEST_XMIN_SLOTS; i++) {
+        buf->slots[i].store(0, std::memory_order_release);
+    }
+    EXECUTE_ESB();
+}
+
+bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 oldest_xmin)
+{
+    /* Only used without reform */
+    if (SS_IN_REFORM) {
+        return false;
+    }
+
+    if (buf == nullptr) {
+        return false;
+    }
+    if (node_id >= UB_OLDEST_XMIN_SLOTS) {
+        return false;
+    }
+    if (oldest_xmin == 0) {
+        return false;
+    }
+
+    uint32 slot_idx = node_id;
+    uint64 old_val = buf->slots[slot_idx].load(std::memory_order_acquire);
+    if (old_val != 0 && oldest_xmin <= old_val) {
+        EXECUTE_ESB();
+        return true;
+    }
+
+    buf->slots[slot_idx].store(oldest_xmin, std::memory_order_release);
+    EXECUTE_ESB();
+    return true;
+}
+
+uint64 UBOldestXminBufferGetSlot(UBOldestXminBuffer *buf, uint32 node_id)
+{
+    if (buf == nullptr) {
+        return 0;
+    }
+    if (node_id >= UB_OLDEST_XMIN_SLOTS) {
+        return 0;
+    }
+    uint32 slot_idx = node_id;
+    uint64 val = buf->slots[slot_idx].load(std::memory_order_acquire);
+    EXECUTE_ESB();
+    return val;
+}
+
+size_t UBOldestXminBufferSize(void)
+{
+    return sizeof(UBOldestXminBuffer);
+}
+
+void UBOldestXminShmemInit(void)
+{
+    char *base = g_instance.shmem_cxt.UBTxnCachePtr;
+    if (base == nullptr) {
+        ereport(FATAL, (errmsg("UB shared memory not initialized")));
+        return;
+    }
+    UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
+    uint64 offset = ctrl->oldest_xmin_offset.load(std::memory_order_acquire);
+    UBOldestXminBuffer *buf = (UBOldestXminBuffer *)(base + offset);
+    g_instance.shmem_cxt.UBOldestXminBufPtr = buf;
+}
+
+/* USE_UB_TXN_CACHE - END */

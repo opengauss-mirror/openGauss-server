@@ -14,6 +14,7 @@
 
 #include "access/xlogreader.h"
 #include "lib/stringinfo.h"
+#include <atomic>
 
 /*
  * Defines for CLOG page sizes.  A page is the same BLCKSZ as is used
@@ -102,6 +103,58 @@ typedef enum {
 #include "fmgr.h"
 extern Datum gs_fault_inject(PG_FUNCTION_ARGS);
 extern void SSCLOGShmemClear(void);
+
+/* USE_UB_TXN_CACHE - BEGIN */
+
+#define UB_CLOG_CACHE_SIZE (1ULL << 32)          // 2^32 个槽位
+#define UB_CLOG_STATUS_BITS 2
+#define UB_CLOG_TIMELINE_BITS 14
+#define UB_CLOG_MAX_TIMELINE ((1ULL << UB_CLOG_TIMELINE_BITS) - 1)  // 16383
+
+static inline uint64 UBCLogCalSlotIndex(TransactionId xid)
+{
+    return (uint64)(xid % UB_CLOG_CACHE_SIZE);
+}
+
+static inline uint64 UBCLogExpectedTimeline(TransactionId xid)
+{
+    return (uint64)(xid / UB_CLOG_CACHE_SIZE);
+}
+
+typedef std::atomic<uint16> UBCLogBufferSlot;
+
+typedef struct {
+    UBCLogBufferSlot slots[UB_CLOG_CACHE_SIZE];
+} UBCLogBuffer;
+
+static inline uint8 UBCLogSlotGetStatus(uint16 slot)
+{
+    return (uint8)(slot & 0x03);
+}
+static inline uint16 UBCLogSlotGetTimeline(uint16 slot)
+{
+    return (uint16)(slot >> UB_CLOG_STATUS_BITS);
+}
+static inline uint16 UBCLogSlotMake(CLogXidStatus status, uint16 timeline)
+{
+    return (uint16)((timeline << UB_CLOG_STATUS_BITS) | (status & 0x03));
+}
+static inline bool UBCLogStatusIsDefinitive(CLogXidStatus status)
+{
+    return status == CLOG_XID_STATUS_COMMITTED || status == CLOG_XID_STATUS_ABORTED;
+}
+static inline bool UBCLogIsValidXid(TransactionId xid)
+{
+    return UBCLogExpectedTimeline(xid) <= UB_CLOG_MAX_TIMELINE;
+}
+
+extern void UBCLogBufferInit(UBCLogBuffer *buf);
+extern void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus status);
+extern size_t UBCLogBufferSize(void);
+extern void UBCLogShmemInit(void);
+extern bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status);
+
+/* USE_UB_TXN_CACHE - END */
 
 #endif /* CLOG_H */
 

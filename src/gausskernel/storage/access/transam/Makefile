@@ -13,12 +13,12 @@ ifeq ($(enable_multiple_nodes), yes)
 OBJS = clog.o multixact.o rmgr.o slru.o csnlog.o transam.o twophase.o \
 	twophase_rmgr.o varsup.o double_write.o single_double_write.o seg_double_write.o redo_statistic.o multi_redo_api.o multi_redo_settings.o\
 	xact.o xlog.o xlogfuncs.o extreme_rto_redo_api.o generic_xlog.o \
-	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o
+	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o ubmem_buf.o ub_sigbus_handler.o
 else
 OBJS = clog.o gtm_single.o multixact.o rmgr.o slru.o csnlog.o transam.o twophase.o \
 	twophase_rmgr.o varsup.o double_write.o single_double_write.o seg_double_write.o redo_statistic.o multi_redo_api.o multi_redo_settings.o\
 	xact.o xlog.o xlogfuncs.o extreme_rto_redo_api.o generic_xlog.o \
-	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o
+	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o ubmem_buf.o ub_sigbus_handler.o
 endif
 
 SUBDIRS = parallel_recovery extreme_rto ondemand_extreme_rto 

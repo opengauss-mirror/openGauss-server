@@ -274,6 +274,7 @@ set(gaussdb_objects ${gaussdb_objects} ${gaussdb_server_objects})
 list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:common_interfaces_libpq>
     $<TARGET_OBJECTS:lib_gstrace_common>
+    $<TARGET_OBJECTS:gausskernel_storage_matrix_mem>
 )
 find_library(OPENBLAS_LIB openblas HINTS /usr/lib64 /usr/lib)
 set(gaussdb_LINK_OPTIONS ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} ${OPENBLAS_LIB} -Wl,-E)
@@ -405,6 +406,7 @@ if("${ENABLE_RELOCATION}" STREQUAL "ON")
 endif()
     target_link_directories(gaussdb PRIVATE ${gaussdb_LINK_DIRS})
     target_link_libraries(gaussdb PRIVATE ${gaussdb_LINK_LIBS})
+    target_link_libraries(gaussdb PRIVATE atomic)
     add_dependencies(gaussdb ${gaussdb_DEPEND_LIST})
     if("${SUPPORT_HOTPATCH}" STREQUAL "yes")
         add_custom_command(TARGET gaussdb POST_BUILD

@@ -36,6 +36,7 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/csnlog.h"
+#include "access/ubmem_buf.h"
 #include "access/nbtree.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"
@@ -494,6 +495,35 @@ static int CBSwitchoverDemote(void *db_handle)
     return DMS_ERROR;
 }
 
+static bool UBReformMemSync(void)
+{
+    int old_primary_id = SS_PRIMARY_ID;
+    int new_primary_id = SS_MY_INST_ID;
+    const int UB_SYNC_MAX_RETRIES = 5;
+    const long UB_SYNC_RETRY_WAIT_US = 100000L;
+    bool synced = false;
+
+    for (int ntries = 0; ntries < UB_SYNC_MAX_RETRIES; ntries++) {
+        synced = UBSMemSyncFromOldPrimary(old_primary_id, new_primary_id);
+        if (synced) {
+            ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform][UB SYNC] UB transaction cache sync SUCCESS: "
+                       "old_primary=%d, new_primary=%d, attempt=%d/%d",
+                       old_primary_id, new_primary_id, ntries + 1, UB_SYNC_MAX_RETRIES)));
+            break;
+        }
+
+        ereport(LOG, (errmodule(MOD_DMS),
+            errmsg("[SS reform][UB SYNC] UB transaction cache sync attempt %d/%d FAILED",
+                   ntries + 1, UB_SYNC_MAX_RETRIES)));
+
+        CHECK_FOR_INTERRUPTS();
+        pg_usleep(UB_SYNC_RETRY_WAIT_US);
+    }
+
+    return synced;
+}
+
 static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
     g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
@@ -504,6 +534,14 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Starting to promote standby.")));
+
+    if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        bool synced = UBReformMemSync();
+        if (!synced) {
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[SS reform][SS switchover][UB SYNC] UB transaction cache sync FAILED")));
+        }
+    }
 
     SSNotifySwitchoverPromote();
 
@@ -1887,6 +1925,13 @@ static void SSFailoverPromoteNotify()
                       "set restart_failover_flag to %s when DB restart.",
                       g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag ? "true" : "false")));
     } else {
+        if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+            bool synced = UBReformMemSync();
+            if (!synced) {
+                ereport(WARNING, (errmodule(MOD_DMS),
+                    errmsg("[SS reform][SS failover][UB SYNC] UB transaction cache sync FAILED")));
+            }
+        }
         SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_STARTUP);
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] SSFailoverPromoteNotify:"
                       "send signal to PM to initialize startup thread when DB alive")));
@@ -2201,6 +2246,9 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     }
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
+    if (ENABLE_UB && g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
+        UBTxnCacheResetReformMeta();
+    }
     char reform_type_str[reform_type_str_len] = {0};
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
@@ -2241,6 +2289,28 @@ static int CBReformDoneNotify(void *db_handle)
 
     if (SS_DISASTER_CLUSTER) {
         SSDisasterUpdateHAmode();
+    }
+
+    /*
+     * Before reform finishes, standby nodes in switchover/failover need to
+     * detach the old primary UB mapping and attach the current primary one.
+     * Standby only remaps and refreshes local pointers, without touching the
+     * actual shared memory contents.
+     */
+    if (ENABLE_UB && SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER) &&
+        !UBTxnCacheAttachPrimary()) {
+        return DMS_ERROR;
+    }
+
+    /*
+     * Before reform finishes, standby nodes in switchover/failover need to
+     * detach the old primary UB mapping and attach the current primary one.
+     * Standby only remaps and refreshes local pointers, without touching the
+     * actual shared memory contents.
+     */
+    if (ENABLE_UB && SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER) &&
+        !UBTxnCacheAttachPrimary()) {
+        return DMS_ERROR;
     }
    
     /* SSClusterState and in_reform must be set atomically */

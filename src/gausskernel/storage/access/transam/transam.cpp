@@ -40,7 +40,7 @@
 #include "utils/builtins.h"
 #endif
 
-static CLogXidStatus TransactionLogFetch(TransactionId transactionId);
+CLogXidStatus TransactionLogFetch(TransactionId transactionId);
 
 #ifdef PGXC
 /* It is not really necessary to make it appear in header file */
@@ -277,7 +277,7 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
 /*
  * TransactionLogFetch --- fetch commit status of specified transaction id
  */
-static CLogXidStatus TransactionLogFetch(TransactionId transactionId)
+CLogXidStatus TransactionLogFetch(TransactionId transactionId)
 {
     CLogXidStatus xidstatus;
     XLogRecPtr xidlsn;

@@ -29,6 +29,10 @@ enum MemoryContextType {
     MEMALIGN_SHRCTX,   // the shared context only used to allocate the aligned memory
 };
 
+struct RackPrefix {
+    Size size;
+};
+
 /*
  * MaxAllocSize
  *		Quasi-arbitrary limit on size of allocations.

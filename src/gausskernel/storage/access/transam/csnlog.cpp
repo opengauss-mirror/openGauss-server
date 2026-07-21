@@ -52,7 +52,10 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "replication/walreceiver.h"
-
+/* USE_UB_TXN_CACHE - BEGIN */
+#include "access/ubmem_buf.h"
+#include "access/ub_sigbus_handler.h"
+/* USE_UB_TXN_CACHE - END */
 /*
  * Defines for CSNLOG page sizes.  A page is the same BLCKSZ as is used
  * everywhere else in openGauss.
@@ -414,6 +417,14 @@ static bool CSNLogSetCSN(SlruCtl ctl, TransactionId xid, CommitSeqNo csn, int sl
 
     if (!COMMITSEQNO_IS_ABORTED(*ptr)) {
         *ptr = csn;
+/* USE_UB_TXN_CACHE - BEGIN */
+        if (ENABLE_UB) {
+            UBCSNLogBuffer *ubBuf = (UBCSNLogBuffer *)g_instance.shmem_cxt.UBCSNLogBufPtr;
+            if (ubBuf != nullptr) {
+                UBCSNLogBufferSetSlot(ubBuf, xid, csn);
+            }
+        }
+/* USE_UB_TXN_CACHE - END */
         return true;
     } else {
         return false;
@@ -852,3 +863,98 @@ void SSCSNLOGShmemClear(void)
             CSNLOGDIR, i);
     }
 }
+
+/*
+ * @Description: Initialization of UB shared memory for CSNLOG
+ */
+
+/* USE_UB_TXN_CACHE - BEGIN */
+
+void UBCSNLogBufferInit(UBCSNLogBuffer *buf)
+{
+    const size_t CHUNK_SIZE = 1024 * 1024 * 1024;
+    size_t total_size = sizeof(UBCSNLogBuffer);
+    size_t offset = 0;
+    
+    while (offset < total_size) {
+        size_t chunk = (total_size - offset) < CHUNK_SIZE ? (total_size - offset) : CHUNK_SIZE;
+        errno_t rc = memset_s((char *)buf + offset, chunk, 0, chunk);
+        securec_check_c(rc, "\0", "\0");
+        offset += chunk;
+    }
+    EXECUTE_ESB();
+}
+
+void UBCSNLogBufferSetSlot(UBCSNLogBuffer *buf, TransactionId xid, uint64 csn)
+{
+    if (buf == nullptr || csn == 0) {
+        return;
+    }
+    if (!UBCSNLogIsValidXid(xid)) {
+        return;
+    }
+
+    uint32 slot_idx = (uint32)UBCSNLogCalSlotIndex(xid);
+    uint64 expected_timeline = (uint64)UBCSNLogExpectedTimeline(xid);
+    __uint128_t packed_val = UBCSNLogPackSlot(expected_timeline, csn);
+    buf->slots[slot_idx].store(packed_val, std::memory_order_release);
+    EXECUTE_ESB();
+}
+
+size_t UBCSNLogBufferSize(void)
+{
+    return sizeof(UBCSNLogBuffer);
+}
+
+void UBCSNLogShmemInit(void)
+{
+    char *base = g_instance.shmem_cxt.UBTxnCachePtr;
+    if (base == nullptr) {
+        ereport(FATAL, (errmsg("UB shared memory not initialized")));
+        return;
+    }
+    UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
+    uint64 offset = ctrl->csnlog_offset.load(std::memory_order_acquire);
+    UBCSNLogBuffer *buf = (UBCSNLogBuffer *)(base + offset);
+    g_instance.shmem_cxt.UBCSNLogBufPtr = buf;
+}
+
+bool UBGetCSNFromPrimary(TransactionId xid, uint64 *csn)
+{
+    if (csn == nullptr) {
+        ereport(WARNING, (errmsg("UB CSNLOG: csn pointer is null")));
+        return false;
+    }
+
+    if (SS_IN_REFORM) {
+        return false;
+    }
+
+    UBCSNLogBuffer *ubCSNLogBuf = (UBCSNLogBuffer *)g_instance.shmem_cxt.UBCSNLogBufPtr;
+    if (ubCSNLogBuf == nullptr) {
+        ereport(WARNING, (errmsg("UB CSNLOG buffer not initialized on primary")));
+        return false;
+    }
+
+    if (!UBCSNLogIsValidXid(xid)) {
+        return false;
+    }
+
+    uint32 slot_idx = (uint32)UBCSNLogCalSlotIndex(xid);
+    uint64 expected_timeline = (uint64)UBCSNLogExpectedTimeline(xid);
+    __uint128_t slot_val = ubCSNLogBuf->slots[slot_idx].load(std::memory_order_acquire);
+    EXECUTE_ESB();
+
+    uint64 timelineid = UBCSNLogUnpackTimelineId(slot_val);
+    uint64 csn_val = UBCSNLogUnpackCSN(slot_val);
+    if (timelineid == expected_timeline && csn_val != 0) {
+        if (COMMITSEQNO_IS_COMMITTING(csn_val)) {
+            return false;
+        }
+        *csn = csn_val;
+        return true;
+    }
+    return false;
+}
+
+/* USE_UB_TXN_CACHE - END */
