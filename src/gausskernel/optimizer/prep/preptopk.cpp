@@ -72,8 +72,13 @@ static bool validate_union_leaf_output_types(Query *unionQuery, List *leafMapTli
 static bool leaf_local_expr_is_valid(Query *leaf, Expr *mappedExpr);
 static DiskAnnTopKPreparedLeaf *make_prepared_leaf(RangeTblEntry *ownerRte, Query *rewrittenQuery);
 static bool prepare_leaf_diskann_topk(Query *outer, Index unionRti, RangeTblEntry *unionRte,
-                                       Query *unionQuery, Query *leafCopy);
+                                       Query *unionQuery, Query *leafCopy, Node *outerQual);
 static void commit_prepared_leaves(List *prepared);
+static bool check_outer_qual_pushdown_safe(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                             List *leaves);
+static Expr *map_outer_qual_to_leaf(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                      Query *leaf, Expr *outerQual);
+static bool append_outer_qual_to_leaf(Query *leafCopy, Expr *mappedQual);
 
 /*
  * preprocess_union_all_diskann_topk
@@ -91,14 +96,21 @@ preprocess_union_all_diskann_topk(PlannerInfo *root)
     ListCell *lc = NULL;
     RangeTblEntry *unionRte = NULL;
     Index unionRti = 0;
+    Node *outerQual = NULL;
 
     /* Check GUC switch */
-    if (!u_sess->attr.attr_sql.enable_union_all_diskann_topk_pushdown)
+    if (!u_sess->attr.attr_sql.enable_union_all_diskann_topk_pushdown) {
+        elog(DEBUG1, "preprocess_union_all_diskann_topk: GUC disabled");
         return;
+    }
+
+    elog(DEBUG1, "preprocess_union_all_diskann_topk: starting...");
 
     /* Validate outer query structure */
-    if (!diskann_topk_outer_query_is_safe(outer))
+    if (!diskann_topk_outer_query_is_safe(outer)) {
+        elog(DEBUG1, "preprocess_union_all_diskann_topk: outer query unsafe");
         return;
+    }
 
     /* Get the single UNION ALL subquery RTE */
     unionRte = get_single_union_subquery_rte(outer, &unionRti);
@@ -107,6 +119,13 @@ preprocess_union_all_diskann_topk(PlannerInfo *root)
 
     /* Collect all leaves from pure UNION ALL tree */
     if (!collect_pure_union_all_leaves(unionRte->subquery, &leaves))
+        return;
+
+    /* Extract outer WHERE clause */
+    outerQual = (outer->jointree != NULL) ? outer->jointree->quals : NULL;
+
+    /* Check if outer WHERE can be safely pushed down to all leaves */
+    if (!check_outer_qual_pushdown_safe(outer, unionRti, unionRte, leaves))
         return;
 
     /* Phase 1: Copy all leaf queries without modifying originals */
@@ -122,7 +141,7 @@ preprocess_union_all_diskann_topk(PlannerInfo *root)
         DiskAnnTopKPreparedLeaf *item = (DiskAnnTopKPreparedLeaf *)lfirst(lc);
 
         if (!prepare_leaf_diskann_topk(outer, unionRti, unionRte,
-                                        unionRte->subquery, item->rewrittenQuery)) {
+                                        unionRte->subquery, item->rewrittenQuery, outerQual)) {
             /* Failure: discard all and keep original query */
             return;
         }
@@ -161,7 +180,7 @@ diskann_topk_outer_query_is_safe(Query *query)
         return false;
 
     FromExpr *fromExpr = (FromExpr *)query->jointree;
-    if (list_length(fromExpr->fromlist) != 1 || fromExpr->quals != NULL)
+    if (list_length(fromExpr->fromlist) != 1)
         return false;
 
     /* Must have non-empty ORDER BY */
@@ -181,13 +200,26 @@ diskann_topk_outer_query_is_safe(Query *query)
     if (query->limitCount == NULL || query->limitOffset != NULL)
         return false;
 
-    /* Validate LIMIT is Const or Param */
+    /*
+     * Validate LIMIT expression:
+     * - Accept Const (e.g., LIMIT 2::bigint)
+     * - Accept Param (e.g., LIMIT $1)
+     * - Accept FuncExpr wrapping a Const (e.g., int8(2::int4) for plain LIMIT 2)
+     * - Reject complex expressions (SubLink, volatile functions, etc.)
+     *
+     * For FuncExpr, verify it's a simple type coercion (int8, int4, int2) with
+     * a constant argument. This handles the common case where parser wraps
+     * integer literals with implicit casts.
+     */
     Node *limitNode = query->limitCount;
+
     if (IsA(limitNode, Const)) {
         Const *c = (Const *)limitNode;
         if (c->constisnull)
             return false;
-        /* Should be int8 >= 0 */
+        /* Should be int8 >= 1 */
+        if (c->consttype != INT8OID)
+            return false;
         int64 k = DatumGetInt64(c->constvalue);
         if (k <= 0)
             return false;
@@ -195,8 +227,50 @@ diskann_topk_outer_query_is_safe(Query *query)
         Param *p = (Param *)limitNode;
         if (p->paramkind != PARAM_EXTERN)
             return false;
+        /* Runtime parameter: accept and let execution validate */
+    } else if (IsA(limitNode, FuncExpr)) {
+        FuncExpr *fe = (FuncExpr *)limitNode;
+
+        /* Must be a simple type coercion function (int8, int4, int2, etc.) */
+        /* Check if it's a cast-like function with one argument */
+        if (list_length(fe->args) != 1)
+            return false;
+
+        Node *arg = (Node *)linitial(fe->args);
+
+        /* Argument must be a Const */
+        if (!IsA(arg, Const))
+            return false;
+
+        Const *c = (Const *)arg;
+        if (c->constisnull)
+            return false;
+
+        /* Verify the constant value is a positive integer */
+        int64 k = 0;
+        switch (c->consttype) {
+            case INT2OID:
+                k = DatumGetInt16(c->constvalue);
+                break;
+            case INT4OID:
+                k = DatumGetInt32(c->constvalue);
+                break;
+            case INT8OID:
+                k = DatumGetInt64(c->constvalue);
+                break;
+            default:
+                /* Non-integer type: reject */
+                return false;
+        }
+
+        if (k <= 0)
+            return false;
+
+        /* Additional safety: reject if function contains volatile operations */
+        if (contain_volatile_functions(limitNode))
+            return false;
     } else {
-        /* Complex expression: reject */
+        /* Complex expression (SubLink, Aggref, etc.): reject */
         return false;
     }
 
@@ -567,13 +641,14 @@ make_prepared_leaf(RangeTblEntry *ownerRte, Query *rewrittenQuery)
 
 /*
  * prepare_leaf_diskann_topk
- *     Prepare a single leaf query by adding ORDER BY + LIMIT.
+ *     Prepare a single leaf query by adding outer WHERE + ORDER BY + LIMIT.
  *
  * This operates on the rewritten copy, not the original.
+ * Execution order: map outer WHERE -> merge with leaf quals -> map ORDER BY -> set LIMIT
  */
 static bool
 prepare_leaf_diskann_topk(Query *outer, Index unionRti, RangeTblEntry *unionRte,
-                          Query *unionQuery, Query *leafCopy)
+                          Query *unionQuery, Query *leafCopy, Node *outerQual)
 {
     ListCell *lc = NULL;
 
@@ -581,7 +656,18 @@ prepare_leaf_diskann_topk(Query *outer, Index unionRti, RangeTblEntry *unionRte,
     if (!leaf_query_is_safe(leafCopy))
         return false;
 
-    /* Map each sort clause */
+    /* Step 1: Map and append outer WHERE to leaf if present */
+    if (outerQual != NULL) {
+        Expr *mappedQual = map_outer_qual_to_leaf(outer, unionRti, unionRte,
+                                                    leafCopy, (Expr *)outerQual);
+        if (mappedQual == NULL)
+            return false;
+
+        if (!append_outer_qual_to_leaf(leafCopy, mappedQual))
+            return false;
+    }
+
+    /* Step 2: Map each sort clause */
     List *mappedSortClause = NIL;
 
     foreach (lc, outer->sortClause) {
@@ -618,10 +704,16 @@ prepare_leaf_diskann_topk(Query *outer, Index unionRti, RangeTblEntry *unionRte,
         mappedSortClause = lappend(mappedSortClause, leafSc);
     }
 
-    /* Assign the ORDER BY and LIMIT */
+    /* Step 3: Assign the ORDER BY and LIMIT */
     leafCopy->sortClause = mappedSortClause;
     leafCopy->limitCount = (Node *)copyObject(outer->limitCount);
     leafCopy->limitOffset = NULL;
+    leafCopy->limitIsPercent = false;
+    leafCopy->limitWithTies = false;
+
+    elog(DEBUG1, "prepare_leaf_diskann_topk: set leaf LIMIT, sortClause length=%d, limitCount=%s",
+         list_length(leafCopy->sortClause),
+         leafCopy->limitCount ? "SET" : "NULL");
 
     return true;
 }
@@ -639,4 +731,157 @@ commit_prepared_leaves(List *prepared)
         DiskAnnTopKPreparedLeaf *item = (DiskAnnTopKPreparedLeaf *)lfirst(lc);
         item->ownerRte->subquery = item->rewrittenQuery;
     }
+}
+
+/*
+ * check_outer_qual_pushdown_safe
+ *     Check if the outer WHERE clause can be safely pushed down to all UNION ALL leaves.
+ *
+ * Returns false if:
+ * - Outer WHERE contains SubLink, volatile functions, SRF, aggregates, or window functions
+ * - Any Var in outer WHERE does not reference the UNION RTE's normal output columns
+ * - Type/typmod/collation mismatch between UNION output and any leaf's corresponding column
+ */
+static bool
+check_outer_qual_pushdown_safe(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                 List *leaves)
+{
+    Node *outerQual = (outer->jointree != NULL) ? outer->jointree->quals : NULL;
+    ListCell *lc = NULL;
+
+    /* No WHERE clause is a valid case - nothing to push down */
+    if (outerQual == NULL)
+        return true;
+
+    /* Reject SubLinks - correlated subqueries need special handling */
+    if (checkExprHasSubLink(outerQual))
+        return false;
+
+    /* Reject volatile functions - they may have side effects or change results */
+    if (contain_volatile_functions(outerQual))
+        return false;
+
+    /* Reject SRF, aggregates, and window functions */
+    if (expression_returns_set(outerQual) ||
+        contain_agg_clause(outerQual) ||
+        contain_window_function(outerQual))
+        return false;
+
+    /* Collect all level-0 Vars from outer WHERE */
+    List *vars = pull_vars_of_level((Node *)outerQual, 0);
+
+    /* Verify all Vars reference the UNION RTE and are normal column refs */
+    foreach (lc, vars) {
+        Node *node = (Node *)lfirst(lc);
+        if (!IsA(node, Var))
+            return false;
+
+        Var *v = (Var *)node;
+        Assert(v->varlevelsup == 0);
+
+        /* Must reference unionRti and be a normal output column (varattno > 0) */
+        if (v->varno != unionRti || v->varattno <= 0)
+            return false;
+    }
+
+    /* Verify type compatibility for each leaf */
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        Query *leaf = leafRte->subquery;
+
+        /* Build temporary mapping targetlist for this leaf */
+        List *leafMapTlist = build_visible_output_map_tlist(leaf);
+
+        /* Validate types match between UNION and leaf */
+        if (!validate_union_leaf_output_types(unionRte->subquery, leafMapTlist, vars))
+            return false;
+    }
+
+    return true;
+}
+
+/*
+ * map_outer_qual_to_leaf
+ *     Map the outer WHERE expression to the corresponding leaf expression.
+ *
+ * This replaces UNION output Vars with the actual leaf expressions using
+ * ReplaceVarsFromTargetList.
+ */
+static Expr *
+map_outer_qual_to_leaf(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                        Query *leaf, Expr *outerQual)
+{
+    /* Reject SubLinks and outer-level Vars */
+    if (checkExprHasSubLink((Node *)outerQual))
+        return NULL;
+
+    if (contain_vars_of_level_or_above((Node *)outerQual, 1))
+        return NULL;
+
+    /* Collect all level-0 Vars */
+    List *vars = pull_vars_of_level((Node *)outerQual, 0);
+    ListCell *lc = NULL;
+
+    /* All Vars must reference the UNION RTE and be normal column refs */
+    foreach (lc, vars) {
+        Node *node = (Node *)lfirst(lc);
+        if (!IsA(node, Var))
+            return NULL;
+
+        Var *v = (Var *)node;
+        Assert(v->varlevelsup == 0);
+
+        if (v->varno != unionRti || v->varattno <= 0)
+            return NULL;
+    }
+
+    /* Build a temporary mapping targetlist for this leaf */
+    List *leafMapTlist = build_visible_output_map_tlist(leaf);
+
+    /* Validate types match between UNION and leaf */
+    if (!validate_union_leaf_output_types(unionRte->subquery, leafMapTlist, vars))
+        return NULL;
+
+    /* Perform the replacement */
+    Expr *mapped = (Expr *)ReplaceVarsFromTargetList((Node *)outerQual,
+                                                      unionRti,
+                                                      0,
+                                                      unionRte,
+                                                      leafMapTlist,
+                                                      REPLACEVARS_REPORT_ERROR,
+                                                      0,
+                                                      NULL);
+
+    /* Validate the mapped expression */
+    if (!leaf_local_expr_is_valid(leaf, mapped))
+        return NULL;
+
+    return mapped;
+}
+
+/*
+ * append_outer_qual_to_leaf
+ *     Append the mapped outer WHERE to the leaf's existing quals using AND.
+ *
+ * This preserves the leaf's original WHERE conditions (e.g., NOT EXISTS for deletions)
+ * and adds the outer filter condition.
+ */
+static bool
+append_outer_qual_to_leaf(Query *leafCopy, Expr *mappedQual)
+{
+    if (mappedQual == NULL)
+        return false;
+
+    /* Merge with existing leaf quals using AND */
+    if (leafCopy->jointree == NULL) {
+        leafCopy->jointree = makeNode(FromExpr);
+        leafCopy->jointree->fromlist = NIL;
+        leafCopy->jointree->quals = NULL;
+    }
+
+    leafCopy->jointree->quals = (Node *)make_and_qual(
+        (Node *)leafCopy->jointree->quals,
+        (Node *)mappedQual);
+
+    return true;
 }
