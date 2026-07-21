@@ -263,8 +263,9 @@ function install_gaussdb()
     LIBOG_QUERY_DIR=$ROOT_DIR/src/bin/libog_query
     if [ -d $LIBOG_QUERY_DIR ]; then
         cd $LIBOG_QUERY_DIR
-        sh build.sh >> "$LOG_FILE" 2>&1
-	cp libog_query.so ${BUILD_DIR}/lib/postgresql/libog_query.so
+        sh build.sh >> "$LOG_FILE" 2>&1 || die "build libog_query failed."
+        [ -f libog_query.so ] || die "libog_query.so was not generated."
+        cp libog_query.so ${BUILD_DIR}/lib/postgresql/libog_query.so || die "install libog_query.so failed."
         echo "End make install libog_query" >> "$LOG_FILE" 2>&1
     fi
 
