@@ -1543,23 +1543,64 @@ bool IsLogicalSlot(const char *name)
 
 /*
  * Get rid of a replication slot that is no longer wanted.
+ *
+ * We wrap the drop in PG_TRY/PG_CATCH so that if the slot does not exist,
+ * we intercept the ERRCODE_UNDEFINED_OBJECT error and send it as a normal
+ * ErrorResponse via the wire protocol, keeping the walsender connection alive.
+ * Without this, the ERROR from ReplicationSlotAcquire would propagate to the
+ * walsender main loop and be escalated to FATAL, killing the connection and
+ * preventing subsequent slot drops on the same session.
  */
 static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
 {
-    if (IsLogicalSlot(cmd->slotname)) {
-        if (!IsPostmasterChildNormal()) {
-            MarkPostmasterChildNormal();
+    PG_TRY();
+    {
+        if (IsLogicalSlot(cmd->slotname)) {
+            if (!IsPostmasterChildNormal()) {
+                MarkPostmasterChildNormal();
+            }
+            CheckPMstateAndRecoveryInProgress();
+            ReplicationSlotDrop(cmd->slotname, false, !cmd->wait);
+            log_slot_drop(cmd->slotname);
+        } else {
+            ReplicationSlotDrop(cmd->slotname);
         }
-        CheckPMstateAndRecoveryInProgress();
-        ReplicationSlotDrop(cmd->slotname, false, !cmd->wait);
-        log_slot_drop(cmd->slotname);
-    } else {
-        ReplicationSlotDrop(cmd->slotname);
-    }
 
-    EndCommand_noblock("DROP_REPLICATION_SLOT", DestRemote);
-    EndCommand_noblock("SELECT", DestRemote);
-    ReadyForQuery_noblock(DestRemote, WalSndTimeout());
+        EndCommand_noblock("DROP_REPLICATION_SLOT", DestRemote);
+        EndCommand_noblock("SELECT", DestRemote);
+        ReadyForQuery_noblock(DestRemote, WalSndTimeout());
+    }
+    PG_CATCH();
+    {
+        if (geterrcode() == ERRCODE_UNDEFINED_OBJECT) {
+            StringInfoData buf;
+            StringInfoData msgbuf;
+
+            FlushErrorState();
+
+            initStringInfo(&msgbuf);
+            appendStringInfo(&msgbuf, "replication slot \"%s\" does not exist", cmd->slotname);
+
+            pq_beginmessage(&buf, 'E');
+            pq_sendbyte(&buf, PG_DIAG_SEVERITY);
+            pq_sendstring(&buf, "ERROR");
+            pq_sendbyte(&buf, PG_DIAG_SQLSTATE);
+            pq_sendstring(&buf, "42704");
+            pq_sendbyte(&buf, PG_DIAG_MESSAGE_PRIMARY);
+            pq_sendstring(&buf, msgbuf.data);
+            pq_sendbyte(&buf, '\0');
+            pq_endmessage_noblock(&buf);
+
+            pfree(msgbuf.data);
+
+            ereport(LOG, (errmsg("replication slot \"%s\" does not exist, skipped", cmd->slotname)));
+
+            ReadyForQuery_noblock(DestRemote, WalSndTimeout());
+            return;
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 /*

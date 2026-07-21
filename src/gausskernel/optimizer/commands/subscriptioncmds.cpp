@@ -1362,33 +1362,33 @@ void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok)
     Assert(t_thrd.libwalreceiver_cxt.streamConn);
 
     initStringInfo(&cmd);
-
-    /* Check if the replication slot exists on publisher. */
-    if (missing_ok) {
-        Oid row[1] = {INT4OID};
-
-        appendStringInfo(&cmd, "SELECT 1 FROM pg_replication_slots WHERE slot_name = '%s'", slotname);
-        res = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_exec(cmd.data, 1, row);
-        resetStringInfo(&cmd);
-
-        if (res->status == WALRCV_OK_TUPLES && tuplestore_get_memtupcount(res->tuplestore) == 0) {
-            walrcv_clear_result(res);
-            FreeStringInfo(&cmd);
-
-            ereport(DEBUG2, (errmsg("replication slot \"%s\" does not exist on publisher", slotname)));
-            return;
-        }
-    }
-
     appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s WAIT", quote_identifier(slotname));
 
     res = WalReceiverFuncTable[GET_FUNC_IDX].walrcv_exec(cmd.data, 0, NULL);
     if (res->status != WALRCV_OK_COMMAND) {
+        bool isSlotMissing = missing_ok &&
+            res->status == WALRCV_ERROR &&
+            res->sqlstate == ERRCODE_UNDEFINED_OBJECT &&
+            res->err != NULL &&
+            res->err[0] != '\0' &&
+            strstr(res->err, "no connection") == NULL &&
+            strstr(res->err, "connection reset") == NULL &&
+            strstr(res->err, "server closed") == NULL;
+        if (isSlotMissing) {
+            ereport(LOG, (errmsg("replication slot \"%s\" does not exist on publisher", slotname),
+                errdetail("The error was: %s", res->err)));
+            walrcv_clear_result(res);
+            FreeStringInfo(&cmd);
+            return;
+        }
+
+        char *err = pstrdup(res->err ? res->err : "unknown error");
+
         walrcv_clear_result(res);
         FreeStringInfo(&cmd);
 
         ereport(ERROR, (errmsg("could not drop the replication slot \"%s\" on publisher", slotname),
-            errdetail("The error was: %s", res->err)));
+            errdetail("The error was: %s", err)));
     } else {
         ereport(NOTICE, (errmsg("dropped replication slot \"%s\" on publisher", slotname)));
     }
