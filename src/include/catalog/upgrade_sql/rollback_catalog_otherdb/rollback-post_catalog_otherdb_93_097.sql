@@ -2,16 +2,85 @@ DO $DO$
 DECLARE
     has_sys      boolean;
     has_perf     boolean;
+    has_sysprocesses boolean;
+    sysprocesses_stub text;
+    has_dolphin_events_waits_current boolean;
+    dolphin_events_waits_current_definition text;
+    dolphin_events_waits_current_stub text;
 BEGIN
     select case when count(*)=1 then true else false end as ans from (select nspname from pg_catalog.pg_namespace where nspname='sys' limit 1) into has_sys;
     select case when count(*)=1 then true else false end as ans from (select nspname from pg_catalog.pg_namespace where nspname='dbe_perf' limit 1) into has_perf;
+    select case when count(*)=1 then true else false end as ans
+      from pg_catalog.pg_class rel
+      join pg_catalog.pg_namespace nsp on nsp.oid = rel.relnamespace
+     where nsp.nspname = 'sys'
+       and rel.relname = 'sysprocesses'
+       and rel.relkind = 'v'
+      into has_sysprocesses;
+
+    if has_sysprocesses = true then
+        select 'CREATE OR REPLACE VIEW sys.sysprocesses AS SELECT ' ||
+               (select pg_catalog.string_agg(
+                           'NULL::' || pg_catalog.format_type(attr.atttypid, attr.atttypmod) ||
+                           ' AS ' || pg_catalog.quote_ident(attr.attname),
+                           ', ' order by attr.attnum)
+                  from pg_catalog.pg_attribute attr
+                 where attr.attrelid = rel.oid
+                   and attr.attnum > 0
+                   and not attr.attisdropped) ||
+               ' WHERE false'
+          from pg_catalog.pg_class rel
+          join pg_catalog.pg_namespace nsp on nsp.oid = rel.relnamespace
+         where nsp.nspname = 'sys'
+           and rel.relname = 'sysprocesses'
+          into sysprocesses_stub;
+    end if;
+
+    select case when count(*)=1 then true else false end as ans
+      from pg_catalog.pg_class rel
+      join pg_catalog.pg_namespace nsp on nsp.oid = rel.relnamespace
+      join pg_catalog.pg_depend dep on dep.classid = 'pg_catalog.pg_class'::regclass
+                                   and dep.objid = rel.oid
+                                   and dep.objsubid = 0
+                                   and dep.refclassid = 'pg_catalog.pg_extension'::regclass
+                                   and dep.deptype = 'e'
+      join pg_catalog.pg_extension ext on ext.oid = dep.refobjid
+     where nsp.nspname = 'performance_schema'
+       and rel.relname = 'events_waits_current'
+       and rel.relkind = 'v'
+       and ext.extname = 'dolphin'
+      into has_dolphin_events_waits_current;
+
+    if has_dolphin_events_waits_current = true then
+        select pg_catalog.pg_get_viewdef(rel.oid),
+               'CREATE OR REPLACE VIEW performance_schema.events_waits_current AS SELECT ' ||
+               (select pg_catalog.string_agg(
+                           'NULL::' || pg_catalog.format_type(attr.atttypid, attr.atttypmod) ||
+                           ' AS ' || pg_catalog.quote_ident(attr.attname),
+                           ', ' order by attr.attnum)
+                  from pg_catalog.pg_attribute attr
+                 where attr.attrelid = rel.oid
+                   and attr.attnum > 0
+                   and not attr.attisdropped) ||
+               ' WHERE false'
+          from pg_catalog.pg_class rel
+          join pg_catalog.pg_namespace nsp on nsp.oid = rel.relnamespace
+         where nsp.nspname = 'performance_schema'
+           and rel.relname = 'events_waits_current'
+          into dolphin_events_waits_current_definition,
+               dolphin_events_waits_current_stub;
+    end if;
 
     if has_perf = true then
         DROP VIEW IF EXISTS dbe_perf.locks cascade;
     end if;
 
-    if has_sys = true then
-        DROP VIEW IF EXISTS sys.sysprocesses cascade;
+    if has_sysprocesses = true then
+        EXECUTE sysprocesses_stub;
+    end if;
+
+    if has_dolphin_events_waits_current = true then
+        EXECUTE dolphin_events_waits_current_stub;
     end if;
 
     DROP VIEW IF EXISTS pg_catalog.pg_locks cascade;
@@ -71,6 +140,11 @@ BEGIN
     if has_perf = true then
         CREATE OR REPLACE VIEW dbe_perf.locks AS
             SELECT * FROM pg_catalog.pg_lock_status() AS L;
+    end if;
+
+    if has_dolphin_events_waits_current = true then
+        EXECUTE 'CREATE OR REPLACE VIEW performance_schema.events_waits_current AS ' ||
+            dolphin_events_waits_current_definition;
     end if;
 
     if has_sys = true then
