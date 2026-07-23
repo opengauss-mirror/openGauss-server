@@ -950,7 +950,7 @@ StmtResult *SearchEventInfo(ShowEventStmt *stmt)
     }
     appendStringInfo(&buf, "job_name,nspname,log_user,priv_user,job_status,start_date,%s,end_date,enable,failure_msg ",
                      intervalColName);
-    appendStringInfo(&buf, "FROM PG_JOB ");
+    appendStringInfo(&buf, "FROM pg_job ");
 
     /* Concatenate where clause */
     appendStringInfo(&buf, "WHERE dbname=%s AND ",
