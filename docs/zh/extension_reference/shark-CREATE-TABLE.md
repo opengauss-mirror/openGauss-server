@@ -28,6 +28,7 @@ FILLFACTOR = fillfactor
 其中FILLFACTOR选项的取值fillfactor为[1, 100]的整数，实际含义同A库（A库的取值范围为[10, 100]的整数），因此当D库中fillfactor的取值范围为[1, 10)，不报错，将打印notice信息，并将fillfactor的取值设置为A库的最小值10;
 COMPRESSION_DELAY选项的取值delay为[0, 10080]的整数;
 除FILLFACTOR选项含有实际功能，同A库，其余参数均无实际功能，仅语法支持。
+
 - 建表语句中，针对UNIQUE和PRIMARY KEY约束，支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
 - 建表语句新增支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
 - 建表语句新增支持TEXTIMAGE_ON { filegroup | "default" } 选项，无实际作用，仅语法支持。
@@ -338,4 +339,4 @@ openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
 
 ## 相关链接<a name="section156744489391"></a>
 
-[CREATE TABLE](../sql_reference/create_table.md)
+[CREATE TABLE](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_table.html)

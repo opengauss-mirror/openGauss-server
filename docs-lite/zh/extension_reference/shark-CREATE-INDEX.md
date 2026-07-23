@@ -63,4 +63,4 @@ CREATE INDEX
 
 ## 相关链接<a name="section156744489391"></a>
 
-[CREATE INDEX](../sql_reference/create_index.md)
+[CREATE INDEX](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/create_index_1.html)

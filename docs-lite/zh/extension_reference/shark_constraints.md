@@ -8,7 +8,7 @@
 
 openGauss中shark插件中的约束如下：
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss请参考章节[约束](../brief_tutorial/constraints.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss请参考章节[约束](https://docs.opengauss.org/zh/docs/latest-lite/brief_tutorial/constraints.html)。
 - IDENTITY: 用于在表中创建一个标识列，仅在D模式下shark插件中生效。
 
 ## IDENTITY约束<a name="section11621339171820"></a>
@@ -44,4 +44,4 @@ CREATE TABLE
 
 ## 相关链接<a name="section156744489391"></a>
 
-[约束](../brief_tutorial/constraints.md)
+[约束](https://docs.opengauss.org/zh/docs/latest-lite/brief_tutorial/constraints.html)

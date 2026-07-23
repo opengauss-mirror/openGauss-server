@@ -48,4 +48,4 @@ opengauss=# select * from test1 where id <    > 3;
 
 ## 相关链接<a name="section156744489391"></a>
 
-[操作符](../sql_reference/operators.md)
+[操作符](https://docs.opengauss.org/zh/docs/latest/sql_reference/operators.html)

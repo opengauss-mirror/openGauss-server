@@ -7,7 +7,7 @@
 ## 注意事项<a name="zh-cn_topic_0283137308_zh-cn_topic_0237122170_section166351045574"></a>
 
 - 进行MERGE INTO操作的用户需要同时拥有目标表的UPDATE和INSERT权限，以及源表的SELECT权限。
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的MERGE INTO语法请参考章节[MERGE INTO](../sql_reference/merge_into.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的MERGE INTO语法请参考章节[MERGE INTO](https://docs.opengauss.org/zh/docs/latest/sql_reference/merge_into.html)。
 - 新增支持table_hint子句。
 
 ## 语法格式<a name="zh-cn_topic_0283137308_zh-cn_topic_0237122170_section10551749579"></a>
@@ -156,4 +156,4 @@ openGauss=# DROP TABLE newproducts;
 
 ## 相关链接<a name="section156744489391"></a>
 
-[MERGE INTO](../sql_reference/merge_into.md)
+[MERGE INTO](https://docs.opengauss.org/zh/docs/latest/sql_reference/merge_into.html)

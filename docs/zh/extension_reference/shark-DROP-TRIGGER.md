@@ -105,4 +105,4 @@ select tgname from pg_trigger;
 
 ## 相关链接<a name="section156744489391"></a>
 
-[DROP TRIGGER](../sql_reference/drop_trigger.md)
+[DROP TRIGGER](https://docs.opengauss.org/zh/docs/latest/sql_reference/drop_trigger.html)

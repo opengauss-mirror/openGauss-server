@@ -6,7 +6,7 @@
 
 ## 注意事项<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s31780559299b4f62bec935a2c4679b84"></a>
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的CREATE PROCEDURE语法请参考章节[CREATE PROCEDURE](../sql_reference/create_procedure.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的CREATE PROCEDURE语法请参考章节[CREATE PROCEDURE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/create_procedure.html)。
 - 新增支持通过CREATE PROC方式创建存储过程，功能和CREATE PROCEDURE方式保持一致。
 
 ## 语法格式<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_sa24c1a88574742bcb5427f58f5abb732"></a>
@@ -75,4 +75,4 @@ INFO:  call procedure: p2
 
 ## 相关链接<a name="section156744489391"></a>
 
-[CREATE PROCEDURE](../sql_reference/create_procedure.md)
+[CREATE PROCEDURE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/create_procedure.html)

@@ -6,7 +6,7 @@
 
 ## 注意事项<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s31780559299b4f62bec935a2c4679b84"></a>
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的DROP PROCEDURE语法请参考章节[DROP PROCEDURE](../sql_reference/drop_procedure.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的DROP PROCEDURE语法请参考章节[DROP PROCEDURE](https://docs.opengauss.org/zh/docs/latest/sql_reference/drop_procedure.html)。
 - 新增支持通过DROP PROC方式删除存储过程，功能和DROP PROCEDURE方式保持一致。
 
 ## 语法格式<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_sa24c1a88574742bcb5427f58f5abb732"></a>
@@ -48,4 +48,4 @@ drop procedure p2;
 
 ## 相关链接<a name="section156744489391"></a>
 
-[DROP PROCEDURE](../sql_reference/drop_procedure.md)
+[DROP PROCEDURE](https://docs.opengauss.org/zh/docs/latest/sql_reference/drop_procedure.html)

@@ -6,7 +6,7 @@
 
 ## 注意事项<a name="zh-cn_topic_0283137542_zh-cn_topic_0237122167_zh-cn_topic_0059778902_sdd2da7fe44624eb99ee77013ff96c6bd"></a>
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的INSERT语法请参考章节[INSERT](../sql_reference/INSERT.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的INSERT语法请参考章节[INSERT](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/INSERT.html)。
 - 新增支持table_hint子句。
 
 ## 语法格式<a name="zh-cn_topic_0283137542_zh-cn_topic_0237122167_zh-cn_topic_0059778902_se242be9719f44731b261539dbd42d7b9"></a>
@@ -113,4 +113,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## 相关链接<a name="section156744489391"></a>
 
-[INSERT](../sql_reference/INSERT.md)
+[INSERT](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/INSERT.html)

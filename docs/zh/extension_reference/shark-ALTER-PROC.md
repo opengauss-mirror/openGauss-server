@@ -6,7 +6,7 @@
 
 ## 注意事项<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s31780559299b4f62bec935a2c4679b84"></a>
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的ALTER PROCEDURE语法请参考章节[ALTER PROCEDURE](../sql_reference/alter_procedure.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的ALTER PROCEDURE语法请参考章节[ALTER PROCEDURE](https://docs.opengauss.org/zh/docs/latest/sql_reference/alter_procedure.html)。
 - 新增支持通过ALTER PROC方式修改自定义存储过程的属性，功能和ALTER PROCEDURE方式保持一致。
 - ALTER PROCEDURE/PROC COMPILE仅在A库生效，在D库报错不支持。
 
@@ -184,4 +184,4 @@ INFO:  call procedure: p2
 
 ## 相关链接<a name="section156744489391"></a>
 
-[ALTER PROCEDURE](../sql_reference/alter_procedure.md)
+[ALTER PROCEDURE](https://docs.opengauss.org/zh/docs/latest/sql_reference/alter_procedure.html)

@@ -8,7 +8,7 @@ SELECT语句就像叠加在数据库表上的过滤器，利用SQL关键字从�
 
 ## 注意事项<a name="zh-cn_topic_0283136463_zh-cn_topic_0237122184_zh-cn_topic_0059777449_s42c37979749545719ac9114594f45d93"></a>
 
-- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的SELECT语法请参考章节[SELECT](../sql_reference/SELECT.md)。
+- 本章节只包含shark新增的语法，原openGauss的语法未做删除和修改。原openGauss的SELECT语法请参考章节[SELECT](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/SELECT.html)。
 - 新增支持TOP子句。
 - 新增支持table_hint子句。
 
@@ -221,4 +221,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## 相关链接<a name="section156744489391"></a>
 
-[SELECT](../sql_reference/SELECT.md)
+[SELECT](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/SELECT.html)

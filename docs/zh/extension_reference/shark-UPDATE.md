@@ -6,7 +6,7 @@
 
 ## 注意事项<a name="zh-cn_topic_0283137651_zh-cn_topic_0237122194_zh-cn_topic_0059778969_s7e9e912f472543cbb190edb83e5f22d3"></a>
 
-- 本章节仅包含shark新增语法，原openGauss的UPDATE语法未作删除和修改。原openGauss的UPDATE语法请参考章节[UPDATE](../sql_reference/update.md)。
+- 本章节仅包含shark新增语法，原openGauss的UPDATE语法未作删除和修改。原openGauss的UPDATE语法请参考章节[UPDATE](https://docs.opengauss.org/zh/docs/latest/sql_reference/update.html)。
 - 新增支持table_hint子句。
 
 ## 语法格式<a name="zh-cn_topic_0283137651_zh-cn_topic_0237122194_zh-cn_topic_0059778969_sd8d9ff15ff6c45c9aebd16c861936c07"></a>
@@ -92,4 +92,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## 相关链接<a name="section156744489391"></a>
 
-[UPDATE](../sql_reference/update.md)
+[UPDATE](https://docs.opengauss.org/zh/docs/latest/sql_reference/update.html)
