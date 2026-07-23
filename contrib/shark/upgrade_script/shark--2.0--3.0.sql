@@ -1485,6 +1485,55 @@ CAST(NULL AS INT) AS default_language_lcid,
 CAST(0 AS BIT) AS allow_encrypted_value_modifications
 from pg_roles;
 
+DO $do$
+DECLARE
+  shark_oid oid;
+  sysprocesses_oid oid;
+  sysprocesses_relkind text;
+  sysprocesses_extension_oid oid;
+  sysprocesses_extension_name text;
+BEGIN
+  SELECT pg_catalog.min(oid::bigint)::oid
+    FROM pg_catalog.pg_extension
+   WHERE extname = 'shark'
+    INTO shark_oid;
+
+  SELECT pg_catalog.min(rel.oid::bigint)::oid,
+         pg_catalog.min(rel.relkind::text)
+    FROM pg_catalog.pg_class rel
+    JOIN pg_catalog.pg_namespace nsp ON nsp.oid = rel.relnamespace
+   WHERE nsp.nspname = 'sys'
+     AND rel.relname = 'sysprocesses'
+    INTO sysprocesses_oid, sysprocesses_relkind;
+
+  IF sysprocesses_oid IS NOT NULL THEN
+    IF sysprocesses_relkind <> 'v' THEN
+      RAISE EXCEPTION 'cannot upgrade Shark: sys.sysprocesses exists but is not a view';
+    END IF;
+
+    SELECT pg_catalog.min(dep.refobjid::bigint)::oid
+      FROM pg_catalog.pg_depend dep
+     WHERE dep.classid = 'pg_catalog.pg_class'::regclass
+       AND dep.objid = sysprocesses_oid
+       AND dep.objsubid = 0
+       AND dep.refclassid = 'pg_catalog.pg_extension'::regclass
+       AND dep.deptype = 'e'
+      INTO sysprocesses_extension_oid;
+
+    IF sysprocesses_extension_oid IS NULL THEN
+      ALTER EXTENSION shark ADD VIEW sys.sysprocesses;
+    ELSIF sysprocesses_extension_oid <> shark_oid THEN
+      SELECT extname
+        FROM pg_catalog.pg_extension
+       WHERE oid = sysprocesses_extension_oid
+        INTO sysprocesses_extension_name;
+      RAISE EXCEPTION 'cannot upgrade Shark: sys.sysprocesses belongs to extension %',
+        sysprocesses_extension_name;
+    END IF;
+  END IF;
+END
+$do$;
+
 -- sys.sysprocesses
 CREATE OR REPLACE VIEW sys.sysprocesses AS
 SELECT
