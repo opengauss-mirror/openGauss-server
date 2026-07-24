@@ -23,24 +23,14 @@
 #define UB_SIGBUS_HANDLER_H
 
 #include <setjmp.h>
-#if defined(__aarch64__)
+#include <signal.h>
 extern thread_local sigjmp_buf jump_env;
+extern thread_local volatile sig_atomic_t ub_sigbus_jump_active;
 
+#if defined(__aarch64__)
 extern int register_sigbus_handler(void);
-
-
-extern "C" {
-    void execute_esb_with_fault_handler(void);
-}
-
-#define EXECUTE_ESB()                           \
-    do {                                        \
-        if (UB_SIGBUS_HANDLER) {                \
-            execute_esb_with_fault_handler();   \
-        }                                       \
-    } while (0)
+#define UB_ESB_BARRIER()    asm volatile("esb" ::: "memory")
 #else
-#define EXECUTE_ESB() ((void)0)
+#define UB_ESB_BARRIER()  ((void)0)
 #endif
-
 #endif /* UB_SIGBUS_HANDLER_H */

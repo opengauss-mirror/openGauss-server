@@ -36,6 +36,8 @@
 #include "utils/guc.h"
 #include "utils/fatal_err.h"
 #include "ddes/dms/ss_dms.h"
+#include "access/ub_sigbus_handler.h"
+#include "ddes/dms/ss_common_attr.h"
 
 #define BBOX_PATH_SIZE 512
 #define DEFAULT_BLACKLIST_MASK (0xFFFFFFFFFFFFFFFF)
@@ -363,6 +365,19 @@ void assign_bbox_coredump(const bool newval, void* extra)
         (void)install_signal(SIGILL, coredump_handler);
         (void)install_signal(SIGSEGV, coredump_handler);
     }
+
+#if defined(__aarch64__)
+    /*
+     * UB handler must be the outermost SIGBUS handler.
+     * It will recover inside UB protected regions, and chain to BBOX
+     * (or coredump) handler for faults outside protected regions.
+     * Re-register here because BBOX's install_signal() above may have
+     * overwritten it (e.g. on SIGHUP config reload).
+     */
+    if (ENABLE_UB) {
+        (void)register_sigbus_handler();
+    }
+#endif
 }
 
 /*

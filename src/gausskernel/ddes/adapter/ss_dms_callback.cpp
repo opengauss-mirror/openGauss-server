@@ -535,7 +535,8 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Starting to promote standby.")));
 
-    if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+    if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+        !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
         bool synced = UBReformMemSync();
         if (!synced) {
             ereport(WARNING, (errmodule(MOD_DMS),
@@ -1946,7 +1947,8 @@ static void SSFailoverPromoteNotify()
                       "set restart_failover_flag to %s when DB restart.",
                       g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag ? "true" : "false")));
     } else {
-        if (ENABLE_UB && !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+            !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
             bool synced = UBReformMemSync();
             if (!synced) {
                 ereport(WARNING, (errmodule(MOD_DMS),
@@ -2267,6 +2269,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     }
     reform_info->reform_ver = reform_info->reform_start_time;
     reform_info->in_reform = true;
+    g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
     if (ENABLE_UB && g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
         UBTxnCacheResetReformMeta();
     }
@@ -2334,9 +2337,12 @@ static int CBReformDoneNotify(void *db_handle)
      * Standby only remaps and refreshes local pointers, without touching the
      * actual shared memory contents.
      */
-    if (ENABLE_UB && SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER) &&
-        !UBTxnCacheAttachPrimary()) {
-        return DMS_ERROR;
+    if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+        SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER)) {
+        if (!UBTxnCacheAttachPrimary()) {
+            return DMS_ERROR;
+        }
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
     }
    
     /* SSClusterState and in_reform must be set atomically */

@@ -29169,9 +29169,9 @@ fi
 PLATFORM_ARCH=$(uname -m)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
   if [[ $CFLAGS == *"__ARM_LSE"* ]];then
-    CFLAGS="-march=armv8-a+crc+lse $CFLAGS"
+    CFLAGS="-march=armv8.2-a+crc+lse $CFLAGS"
   else
-    CFLAGS="-march=armv8-a+crc $CFLAGS"
+    CFLAGS="-march=armv8.2-a+crc $CFLAGS"
   fi
 elif [ "$PLATFORM_ARCH"X == "x86_64"X ] ; then
 	CFLAGS="-mcx16 $CFLAGS_SSE42 $CFLAGS"
