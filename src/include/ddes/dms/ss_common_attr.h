@@ -41,7 +41,8 @@
 #define ENABLE_SS_BCAST_GETOLDESTXMIN false
 #define SS_SINGLE_CLUSTER false
 #else
-#define ENABLE_UB (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb)
+#define ENABLE_UB (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb && \
+                   g_instance.shmem_cxt.UBMemAccessEnabled.load(std::memory_order_acquire))
 #define UB_DEBUG_LOG (g_instance.attr.attr_storage.dms_attr.ub_debug_log)
 #define UB_SIGBUS_HANDLER (g_instance.attr.attr_storage.dms_attr.ub_sigbus_handler)
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
