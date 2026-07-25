@@ -95,6 +95,24 @@
 #include "utils/tzparser.h"
 #include "miscadmin.h"
 
+/* Compile fast path only for base-10000 Numeric; DEC_DIGITS is per-group width, not input length. */
+#if DEC_DIGITS == 4
+#define TO_CHAR_COMMA_POS 3
+#define TO_CHAR_FRAC_LEN 2
+#define FMT_COMMA_99_LEN 10 /* strlen("999,999.99") */
+#define FMT_COMMA_999_LEN 14 /* strlen("999,999,999.99") */
+#define FMT_COMMA_99_PRE_LEN 6
+#define FMT_COMMA_999_PRE_LEN 9
+#define FAST_DIGIT_OFFSET 3
+#define FAST_DIGIT_BUF_LEN (FMT_COMMA_999_PRE_LEN + FAST_DIGIT_OFFSET)
+
+typedef enum FastNumericFormat {
+    FMT_INVALID = 0,
+    FMT_COMMA_99,
+    FMT_COMMA_999
+} FastNumericFormat;
+#endif
+
 /* just keep compiler silent */
 #define UNUSED_ARG(_arg_) ((void)(_arg_))
 
@@ -1703,7 +1721,6 @@ void initialize_csid()
  * ----------
  */
 typedef struct NUMProc {
-    bool is_to_char;
     NUMDesc* Num; /* number description		*/
 
     int sign,       /* '-' or '+'			*/
@@ -1890,8 +1907,9 @@ static void NUM_prepare_locale(NUMProc* Np);
 static char* get_last_relevant_decnum(char* num);
 static void NUM_numpart_from_char(NUMProc* Np, int id, int plen, int& tmp_len);
 static void NUM_numpart_to_char(NUMProc* Np, int id, int& tmp_len);
+template <bool is_to_char>
 static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* number, int tmp_len, int plen, int sign,
-    bool is_to_char, Oid collid);
+    Oid collid);
 void long_int_add(char* addend, const char* summand);
 
 static DCHCacheEntry* DCH_cache_search(const char* str);
@@ -5551,7 +5569,7 @@ static NUMCacheEntry* NUM_cache_getnew(const char* str)
     NUMCacheEntry* ent = NULL;
 
     /* counter overflow check - paranoia? */
-    if (t_thrd.format_cxt.NUM_counter >= (INT_MAX - NUM_CACHE_FIELDS - 1)) {
+    if (unlikely(t_thrd.format_cxt.NUM_counter >= (INT_MAX - NUM_CACHE_FIELDS - 1))) {
         t_thrd.format_cxt.NUM_counter = 0;
 
         for (ent = t_thrd.format_cxt.NUM_cache; ent <= (t_thrd.format_cxt.NUM_cache + NUM_CACHE_FIELDS); ent++)
@@ -5652,14 +5670,14 @@ static FormatNode* NUM_cache(int len, NUMDesc* Num, text* pars_str, bool* should
     FormatNode* format = NULL;
     char* str = NULL;
 
-    str = text_to_cstring(pars_str);
+    str = output_text_to_cstring(pars_str);
 
     /*
      * Allocate new memory if format picture is bigger than static cache and
      * not use cache (call parser always). This branches sets shouldFree to
      * true, accordingly.
      */
-    if (len > NUM_CACHE_SIZE) {
+    if (unlikely(len > NUM_CACHE_SIZE)) {
         format = (FormatNode*)palloc((len + 1) * sizeof(FormatNode));
 
         *shouldFree = true;
@@ -5694,22 +5712,16 @@ static FormatNode* NUM_cache(int len, NUMDesc* Num, text* pars_str, bool* should
         /*
          * Copy cache to used struct
          */
-        Num->flag = ent->Num.flag;
-        Num->lsign = ent->Num.lsign;
-        Num->pre = ent->Num.pre;
-        Num->post = ent->Num.post;
-        Num->pre_lsign_num = ent->Num.pre_lsign_num;
-        Num->need_locale = ent->Num.need_locale;
-        Num->multi = ent->Num.multi;
-        Num->zero_start = ent->Num.zero_start;
-        Num->zero_end = ent->Num.zero_end;
+        *Num = ent->Num;
     }
 
 #ifdef DEBUG_TO_FROM_CHAR
     dump_index(NUM_keywords, NUM_index);
 #endif
 
-    pfree_ext(str);
+    if (str != u_sess->utils_cxt.guc_cold->varcharoutput_buffer) {
+        pfree_ext(str);
+    }
     return format;
 }
 
@@ -6183,20 +6195,18 @@ static void NUM_numpart_to_char(NUMProc* Np, int id, int& tmp_len)
              * Write Decimal point
              */
             if (*Np->number_p == '.') {
-                if ((NULL == Np->last_relevant) || *Np->last_relevant != '.') {
-                    rc = strcpy_s(Np->inout_p, tmp_len, Np->decimal); /* Write DEC/D */
-                    securec_check(rc, "\0", "\0");
-                    Np->inout_p += strlen(Np->inout_p);
-                    tmp_len -= strlen(Np->inout_p);
-                }
-                /*
-                 * Ora 'n' -- FM9.9 --> 'n.'
-                 */
-                else if (IS_FILLMODE(Np->Num) && Np->last_relevant && *Np->last_relevant == '.') {
-                    rc = strcpy_s(Np->inout_p, tmp_len, Np->decimal); /* Write DEC/D */
-                    securec_check(rc, "\0", "\0");
-                    Np->inout_p += strlen(Np->inout_p);
-                    tmp_len -= strlen(Np->inout_p);
+                if ((NULL == Np->last_relevant) || *Np->last_relevant != '.' ||
+                    (IS_FILLMODE(Np->Num) && Np->last_relevant && *Np->last_relevant == '.')) {
+                    int len = 1;
+                    if (likely(Np->decimal[0] == '.' && Np->decimal[1] == '\0')) {
+                        *Np->inout_p = '.';
+                    } else {
+                        rc = strcpy_s(Np->inout_p, tmp_len, Np->decimal); /* Write DEC/D */
+                        securec_check(rc, "\0", "\0");
+                        len = strlen(Np->inout_p);
+                    }
+                    Np->inout_p += len;
+                    tmp_len -= len;
                 }
             } else {
                 /*
@@ -6374,8 +6384,9 @@ void long_int_add(char* addend, const char* summand)
  * Note: 'plen' is used in FROM_CHAR conversion and it's length of
  * input (inout). In TO_CHAR conversion it's space before first number.
  */
+template <bool is_to_char>
 static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* number, int tmp_len, int plen, int sign,
-    bool is_to_char, Oid collid)
+    Oid collid)
 {
     FormatNode* n = NULL;
     NUMProc _Np, *Np = &_Np;
@@ -6391,7 +6402,6 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
     securec_check(rc, "\0", "\0");
 
     Np->Num = Num;
-    Np->is_to_char = is_to_char;
     Np->number = number;
     Np->inout = inout;
     Np->last_relevant = NULL;
@@ -6403,7 +6413,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
         --Np->Num->zero_start;
 
     if (IS_EEEE(Np->Num)) {
-        if (!Np->is_to_char)
+        if (!is_to_char)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("\"EEEE\" not supported for input")));
         rc = strcpy_s(inout, tmp_len, number);
         securec_check(rc, "\0", "\0");
@@ -6414,7 +6424,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
      * Roman correction
      */
     if (IS_ROMAN(Np->Num)) {
-        if (!Np->is_to_char)
+        if (!is_to_char)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("\"RN\" not supported for input")));
 
         Np->Num->lsign = Np->Num->pre_lsign_num = Np->Num->post = Np->Num->pre = Np->num_pre = Np->sign = 0;
@@ -6526,13 +6536,14 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
     /*
      * Processor direct cycle
      */
-    if (Np->is_to_char)
+    if (is_to_char) {
         Np->number_p = Np->number;
-    else
+    } else {
         Np->number_p = Np->number + 1; /* first char is space for sign */
+    }
 
     for (n = node, Np->inout_p = Np->inout; n->type != NODE_TYPE_END; n++) {
-        if (!Np->is_to_char) {
+        if (!is_to_char) {
             /*
              * Check at least one character remains to be scanned.	(In
              * actions below, must use AMOUNT_TEST if we want to read more
@@ -6570,7 +6581,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                 case NUM_0:
                 case NUM_DEC:
                 case NUM_D:
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         NUM_numpart_to_char(Np, n->key->id, tmp_len);
                         continue; /* for() */
                     } else {
@@ -6583,7 +6594,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     }
 
                 case NUM_COMMA:
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         if (!Np->num_in) {
                             if (IS_FILLMODE(Np->Num))
                                 continue;
@@ -6608,7 +6619,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                 case NUM_G:
                     pattern = Np->L_thousands_sep;
                     pattern_len = strlen(pattern);
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         if (!Np->num_in) {
                             if (IS_FILLMODE(Np->Num))
                                 continue;
@@ -6646,7 +6657,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
 
                 case NUM_L:
                     pattern = Np->L_currency_symbol;
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         rc = strcpy_s(Np->inout_p, tmp_len, pattern);
                         securec_check(rc, "\0", "\0");
                         Np->inout_p += strlen(Np->inout_p) - 1;
@@ -6689,7 +6700,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     if (IS_ROMAN(Np->Num) || *Np->number == '#' || Np->sign == '-' || IS_DECIMAL(Np->Num))
                         continue;
 
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         rc = strcpy_s(Np->inout_p, tmp_len, get_th(Np->number, TH_LOWER));
                         securec_check(rc, "\0", "\0");
                         Np->inout_p += 1;
@@ -6705,7 +6716,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     if (IS_ROMAN(Np->Num) || *Np->number == '#' || Np->sign == '-' || IS_DECIMAL(Np->Num))
                         continue;
 
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         rc = strcpy_s(Np->inout_p, tmp_len, get_th(Np->number, TH_UPPER));
                         securec_check(rc, "\0", "\0");
                         Np->inout_p += 1;
@@ -6718,7 +6729,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     break;
 
                 case NUM_MI:
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         if (Np->sign == '-')
                             *Np->inout_p = '-';
                         else if (IS_FILLMODE(Np->Num))
@@ -6736,7 +6747,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     break;
 
                 case NUM_PL:
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         if (Np->sign == '+')
                             *Np->inout_p = '+';
                         else if (IS_FILLMODE(Np->Num))
@@ -6754,7 +6765,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                     break;
 
                 case NUM_SG:
-                    if (Np->is_to_char)
+                    if (is_to_char)
                         *Np->inout_p = Np->sign;
 
                     else {
@@ -6772,7 +6783,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                 // convert 16-byte hexadecimal to decimal
                 case NUM_X:
                 case NUM_x:
-                    if (Np->is_to_char) {
+                    if (is_to_char) {
                         if ((!IS_FILLMODE(Np->Num)) && (Np->sign_wrote == false)) {
                             // a space for the sign bit, and other spaces for filling
                             errno_t rc = EOK;
@@ -6839,14 +6850,14 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
              * non-pattern format character, whether or not it matches the
              * format character.
              */
-            if (Np->is_to_char)
+            if (is_to_char)
                 *Np->inout_p = n->character;
         }
         Np->inout_p++;
         tmp_len--;
     }
 
-    if (Np->is_to_char) {
+    if (is_to_char) {
         *Np->inout_p = '\0';
         return Np->inout;
     } else {
@@ -6888,8 +6899,8 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
  */
 #define NUM_TOCHAR_finish                                                                   \
     do {                                                                                    \
-        NUM_processor(format, &Num, VARDATA(result), numstr, result_alloc_len - VARHDRSZ,   \
-                        plen, sign, true, PG_GET_COLLATION());                              \
+        NUM_processor<true>(format, &Num, VARDATA(result), numstr, result_alloc_len - VARHDRSZ,   \
+                        plen, sign, PG_GET_COLLATION());                                    \
                                                                                             \
         if (shouldFree)                                                                     \
             pfree_ext(format);                                                              \
@@ -6968,14 +6979,13 @@ char* format_numeric_with_fmt(text* sourceValue, text* fmt, bool withDefault, Oi
 
     sourceNumstr = static_cast<char*>(palloc((len * NUM_MAX_ITEM_SIZ) + 1));
 
-    (void)NUM_processor(format,
+    (void)NUM_processor<false>(format,
         &numDesc,
         VARDATA(sourceValue),
         sourceNumstr,
         (len * NUM_MAX_ITEM_SIZ) + 1,
         VARSIZE(sourceValue) - VARHDRSZ,
         0,
-        false,
         fncollation);
 
     *scale = (unsigned int)numDesc.post;
@@ -7233,6 +7243,656 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
     }
 }
 
+#if DEC_DIGITS == 4
+/* Strictly match target formats; spaces or modifiers must stay on the generic path. */
+static inline FastNumericFormat match_fast_format(const char* fmt, int len)
+{
+    if (len == FMT_COMMA_99_LEN && strncmp(fmt, "999,999.99", FMT_COMMA_99_LEN) == 0) {
+        return FMT_COMMA_99;
+    }
+    if (len == FMT_COMMA_999_LEN && strncmp(fmt, "999,999,999.99", FMT_COMMA_999_LEN) == 0) {
+        return FMT_COMMA_999;
+    }
+    return FMT_INVALID;
+}
+
+/* Compute integer decimal length from Numeric metadata without string conversion. */
+static bool fast_integer_digits(const NumericDigit* digits, int ndigits, int weight, int* int_len)
+{
+    NumericDigit first_digit;
+    int leading_zeroes = 0;
+
+    if (weight < 0 || ndigits == 0) {
+        *int_len = 0;
+        return true;
+    }
+
+    first_digit = digits[0];
+    if (unlikely(first_digit <= 0 || first_digit >= NBASE)) {
+        return false;
+    }
+
+    /* Values below 10 occupy one decimal place in a four-digit NBASE group. */
+    if (first_digit < 10) {
+        /* A one-digit value has 3 implicit leading zeroes in that group. */
+        leading_zeroes = 3;
+
+        /* Values below 100 occupy at most two decimal places. */
+    } else if (first_digit < 100) {
+        /* A two-digit value has 2 implicit leading zeroes in the NBASE group. */
+        leading_zeroes = 2;
+
+        /* Values below 1000 occupy at most three decimal places. */
+    } else if (first_digit < 1000) {
+        leading_zeroes = 1;
+    }
+
+    *int_len = (weight + 1) * DEC_DIGITS - leading_zeroes;
+    return true;
+}
+
+/* Extract a scale-0 normal Numeric as uint64; uncertain layouts return false. */
+static bool fast_integer_value_from_numeric(
+    const NumericDigit* digits, int ndigits, int weight, uint64* abs_value)
+{
+    uint64 value = 0;
+
+    if (ndigits == 0 || weight < 0) {
+        *abs_value = 0;
+        return true;
+    }
+
+    for (int i = 0; i <= weight; i++) {
+        NumericDigit digit = i < ndigits ? digits[i] : 0;
+
+        if (unlikely(digit < 0 || digit >= NBASE)) {
+            return false;
+        }
+        value = value * NBASE + (uint64)digit;
+    }
+
+    *abs_value = value;
+    return true;
+}
+
+/* Fast path for dscale <= 2 when no rounding or hidden tail digit is needed. */
+static bool fast_unrounded_value_from_numeric(const NumericDigit* digits, int ndigits, int weight,
+    uint64* abs_value, int* tenth_digit, int* hundredth_digit)
+{
+    uint64 value = 0;
+    int frac_index = weight + 1;
+    NumericDigit frac_digit = 0;
+
+    if (weight >= 0) {
+        for (int i = 0; i <= weight; i++) {
+            NumericDigit digit = i < ndigits ? digits[i] : 0;
+
+            if (unlikely(digit < 0 || digit >= NBASE)) {
+                return false;
+            }
+            value = value * NBASE + (uint64)digit;
+        }
+    }
+
+    if (frac_index >= 0 && frac_index < ndigits) {
+        frac_digit = digits[frac_index];
+        if (unlikely(frac_digit < 0 || frac_digit >= NBASE)) {
+            return false;
+        }
+
+        /* Modulo 100 verifies that the two lower decimal places are zero. */
+        if (unlikely(frac_digit % 100 != 0)) {
+            return false;
+        }
+    }
+
+    *abs_value = value;
+
+    /* Dividing the NBASE group by 1000 extracts the tenths digit. */
+    *tenth_digit = frac_digit / 1000;
+
+    /* Dividing the NBASE group by 100 extracts the hundredths digit. */
+    *hundredth_digit = (frac_digit / 100) % 10;
+    return true;
+}
+
+static inline unsigned char fast_pop_decimal_digit(NumericDigit* digit)
+{
+    unsigned char result = (unsigned char)(*digit % 10);
+
+    /* Division by 10 removes the decimal digit that was just popped. */
+    *digit /= 10;
+    return result;
+}
+
+/* Unpack only digits needed for output and one extra 10^-3 digit for rounding. */
+template <int max_pre_len>
+static bool fast_unpack_decimal_digits(
+    const NumericDigit* digits, int ndigits, int weight, unsigned char* decimal_digits)
+{
+    int first_index = weight - (max_pre_len - 1) / DEC_DIGITS;
+
+    /* 10^-3 belongs to NBASE group -1 */
+    int last_index = weight + 1;
+
+    first_index = first_index < 0 ? 0 : first_index;
+    last_index = last_index >= ndigits ? ndigits - 1 : last_index;
+
+    for (int i = first_index; i <= last_index; i++) {
+        NumericDigit digit = digits[i];
+        int power = (weight - i) * DEC_DIGITS;
+
+        if (unlikely(digit < 0 || digit >= NBASE)) {
+            return false;
+        }
+
+        switch (power) {
+            /* This NBASE group starts at decimal power 10^-4. */
+            case -4:
+                /* skip 10^-4; rounding only needs 10^-3. */
+                digit /= 10;
+                decimal_digits[0] = fast_pop_decimal_digit(&digit);
+                decimal_digits[1] = fast_pop_decimal_digit(&digit);
+
+                /* Buffer index 2 stores the tenths digit. */
+                decimal_digits[2] = (unsigned char)digit;
+                break;
+            case 0:
+                /* Buffer index 3 stores ones. */
+                decimal_digits[3] = fast_pop_decimal_digit(&digit);
+
+                /* Buffer index 4 stores tens. */
+                decimal_digits[4] = fast_pop_decimal_digit(&digit);
+
+                /* Buffer index 5 stores hundreds. */
+                decimal_digits[5] = fast_pop_decimal_digit(&digit);
+
+                /* Buffer index 6 stores thousands. */
+                decimal_digits[6] = (unsigned char)digit;
+                break;
+
+            /* This NBASE group starts at decimal power 10^4. */
+            case 4:
+                /* Buffer index 7 stores ten-thousands. */
+                decimal_digits[7] = fast_pop_decimal_digit(&digit);
+
+                /* Buffer index 8 stores hundred-thousands. */
+                decimal_digits[8] = fast_pop_decimal_digit(&digit);
+                if (max_pre_len > FMT_COMMA_99_PRE_LEN) {
+                    /* Buffer index 9 stores millions. */
+                    decimal_digits[9] = fast_pop_decimal_digit(&digit);
+
+                    /* Buffer index 10 stores ten-millions. */
+                    decimal_digits[10] = (unsigned char)digit;
+                }
+                break;
+
+            /* This NBASE group starts at decimal power 10^8. */
+            case 8:
+                /* Buffer index 11 stores hundred-millions, and modulo 10 extracts that digit. */
+                decimal_digits[11] = (unsigned char)(digit % 10);
+                break;
+            default:
+                break;
+        }
+    }
+    return true;
+}
+
+/* Round unpacked digits in place; never modifies the input Numeric. */
+template <int max_pre_len>
+static bool fast_round_decimal_digits(unsigned char* decimal_digits, int int_len, bool is_negative, int dscale,
+    int* rounded_int_len, bool* rounded_is_zero)
+{
+    *rounded_int_len = int_len;
+
+    /* A thousandths digit below 5 does not round up. */
+    if (dscale <= TO_CHAR_FRAC_LEN || decimal_digits[0] < 5) {
+        /* Buffer index 2 is the tenths digit in the zero check. */
+        *rounded_is_zero = int_len == 0 && decimal_digits[1] == 0 && decimal_digits[2] == 0;
+        return false;
+    }
+
+    int last_output_index = int_len + FAST_DIGIT_OFFSET - 1;
+    for (int index = 1; index <= last_output_index; index++) {
+        int digit = decimal_digits[index] + 1;
+
+        /* A base-10 digit below 10 does not propagate a carry. */
+        if (digit < 10) {
+            decimal_digits[index] = (unsigned char)digit;
+            *rounded_is_zero = false;
+            return false;
+        }
+        decimal_digits[index] = 0;
+    }
+
+    if (int_len >= max_pre_len) {
+        return true;
+    }
+    decimal_digits[int_len + FAST_DIGIT_OFFSET] = 1;
+    int_len++;
+    *rounded_int_len = int_len;
+    *rounded_is_zero = false;
+    return false;
+}
+
+static inline void emit_fast_uint64_digit(char** p, uint64* absValue)
+{
+    /* Modulo 10 extracts the least-significant decimal digit. */
+    *--(*p) = (char)('0' + (*absValue % 10));
+
+    /* Division by 10 removes the emitted decimal digit. */
+    *absValue /= 10;
+}
+
+static inline void emit_fast_uint64_digits(char** p, uint64* absValue, int count)
+{
+    if (count >= 1) {
+        emit_fast_uint64_digit(p, absValue);
+    }
+
+    /* A count of at least 2 requires the second digit. */
+    if (count >= 2) {
+        emit_fast_uint64_digit(p, absValue);
+    }
+
+    /* A decimal group contains at most 3 emitted digits. */
+    if (count >= 3) {
+        emit_fast_uint64_digit(p, absValue);
+    }
+}
+
+static inline void emit_fast_decimal_digit(char** p, const unsigned char* decimalDigits, int power)
+{
+    *--(*p) = (char)('0' + decimalDigits[power + FAST_DIGIT_OFFSET]);
+}
+
+static inline void emit_fast_decimal_digits(char** p, const unsigned char* decimalDigits, int power, int count)
+{
+    if (count >= 1) {
+        emit_fast_decimal_digit(p, decimalDigits, power);
+    }
+
+    /* A count of at least 2 requires the second buffered digit. */
+    if (count >= 2) {
+        emit_fast_decimal_digit(p, decimalDigits, power + 1);
+    }
+
+    /* A decimal group contains at most 3 emitted digits. */
+    if (count >= 3) {
+        /* Offset 2 selects the third digit. */
+        emit_fast_decimal_digit(p, decimalDigits, power + 2);
+    }
+}
+
+static inline text* finish_fast_number_result(text* result, char* output, char* p, bool is_negative, int output_width)
+{
+    if (is_negative) {
+        *--p = '-';
+    }
+    while (p > output) {
+        *--p = ' ';
+    }
+    SET_VARSIZE(result, VARHDRSZ + output_width);
+    return result;
+}
+
+/* Emit fixed-format output from a uint64 integer plus optional two fraction digits. */
+static text* emit_fast_integer_number(
+    uint64 abs_value, int int_len, bool is_negative, int output_width, int tenth_digit = 0, int hundredth_digit = 0)
+{
+    text* result = (text*)palloc(VARHDRSZ + output_width);
+    char* output = VARDATA(result);
+    char* p = output + output_width;
+
+    *--p = (char)('0' + hundredth_digit);
+    *--p = (char)('0' + tenth_digit);
+    *--p = '.';
+
+    /* More than 6 digits require two thousands separators. */
+    if (int_len > 6) {
+        /* Emit the lowest 3-digit group. */
+        emit_fast_uint64_digits(&p, &abs_value, 3);
+        *--p = ',';
+
+        /* Emit the middle 3-digit group. */
+        emit_fast_uint64_digits(&p, &abs_value, 3);
+        *--p = ',';
+
+        /* Subtract 6 digits to emit the part preceding the two groups. */
+        emit_fast_uint64_digits(&p, &abs_value, int_len - 6);
+
+        /* More than 3 digits require one thousands separator. */
+    } else if (int_len > 3) {
+        /* Emit the lowest 3-digit group. */
+        emit_fast_uint64_digits(&p, &abs_value, 3);
+        *--p = ',';
+
+        /* Subtract 3 digits to emit the part preceding the lowest group. */
+        emit_fast_uint64_digits(&p, &abs_value, int_len - 3);
+    } else {
+        emit_fast_uint64_digits(&p, &abs_value, int_len);
+    }
+
+    return finish_fast_number_result(result, output, p, is_negative, output_width);
+}
+
+/* Emit fixed-format output from the unpacked-and-rounded decimal digit buffer. */
+static text* emit_fast_rounded_number(
+    const unsigned char* decimal_digits, int int_len, bool is_negative, int output_width)
+{
+    text* result = (text*)palloc(VARHDRSZ + output_width);
+    char* output = VARDATA(result);
+    char* p = output + output_width;
+
+    /* hundredths */
+    *--p = (char)('0' + decimal_digits[1]);
+
+    /* Buffer index 2 stores tenths. */
+    *--p = (char)('0' + decimal_digits[2]);
+    *--p = '.';
+
+    /* More than 6 digits require two thousands separators. */
+    if (int_len > 6) {
+        /* Emit the lowest 3-digit group. */
+        emit_fast_decimal_digits(&p, decimal_digits, 0, 3);
+        *--p = ',';
+
+        /* Power 3 begins the middle 3-digit group. */
+        emit_fast_decimal_digits(&p, decimal_digits, 3, 3);
+        *--p = ',';
+
+        /* Power 6 begins the highest group after subtracting 6 lower digits. */
+        emit_fast_decimal_digits(&p, decimal_digits, 6, int_len - 6);
+
+        /* More than 3 digits require one thousands separator. */
+    } else if (int_len > 3) {
+        /* Emit the lowest 3-digit group. */
+        emit_fast_decimal_digits(&p, decimal_digits, 0, 3);
+        *--p = ',';
+
+        /* Power 3 begins the highest group after subtracting 3 lower digits. */
+        emit_fast_decimal_digits(&p, decimal_digits, 3, int_len - 3);
+    } else {
+        emit_fast_decimal_digits(&p, decimal_digits, 0, int_len);
+    }
+
+    return finish_fast_number_result(result, output, p, is_negative, output_width);
+}
+
+/* Emit non-A-format overflow with the original sign slot. */
+static text* emit_fast_overflow_number(int fmt_len, bool is_negative)
+{
+    int output_width = fmt_len + 1;
+    text* result = (text*)palloc(VARHDRSZ + output_width);
+    char* output = VARDATA(result);
+    const char* overflow = (fmt_len == FMT_COMMA_99_LEN) ?
+        (is_negative ? "-###,###.##" : " ###,###.##") :
+        (is_negative ? "-###,###,###.##" : " ###,###,###.##");
+    errno_t rc = memcpy_s(output, output_width, overflow, output_width);
+    securec_check(rc, "\0", "\0");
+
+    SET_VARSIZE(result, VARHDRSZ + output_width);
+    return result;
+}
+
+/* Emit A-format overflow as fixed-width pure '#'. */
+static inline text* emit_fast_a_overflow_number(int output_width)
+{
+    text* result = (text*)palloc(VARHDRSZ + output_width);
+    errno_t rc = memset_s(VARDATA(result), output_width, '#', output_width);
+    securec_check(rc, "\0", "\0");
+
+    SET_VARSIZE(result, VARHDRSZ + output_width);
+    return result;
+}
+
+static bool fast_get_decimal_digit(
+    const NumericDigit* digits, int ndigits, int weight, int power, int* decimal_digit)
+{
+    int group_power = power >= 0 ? power / DEC_DIGITS : -((-power + DEC_DIGITS - 1) / DEC_DIGITS);
+    int group_index = weight - group_power;
+    int offset = power - group_power * DEC_DIGITS;
+    int divisor = 1;
+
+    if (group_index < 0 || group_index >= ndigits) {
+        *decimal_digit = 0;
+        return true;
+    }
+
+    NumericDigit digit = digits[group_index];
+    if (unlikely(digit < 0 || digit >= NBASE)) {
+        return false;
+    }
+
+    for (int i = 0; i < offset; i++) {
+        /* Multiplication by 10 advances the divisor by one decimal place. */
+        divisor *= 10;
+    }
+
+    /* Modulo 10 isolates the requested decimal digit. */
+    *decimal_digit = (digit / divisor) % 10;
+    return true;
+}
+
+static int fast_a_hidden_overflow_width(
+    int int_len, int tenth_digit, int hundredth_digit, int max_output_width)
+{
+    int output_width = int_len + (int_len - 1) / 3;
+
+    if (hundredth_digit != 0) {
+        /* 3 characters are required for ".dd". */
+        output_width += 3;
+    } else if (tenth_digit != 0) {
+        /* 2 characters are required for ".d". */
+        output_width += 2;
+    }
+    return Min(output_width, max_output_width);
+}
+
+static bool fast_a_hidden_overflow_width_from_numeric(
+    const NumericDigit* digits, int ndigits, int weight, int int_len, int dscale, int max_output_width,
+    int* output_width)
+{
+    int tenth_digit = 0;
+    int hundredth_digit = 0;
+    int thousandth_digit = 0;
+
+    *output_width = fast_a_hidden_overflow_width(int_len, 0, 0, max_output_width);
+    if (*output_width == max_output_width) {
+        return true;
+    }
+
+    if (/*
+         * Extract the decimal digits required for rounding and overflow-width calculation.
+         */
+        /* Power -1 selects the tenths digit. */
+        !fast_get_decimal_digit(digits, ndigits, weight, -1, &tenth_digit) ||
+        /* Power -2 selects the hundredths digit. */
+        !fast_get_decimal_digit(digits, ndigits, weight, -2, &hundredth_digit) ||
+        /* Power -3 selects the thousandths digit. */
+        !fast_get_decimal_digit(digits, ndigits, weight, -3, &thousandth_digit)) {
+        return false;
+    }
+
+    /* 5 is the decimal half-up threshold. */
+    if (dscale > TO_CHAR_FRAC_LEN && thousandth_digit >= 5) {
+        hundredth_digit++;
+
+        /* 10 means the hundredths digit overflowed and carries. */
+        if (hundredth_digit == 10) {
+            hundredth_digit = 0;
+            tenth_digit++;
+
+            /* 10 means the tenths digit overflowed into the integer part. */
+            if (tenth_digit == 10) {
+                bool carry_int = true;
+
+                tenth_digit = 0;
+                for (int power = 0; power < int_len; power++) {
+                    int decimal_digit;
+
+                    if (!fast_get_decimal_digit(digits, ndigits, weight, power, &decimal_digit)) {
+                        return false;
+                    }
+
+                    /* Only 9 propagates a decimal carry to the next place. */
+                    if (decimal_digit != 9) {
+                        carry_int = false;
+                        break;
+                    }
+                }
+                if (carry_int) {
+                    int_len++;
+                }
+            }
+        }
+    }
+
+    *output_width = fast_a_hidden_overflow_width(int_len, tenth_digit, hundredth_digit, max_output_width);
+    return true;
+}
+
+/* Apply hide_tailing_zero to the fixed two-decimal result without scanning or modifying Numeric. */
+static text* trim_fast_tailing_zero(text* result, bool is_zero)
+{
+    if (!HIDE_TAILING_ZERO) {
+        return result;
+    }
+
+    char* output = VARDATA(result);
+    int len = VARSIZE_ANY_EXHDR(result);
+
+    /* Match the original numeric_to_char() zero shortcut after hide_tailing_zero. */
+    if (is_zero) {
+        output[0] = '0';
+        SET_VARSIZE(result, VARHDRSZ + 1);
+        return result;
+    }
+
+    /* emit_fast_* always ends in ".dd", so tail trimming needs at most two fixed checks. */
+    if (output[len - 1] == '0') {
+        /* Index offset 2 checks the second-last character before removing ".00" (3 chars) or 1 trailing zero. */
+        len -= (output[len - 2] == '0') ? 3 : 1;
+        SET_VARSIZE(result, VARHDRSZ + len);
+    }
+    return result;
+}
+
+static text* emit_fast_precheck_overflow(const NumericDigit* digits, int ndigits, int weight, int intLen, int dscale,
+    int fmtLen, bool isNegative)
+{
+    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+        return emit_fast_overflow_number(fmtLen, isNegative);
+    }
+    if (HIDE_TAILING_ZERO) {
+        int output_width;
+
+        if (!fast_a_hidden_overflow_width_from_numeric(
+                digits, ndigits, weight, intLen, dscale, fmtLen + 1, &output_width)) {
+            return NULL;
+        }
+        return emit_fast_a_overflow_number(output_width);
+    }
+    return emit_fast_a_overflow_number(fmtLen + 1);
+}
+
+static text* try_emit_fast_direct_number(const NumericDigit* digits, int ndigits, int weight, int intLen, int dscale,
+    bool isNegative, int fmtLen)
+{
+    uint64 abs_value = 0;
+
+    if (dscale == 0) {
+        if (fast_integer_value_from_numeric(digits, ndigits, weight, &abs_value)) {
+            return trim_fast_tailing_zero(
+                emit_fast_integer_number(abs_value, intLen, isNegative && intLen != 0, fmtLen + 1), intLen == 0);
+        }
+        return NULL;
+    }
+    if (dscale <= TO_CHAR_FRAC_LEN) {
+        int tenth_digit = 0;
+        int hundredth_digit = 0;
+
+        if (fast_unrounded_value_from_numeric(digits, ndigits, weight, &abs_value, &tenth_digit, &hundredth_digit)) {
+            bool is_zero = intLen == 0 && tenth_digit == 0 && hundredth_digit == 0;
+
+            return trim_fast_tailing_zero(
+                emit_fast_integer_number(
+                    abs_value, intLen, isNegative && !is_zero, fmtLen + 1, tenth_digit, hundredth_digit),
+                is_zero);
+        }
+    }
+    return NULL;
+}
+
+static text* emit_fast_round_overflow(int intLen, int fmtLen, bool isNegative)
+{
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && HIDE_TAILING_ZERO) {
+        return emit_fast_a_overflow_number(fast_a_hidden_overflow_width(intLen + 1, 0, 0, fmtLen + 1));
+    }
+    return u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ?
+        emit_fast_a_overflow_number(fmtLen + 1) :
+        emit_fast_overflow_number(fmtLen, isNegative);
+}
+
+/* Main fixed-format fast path. Return NULL to delegate uncertain cases to the original path. */
+template <int max_pre_len, int fmt_len>
+static text* fast_numeric_to_char(Numeric num)
+{
+    int int_len;
+    int rounded_int_len;
+    const NumericDigit* digits;
+    int ndigits;
+    int weight;
+    int dscale;
+    uint16 num_flags;
+    bool is_negative;
+    bool rounded_is_zero = false;
+    text* direct_result = NULL;
+
+    num_flags = NUMERIC_NB_FLAGBITS(num);
+    if (unlikely(NUMERIC_FLAG_IS_NAN(num_flags))) {
+        return NULL;
+    }
+    if (unlikely(NUMERIC_FLAG_IS_BI(num_flags))) {
+        num = makeNumericNormal(num);
+    }
+
+    digits = NUMERIC_DIGITS(num);
+    ndigits = NUMERIC_NDIGITS(num);
+    weight = NUMERIC_WEIGHT(num);
+    dscale = NUMERIC_DSCALE(num);
+
+    if (unlikely(!fast_integer_digits(digits, ndigits, weight, &int_len))) {
+        return NULL;
+    }
+    if (unlikely(int_len > max_pre_len)) {
+        return emit_fast_precheck_overflow(digits, ndigits, weight, int_len, dscale, fmt_len,
+            NUMERIC_SIGN(num) == NUMERIC_NEG);
+    }
+
+    is_negative = NUMERIC_SIGN(num) == NUMERIC_NEG;
+    direct_result = try_emit_fast_direct_number(digits, ndigits, weight, int_len, dscale, is_negative, fmt_len);
+    if (direct_result != NULL) {
+        return direct_result;
+    }
+
+    /* General target case: unpack limited digits, round locally, then emit. */
+    unsigned char decimal_digits[FAST_DIGIT_BUF_LEN] = {0};
+    if (unlikely(!fast_unpack_decimal_digits<max_pre_len>(digits, ndigits, weight, decimal_digits))) {
+        return NULL;
+    }
+    if (unlikely(fast_round_decimal_digits<max_pre_len>(
+            decimal_digits, int_len, is_negative, dscale, &rounded_int_len, &rounded_is_zero))) {
+        return emit_fast_round_overflow(int_len, fmt_len, is_negative);
+    }
+
+    return trim_fast_tailing_zero(
+        emit_fast_rounded_number(decimal_digits, rounded_int_len, is_negative && !rounded_is_zero, fmt_len + 1),
+        rounded_is_zero);
+}
+#endif
+
 /* ------------------
  * NUMERIC to_char()
  * ------------------
@@ -7254,7 +7914,29 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
     errno_t ret = EOK;
     int result_alloc_len = 0;
 
-    NUM_TOCHAR_prepare;
+    len = VARSIZE_ANY_EXHDR(fmt);
+    if (len <= 0 || len >= (INT_MAX - VARHDRSZ) / NUM_MAX_ITEM_SIZ) {
+        PG_RETURN_TEXT_P(cstring_to_text(""));
+    }
+
+    /* Try exact fixed-format fast path; unsupported cases fall through unchanged. */
+#if DEC_DIGITS == 4
+    FastNumericFormat fast_format = match_fast_format(VARDATA_ANY(fmt), len);
+    if (fast_format == FMT_COMMA_99) {
+        /* Fast path for "999,999.99". */
+        result = fast_numeric_to_char<FMT_COMMA_99_PRE_LEN, FMT_COMMA_99_LEN>(value);
+    } else if (fast_format == FMT_COMMA_999) {
+        /* Fast path for "999,999,999.99". */
+        result = fast_numeric_to_char<FMT_COMMA_999_PRE_LEN, FMT_COMMA_999_LEN>(value);
+    }
+    if (result != NULL) {
+        PG_RETURN_TEXT_P(result);
+    }
+#endif
+
+    result_alloc_len = (len * NUM_MAX_ITEM_SIZ) + 1 + VARHDRSZ;
+    result = (text*)palloc0(result_alloc_len);
+    format = NUM_cache(len, &Num, fmt, &shouldFree);
     /*
      * On DateType depend part (numeric)
      */
@@ -7315,7 +7997,7 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
             }
 
             x = DatumGetNumeric(DirectFunctionCall2(numeric_round, NumericGetDatum(val), Int32GetDatum(Num.post)));
-            orgnum = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(x)));
+            orgnum = output_numeric_out(x, false);
         }
 
         if (*orgnum == '-') {

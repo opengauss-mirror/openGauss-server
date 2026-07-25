@@ -1535,7 +1535,7 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                         need_free = !check_need_free_varchar_output(outputstr, guc_cold);
                         break;
                     case F_NUMERIC_OUT: 
-                        outputstr = output_numeric_out(DatumGetNumeric(attr));
+                        outputstr = output_numeric_out(DatumGetNumeric(attr), true);
                         need_free = !check_need_free_numeric_output(outputstr, guc_cold);
                         break;
                     case F_DATE_OUT:

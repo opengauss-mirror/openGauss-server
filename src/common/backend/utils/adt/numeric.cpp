@@ -527,7 +527,7 @@ Datum numeric_out(PG_FUNCTION_ARGS)
  *      Output function for numeric data type.
  *      include bi64 and bi128 type
  */
-char* output_numeric_out(Numeric num)
+char* output_numeric_out(Numeric num, bool withoutZero)
 {
     NumericVar x;
     char* str = NULL;
@@ -562,7 +562,7 @@ char* output_numeric_out(Numeric num)
     init_var_from_num(num, &x);
     str = output_get_str_from_var(&x);
 
-    if (TRUNC_NUMERIC_TAIL_ZERO) {
+    if (withoutZero && TRUNC_NUMERIC_TAIL_ZERO) {
         remove_tail_zero(str);
     }
 
