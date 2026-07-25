@@ -15,7 +15,7 @@ add_cmd_gen_when_configure(perl_target unicode_cmd_src)
 
 execute_process(COMMAND ${CMAKE_SOURCE_DIR}/${openGauss}/cmake/src/buildfunction.sh --create_conversionfile ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR})
 
-set(common_DEF_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -DSTREAMPLAN -D_FORTIFY_SOURCE=2)
+set(common_DEF_OPTIONS ${MACRO_OPTIONS} -D_FORTIFY_SOURCE=2)
 set(common_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS} -fstack-protector-all)
 list(REMOVE_ITEM common_COMPILE_OPTIONS -fstack-protector)
 set(common_LINK_OPTIONS ${LIB_LINK_OPTIONS})
