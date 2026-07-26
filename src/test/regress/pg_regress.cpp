@@ -5516,7 +5516,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1382
+#define BASE_PGXC_LIKE_MACRO_NUM 1380
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 
@@ -6447,22 +6447,23 @@ static void setup_super_user()
     sleep(3);
 
     int i, j;
-    struct passwd* pwd;
+    struct passwd* pw_entry;
 
-    pwd = getpwuid(getuid());
+    pw_entry = getpwuid(getuid());
 
-    if (NULL == pwd || NULL == pwd->pw_name) {
+    if (NULL == pw_entry || NULL == pw_entry->pw_name) {
         fprintf(stderr, _("Can not get current user name.\n"));
         exit_nicely(2);
     }
 
     for (i = 0; i < myinfo.co_num; i++) {
-        psql_command_node("postgres", i, COORD, "update pg_authid set rolname='%s' where rolsuper=true;", pwd->pw_name);
+        psql_command_node(
+            "postgres", i, COORD, "update pg_authid set rolname='%s' where rolsuper=true;", pw_entry->pw_name);
     }
 
     for (j = 0; j < myinfo.dn_num; j++) {
         psql_command_node(
-            "postgres", j, DATANODE, "update pg_authid set rolname='%s' where rolsuper=true;", pwd->pw_name);
+            "postgres", j, DATANODE, "update pg_authid set rolname='%s' where rolsuper=true;", pw_entry->pw_name);
     }
 }
 
@@ -6995,6 +6996,14 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
     int result = initialize_myinfo(coordnode_num, datanode_num, init_port, keep_last_time_data, run_test_case);
     if (result != 0) {
         return -1;
+    }
+
+    if (use_existing && port_specified_by_user) {
+        if (test_single_node) {
+            myinfo.dn_port[0] = port;
+        } else {
+            myinfo.co_port[0] = port;
+        }
     }
 
     // Upgrade check option
@@ -7576,6 +7585,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         }
 
         fclose(logfile);
+        logfile = NULL;
 
         /*
          * Emit nice-looking summary message

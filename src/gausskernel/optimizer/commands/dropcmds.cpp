@@ -98,6 +98,8 @@ static void DropExtensionInListIsSupported(List* objname)
         "db_pg_parser",
         "hdfs_fdw",
         "age",
+        "fuzzystrmatch",
+        "pg_trgm",
         "gms_compress",
         "gms_utility",
         "gms_stats",

@@ -89,6 +89,7 @@ function create_snowballfile()
 
 function runscript()
 {
+    set -e
     if [ ! "X$1" = "X" ]; then
         eval $1
         echo "$1" >> $CMAKE_BUILD_PATH/runscript.log

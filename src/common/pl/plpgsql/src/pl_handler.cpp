@@ -196,9 +196,11 @@ static void processError(CreateFunctionStmt* stmt, enum FunctionErrorType ErrorT
 
 void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status)
 {
-    bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 || IsSystemNamespace(nspid) || 
-        IsToastNamespace(nspid) || IsCStoreNamespace(nspid) || 
-        IsPackageSchemaOid(nspid) || SKIP_GS_SOURCE;
+    bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 ||
+        OidIsValid(u_sess->cmd_cxt.CurrentExtensionObject) ||
+        IsSystemNamespace(nspid) || IsToastNamespace(nspid) ||
+        IsCStoreNamespace(nspid) || IsPackageSchemaOid(nspid) ||
+        SKIP_GS_SOURCE;
     if (notInsert || t_thrd.log_cxt.errordata_stack_depth > ERRORDATA_STACK_SIZE - 2) {
         return;
     }

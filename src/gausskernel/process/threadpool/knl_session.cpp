@@ -513,6 +513,7 @@ static void knl_u_utils_init(knl_session_context* sess_cxt)
     guc_cold->GUC_check_errhint_string = NULL;
     guc_cold->set_params_htab = NULL;
     guc_cold->sync_guc_variables = NULL;
+    guc_cold->reserved_guc_prefixes = NIL;
     for (int strategy = 0; strategy < MAX_GUC_ATTR; strategy++) {
         guc_cold->ConfigureNamesBool[strategy] = NULL;
         guc_cold->ConfigureNamesInt[strategy] = NULL;

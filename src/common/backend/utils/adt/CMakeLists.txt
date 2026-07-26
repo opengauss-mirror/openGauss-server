@@ -13,13 +13,13 @@ execute_process(
 )
 
 set(jsonpath_cmd_src
-"${PROJECT_SRC_DIR}/common/backend/utils/adt|||flex -CF -b -p -p -o 'jsonpath_scan.inc' jsonpath_scan.l|sed -i 's/YY_NULL/YY_ZERO/g' scan.inc"
+"${PROJECT_SRC_DIR}/common/backend/utils/adt|||flex -CF -b -p -p -o 'jsonpath_scan.inc' jsonpath_scan.l|sed -i 's/YY_NULL/YY_ZERO/g' jsonpath_scan.inc"
 )
 
 add_cmd_gen_when_configure(flex_target jsonpath_cmd_src)
 
 execute_process(
-    COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/jsonpath_gram.hpp ${CMAKE_CURRENT_SOURCE_DIR}/../include/utils/jsonpath_gram.hpp
+    COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/jsonpath_gram.hpp ${PROJECT_SRC_DIR}/include/utils/jsonpath_gram.hpp
 )
 
 list(REMOVE_ITEM TGT_adt_SRC
