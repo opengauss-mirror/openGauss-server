@@ -4503,14 +4503,6 @@ void ExecuteTruncate(TruncateStmt* stmt)
 #endif
 
 #ifdef PGXC
-    if (stmt->restart_seqs)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("PGXC does not support RESTART IDENTITY yet"),
-                errdetail("The feature is not supported currently")));
-#endif
-
-#ifdef PGXC
     /*
      * If I am the main execute CN but not CCN,
      * Notify the CCN to create firstly, and then notify other CNs except me.
@@ -5032,7 +5024,7 @@ void ExecuteTruncateGuts(
     foreach (cell, seq_relids) {
         Oid seq_relid = lfirst_oid(cell);
 
-        ResetSequence(seq_relid, false);
+        ResetSequence(seq_relid, true);
     }
     foreach (cell, autoinc_seqoids) {
         Oid seq_relid = lfirst_oid(cell);
