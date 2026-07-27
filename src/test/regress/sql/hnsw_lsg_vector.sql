@@ -74,7 +74,15 @@ select explain_analyze_filtered('SELECT /*+ indexscan(tablevector idx_vectors_l2
 select explain_analyze_filtered('SELECT /*+ indexscan(tablevector idx_vectors_ip) */ id FROM tablevector ORDER BY val <#> array_fill(1,array[100])::vector limit 3;');
 
 
--- 2 无数据建索引，预期报错
+-- 2 unlogged表建LSG索引，预期报错
+drop table tablevector;
+create unlogged table tablevector (id int, val vector(100));
+insert into tablevector select * from tableStandardA;
+
+-- cosine
+CREATE INDEX idx_vectors_cosine ON tablevector USING hnsw (val vector_cosine_ops) WITH (m = 4, ef_construction = 10, enable_lsg = on);
+
+-- 3 无数据建索引，预期报错
 drop table tablevector;
 create table tablevector (id int, val vector(100));
 
@@ -85,7 +93,7 @@ CREATE INDEX idx_vectors_l2 ON tablevector USING hnsw (val vector_l2_ops) WITH (
 -- ip
 CREATE INDEX idx_vectors_ip ON tablevector USING hnsw (val vector_ip_ops) WITH (m = 4, ef_construction = 10, enable_lsg = on);
 
--- 3 同时使能HNSW lsg算法和量化算法，报错
+-- 4 同时使能HNSW lsg算法和量化算法，报错
 
 -- cosine + lsg + rabitq
 CREATE INDEX idx_vectors_cosine ON tablevector USING hnsw (val vector_cosine_ops) WITH (m = 4, ef_construction = 10, enable_lsg = on, enable_rabitq = on);
