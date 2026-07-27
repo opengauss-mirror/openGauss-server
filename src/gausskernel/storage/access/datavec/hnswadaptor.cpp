@@ -77,9 +77,18 @@ int pq_load_symbol(char *symbol, void **sym_lib_handle)
 
 #define PQ_LOAD_SYMBOL_FUNC(func) pq_load_symbol(#func, (void **)&g_pq_func.func)
 
+#ifndef WIN32
+static void PqClearOpenmpBindingEnv()
+{
+    (void)unsetenv("GOMP_CPU_AFFINITY");
+    (void)unsetenv("OMP_PROC_BIND");
+}
+#endif
+
 int pq_open_dl(void **lib_handle, char *symbol)
 {
 #ifndef WIN32
+    PqClearOpenmpBindingEnv();
     *lib_handle = dlopen(symbol, RTLD_LAZY);
     if (*lib_handle == NULL) {
         ereport(WARNING, (errcode_for_file_access(), errmsg("could not load library %s, %s", PQ_SO_NAME, dlerror())));
