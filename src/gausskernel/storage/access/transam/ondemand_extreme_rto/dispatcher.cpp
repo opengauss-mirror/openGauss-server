@@ -28,6 +28,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "postmaster/startup.h"
+#include "postmaster/atfworker.h"
 #include "access/clog.h"
 #include "access/xact.h"
 #include "access/xlog_internal.h"
@@ -2014,8 +2015,8 @@ void WaitRedoFinish()
     /* make pmstate as run so db can accept service from now */
     g_instance.fatal_error = false;
     g_instance.demotion = NoDemote;
+    (void)PrepareAtfRecoveryStage();
     pmState = PM_RUN;
-    GlobalTaskCounterInc();
     write_stderr_with_prefix("[On-demand] LOG: database system is ready to accept connections");
 
     g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status = CLUSTER_IN_ONDEMAND_REDO;

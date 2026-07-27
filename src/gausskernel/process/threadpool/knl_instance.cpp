@@ -49,6 +49,7 @@
 #include "utils/hotkey.h"
 #include "lib/lrucache.h"
 #include "storage/matrix_mem.h"
+#include "ddes/dms/ss_common_attr.h"
 #ifdef ENABLE_WHITEBOX
 #include "access/ustore/knl_whitebox_test.h"
 #endif
@@ -1114,9 +1115,9 @@ static void knl_g_atf_init(knl_g_atf_context* atf_cxt)
     Assert(atf_cxt != NULL);
     errno_t rc = memset_s(atf_cxt, sizeof(knl_g_atf_context), 0, sizeof(knl_g_atf_context));
     securec_check(rc, "\0", "\0");
-    atf_cxt->all_task_done = false;
+    atf_cxt->all_task_done = true;
     pg_atomic_init_u64(&atf_cxt->global_task_counter, 0);
-    atf_cxt->last_counter_update_ts = GetCurrentTimestamp();
+    atf_cxt->last_counter_update_ts = 0;
 }
 
 void knl_instance_init()

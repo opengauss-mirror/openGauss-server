@@ -128,6 +128,7 @@
 #include "common/config/cm_config.h"
 #include "catalog/pg_namespace.h"
 #include "storage/lmgr.h"
+#include "ddes/dms/ss_common_attr.h"
 
 /* struct to keep tuples stat that fetchs from DataNode */
 typedef struct avw_info {
@@ -1965,13 +1966,15 @@ static void do_autovacuum(void)
     vacuum_object* vacObj = NULL;
     errno_t rc = EOK;
     knl_g_atf_context *instance = &g_instance.atf_cxt;
-    LWLockAcquire(instance->global_task_lock, LW_SHARED);
-    if (!instance->all_task_done) {
+    if (ENABLE_ATF_TIMEOUT) {
+        LWLockAcquire(instance->global_task_lock, LW_SHARED);
+        if (!instance->all_task_done) {
+            LWLockRelease(instance->global_task_lock);
+            ereport(DEBUG2, (errmsg("Canceled an autovacuum because an AFT rebuild transaction is in progress.")));
+            return;
+        }
         LWLockRelease(instance->global_task_lock);
-        ereport(DEBUG2, (errmsg("Canceled an autovacuum because an AFT rebuild transaction is in progress.")));
-        return;
     }
-    LWLockRelease(instance->global_task_lock);
     
     /*
      * StartTransactionCommand and CommitTransactionCommand will automatically

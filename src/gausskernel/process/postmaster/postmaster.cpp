@@ -112,6 +112,7 @@
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#include "postmaster/atfworker.h"
 #include "optimizer/sqlpatch.h"
 #ifdef PGXC
 #include "pgxc/csnminsync.h"
@@ -6728,6 +6729,10 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.SqlLimitPID, SIGTERM);
             }
 
+            if (g_instance.pid_cxt.AtfWorkerPID != 0) {
+                signal_child(g_instance.pid_cxt.AtfWorkerPID, SIGTERM);
+            }
+
 #ifdef ENABLE_HTAP
             if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
                 signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
@@ -7024,6 +7029,9 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.SqlLimitPID != 0)
                     signal_child(g_instance.pid_cxt.SqlLimitPID, SIGTERM);
 
+                if (g_instance.pid_cxt.AtfWorkerPID != 0)
+                    signal_child(g_instance.pid_cxt.AtfWorkerPID, SIGTERM);
+
                 smb_recovery::KillSMBWriterThreads();
 
 #ifdef ENABLE_HTAP
@@ -7179,6 +7187,10 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.SqlLimitPID != 0) {
                 signal_child(g_instance.pid_cxt.SqlLimitPID, SIGTERM);
+            }
+
+            if (g_instance.pid_cxt.AtfWorkerPID != 0) {
+                signal_child(g_instance.pid_cxt.AtfWorkerPID, SIGTERM);
             }
 
 #ifndef ENABLE_LITE_MODE
@@ -7347,6 +7359,9 @@ dms_demote:
 
                     if (g_instance.pid_cxt.SqlLimitPID != 0)
                         signal_child(g_instance.pid_cxt.SqlLimitPID, SIGTERM);
+
+                    if (g_instance.pid_cxt.AtfWorkerPID != 0)
+                        signal_child(g_instance.pid_cxt.AtfWorkerPID, SIGTERM);
 #ifdef ENABLE_HTAP
                     if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
                         signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
@@ -7519,6 +7534,7 @@ static void reaper(SIGNAL_ARGS)
             if ((IS_EXRTO_STANDBY_READ) && (g_instance.pid_cxt.UndoRecyclerPID!= 0)) {
                 signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
             }
+            (void)PrepareAtfRecoveryStage();
             pmState = PM_RUN;
 
             if (t_thrd.postmaster_cxt.HaShmData && (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
@@ -7825,7 +7841,6 @@ static void reaper(SIGNAL_ARGS)
 
             /* at this point we are really open for business */
             if (!SS_REPLAYED_BY_ONDEMAND) {
-                GlobalTaskCounterInc();
                 write_stderr("%s LOG: database system is ready to accept connections\n",
                     GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 if (g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
@@ -8025,6 +8040,9 @@ static void reaper(SIGNAL_ARGS)
 
                 if (g_instance.pid_cxt.PercentilePID != 0)
                     signal_child(g_instance.pid_cxt.PercentilePID, SIGQUIT);
+
+                if (g_instance.pid_cxt.AtfWorkerPID != 0)
+                    signal_child(g_instance.pid_cxt.AtfWorkerPID, SIGQUIT);
 
                 /*
                  * We can also shut down the audit collector now; there's
@@ -8421,6 +8439,17 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+        if (pid == g_instance.pid_cxt.AtfWorkerPID) {
+            g_instance.pid_cxt.AtfWorkerPID = 0;
+            if (!EXIT_STATUS_0(exitstatus)) {
+                bool stageBypassed = MarkAtfRecoveryDone();
+                if (stageBypassed && pmState < PM_WAIT_BACKENDS) {
+                    ereport(WARNING, (errmsg("[ATF] worker exited unexpectedly; recovery stage bypassed")));
+                }
+            }
+            continue;
+        }
+
 #ifdef ENABLE_HTAP
         if (pid == g_instance.pid_cxt.IMCStoreVacuumPID) {
             g_instance.pid_cxt.IMCStoreVacuumPID = 0;
@@ -8692,6 +8721,9 @@ static const char* GetProcName(ThreadId pid)
         return "rack mem cleaner process";
     else if (pid == g_instance.pid_cxt.SqlLimitPID)
         return "sql limit process";
+    else if (pid == g_instance.pid_cxt.AtfWorkerPID) {
+        return "ATF recovery worker";
+    }
 #ifdef ENABLE_HTAP
     else if (pid == g_instance.pid_cxt.IMCStoreVacuumPID)
         return "imcstore vacuum process";
@@ -9114,6 +9146,7 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.WalWriterPID == 0);
     Assert(g_instance.pid_cxt.WalWriterAuxiliaryPID == 0);
     Assert(g_instance.pid_cxt.SqlLimitPID == 0);
+    Assert(g_instance.pid_cxt.AtfWorkerPID == 0);
 #ifdef ENABLE_HTAP
     Assert(g_instance.pid_cxt.IMCStoreVacuumPID == 0);
 #endif
@@ -9285,6 +9318,7 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.rackMemCleanerPID == 0 &&
             g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
             g_instance.pid_cxt.BarrierPreParsePID == 0 && g_instance.pid_cxt.SqlLimitPID == 0 &&
+            g_instance.pid_cxt.AtfWorkerPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
             g_instance.pid_cxt.TsCompactionPID == 0 && g_instance.pid_cxt.TsCompactionAuxiliaryPID == 0
@@ -9534,6 +9568,7 @@ static void PostmasterStateMachine(void)
         ereport(LOG, (errmsg("all server processes terminated; reinitializing")));
 
         if (SS_DISASTER_STANDBY_CLUSTER && g_instance.dms_cxt.SSClusterState == NODESTATE_PROMOTE_APPROVE) {
+            (void)PrepareAtfRecoveryStage();
             pmState = PM_RUN;
             return;
         }
@@ -15493,6 +15528,17 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         } break;
 
+        case ATF_WORKER: {
+            InitShmemAccess(UsedShmemSegAddr);
+            t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+            InitProcessAndShareMemory();
+            AtfWorkerMain();
+            proc_exit(0);
+        } break;
+
         case RBWORKER: {
             InitShmemAccess(UsedShmemSegAddr);
             InitProcessAndShareMemory();
@@ -15814,6 +15860,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
 #ifndef ENABLE_LITE_MODE
     { GaussDbThreadMain<AIO_COMPLETER_THREAD>, AIO_COMPLETER_THREAD, "aio_completer", "aio completer" },
 #endif
+    { GaussDbThreadMain<ATF_WORKER>, ATF_WORKER, "ATFworker", "ATF recovery worker" },
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",

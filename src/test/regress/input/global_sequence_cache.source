@@ -914,7 +914,7 @@ create large sequence test_seq_2 start with 1 increment by 1 cache 20 global;
 -- 模拟老版本sequence
 update pg_class set relkind='L' where relname='test_seq_old2';
 update pg_class set relkind='S' where relname='test_seq_old1';
-select relname, relkind, relnatts from pg_class where relname like 'test_seq_%';
+select relname, relkind, relnatts from pg_class where relname like 'test_seq_%' order by relname;
 
 CREATE TABLE employees_old1 ( emp_id INT PRIMARY KEY DEFAULT nextval('test_seq_old1'), emp_name VARCHAR(100) NOT NULL, department VARCHAR(50), hire_date DATE DEFAULT CURRENT_DATE, salary DECIMAL(10,2));
 CREATE TABLE employees_old2 ( emp_id INT PRIMARY KEY DEFAULT nextval('test_seq_old2'), emp_name VARCHAR(100) NOT NULL, department VARCHAR(50), hire_date DATE DEFAULT CURRENT_DATE, salary DECIMAL(10,2));
