@@ -1263,6 +1263,10 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     buildstate->enablePQ = HnswGetEnablePQ(index);
     buildstate->enableLsg = HnswGetEnableLsg(index);
     LsgCalculator* LocScalingParam;
+    if (buildstate->enableLsg && index->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("unlogged HNSW LSG indexes are not supported")));
+    }
     if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
         ereport(ERROR, (errmsg("this data type cannot support hnswpq.")));
     }
