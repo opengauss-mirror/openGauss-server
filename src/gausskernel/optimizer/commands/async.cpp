@@ -178,7 +178,7 @@ typedef struct AsyncQueueEntry {
  * Struct describing a queue position, and assorted macros for working with it
  */
 typedef struct QueuePosition {
-    int page;   /* SLRU page number */
+    int64 page;   /* SLRU page number */
     int offset; /* byte offset within page */
 } QueuePosition;
 
@@ -249,25 +249,6 @@ static THR_LOCAL SlruCtlData AsyncCtlData;
 #define AsyncCtl (&AsyncCtlData)
 #define QUEUE_PAGESIZE BLCKSZ
 const int QUEUE_FULL_WARN_INTERVAL = 5000; /* warn at most once every 5s */
-
-/*
- * slru.c currently assumes that all filenames are four characters of hex
- * digits. That means that we can use segments 0000 through FFFF.
- * Each segment contains SLRU_PAGES_PER_SEGMENT pages which gives us
- * the pages from 0 to SLRU_PAGES_PER_SEGMENT * 0x10000 - 1.
- *
- * It's of course possible to enhance slru.c, but this gives us so much
- * space already that it doesn't seem worth the trouble.
- *
- * The most data we can have in the queue at a time is QUEUE_MAX_PAGE/2
- * pages, because more than that would confuse slru.c into thinking there
- * was a wraparound condition.	With the default BLCKSZ this means there
- * can be up to 8GB of queued-and-not-read data.
- *
- * Note: it's possible to redefine QUEUE_MAX_PAGE with a smaller multiple of
- * SLRU_PAGES_PER_SEGMENT, for easier testing of queue-full behaviour.
- */
-#define QUEUE_MAX_PAGE (SLRU_PAGES_PER_SEGMENT * 0x10000 - 1)
 
 /*
  * State for pending LISTEN/UNLISTEN actions consists of an ordered list of
@@ -414,6 +395,16 @@ void AsyncShmemInit(void)
     }
 }
 
+void CheckAsyncNotifySupported(const char* cmd)
+{
+    if (g_instance.attr.attr_common.enable_thread_pool) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("%s is not supported in thread pool mode.", cmd)));
+    }
+    PreventCommandDuringRecovery("LISTEN");
+}
+
 /*
  * pg_notify -
  *	  SQL function to send a notification event
@@ -434,7 +425,7 @@ Datum pg_notify(PG_FUNCTION_ARGS)
         payload = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
     /* For NOTIFY as a statement, this is checked in ProcessUtility */
-    PreventCommandDuringRecovery("NOTIFY");
+    CheckAsyncNotifySupported("NOTIFY");
 
     Async_Notify(channel, payload);
 
@@ -1061,27 +1052,16 @@ static void asyncQueueUnregister(void)
  */
 static bool asyncQueueIsFull(void)
 {
-    int nexthead;
-    int boundary;
+    int64 headPage = QUEUE_POS_PAGE(QUEUE_HEAD);
+    int64 tailPage = QUEUE_POS_PAGE(QUEUE_TAIL);
+    int tailOffset = QUEUE_POS_OFFSET(QUEUE_TAIL);
+    int64 occupied = headPage - tailPage;
+    if (tailOffset == 0) {
+        /* the start page should be count in if it's empty at the beginning */
+        occupied++;
+    }
 
-    /*
-     * The queue is full if creating a new head page would create a page that
-     * logically precedes the current global tail pointer, ie, the head
-     * pointer would wrap around compared to the tail.	We cannot create such
-     * a head page for fear of confusing slru.c.  For safety we round the tail
-     * pointer back to a segment boundary (compare the truncation logic in
-     * asyncQueueAdvanceTail).
-     *
-     * Note that this test is *not* dependent on how much space there is on
-     * the current head page.  This is necessary because asyncQueueAddEntries
-     * might try to create the next head page in any case.
-     */
-    nexthead = QUEUE_POS_PAGE(QUEUE_HEAD) + 1;
-    if (nexthead > QUEUE_MAX_PAGE)
-        nexthead = 0; /* wrap around */
-    boundary = QUEUE_POS_PAGE(QUEUE_TAIL);
-    boundary -= boundary % SLRU_PAGES_PER_SEGMENT;
-    return nexthead < boundary;
+    return occupied > g_instance.attr.attr_storage.maxNotifyQueuePages;
 }
 
 /*
@@ -1091,7 +1071,7 @@ static bool asyncQueueIsFull(void)
  */
 static bool asyncQueueAdvance(QueuePosition* position, int entryLength)
 {
-    int pageno = QUEUE_POS_PAGE(*position);
+    int64 pageno = QUEUE_POS_PAGE(*position);
     int offset = QUEUE_POS_OFFSET(*position);
     bool pageJump = false;
 
@@ -1109,8 +1089,6 @@ static bool asyncQueueAdvance(QueuePosition* position, int entryLength)
      */
     if (offset + QUEUEALIGN(AsyncQueueEntryEmptySize) > QUEUE_PAGESIZE) {
         pageno++;
-        if (pageno > QUEUE_MAX_PAGE)
-            pageno = 0; /* wrap around */
         offset = 0;
         pageJump = true;
     }
@@ -1168,7 +1146,7 @@ static ListCell* asyncQueueAddEntries(ListCell* nextNotify)
 {
     AsyncQueueEntry qe;
     QueuePosition queue_head;
-    int pageno;
+    int64 pageno;
     int offset;
     int slotno;
 
@@ -1257,24 +1235,16 @@ static ListCell* asyncQueueAddEntries(ListCell* nextNotify)
  */
 static void asyncQueueFillWarning(void)
 {
-    int headPage = QUEUE_POS_PAGE(QUEUE_HEAD);
-    int tailPage = QUEUE_POS_PAGE(QUEUE_TAIL);
-    int occupied;
-    double fillDegree;
-    TimestampTz t;
-
-    occupied = headPage - tailPage;
-
+    int64 headPage = QUEUE_POS_PAGE(QUEUE_HEAD);
+    int64 tailPage = QUEUE_POS_PAGE(QUEUE_TAIL);
+    int64 occupied = headPage - tailPage;
     if (occupied == 0) {
-        return; /* fast exit for common case */
+        /* fast exit for common case */
+        return;
     }
 
-    if (occupied < 0) {
-        /* head has wrapped around, tail not yet */
-        occupied += QUEUE_MAX_PAGE + 1;
-    }
-
-    fillDegree = (double)occupied / (double)((QUEUE_MAX_PAGE + 1) / 2);
+    double fillDegree = ((double)occupied / (double)(g_instance.attr.attr_storage.maxNotifyQueuePages));
+    TimestampTz t;
 
     if (fillDegree < 0.5) {
         return;
@@ -1591,7 +1561,7 @@ static void asyncQueueReadAllNotifications(void)
         bool reachedStop = false;
 
         do {
-            int curpage = QUEUE_POS_PAGE(pos);
+            int64 curpage = QUEUE_POS_PAGE(pos);
             int curoffset = QUEUE_POS_OFFSET(pos);
             int slotno;
             int copysize;
@@ -1756,9 +1726,9 @@ static void asyncQueueAdvanceTail(void)
 {
     QueuePosition min;
     int i;
-    int oldtailpage;
-    int newtailpage;
-    int boundary;
+    int64 oldtailpage;
+    int64 newtailpage;
+    int64 boundary;
 
     LWLockAcquire(AsyncQueueLock, LW_EXCLUSIVE);
     min = QUEUE_HEAD;

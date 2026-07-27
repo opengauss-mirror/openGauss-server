@@ -51,5 +51,6 @@ extern void HandleNotifyInterrupt(void);
 
 /* process interrupts */
 extern void ProcessNotifyInterrupt(void);
+extern void CheckAsyncNotifySupported(const char* cmd);
 
 #endif /* ASYNC_H */

@@ -355,6 +355,58 @@ void pgaudit_lock_or_unlock_user(bool islocked, const char* user_name)
 }
 
 /*
+ * Brief		    : void PGAuditNotify(const char* conditionname)
+ * Description	: audit the NOTIFY statement
+ */
+static void PGAuditNotify(const char* conditionname)
+{
+    AuditType auditType = AUDIT_ASYNC;
+    AuditResult auditResult = AUDIT_OK;
+    char details[PGAUDIT_MAXLENGTH] = {0};
+    int rc = 0;
+    rc = snprintf_s(details, sizeof(details), sizeof(details) - 1,
+        "notify channel \"%s\" success", conditionname);
+    securec_check_ss(rc, "", "");
+    audit_report(auditType, auditResult, NULL, details);
+}
+
+/*
+ * Brief		    : void PGAuditListen(const char* conditionname)
+ * Description	: audit the LISTEN statement
+ */
+static void PGAuditListen(const char* conditionname)
+{
+    AuditType auditType = AUDIT_ASYNC;
+    AuditResult auditResult = AUDIT_OK;
+    char details[PGAUDIT_MAXLENGTH] = {0};
+    int rc = snprintf_s(details, sizeof(details), sizeof(details) - 1,
+        "listen channel \"%s\" success", conditionname);
+    securec_check_ss(rc, "", "");
+    audit_report(auditType, auditResult, NULL, details);
+}
+
+/*
+ * Brief		    : void PGAuditUnlisten(const char* conditionname)
+ * Description	: audit the UNLISTEN statement
+ */
+static void PGAuditUnlisten(const char* conditionname)
+{
+    AuditType auditType = AUDIT_ASYNC;
+    AuditResult auditResult = AUDIT_OK;
+    char details[PGAUDIT_MAXLENGTH] = {0};
+    int rc = 0;
+    if (conditionname) {
+        rc = snprintf_s(details, sizeof(details), sizeof(details) - 1,
+            "unlisten channel \"%s\" success", conditionname);
+    } else {
+        rc = snprintf_s(details, sizeof(details), sizeof(details) - 1,
+            "unlisten all channels success");
+    }
+    securec_check_ss(rc, "", "");
+    audit_report(auditType, auditResult, NULL, details);
+}
+
+/*
  * Description: store the audit informations
  */
 static void pgaudit_store_auditstat(
@@ -1871,6 +1923,18 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
         case T_AlterFdwStmt: {
             AlterFdwStmt *stmt = (AlterFdwStmt*)parsetree;
             pgaudit_ddl_fdw(stmt->fdwname, queryString);
+        } break;
+        case T_NotifyStmt: {
+            NotifyStmt *stmt = (NotifyStmt*)parsetree;
+            PGAuditNotify(stmt->conditionname);
+        } break;
+        case T_ListenStmt: {
+            ListenStmt *stmt = (ListenStmt*)parsetree;
+            PGAuditListen(stmt->conditionname);
+        } break;
+        case T_UnlistenStmt: {
+            UnlistenStmt *stmt = (UnlistenStmt*)parsetree;
+            PGAuditUnlisten(stmt->conditionname);
         } break;
         default:
             break;

@@ -348,6 +348,7 @@ CREATE TYPE float8_range AS RANGE (subtype = float8, subtype_diff = float8mi);
 ALTER TYPE colors ADD VALUE 'orange' AFTER 'red';
 CREATE COLLATION french (LOCALE = 'fr_FR.utf8');
 UNLISTEN virtual;
+LISTEN virtual;
 NOTIFY virtual;
 CREATE LANGUAGE plperl;
 CREATE OPERATOR FAMILY name USING

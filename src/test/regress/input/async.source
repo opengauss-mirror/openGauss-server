@@ -1,0 +1,73 @@
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_thread_pool=off"     > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "max_notify_queue_pages=64"  > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 2
+\! echo "SELECT pg_listening_channels();"   >> @abs_bindir@/async_test.sql
+\! echo "LISTEN virtual1;"                  >> @abs_bindir@/async_test.sql
+\! echo "LISTEN virtual2;"                  >> @abs_bindir@/async_test.sql
+\! echo "SELECT pg_listening_channels();"   >> @abs_bindir@/async_test.sql
+\! echo "NOTIFY virtual1;"                  >> @abs_bindir@/async_test.sql
+\! echo "NOTIFY virtual2, 'message1';"      >> @abs_bindir@/async_test.sql
+\! echo "UNLISTEN virtual1;"                >> @abs_bindir@/async_test.sql
+\! echo "SELECT pg_listening_channels();"   >> @abs_bindir@/async_test.sql
+\! echo "UNLISTEN *;"                       >> @abs_bindir@/async_test.sql
+\! echo "SELECT pg_listening_channels();"   >> @abs_bindir@/async_test.sql
+
+\h listen
+\h notify
+\h unlisten
+
+-- throw warnings when async queue is half full
+\! echo "LISTEN ch1;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "BEGIN"                                                                             >> @abs_bindir@/async_test.sql
+\! echo "  FOR i IN 0..33 LOOP"                                                             >> @abs_bindir@/async_test.sql
+-- payload length is 19*421=7999
+\! echo "    EXECUTE 'NOTIFY ch2, ' || quote_literal(repeat('line of length 19. ', 421));"  >> @abs_bindir@/async_test.sql
+\! echo "    COMMIT;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "  END LOOP;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "END;"                                                                              >> @abs_bindir@/async_test.sql
+\! echo "/"                                                                                 >> @abs_bindir@/async_test.sql
+\! echo "UNLISTEN *;"                                                                       >> @abs_bindir@/async_test.sql
+
+-- error when async queue is full
+\! echo "LISTEN ch1;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "BEGIN"                                                                             >> @abs_bindir@/async_test.sql
+\! echo "  FOR i IN 1..65 LOOP"                                                             >> @abs_bindir@/async_test.sql
+-- payload length is 19*421=7999
+\! echo "    EXECUTE 'NOTIFY ch2, ' || quote_literal(repeat('line of length 19. ', 421));"  >> @abs_bindir@/async_test.sql
+\! echo "    COMMIT;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "  END LOOP;"                                                                       >> @abs_bindir@/async_test.sql
+\! echo "END;"                                                                              >> @abs_bindir@/async_test.sql
+\! echo "/"                                                                                 >> @abs_bindir@/async_test.sql
+\! echo "UNLISTEN *;"                                                                       >> @abs_bindir@/async_test.sql
+
+-- payload of length 8000, exceeds limit for payload length
+\! echo "LISTEN ch1;"                                                       >> @abs_bindir@/async_test.sql
+\! echo "BEGIN"                                                             >> @abs_bindir@/async_test.sql
+\! echo "  EXECUTE 'NOTIFY ch1, ' || quote_literal(repeat('abcd ', 1600));" >> @abs_bindir@/async_test.sql
+\! echo "END;"                                                              >> @abs_bindir@/async_test.sql
+\! echo "/"                                                                 >> @abs_bindir@/async_test.sql
+\! echo "UNLISTEN *;"                                                       >> @abs_bindir@/async_test.sql
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -f @abs_bindir@/async_test.sql
+\! rm -f @abs_bindir@/async_test.sql
+
+-- test audit LISTEN/NOTIFY/UNLISTEN
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=134217727" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_async_notify=1" > /dev/null 2>&1
+\! echo "SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');" >> @abs_bindir@/async_audit_test.sql
+\! echo "LISTEN ch1;"                   >> @abs_bindir@/async_audit_test.sql
+\! echo "NOTIFY ch1;"                   >> @abs_bindir@/async_audit_test.sql
+\! echo "NOTIFY ch1, 'audit message';"  >> @abs_bindir@/async_audit_test.sql
+\! echo "UNLISTEN ch1;"                 >> @abs_bindir@/async_audit_test.sql
+\! echo "UNLISTEN *;"                   >> @abs_bindir@/async_audit_test.sql
+\! echo "SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='async_notify'" >> @abs_bindir@/async_audit_test.sql
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -f @abs_bindir@/async_audit_test.sql
+\! rm -f @abs_bindir@/async_audit_test.sql
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_async_notify" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_thread_pool=on"          > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "max_notify_queue_pages=1048576" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1  > /dev/null

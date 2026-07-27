@@ -1,0 +1,16 @@
+<refentry id="SQL-LISTEN">
+<refmeta>
+<refentrytitle>LISTEN</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>LISTEN</refname>
+<refpurpose>register current session as a listener of certain notification channel</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+LISTEN channel;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -3625,39 +3625,29 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
 
             /* Query-level asynchronous notification */
         case T_NotifyStmt:
-#ifdef PGXC
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("NOFITY statement is not yet supported.")));
-#endif /* PGXC */
             {
                 NotifyStmt* stmt = (NotifyStmt*)parse_tree;
 
-                PreventCommandDuringRecovery("NOTIFY");
+                CheckAsyncNotifySupported("NOTIFY");
                 Async_Notify(stmt->conditionname, stmt->payload);
             }
             break;
 
         case T_ListenStmt:
-#ifdef PGXC
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("LISTEN statement is not yet supported.")));
-#endif /* PGXC */
             {
                 ListenStmt* stmt = (ListenStmt*)parse_tree;
 
-                PreventCommandDuringRecovery("LISTEN");
+                CheckAsyncNotifySupported("LISTEN");
                 CheckRestrictedOperation("LISTEN");
                 Async_Listen(stmt->conditionname);
             }
             break;
 
         case T_UnlistenStmt:
-#ifdef PGXC
-            ereport(
-                ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UNLISTEN statement is not yet supported.")));
-#endif /* PGXC */
             {
                 UnlistenStmt* stmt = (UnlistenStmt*)parse_tree;
 
-                PreventCommandDuringRecovery("UNLISTEN");
+                CheckAsyncNotifySupported("UNLISTEN");
                 CheckRestrictedOperation("UNLISTEN");
                 if (stmt->conditionname)
                     Async_Unlisten(stmt->conditionname);

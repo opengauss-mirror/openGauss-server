@@ -3328,9 +3328,11 @@ ERROR:  type "colors" does not exist
 CREATE COLLATION french (LOCALE = 'fr_FR.utf8');
 ERROR:  user defined collation is not yet supported.
 UNLISTEN virtual;
-ERROR:  UNLISTEN statement is not yet supported.
+ERROR:  UNLISTEN is not supported in thread pool mode.
+LISTEN virtual;
+ERROR:  LISTEN is not supported in thread pool mode.
 NOTIFY virtual;
-ERROR:  NOFITY statement is not yet supported.
+ERROR:  NOTIFY is not supported in thread pool mode.
 CREATE LANGUAGE plperl;
 ERROR:  new language is not yet supported.
 CREATE OPERATOR FAMILY name USING

@@ -288,6 +288,7 @@ typedef struct knl_instance_attr_storage {
     int adioBufferAlignSize;
     int adioReaderThreadNum;
     int adioWriterThreadNum;
+    int maxNotifyQueuePages;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */
