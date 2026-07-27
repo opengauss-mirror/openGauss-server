@@ -148,6 +148,7 @@ typedef enum knl_thread_role {
 #ifndef ENABLE_LITE_MODE
     AIO_COMPLETER_THREAD,
 #endif
+    ATF_WORKER,
     TS_COMPACTION,
     TS_COMPACTION_CONSUMER,
     TS_COMPACTION_AUXILIAY,

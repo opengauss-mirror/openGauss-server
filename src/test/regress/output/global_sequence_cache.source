@@ -2109,7 +2109,7 @@ create large sequence test_seq_2 start with 1 increment by 1 cache 20 global;
 -- 模拟老版本sequence
 update pg_class set relkind='L' where relname='test_seq_old2';
 update pg_class set relkind='S' where relname='test_seq_old1';
-select relname, relkind, relnatts from pg_class where relname like 'test_seq_%';
+select relname, relkind, relnatts from pg_class where relname like 'test_seq_%' order by relname;
               relname              | relkind | relnatts 
 -----------------------------------+---------+----------
  test_seq_1                        | z       |       12

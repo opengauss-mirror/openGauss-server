@@ -184,6 +184,7 @@
 #include "utils/mem_snapshot.h"
 #include "nodes/parsenodes_common.h"
 #include "mb/pg_wchar.h"
+#include "ddes/dms/ss_common_attr.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""

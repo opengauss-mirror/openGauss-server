@@ -80,6 +80,7 @@
 #include "parser/parse_type.h"
 #endif /* PGXC */
 #include "postmaster/autovacuum.h"
+#include "postmaster/atfworker.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/snapcapturer.h"
 #include "postmaster/cfs_shrinker.h"
@@ -202,6 +203,7 @@ extern int optreset; /* might not be declared by system headers */
 #include "libpq/libpq-int.h"
 #include "tcop/autonomoustransaction.h"
 #include "workload/sql_limit_process.h"
+#include "ddes/dms/ss_common_attr.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcs_ctlg.h"
 #endif
@@ -236,7 +238,6 @@ typedef struct AttachInfoContext {
 
 #define MAXSTRLEN ((1 << 11) - 1)
 
-#define ATF_TASK_CHECK_INTERVAL_USEC 100000
 
 static inline bool fast_bind_text_input(Oid ptype, char* pstring, Datum* pval)
 {
@@ -8489,68 +8490,11 @@ void GlobalTaskCounterInc()
     LWLockRelease(instance->global_task_lock);
 }
 
-// Utility function: Calculate time difference (in seconds)
-static inline int GetTimeDiffSec(TimestampTz ts1, TimestampTz ts2) 
+/* Wait for global ATF recovery to finish, then clear the current session state. */
+static void SessionWaitForAtfRecoveryDone()
 {
-    long secs;
-    int microsecs;
-    TimestampDifference(ts1, ts2, &secs, &microsecs);
-    return (int)secs;  // Convert to seconds
-}
-
-/*
- * SessionWaitAfterTaskDone - ATF Session wait for global task completion
- * 
- * Called after Session finishes tasks, loop to check global task status:
- * 1. Protect global counter/timestamp/done flag with exclusive lock;
- * 2. Exit if: global tasks done or counter update timeout;
- * 3. Sleep 100ms and retry if not met, reset ATF recovery flag finally.
- */
-void SessionWaitAfterTaskDone() {
-    knl_g_atf_context *instance = &g_instance.atf_cxt;
-    bool allTaskDone = false;
-    ereport(WARNING, (errmsg("[ATF] wait session task=%u", u_sess->attr.attr_common.atf_sql_count)));
-    while(!allTaskDone) {
-        LWLockAcquire(instance->global_task_lock, LW_EXCLUSIVE);
-        TimestampTz last_counter_update_ts = instance->last_counter_update_ts;
-        allTaskDone = instance->all_task_done;
-
-        if (allTaskDone) {
-            LWLockRelease(instance->global_task_lock);
-            break;
-        }
-
-        TimestampTz now_ts = GetCurrentTimestamp();
-        int elapsedSec = GetTimeDiffSec(last_counter_update_ts, now_ts);
-        
-        if (elapsedSec >= g_instance.attr.attr_common.atf_task_counter_timeout_sec && pg_atomic_read_u64(&instance->global_task_counter) == 0) {
-            ereport(DEBUG2, (errmsg("[ATF] timeout reached, mark all tasks, atf_task_counter_timeout_sec: done %d",g_instance.attr.attr_common.atf_task_counter_timeout_sec)));
-            instance->all_task_done = true;
-            allTaskDone = true;
-        }
-
-        LWLockRelease(instance->global_task_lock);
-
-        if (allTaskDone) {
-            break;
-        }
-
-        CHECK_FOR_INTERRUPTS();
-        pg_usleep(ATF_TASK_CHECK_INTERVAL_USEC);  // Sleep for 100ms before checking again
-    }
-
-    ereport(DEBUG2, (errmsg("[ATF] finish waiting for global task completion (reason: %s), reset atf_recovery=false",
-                             allTaskDone ? "all tasks done/timeout" : "unexpected exit")));
-
+    WaitForAtfTaskDone();
     u_sess->attr.attr_common.atf_recovery = false;
-}
-
-bool IsAtfRecoveryDone() {
-    knl_g_atf_context *instance = &g_instance.atf_cxt;
-    LWLockAcquire(instance->global_task_lock, LW_SHARED);
-    bool done = instance->all_task_done;
-    LWLockRelease(instance->global_task_lock);
-    return done;
 }
 
 /* ----------------------------------------------------------------
@@ -10636,11 +10580,11 @@ static void ProcessCommandUpperE(StringInfo input_message, volatile bool& send_r
                 knl_g_atf_context *instance = &g_instance.atf_cxt;
                 pg_atomic_fetch_sub_u64(&instance->global_task_counter, 1);
             }
-            SessionWaitAfterTaskDone();
+            SessionWaitForAtfRecoveryDone();
         }
     } else if (u_sess->attr.attr_common.enable_atf) {
         if (!IsAtfRecoveryDone()) {
-            SessionWaitAfterTaskDone();
+            SessionWaitForAtfRecoveryDone();
         }
     }
 
@@ -10665,6 +10609,7 @@ static void ProcessCommandUpperE(StringInfo input_message, volatile bool& send_r
  */
 static void ProcessCommandLowerV(StringInfo input_message, volatile bool& send_ready_for_query, bool& query_started)
 {
+    Assert(ENABLE_ATF_TIMEOUT);
     Assert(IsolationIsReadCommittedOrRepeatableRead());
     CommitSeqNo csn = InvalidCommitSeqNo;
     TransactionId xmin = InvalidTransactionId;

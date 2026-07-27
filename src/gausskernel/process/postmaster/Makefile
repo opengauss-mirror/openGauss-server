@@ -31,7 +31,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o pgstat_shmem.o og_record_time.o postmaster.o gaussdb_version.o\
+OBJS = atfworker.o autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o pgstat_shmem.o og_record_time.o postmaster.o gaussdb_version.o\
 	startup.o syslogger.o walwriter.o walwriterauxiliary.o checkpointer.o pgaudit.o alarmchecker.o \
 	twophasecleaner.o fencedudf.o lwlockmonitor.o cbmwriter.o pagewriter.o pagerepair.o snapcapturer.o rbcleaner.o globalstats.o \
 	cfs_shrinker.o rack_mem_cleaner.o\
@@ -46,4 +46,3 @@ include $(top_srcdir)/src/gausskernel/common.mk
 
 $(top_builddir)/src/lib/config/libconfig.a:
 	$(MAKE) -C $(top_builddir)/src/lib/config libconfig.a
-

@@ -301,6 +301,7 @@ typedef struct knl_g_pid_context {
     ThreadId DmsAuxiliaryPID;
     ThreadId SyncAuxiliaryPID;
     ThreadId SqlLimitPID;
+    ThreadId AtfWorkerPID;
 #ifdef ENABLE_NEON
     ThreadId WALproposerPID;
 #endif
