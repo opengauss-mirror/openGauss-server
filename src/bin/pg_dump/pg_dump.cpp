@@ -20510,7 +20510,17 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
             const char* endpos = NULL;
             char* usingpos = strstr(indxinfo->indexdef, " USING ");
             if (usingpos != NULL) {
+                /*
+                 * Extract "USING ... (keypart, ...)" for INDEX inside CREATE
+                 * TABLE. For partitioned tables, pg_get_indexdef appends
+                 * " LOCAL(PARTITION ...)" which is valid for CREATE INDEX but
+                 * not for INDEX in CREATE TABLE; stop before that clause.
+                 */
                 endpos = strstr(usingpos, " TABLESPACE ");
+                const char* localpos = strstr(usingpos, " LOCAL(");
+                if (localpos != NULL && (endpos == NULL || localpos < endpos)) {
+                    endpos = localpos;
+                }
                 if (endpos != NULL) {
                     posoffset = (uint32)(endpos - usingpos);
                 } else {
