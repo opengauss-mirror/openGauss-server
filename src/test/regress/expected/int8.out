@@ -711,11 +711,7 @@ ERROR:  bigint out of range
 select '9223372036854775800'::int8 / '0'::int8;
 ERROR:  division by zero
 select '9223372036854775800'::int8 % '0'::int8;
-      ?column?       
----------------------
- 9223372036854775800
-(1 row)
-
+ERROR:  division by zero
 select abs('-9223372036854775808'::int8);
 ERROR:  bigint out of range
 CONTEXT:  referenced column: abs

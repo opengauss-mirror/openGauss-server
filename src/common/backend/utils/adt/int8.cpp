@@ -581,17 +581,10 @@ Datum int8mod(PG_FUNCTION_ARGS)
 {
     int64 arg1 = PG_GETARG_INT64(0);
     int64 arg2 = PG_GETARG_INT64(1);
-
     if (unlikely(arg2 == 0)) {
-        if (DB_IS_CMPT(PG_FORMAT)) {
-            /* zero is not allowed to be divisor if compatible with PG */
-            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
-
-            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-            PG_RETURN_NULL();
-        }
-        // zero is allowed to be divisor
-        PG_RETURN_INT64(arg1);
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+        PG_RETURN_NULL();
     }
 
     /*
