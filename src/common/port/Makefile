@@ -102,11 +102,11 @@ libpgport.a: $(OBJS)
 thread.o: CFLAGS+=$(PTHREAD_CFLAGS)
 
 crc32_arm_parallel.o: crc32_arm_parallel.S
-	$(CC) $(CPPFLAGS) $(CFLAGS) -march=armv8-a+crc+crypto -o $@ -c $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) -march=armv8.2-a+crc+crypto -o $@ -c $^
 
 
 crc32_arm_parallel_srv.o: crc32_arm_parallel.S
-	$(CC) $(CPPFLAGS) $(CFLAGS) -march=armv8-a+crc+crypto -o $@ -c $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) -march=armv8.2-a+crc+crypto -o $@ -c $^
 
 # pg_crc32c_sse42.o and its _srv.o version need CFLAGS_SSE42
 CFLAGS_SSE42=-msse4.2

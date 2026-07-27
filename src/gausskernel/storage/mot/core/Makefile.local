@@ -70,8 +70,8 @@ endif
 # Common flags definition
 PLATFORM_ARCH = $(shell uname -m)
 ifeq ($(PLATFORM_ARCH),aarch64)
-	#CFLAGS += -std=gnu++11 -march=armv8-a+crc -Wall -Wextra -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
-	CFLAGS += -std=gnu++11 -march=armv8-a+crc -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+	#CFLAGS += -std=gnu++11 -march=armv8.2-a+crc -Wall -Wextra -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+	CFLAGS += -std=gnu++11 -march=armv8.2-a+crc -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
 else
 	#CFLAGS += -std=gnu++11 -march=native -mcx16 -Wall -Wextra -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
 	CFLAGS += -std=gnu++11 -mcx16 -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC

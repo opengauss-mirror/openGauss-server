@@ -152,7 +152,20 @@ static bool UBTryReuseRememberedMapping(int32 instance_id, size_t expected_size,
         return false;
     }
 
-    if (!UBSMemVerification(addr)) {
+    bool verify_ok = false;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        verify_ok = UBSMemVerification(addr);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBTryReuseRememberedMapping (verification)")));
+        verify_ok = false;
+    }
+    if (!verify_ok) {
         ereport(WARNING, (errmsg("Remembered UB shared memory verification failed: inst=%d, addr=%p",
                                  instance_id, addr)));
         size_t mapSize = (saved_size != 0) ? (size_t)saved_size : expected_size;
@@ -262,23 +275,52 @@ static void InitUBSMemControlBlock(UBShmControlBlock *ctrl, size_t total_size, s
 
 static void InitUBSMemBuffer(UBShmControlBlock *ctrl, char *base_addr)
 {
-    if (!ctrl->clog_inited.load(std::memory_order_acquire)) {
-        UBCLogBuffer *clog_buf = (UBCLogBuffer *)(base_addr + ctrl->clog_offset.load());
+    bool clog_inited = false;
+    bool csnlog_inited = false;
+    bool oldest_xmin_inited = false;
+    bool snapshot_inited = false;
+    uint64 clog_off = 0;
+    uint64 csnlog_off = 0;
+    uint64 oldest_xmin_off = 0;
+    uint64 snapshot_off = 0;
+
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        clog_inited = ctrl->clog_inited.load(std::memory_order_acquire);
+        clog_off = ctrl->clog_offset.load();
+        csnlog_inited = ctrl->csnlog_inited.load(std::memory_order_acquire);
+        csnlog_off = ctrl->csnlog_offset.load();
+        oldest_xmin_inited = ctrl->oldest_xmin_inited.load(std::memory_order_acquire);
+        oldest_xmin_off = ctrl->oldest_xmin_offset.load();
+        snapshot_inited = ctrl->snapshot_inited.load(std::memory_order_acquire);
+        snapshot_off = ctrl->snapshot_offset.load();
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in InitUBSMemBuffer (offset read)")));
+        return;
+    }
+
+    if (!clog_inited) {
+        UBCLogBuffer *clog_buf = (UBCLogBuffer *)(base_addr + clog_off);
         UBCLogBufferInit(clog_buf);
         ctrl->clog_inited.store(true, std::memory_order_release);
     }
-    if (!ctrl->csnlog_inited.load(std::memory_order_acquire)) {
-        UBCSNLogBuffer *csnlog_buf = (UBCSNLogBuffer *)(base_addr + ctrl->csnlog_offset.load());
+    if (!csnlog_inited) {
+        UBCSNLogBuffer *csnlog_buf = (UBCSNLogBuffer *)(base_addr + csnlog_off);
         UBCSNLogBufferInit(csnlog_buf);
         ctrl->csnlog_inited.store(true, std::memory_order_release);
     }
-    if (!ctrl->oldest_xmin_inited.load(std::memory_order_acquire)) {
-        UBOldestXminBuffer *xmin_buf = (UBOldestXminBuffer *)(base_addr + ctrl->oldest_xmin_offset.load());
+    if (!oldest_xmin_inited) {
+        UBOldestXminBuffer *xmin_buf = (UBOldestXminBuffer *)(base_addr + oldest_xmin_off);
         UBOldestXminBufferInit(xmin_buf);
         ctrl->oldest_xmin_inited.store(true, std::memory_order_release);
     }
-    if (!ctrl->snapshot_inited.load(std::memory_order_acquire)) {
-        UBSnapshotBuffer *snapshot_buf = (UBSnapshotBuffer *)(base_addr + ctrl->snapshot_offset.load());
+    if (!snapshot_inited) {
+        UBSnapshotBuffer *snapshot_buf = (UBSnapshotBuffer *)(base_addr + snapshot_off);
         UBSnapshotBufferInit(snapshot_buf);
         ctrl->snapshot_inited.store(true, std::memory_order_release);
     }
@@ -418,8 +460,25 @@ bool UBSMemLogBufferCreate()
 
     g_instance.shmem_cxt.UBTxnCachePtr = (char *)addr;
 
-    ereport(LOG, (errmsg("UB shared memory initialized (size: %lu, %s)",
-                         sz.total_size, new_created ? "new create" : "reused")));
+    /* Print partition addresses for fault injection experiments */
+    UBShmControlBlock *primary_ctrl = (UBShmControlBlock *)addr;
+    char *base_addr = (char *)addr;
+    uint64 clog_off = primary_ctrl->clog_offset.load(std::memory_order_acquire);
+    uint64 csnlog_off = primary_ctrl->csnlog_offset.load(std::memory_order_acquire);
+    uint64 xmin_off = primary_ctrl->oldest_xmin_offset.load(std::memory_order_acquire);
+    uint64 snap_off = primary_ctrl->snapshot_offset.load(std::memory_order_acquire);
+    ereport(LOG, (errmsg("UB shared memory initialized (size: %lu, %s). "
+                         "Partition addresses for fault injection: "
+                         "base=%p, clog=%p (off=%lu, size=%lu), "
+                         "csnlog=%p (off=%lu, size=%lu), "
+                         "oldest_xmin=%p (off=%lu, size=%lu), "
+                         "snapshot=%p (off=%lu, size=%lu)",
+                         sz.total_size, new_created ? "new create" : "reused",
+                         base_addr,
+                         base_addr + clog_off, clog_off, sz.clog_size,
+                         base_addr + csnlog_off, csnlog_off, sz.csnlog_size,
+                         base_addr + xmin_off, xmin_off, sz.xmin_size,
+                         base_addr + snap_off, snap_off, sz.snapshot_size)));
     return true;
 }
 
@@ -446,11 +505,6 @@ bool UBSMemFinalize()
         }
     }
 
-    int ret = ubsmem_finalize();
-    if (ret != UBSM_OK) {
-        ereport(ERROR, (errmsg("Failed to finalize ubs-mem. ret: %d", ret)));
-        return false;
-    }
     UBReleaseLocalMapRecords();
     return true;
 }
@@ -565,7 +619,20 @@ bool UBTxnCacheAttachPrimary(void)
     }
     UBRememberLocalMapping(SS_PRIMARY_ID, new_addr, new_map_size);
 
-    if (!UBSMemVerification((char *)new_addr)) {
+    bool verify_ok = false;
+    int ub_fault_rc_v = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc_v == 0) {
+        ub_sigbus_jump_active = 1;
+        verify_ok = UBSMemVerification((char *)new_addr);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBTxnCacheAttachPrimary (verification)")));
+        verify_ok = false;
+    }
+    if (!verify_ok) {
         (void)UBUnmapLocalMapping((char *)new_addr, new_map_size, "invalid current primary");
         ereport(ERROR, (errmsg("Current primary UB shared memory verification failed, shm_name=%s",
                                primary_shm_name)));
@@ -592,14 +659,27 @@ void UBTxnCacheResetReformMeta(void)
     }
 
     UBShmControlBlock *ctrl = (UBShmControlBlock *)base_addr;
-    UBOldestXminBuffer *xmin_buf = (UBOldestXminBuffer *)(base_addr + ctrl->oldest_xmin_offset.load());
-    UBSnapshotBuffer *snapshot_buf = (UBSnapshotBuffer *)(base_addr + ctrl->snapshot_offset.load());
+    UBOldestXminBuffer *xmin_buf = nullptr;
+    UBSnapshotBuffer *snapshot_buf = nullptr;
+
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        xmin_buf = (UBOldestXminBuffer *)(base_addr + ctrl->oldest_xmin_offset.load());
+        snapshot_buf = (UBSnapshotBuffer *)(base_addr + ctrl->snapshot_offset.load());
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBTxnCacheResetReformMeta (offset read)")));
+        return;
+    }
 
     UBOldestXminBufferInit(xmin_buf);
     ctrl->oldest_xmin_inited.store(true, std::memory_order_release);
     UBSnapshotBufferInit(snapshot_buf);
     ctrl->snapshot_inited.store(true, std::memory_order_release);
-    EXECUTE_ESB();
 }
 
 static bool UBSBufferSafeMemcpy(char *dest, const char *src, size_t size)
@@ -729,6 +809,8 @@ bool UBSMemSyncFromOldPrimary(int32 old_primary_id, int32 new_primary_id)
     if (old_primary_addr != new_primary_addr) {
         (void)UBUnmapLocalMapping(old_primary_addr, total_size, "old primary");
     }
+    /* New primary UB memory is fully initialized, re-enable access */
+    g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
     ereport(LOG, (errmsg("UB shared memory sync from old primary finished: old=%d, new=%d, copied=%lu bytes",
                          old_primary_id, new_primary_id, (unsigned long)copied_bytes)));
     

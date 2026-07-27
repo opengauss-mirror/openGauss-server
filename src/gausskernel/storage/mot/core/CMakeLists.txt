@@ -12,7 +12,7 @@ set(mot_core_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS
     -faligned-new -fno-exceptions -fno-rtti -Wwrite-strings -Wcast-align -Wreturn-type -Wpointer-arith -Wlogical-op -Waddress
     -Wsizeof-pointer-memaccess -Winit-self -Wduplicated-cond -Wnon-virtual-dtor -std=gnu++11 -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC -pthread -Wall)
 if(${BUILD_TUPLE} STREQUAL "aarch64")
-    list(APPEND mot_core_COMPILE_OPTIONS -march=armv8-a+crc)
+    list(APPEND mot_core_COMPILE_OPTIONS -march=armv8.2-a+crc)
 else()
     list(APPEND mot_core_COMPILE_OPTIONS -mcx16)
 endif()

@@ -9199,7 +9199,7 @@ static inline void set_hot_standby_recycle_xid()
 static void UBWarmupSetClog(TransactionId xid, CLogXidStatus status)
 {
     /* USE_UB_TXN_CACHE_WARMUP: populate UB txn cache from startup warmup results. */
-    if (!ENABLE_UB) {
+    if (!(ENABLE_UB)) {
         return;
     }
 
@@ -9214,7 +9214,7 @@ static void UBWarmupSetClog(TransactionId xid, CLogXidStatus status)
 static void UBWarmupSetCsnlog(TransactionId xid, CommitSeqNo csn)
 {
     /* USE_UB_TXN_CACHE_WARMUP: populate UB txn cache from startup warmup results. */
-    if (!ENABLE_UB) {
+    if (!(ENABLE_UB)) {
         return;
     }
 
@@ -9237,8 +9237,9 @@ static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, Timestamp
 
 static bool ShouldWarmupClogCsnlogInStartupXLOG(void)
 {
-    return ENABLE_DMS && IsUnderPostmaster && ENABLE_UB &&
-           g_instance.dms_cxt.SSRecoveryInfo.startup_reform && t_thrd.role == STARTUP;
+    return ENABLE_DMS && IsUnderPostmaster && ENABLE_UB && SS_REFORM_REFORMER &&
+           g_instance.dms_cxt.SSRecoveryInfo.startup_reform && t_thrd.role == STARTUP &&
+           !SS_PRIMARY_DEMOTING;
 }
 
 /*

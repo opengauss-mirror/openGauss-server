@@ -1162,7 +1162,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
 
         {{"ub_sigbus_handler",
-            PGC_USERSET,
+            PGC_POSTMASTER,
             NODE_SINGLENODE,
             SHARED_STORAGE_OPTIONS,
             gettext_noop("Enable UB SIGBUS handler for ESB instruction."),

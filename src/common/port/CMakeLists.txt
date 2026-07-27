@@ -106,7 +106,7 @@ set(pgport_DEF_OPTIONS -DFRONTEND ${MACRO_OPTIONS})
 set(pgport_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS} -fstack-protector-all)
 add_static_libtarget(pgport TGT_port_SRC TGT_pgport_INC "${pgport_DEF_OPTIONS}" "${pgport_COMPILE_OPTIONS}")
 if("${BUILD_TUPLE}" STREQUAL "aarch64")
-    set(pgport_crc32_COMPILE_OPTIONS ${pgport_COMPILE_OPTIONS} -march=armv8-a+crc+crypto)
+    set(pgport_crc32_COMPILE_OPTIONS ${pgport_COMPILE_OPTIONS} -march=armv8.2-a+crc+crypto)
     add_static_objtarget(pgport_crc32 TGT_crc32_arm_parallel_SRC TGT_pgport_INC "${pgport_DEF_OPTIONS}" "${pgport_crc32_COMPILE_OPTIONS}" "")
     add_dependencies(pgport_static pgport_crc32)
     add_custom_command(TARGET pgport_static POST_BUILD
@@ -180,7 +180,7 @@ list(REMOVE_ITEM port_srv_DEF_OPTIONS -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -D
 list(REMOVE_ITEM port_srv_COMPILE_OPTIONS -pthread -fstack-protector)
 add_static_libtarget(pgport_srv TGT_pgport_srv_SRC TGT_pgport_srv_INC "${port_srv_DEF_OPTIONS}" "${port_srv_COMPILE_OPTIONS}")
 if("${BUILD_TUPLE}" STREQUAL "aarch64")
-    set(pgport_srv_crc32_COMPILE_OPTIONS ${port_srv_COMPILE_OPTIONS} -march=armv8-a+crc+crypto)
+    set(pgport_srv_crc32_COMPILE_OPTIONS ${port_srv_COMPILE_OPTIONS} -march=armv8.2-a+crc+crypto)
     add_static_objtarget(pgport_srv_crc32 TGT_crc32_arm_parallel_srv_SRC TGT_pgport_srv_INC "${port_srv_DEF_OPTIONS}" "${pgport_srv_crc32_COMPILE_OPTIONS}" "")
     add_dependencies(pgport_srv_static pgport_srv_crc32)
     add_custom_command(TARGET pgport_srv_static POST_BUILD
