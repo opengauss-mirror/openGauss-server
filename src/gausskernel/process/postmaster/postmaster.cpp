@@ -3242,33 +3242,37 @@ int PostmasterMain(int argc, char* argv[])
     }
 
     /*
-    * Initialize UB shared memory.
-    */
-/* USE_UB_TXN_CACHE - BEGIN */
-    if (ENABLE_UB) {
-            if (!UBMemRegionInit()) {
-                ereport(FATAL, (errmsg("Failed to initialize UB memory region")));
-            }
-            ereport(LOG, (errmsg("[postmaster]success initialize UB memory region")));
-            if (!UBSMemLogBufferCreate()) {
-                ereport(FATAL, (errmsg("Failed to create UB shared memory")));
-            }
-            ereport(LOG, (errmsg("[postmaster]success create UB shared memory")));
-            UBCLogShmemInit();
-            UBCSNLogShmemInit();
-            UBOldestXminShmemInit();
-            UBSnapshotShmemInit();
-            ereport(LOG, (errmsg("[postmaster]success init UB shared memory")));
-    }
-/* USE_UB_TXN_CACHE - END */
+     * Register SIGBUS handler before any UB memory access.
+     */
 #if defined(__aarch64__)
-    if (ENABLE_UB) {
+    if (g_instance.attr.attr_storage.dms_attr.enable_ub) {
         if (register_sigbus_handler() != 0) {
             ereport(FATAL, (errmsg("[postmaster] register_sigbus_handler() failed!!!")));
         }
         ereport(LOG, (errmsg("[postmaster] register_sigbus_handler() success!!!")));
     }
 #endif
+
+    /*
+    * Initialize UB shared memory.
+    */
+    g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
+    if (ENABLE_UB) {
+        if (!UBMemRegionInit()) {
+            ereport(FATAL, (errmsg("Failed to initialize UB memory region")));
+        }
+        ereport(LOG, (errmsg("[postmaster]success initialize UB memory region")));
+        if (!UBSMemLogBufferCreate()) {
+            ereport(FATAL, (errmsg("Failed to create UB shared memory")));
+        }
+        ereport(LOG, (errmsg("[postmaster]success create UB shared memory")));
+        UBCLogShmemInit();
+        UBCSNLogShmemInit();
+        UBOldestXminShmemInit();
+        UBSnapshotShmemInit();
+        ereport(LOG, (errmsg("[postmaster]success init UB shared memory")));
+    }
+
     /*
      * Save backend variables for DCF call back thread,
      * the saved backend variables will be restored in

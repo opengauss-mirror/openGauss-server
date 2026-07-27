@@ -1433,14 +1433,23 @@ void UBCLogBufferInit(UBCLogBuffer *buf)
     const size_t CHUNK_SIZE = 1024 * 1024 * 1024;
     size_t total_size = sizeof(buf->slots);
     size_t offset = 0;
-    
-    while (offset < total_size) {
-        size_t chunk = (total_size - offset) < CHUNK_SIZE ? (total_size - offset) : CHUNK_SIZE;
-        errno_t rc = memset_s((char *)buf->slots + offset, chunk, 0xFFFF, chunk);
-        securec_check_c(rc, "\0", "\0");
-        offset += chunk;
+
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        while (offset < total_size) {
+            size_t chunk = (total_size - offset) < CHUNK_SIZE ? (total_size - offset) : CHUNK_SIZE;
+            errno_t rc = memset_s((char *)buf->slots + offset, chunk, 0xFFFF, chunk);
+            securec_check_c(rc, "\0", "\0");
+            offset += chunk;
+        }
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBCLogBufferInit")));
     }
-    EXECUTE_ESB();
 }
 
 void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus status)
@@ -1458,8 +1467,17 @@ void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus sta
     uint64 slot_idx = UBCLogCalSlotIndex(xid);
     uint16 expected_timeline = (uint16)UBCLogExpectedTimeline(xid);
     uint16 slot_val = UBCLogSlotMake(status, expected_timeline);
-    buf->slots[slot_idx].store(slot_val, std::memory_order_release);
-    EXECUTE_ESB();
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        buf->slots[slot_idx].store(slot_val, std::memory_order_release);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        ereport(ERROR, (errmsg("[SIGBUS] fault captured in UBCLogBufferSetSlot, xid=%lu, slot_idx=%lu",
+                                (unsigned long)xid, (unsigned long)slot_idx)));
+    }
 }
 
 size_t UBCLogBufferSize(void)
@@ -1475,7 +1493,19 @@ void UBCLogShmemInit(void)
         return;
     }
     UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
-    uint64 offset = ctrl->clog_offset.load(std::memory_order_acquire);
+    uint64 offset = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        offset = ctrl->clog_offset.load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBCLogShmemInit (offset read)")));
+        return;
+    }
     UBCLogBuffer *buf = (UBCLogBuffer *)(base + offset);
     g_instance.shmem_cxt.UBClogBufPtr = buf;
 }
@@ -1503,8 +1533,20 @@ bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status)
 
     uint64 slot_idx = UBCLogCalSlotIndex(xid);
     uint16 expected_timeline = (uint16)UBCLogExpectedTimeline(xid);
-    uint16 slot_val = ubCLogBuf->slots[slot_idx].load(std::memory_order_acquire);
-    EXECUTE_ESB();
+    uint16 slot_val = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        slot_val = ubCLogBuf->slots[slot_idx].load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBGetTxnStatusFromPrimary, xid=%lu, slot_idx=%lu",
+                                  (unsigned long)xid, (unsigned long)slot_idx)));
+        return false;
+    }
 
     if (slot_val == 0xFFFF) {
         return false;

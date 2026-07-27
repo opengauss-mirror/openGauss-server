@@ -1783,11 +1783,21 @@ void UBSnapshotBufferInit(UBSnapshotBuffer *buf)
     if (buf == nullptr) {
         return;
     }
-    errno_t rc = memset_s(buf, sizeof(UBSnapshotBuffer), 0, sizeof(UBSnapshotBuffer));
-    if (rc != EOK) {
-        ereport(ERROR, (errmsg("memset_s failed for UBSnapshotBuffer")));
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        errno_t rc = memset_s(buf, sizeof(UBSnapshotBuffer), 0, sizeof(UBSnapshotBuffer));
+        if (rc != EOK) {
+            ub_sigbus_jump_active = 0;
+            ereport(ERROR, (errmsg("memset_s failed for UBSnapshotBuffer")));
+        }
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBSnapshotBufferInit, buf=%p", (void *)buf)));
     }
-    EXECUTE_ESB();
 }
 
 void UBSnapshotBufferSetSlot(UBSnapshotBuffer *buf,
@@ -1804,9 +1814,18 @@ void UBSnapshotBufferSetSlot(UBSnapshotBuffer *buf,
     if (!TransactionIdIsValid(xmin) || !TransactionIdIsValid(xmax)) {
         return;
     }
-    
-    UBSnapshotSlotSet(&buf->slots[0], xmin, xmax, csn);
-    EXECUTE_ESB();
+
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        UBSnapshotSlotSet(&buf->slots[0], xmin, xmax, csn);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        ereport(ERROR, (errmsg("[SIGBUS] fault captured in UBSnapshotBufferSetSlot, xmin=%lu, xmax=%lu",
+                                (unsigned long)xmin, (unsigned long)xmax)));
+    }
 }
 
 bool UBGetSnapshotFromPrimary(TransactionId *xmin,
@@ -1821,10 +1840,23 @@ bool UBGetSnapshotFromPrimary(TransactionId *xmin,
     if (buf == nullptr) {
         return false;
     }
-    
+
     for (int retry = 0; retry < SNAPSHOT_RETRY_COUNT; retry++) {
-        if (UBSnapshotSlotGet(&buf->slots[0], xmin, xmax, csn)) {
-            return true;
+        int ub_fault_rc = sigsetjmp(jump_env, 1);
+        if (ub_fault_rc == 0) {
+            ub_sigbus_jump_active = 1;
+            if (UBSnapshotSlotGet(&buf->slots[0], xmin, xmax, csn)) {
+                UB_ESB_BARRIER();
+                ub_sigbus_jump_active = 0;
+                return true;
+            }
+            UB_ESB_BARRIER();
+            ub_sigbus_jump_active = 0;
+        } else {
+            ub_sigbus_jump_active = 0;
+            g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+            ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBGetSnapshotFromPrimary, retry=%d", retry)));
+            break;
         }
     }
 
@@ -1840,19 +1872,18 @@ bool UBSnapshotSlotGet(UBSnapshotSlot *slot,
     if (ver_before == 0 || (ver_before & 1)) {
         return false;
     }
-    
+
     std::atomic_thread_fence(std::memory_order_acquire);
-    
+
     *xmin = slot->xmin.load(std::memory_order_relaxed);
     *xmax = slot->xmax.load(std::memory_order_relaxed);
     *csn = slot->snapshotcsn.load(std::memory_order_relaxed);
-    
+
     uint64 ver_after = slot->version.load(std::memory_order_acquire);
-    EXECUTE_ESB();
     if (ver_before != ver_after) {
         return false;
     }
-    
+
     return true;
 }
 
@@ -1869,7 +1900,19 @@ void UBSnapshotShmemInit(void)
         return;
     }
     UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
-    uint64 offset = ctrl->snapshot_offset.load(std::memory_order_acquire);
+    uint64 offset = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        offset = ctrl->snapshot_offset.load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBSnapshotShmemInit (offset read)")));
+        return;
+    }
     UBSnapshotBuffer *buf = (UBSnapshotBuffer *)(base + offset);
     g_instance.shmem_cxt.UBSnapshotBufPtr = buf;
 }

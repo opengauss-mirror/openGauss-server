@@ -80,8 +80,19 @@ bool UBSyncOldestXminInNodeTable()
     bool synced = false;
 
     for (uint32 node_id = 0; node_id < DMS_MAX_INSTANCES; node_id++) {
-        uint64 ub_oldest_xmin = ubBuf->slots[node_id].load(std::memory_order_acquire);
-        EXECUTE_ESB();
+        uint64 ub_oldest_xmin = 0;
+        int ub_fault_rc = sigsetjmp(jump_env, 1);
+        if (ub_fault_rc == 0) {
+            ub_sigbus_jump_active = 1;
+            ub_oldest_xmin = ubBuf->slots[node_id].load(std::memory_order_acquire);
+            UB_ESB_BARRIER();
+            ub_sigbus_jump_active = 0;
+        } else {
+            ub_sigbus_jump_active = 0;
+            g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+            ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBSyncOldestXminInNodeTable, node_id=%u", node_id)));
+            break;
+        }
         if (ub_oldest_xmin == 0) {
             continue;
         }
@@ -320,10 +331,19 @@ void SSSyncOldestXminWhenReform(uint8 reformer_id)
 
 void UBOldestXminBufferInit(UBOldestXminBuffer *buf)
 {
-    for (int i = 0; i < UB_OLDEST_XMIN_SLOTS; i++) {
-        buf->slots[i].store(0, std::memory_order_release);
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        for (int i = 0; i < UB_OLDEST_XMIN_SLOTS; i++) {
+            buf->slots[i].store(0, std::memory_order_release);
+        }
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBOldestXminBufferInit")));
     }
-    EXECUTE_ESB();
 }
 
 bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 oldest_xmin)
@@ -344,14 +364,36 @@ bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 o
     }
 
     uint32 slot_idx = node_id;
-    uint64 old_val = buf->slots[slot_idx].load(std::memory_order_acquire);
+    uint64 old_val = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        old_val = buf->slots[slot_idx].load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBOldestXminBufferSetSlot (read path), node_id=%u",
+                                  node_id)));
+        return false;
+    }
     if (old_val != 0 && oldest_xmin <= old_val) {
-        EXECUTE_ESB();
         return true;
     }
 
-    buf->slots[slot_idx].store(oldest_xmin, std::memory_order_release);
-    EXECUTE_ESB();
+    int ub_fault_rc_w = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc_w == 0) {
+        ub_sigbus_jump_active = 1;
+        buf->slots[slot_idx].store(oldest_xmin, std::memory_order_release);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        ereport(ERROR, (errmsg("[SIGBUS] fault captured in UBOldestXminBufferSetSlot (write path), node_id=%u",
+                                node_id)));
+        return false;
+    }
     return true;
 }
 
@@ -364,8 +406,18 @@ uint64 UBOldestXminBufferGetSlot(UBOldestXminBuffer *buf, uint32 node_id)
         return 0;
     }
     uint32 slot_idx = node_id;
-    uint64 val = buf->slots[slot_idx].load(std::memory_order_acquire);
-    EXECUTE_ESB();
+    uint64 val = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        val = buf->slots[slot_idx].load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBOldestXminBufferGetSlot, node_id=%u", node_id)));
+    }
     return val;
 }
 
@@ -382,7 +434,19 @@ void UBOldestXminShmemInit(void)
         return;
     }
     UBShmControlBlock *ctrl = (UBShmControlBlock *)base;
-    uint64 offset = ctrl->oldest_xmin_offset.load(std::memory_order_acquire);
+    uint64 offset = 0;
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        offset = ctrl->oldest_xmin_offset.load(std::memory_order_acquire);
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBOldestXminShmemInit (offset read)")));
+        return;
+    }
     UBOldestXminBuffer *buf = (UBOldestXminBuffer *)(base + offset);
     g_instance.shmem_cxt.UBOldestXminBufPtr = buf;
 }

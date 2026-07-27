@@ -106,7 +106,7 @@ pg_crc32c_sse42.o: CFLAGS+=$(CFLAGS_SSE42)
 pg_crc32c_sse42_srv.o: CFLAGS+=$(CFLAGS_SSE42)
 
 # pg_crc32c_armv8.o and its _srv.o version need CFLAGS_ARMV8_CRC
-CFLAGS_ARMV8_CRC=-march=armv8-a+crc+crypto
+CFLAGS_ARMV8_CRC=-march=armv8.2-a+crc+crypto
 pg_crc32c_armv8.o: CPPFLAGS+=$(CFLAGS_ARMV8_CRC)
 pg_crc32c_armv8_srv.o: CPPFLAGS+=$(CFLAGS_ARMV8_CRC)
 
