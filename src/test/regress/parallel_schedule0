@@ -1153,6 +1153,8 @@ test: alter_foreign_schema
 test: slow_sql
 # test user@host
 test: user_host_test
+# test notify/listen/unlisten
+test: async
 
 # test for batchcmd insert for IUD
 test: iud_heap_multi_insert

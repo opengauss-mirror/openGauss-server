@@ -299,7 +299,8 @@ static const char* AuditTypeDescs[] = {"unknown",
                                        "ddl_publication_subscription",
                                        "ddl_foreign_data_wrapper",
                                        "ddl_sql_patch",
-                                       "ddl_event"
+                                       "ddl_event",
+                                       "async_notify"
 };
 
 static const int AuditTypeNum = sizeof(AuditTypeDescs) / sizeof(char*);
@@ -1995,6 +1996,9 @@ static bool audit_type_validcheck(AuditType type)
             break;
         case AUDIT_SYSTEM_FUNCTION_EXEC:
             type_status = (unsigned int)u_sess->attr.attr_security.audit_system_function_exec;
+            break;
+        case AUDIT_ASYNC:
+            type_status = (unsigned int)u_sess->attr.attr_security.auditAsyncNotify;
             break;
         case AUDIT_POLICY_EVENT:
         case MASKING_POLICY_EVENT:

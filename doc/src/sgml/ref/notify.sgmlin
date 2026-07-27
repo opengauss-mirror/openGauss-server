@@ -1,0 +1,16 @@
+<refentry id="SQL-NOTIFY">
+<refmeta>
+<refentrytitle>NOTIFY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>NOTIFY</refname>
+<refpurpose>generate a notification</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+NOTIFY channel [ , payload ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

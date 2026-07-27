@@ -9259,7 +9259,7 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
         "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",
-        "no_audit_client", "full_audit_users", "audit_system_function_exec",
+        "no_audit_client", "full_audit_users", "audit_system_function_exec", "audit_async_notify",
         "allow_create_sysobject",
         NULL
     };

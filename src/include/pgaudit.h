@@ -117,7 +117,8 @@ typedef enum {
     AUDIT_DDL_PUBLICATION_SUBSCRIPTION,
     AUDIT_DDL_FOREIGN_DATA_WRAPPER,
     AUDIT_DDL_SQL_PATCH,
-    AUDIT_DDL_EVENT
+    AUDIT_DDL_EVENT,
+    AUDIT_ASYNC
 } AuditType;
 
 /* keep the same sequence with parameter audit_system_object */

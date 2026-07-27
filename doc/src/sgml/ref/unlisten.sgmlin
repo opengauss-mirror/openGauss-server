@@ -1,0 +1,16 @@
+<refentry id="SQL-UNLISTEN">
+<refmeta>
+<refentrytitle>UNLISTEN</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>UNLISTEN</refname>
+<refpurpose>cancel the registration as a listener of certain notification channel(s)</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+UNLISTEN { channel | * };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -180,6 +180,8 @@ cstore_buffers = 512MB         #min 16MB
 
 #shared_preload_libraries = ''   # (change requires restart. if timescaledb is used, add $libdir/timescaledb)
 
+#max_notify_queue_pages = 1048576	# min 64
+
 # - Cost-Based Vacuum Delay -
 
 #vacuum_cost_delay = 0ms		# 0-100 milliseconds
@@ -796,6 +798,7 @@ audit_enabled = on
 #no_audit_client = ""
 #full_audit_users = ""
 #audit_system_function_exec = 0
+#audit_async_notify = 0
 
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal

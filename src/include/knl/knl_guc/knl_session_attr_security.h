@@ -91,6 +91,7 @@ typedef struct knl_session_attr_security {
     char* no_audit_client;
     char* full_audit_users;
     int audit_system_function_exec;
+    int auditAsyncNotify;
     bool enable_risky_query_detection;
 } knl_session_attr_security;
 
