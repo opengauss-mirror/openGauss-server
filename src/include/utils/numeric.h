@@ -202,7 +202,7 @@ extern Datum bin_to_num(PG_FUNCTION_ARGS);
 extern Datum bin_to_num_noparam(PG_FUNCTION_ARGS);
 extern int cmp_numerics(Numeric num1, Numeric num2);
 extern int128 numeric_int16_internal(Numeric num);
-extern char* output_numeric_out(Numeric num);
+extern char* output_numeric_out(Numeric num, bool withoutZero = true);
 extern Datum numeric_scale(PG_FUNCTION_ARGS);
 
 extern Numeric numeric_add_opt_error(Numeric num1, Numeric num2, bool *haveError);
