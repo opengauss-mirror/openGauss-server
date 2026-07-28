@@ -543,7 +543,9 @@ void PgStatCMAThreadStatus()
 {
     StringInfoData callStack;
     initStringInfo(&callStack);
-    for (int i = 0; i < NUM_CMAGENT_PROCS; i++) {
+    /* Get the total number of CMA procs. */
+    int allCMProcNum = pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount);
+    for (int i = 0; i < allCMProcNum; i++) {
         ThreadId pid = g_instance.proc_base->cmAgentAllProcs[i]->pid;
         if (pid != 0) {
             resetStringInfo(&callStack);
