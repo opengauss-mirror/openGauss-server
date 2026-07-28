@@ -1,0 +1,192 @@
+label: 插件参考
+isManual: true
+sections:
+  - label: gms_stats Extension
+    href: ./gms_stats.md
+  - label: gms_output Extension
+    href: ./gms_output.md
+  - label: gms_profiler Extension
+    href: ./gms_profiler.md
+  - label: gms_i18n Extension
+    href: ./gms_i18n.md
+  - label: gms_sql Extension
+    href: ./gms_sql.md
+  - label: gms_tcp Extension
+    href: ./gms_tcp.md
+  - label: gms_compress Extension
+    href: ./gms_compress.md
+  - label: gms_inaddr Extension
+    href: ./gms_inaddr.md
+  - label: gms_utility Extension
+    href: ./gms_utility.md
+  - label: gms_raw Extension
+    href: ./gms_raw.md
+  - label: gms_match Extension
+    href: ./gms_match.md
+  - label: gms_assert Extension
+    href: ./gms_assert.md
+  - label: shark Extension
+    href: ./shark.md
+  - label: shark语法介绍
+    sections:
+      - label: 关键字
+        href: ./shark_keywords.md
+      - label: 数据类型
+        sections:
+          - label: 字符类型
+            href: ./shark_character_types.md
+          - label: sql_variant类型
+            href: ./shark_sql_variant_types.md
+          - label: varbinary类型
+            href: ./shark_varbinary_types.md
+      - label: 函数和操作符
+        sections:
+          - label: 系统信息函数
+            href: ./shark_system_information_functions.md
+          - label: 系统常用函数
+            href: ./shark_system_common_functions.md
+          - label: 操作符
+            href: ./shark_operators.md
+      - label: SQL语法
+        sections:
+          - label: GUC参数说明
+            href: ./shark_guc_parameters.md
+          - label: CREATE INDEX
+            href: ./shark-CREATE-INDEX.md
+          - label: CREATE TABLE
+            href: ./shark-CREATE-TABLE.md
+          - label: ALTER TABLE
+            href: ./shark-ALTER-TABLE.md
+          - label: INSERT
+            href: ./shark-INSERT.md
+          - label: UPDATE
+            href: ./shark-UPDATE.md
+          - label: DELETE
+            href: ./shark-DELETE.md
+          - label: SELECT
+            href: ./shark-SELECT.md
+          - label: SET
+            href: ./shark-SET.md
+          - label: EXEC
+            href: ./shark-EXEC.md
+          - label: DBCC CHECKIDENT
+            href: ./shark-DBCC-CHECKIDENT.md
+          - label: IDENTITY
+            href: ./shark_constraints.md                        
+          - label: MERGE INTO
+            href: ./shark-MERGE-INTO.md        
+          - label: TRY CATCH
+            href: ./shark-trycatch.md 
+          - label: CREATE PROC
+            href: ./shark-CREATE-PROC.md          
+          - label: ALTER PROC
+            href: ./shark-ALTER-PROC.md    
+          - label: DROP PROC
+            href: ./shark-DROP-PROC.md      
+          - label: USE DB_NAME
+            href: ./shark-USE-DB_NAME.md  
+          - label: DROP TRIGGER
+            href: ./shark-DROP-TRIGGER.md 
+          - label: XACT_ABORT
+            href: ./shark_xact_abort.md                    
+          - label: ALIAS
+            href: ./shark_ALIAS.md
+      - label: 事务
+        sections:
+          - label: 管理事务
+            href: ./shark_managing_transactions.md
+      - label: 不支持语法
+        href: ./shark_unsupported_syntax.md
+      - label: 存储过程
+        sections:
+          - label: 基本语句
+            href: ./shark_stored_procedure_sqlreference.md
+      - label: 系统视图
+        sections:
+          - label: ALL_COLUMNS
+            href: ./shark-ALL_COLUMNS.md
+          - label: ALL_OBJECTS
+            href: ./shark-ALL_OBJECTS.md
+          - label: COLUMNS
+            href: ./shark-COLUMNS.md
+          - label: IDENTITY_COLUMNS
+            href: ./shark-IDENTITY_COLUMNS.md
+          - label: DATABASES
+            href: ./shark-DATABASES.md
+          - label: INDEXS
+            href: ./shark-INDEXS.md
+          - label: INFORMATION_SCHEMA_TSQL.CHECK_CONSTRAINTS
+            href: ./shark-INFORMATION_SCHEMA_TSQL.CHECK_CONSTRAINTS.md
+          - label: INFORMATION_SCHEMA_TSQL.COLUMNS
+            href: ./shark-INFORMATION_SCHEMA_TSQL.COLUMNS.md
+          - label: INFORMATION_SCHEMA_TSQL.TABLES
+            href: ./shark-INFORMATION_SCHEMA_TSQL.TABLES.md
+          - label: INFORMATION_SCHEMA_TSQL.VIEWS
+            href: ./shark-INFORMATION_SCHEMA_TSQL.VIEWS.md
+          - label: OBJECTS
+            href: ./shark-OBJECTS.md
+          - label: PROCEDURES
+            href: ./shark-PROCEDURES.md
+          - label: SCHEMAS
+            href: ./shark-SCHEMAS.md
+          - label: SERVER_PRINCIPALS
+            href: ./shark-SERVER_PRINCIPALS.md
+          - label: SYSDATABASES
+            href: ./shark-SYSDATABASES.md
+          - label: SYSCOLUMNS
+            href: ./shark-SYSCOLUMNS.md
+          - label: SYSINDEXES
+            href: ./shark-SYSINDEXES.md
+          - label: SYSINDEXKEYS
+            href: ./shark-SYSINDEXKEYS.md
+          - label: SYSOBJECTS
+            href: ./shark-SYSOBJECTS.md
+          - label: SYSUSERS
+            href: ./shark-SYSUSERS.md
+          - label: TABLES
+            href: ./shark-TABLES.md
+          - label: VIEWS
+            href: ./shark-VIEWS.md
+          - label: DATABASE_PRINCIPALS
+            href: ./shark-DATABASE_PRINCIPALS.md
+          - label: FOREIGN_KEY_COLUMNS
+            href: ./shark-FOREIGN_KEY_COLUMNS.md
+          - label: FOREIGN_KEYS
+            href: ./shark-FOREIGN_KEYS.md
+          - label: SYSFOREIGNKEYS
+            href: ./shark-SYSFOREIGNKEYS.md
+          - label: KEY_CONSTRAINTS
+            href: ./shark-KEY_CONSTRAINTS.md
+          - label: CHECK_CONSTRAINTS
+            href: ./shark-CHECK_CONSTRAINTS.md
+          - label: INDEX_COLUMNS
+            href: ./shark-INDEX_COLUMNS.md
+          - label: SYSPROCESSES
+            href: ./shark-SYSPROCESSES.md
+          - label: SYNONYMS
+            href: ./shark-SYNONYMS.md
+          - label: SYSTEM_OBJECTS
+            href: ./shark-SYSTEM_OBJECTS.md
+          - label: ALL_VIEWS
+            href: ./shark-ALL_VIEWS.md
+          - label: SEQUENCES
+            href: ./shark-SEQUENCES.md
+          - label: TRIGGERS
+            href: ./shark-TRIGGERS.md
+          - label: TRIGGERS_EVENTS
+            href: ./shark-TRIGGERS_EVENTS.md
+          - label: CONFIGURATIONS
+            href: ./shark-CONFIGURATIONS.md
+          - label: SYSCURCONFIGS
+            href: ./shark-SYSCURCONFIGS.md
+          - label: SYSCONFIGURES
+            href: ./shark-SYSCONFIGURES.md
+  - label: gms_lob Extension
+    href: ./gms_lob.md
+  - label: gms_debug Extension
+    href: ./gms_debug.md
+  - label: gms_xmlparser Extension
+    href: ./gms_xmlparser.md
+  - label: wal2json Extension
+    href: ./wal2json.md
+  
