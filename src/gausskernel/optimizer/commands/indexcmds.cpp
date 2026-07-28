@@ -19,6 +19,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/cstore_delta.h"
+#include "access/datavec/bm25.h"
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
@@ -1396,6 +1397,22 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             "deduplication",
             (Node *)makeString(pstrdup("on")));
         stmt->options = lappend(stmt->options, dedupDef);
+    }
+
+    if (strcmp(accessMethodName, "bm25") == 0) {
+        bool hasDictPath = false;
+        foreach (cell, stmt->options) {
+            DefElem* defElem = (DefElem*)lfirst(cell);
+            if (pg_strcasecmp(defElem->defname, "dict_path") == 0) {
+                hasDictPath = true;
+                break;
+            }
+        }
+        if (!hasDictPath) {
+            DefElem* dictPathDef =
+                makeDefElem("dict_path", (Node*)makeString(pstrdup(DEFAULT_TOKENIZER_CACHE_KEY)));
+            stmt->options = lappend(stmt->options, dictPathDef);
+        }
     }
 
     /*

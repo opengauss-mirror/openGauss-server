@@ -1,43 +1,32 @@
 -- BM25 VarBlock: stress bm25vacuum.cpp (bulkdelete + varblock chain rebuild + multi-wave VACUUM)
 SET client_min_messages = error;
-
 DROP TABLE IF EXISTS bm25_vacuum_stress;
-
 CREATE TABLE bm25_vacuum_stress (
     id int PRIMARY KEY,
     content text
 );
-
 CREATE INDEX bm25_vacuum_stress_idx ON bm25_vacuum_stress USING bm25(content);
-
 -- Long posting chains for one token (VarBlock vacuum path).
 INSERT INTO bm25_vacuum_stress(id, content)
 SELECT g, 'vacuum_token_mass'::text
 FROM generate_series(1, 400) g;
-
 INSERT INTO bm25_vacuum_stress(id, content)
 SELECT g, ('other' || g)::text
 FROM generate_series(401, 900) g;
-
 -- Wave 1: remove a slice from the dense token chain + vacuum inverted lists.
 DELETE FROM bm25_vacuum_stress WHERE id BETWEEN 50 AND 200;
 VACUUM bm25_vacuum_stress;
-
 -- Wave 2: cross-batch deletes (hits token meta scan + posting cleanup).
 DELETE FROM bm25_vacuum_stress WHERE id BETWEEN 400 AND 550;
 VACUUM bm25_vacuum_stress;
-
 -- Many tokens per row (doc forward may span pages; FindDocumetTokens / forward cleanup).
 INSERT INTO bm25_vacuum_stress(id, content)
 SELECT g, repeat('tok' || (g % 10) || ' ', 80)
 FROM generate_series(901, 950) g;
-
 DELETE FROM bm25_vacuum_stress WHERE id BETWEEN 901 AND 920;
 VACUUM bm25_vacuum_stress;
-
 -- No-op vacuum: still runs bm25vacuumcleanup_internal (FSM + NULL stats path when no index work).
 VACUUM bm25_vacuum_stress;
-
 SELECT COUNT(*) FROM bm25_vacuum_stress;
  count 
 -------
@@ -45,26 +34,20 @@ SELECT COUNT(*) FROM bm25_vacuum_stress;
 (1 row)
 
 DROP TABLE bm25_vacuum_stress;
-
 -- Wide heap + mass delete: openGauss may bypass index vacuum when dead-item pages are < 2% of rel_pages
 -- (see bypass_lazy_vacuum_index). Fat rows expand rel_pages; deleting half the key range spreads LP_DEAD
 -- across many pages so lazy_vacuum_index runs and BM25 ambulkdelete / VarBlock vacuum paths execute.
 DROP TABLE IF EXISTS bm25_vacuum_wide;
-
 CREATE TABLE bm25_vacuum_wide (
     id int PRIMARY KEY,
     content text
 );
-
 INSERT INTO bm25_vacuum_wide(id, content)
 SELECT g, ('tok' || (g % 23) || repeat('x', 1800))::text
 FROM generate_series(1, 12000) g;
-
 CREATE INDEX bm25_vacuum_wide_idx ON bm25_vacuum_wide USING bm25(content);
-
 DELETE FROM bm25_vacuum_wide WHERE id <= 6000;
 VACUUM bm25_vacuum_wide;
-
 SELECT COUNT(*) FROM bm25_vacuum_wide;
  count 
 -------
