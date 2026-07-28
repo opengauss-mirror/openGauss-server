@@ -52,6 +52,44 @@ static const Bm25DictFileSpec BM25_DICT_FILES[] = {
 };
 #define BM25_DICT_FILE_COUNT (sizeof(BM25_DICT_FILES) / sizeof(BM25_DICT_FILES[0]))
 
+const char* const DEFAULT_TOKENIZER_CACHE_KEY = "DEFAULT";
+
+char* Bm25GetDefaultDictBasePath(void)
+{
+    char* gausshome = gs_getenv_r("GAUSSHOME");
+    if (gausshome == NULL || gausshome[0] == '\0') {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("GAUSSHOME is not set, cannot determine default BM25 dict_path")));
+    }
+    if (!is_absolute_path(gausshome)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("GAUSSHOME must be an absolute path to determine default BM25 dict_path")));
+    }
+
+    char resolvedGausshome[PATH_MAX + 1] = {0};
+    const char* baseDir = gausshome;
+    if (realpath(gausshome, resolvedGausshome) != NULL) {
+        baseDir = resolvedGausshome;
+    }
+
+    char basePath[MAXPGPATH] = {0};
+    int ret = snprintf_s(basePath, sizeof(basePath), sizeof(basePath) - 1, "%s/lib/jieba_dict", baseDir);
+    if (ret < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("failed to form default BM25 dict_path from GAUSSHOME")));
+    }
+
+    char resolved[PATH_MAX + 1] = {0};
+    if (realpath(basePath, resolved) != NULL) {
+        if (strlen(resolved) >= MAXPGPATH) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("default BM25 dict_path exceeds maximum length")));
+        }
+        return pstrdup(resolved);
+    }
+    return pstrdup(basePath);
+}
+
 static bool Bm25DictFileHasContent(const char* filepath, const char* fileName)
 {
     unsigned char buffer[8192];
@@ -353,23 +391,8 @@ Datum bm25options(PG_FUNCTION_ARGS)
     relopt_value *options;
     int numoptions;
     Bm25Options *rdopts;
-    int i;
 
     options = parseRelOptions(reloptions, validate, RELOPT_KIND_BM25, &numoptions);
-    /* Validate dict_path and replace with resolved path before fillRelOptions */
-    if (validate && options != NULL) {
-        for (i = 0; i < numoptions; i++) {
-            if (options[i].gen != NULL && strcmp(options[i].gen->name, "dict_path") == 0 &&
-                options[i].isset && options[i].values.string_val != NULL &&
-                options[i].values.string_val[0] != '\0') {
-                char *resolved = Bm25ValidateDictPath(options[i].values.string_val);
-                pfree(options[i].values.string_val);
-                options[i].values.string_val = resolved;
-                break;
-            }
-        }
-    }
-
     rdopts = (Bm25Options *)allocateReloptStruct(sizeof(Bm25Options), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(Bm25Options), options, numoptions, validate, tab, lengthof(tab));
 

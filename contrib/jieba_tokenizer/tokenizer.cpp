@@ -14,8 +14,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
-#include <thread>
-#include <mutex>
+#include <pthread.h>
 #include <unordered_map>
 #include <cerrno>
 #include <securec.h>
@@ -26,11 +25,9 @@
 
 /* Implemented in gausskernel/storage/access/datavec/bm25.cpp; do not include bm25.h here
  * (it pulls heavy headers such as plpython.h and breaks contrib_jiebatokenizer build). */
+extern char* Bm25GetDefaultDictBasePath(void);
 extern char* Bm25ValidateDictPath(const char* dictPath);
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
+extern const char* const DEFAULT_TOKENIZER_CACHE_KEY;
 
 const size_t MAX_LENGTH_CRC = 100;
 const size_t MAX_KEYWORD_NUM = 100000;
@@ -45,9 +42,8 @@ const char* const STOP_WORD_PATH = "lib/jieba_dict/stop_words.utf8";
 static const char* const DICT_FILES[] = {
     "jieba.dict.utf8", "hmm_model.utf8", "user.dict.utf8", "idf.utf8", "stop_words.utf8"
 };
-
 static std::unordered_map<std::string, std::unique_ptr<cppjieba::Jieba>> g_tokenizerCache;
-static std::mutex g_tokenizerMutex;
+static pthread_rwlock_t g_tokenizerMutex = PTHREAD_RWLOCK_INITIALIZER;
 
 inline static bool IsWhitespace(const std::string& str)
 {
@@ -114,69 +110,64 @@ static cppjieba::Jieba* CreateJiebaFromBaseDir(const std::string& baseDir)
     return new cppjieba::Jieba(dictPath, hmmPath, userDictPath, idfPath, stopWordPath);
 }
 
-/* Get default dict base path (GAUSSHOME/lib/jieba_dict), resolved. Returns empty on failure. */
-static std::string GetDefaultDictBasePath()
-{
-    char* installPath = getenv("GAUSSHOME");
-    if (installPath == nullptr) {
-        return "";
-    }
-    char path[PATH_MAX + 1] = {0};
-    const char* baseDir = installPath;
-    if (realpath(installPath, path) != nullptr) {
-        baseDir = path;
-    }
-    char basePath[PATH_MAX + 1] = {0};
-    int ret = snprintf_s(basePath, PATH_MAX + 1, PATH_MAX, "%s/lib/jieba_dict", baseDir);
-    if (ret < 0) {
-        return "";
-    }
-    char resolved[PATH_MAX + 1] = {0};
-    if (realpath(basePath, resolved) == nullptr) {
-        return std::string(basePath);  /* fallback to unresolved if realpath fails */
-    }
-    return std::string(resolved);
-}
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void* GetOrCreateTokenizer(const char* dictBasePath)
 {
-    std::string cacheKey;
-    if (dictBasePath == nullptr || dictBasePath[0] == '\0') {
-        cacheKey = GetDefaultDictBasePath();
-        if (cacheKey.empty()) {
-            return nullptr;
+    bool useDefaultPath = dictBasePath == nullptr || dictBasePath[0] == '\0' ||
+        pg_strcasecmp(dictBasePath, DEFAULT_TOKENIZER_CACHE_KEY) == 0;
+    const char* cacheKey = useDefaultPath ? DEFAULT_TOKENIZER_CACHE_KEY : dictBasePath;
+    cppjieba::Jieba* tokenizer = nullptr;
+
+    (void)pthread_rwlock_rdlock(&g_tokenizerMutex);
+    try {
+        auto it = g_tokenizerCache.find(cacheKey);
+        if (it != g_tokenizerCache.end()) {
+            tokenizer = it->second.get();
         }
-    } else {
-        cacheKey = dictBasePath;
+    } catch (...) {
+        (void)pthread_rwlock_unlock(&g_tokenizerMutex);
+        return nullptr;
+    }
+    (void)pthread_rwlock_unlock(&g_tokenizerMutex);
+    if (tokenizer != nullptr) {
+        return static_cast<void*>(tokenizer);
     }
 
-    char* resolvedBaseDir = Bm25ValidateDictPath(cacheKey.c_str());
+    char* resolvedBaseDir = nullptr;
+    if (useDefaultPath) {
+        char* defaultBaseDir = Bm25GetDefaultDictBasePath();
+        resolvedBaseDir = Bm25ValidateDictPath(defaultBaseDir);
+        if (defaultBaseDir != nullptr) {
+            pfree(defaultBaseDir);
+        }
+    } else {
+        resolvedBaseDir = Bm25ValidateDictPath(dictBasePath);
+    }
     if (resolvedBaseDir == nullptr) {
         return nullptr;
     }
-    cacheKey = resolvedBaseDir;
-    pfree(resolvedBaseDir);
 
-    std::lock_guard<std::mutex> lock(g_tokenizerMutex);
-    auto it = g_tokenizerCache.find(cacheKey);
-    if (it != g_tokenizerCache.end()) {
-        return it->second.get();
-    }
-    cppjieba::Jieba* jieba = nullptr;
+    (void)pthread_rwlock_wrlock(&g_tokenizerMutex);
     try {
-        jieba = CreateJiebaFromBaseDir(cacheKey);
+        auto it = g_tokenizerCache.find(cacheKey);
+        if (it != g_tokenizerCache.end()) {
+            tokenizer = it->second.get();
+        } else {
+            std::unique_ptr<cppjieba::Jieba> jieba(CreateJiebaFromBaseDir(resolvedBaseDir));
+            if (jieba != nullptr) {
+                auto result = g_tokenizerCache.emplace(cacheKey, std::move(jieba));
+                tokenizer = result.first->second.get();
+            }
+        }
     } catch (...) {
-        return nullptr;
+        tokenizer = nullptr;
     }
-    if (jieba == nullptr) {
-        return nullptr;
-    }
-    g_tokenizerCache[cacheKey].reset(jieba);
-    return static_cast<void*>(jieba);
+    (void)pthread_rwlock_unlock(&g_tokenizerMutex);
+    pfree(resolvedBaseDir);
+    return static_cast<void*>(tokenizer);
 }
 
 bool CreateTokenizer()
@@ -186,8 +177,9 @@ bool CreateTokenizer()
 
 void DestroyTokenizer()
 {
-    std::lock_guard<std::mutex> lock(g_tokenizerMutex);
+    (void)pthread_rwlock_wrlock(&g_tokenizerMutex);
     g_tokenizerCache.clear();
+    (void)pthread_rwlock_unlock(&g_tokenizerMutex);
 }
 
 bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, bool isKeywordExtractor,

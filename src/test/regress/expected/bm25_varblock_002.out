@@ -1,6 +1,3 @@
-[Warning]: The "libpq.so" loaded mismatch the version of gsql, please check it.
-expected: (openGauss 7.0.0-RC3 build 4a9ddb17) compiled at 2026-04-02 17:19:03 commit 0 last mr 9099 debug
-result: (openGauss 7.0.0-RC3 build 9059335a) compiled at 2026-04-02 19:32:57 commit 0 last mr 9099 debug
 -- BM25 VarBlock: heap-first build (building=true) + update/vacuum/reindex + bulk delete
 -- (Merged old 004/006; parallel_workers omitted here so ORDER BY <&> ties stay stable in regression.)
 SET client_min_messages = error;
@@ -64,5 +61,3 @@ COPY (SELECT /*+ indexscan(bm25_varblock_002 bm25_varblock_002_bm25_idx) */ id
 1204
 1205
 DROP TABLE bm25_varblock_002;
-libgcov profiling error:/home/w00888124/openGauss-server/src/common/interfaces/libpq/../../../..//src/gausskernel/storage/dss/fio_dss.gcda:overwriting an existing profile data with a different timestamp
-libgcov profiling error:/home/w00888124/openGauss-server/src/common/interfaces/libpq/../../../..//src/gausskernel/storage/dss/fio_dss.gcda:overwriting an existing profile data with a different timestamp
