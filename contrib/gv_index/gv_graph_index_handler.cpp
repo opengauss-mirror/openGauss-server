@@ -74,7 +74,7 @@ static void validate_and_adjust_graph_options(Relation index, GraphOptions *opts
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("column does not have dimensions")));
     }
-    static constexpr int MAX_DIMENSION = 1024;
+    static constexpr int MAX_DIMENSION = 4096;
     if (dim > MAX_DIMENSION) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("vector_dimension %d exceeds maxmium allowed %d", dim, MAX_DIMENSION)));
