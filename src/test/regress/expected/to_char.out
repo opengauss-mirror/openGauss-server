@@ -787,11 +787,12 @@ then 'ok' else 'failed' end as fast_path_a_hide_tail_special_edges;
 (1 row)
 
 reset behavior_compat_options;
--- 非 A_FORMAT 兼容库验证：B/C/PG 库下溢出应走非 A 固定模板。
+-- 非 A_FORMAT 兼容库验证：B/C/PG/D 库下溢出应走非 A 固定模板。
 -- 用例执行后切回 regression 并删除临时库。
 CREATE DATABASE to_char_fast_b DBCOMPATIBILITY 'B';
 CREATE DATABASE to_char_fast_c DBCOMPATIBILITY 'C';
 CREATE DATABASE to_char_fast_pg DBCOMPATIBILITY 'PG';
+CREATE DATABASE to_char_fast_d DBCOMPATIBILITY 'D';
 \c to_char_fast_b
 reset behavior_compat_options;
 select case when
@@ -1149,7 +1150,127 @@ then 'ok' else 'failed' end as to_char_fast_pg_special_edges;
  ok
 (1 row)
 
+\c to_char_fast_d
+reset behavior_compat_options;
+select case when
+    btrim(to_char(123.45::numeric, '999,999.99')) = '123.45' and
+    btrim(to_char(99999.999::numeric, '999,999.99')) = '100,000.00' and
+    btrim(to_char(123456::numeric, '999,999.99')) = '123,456.00' and
+    btrim(to_char(123456.1::numeric, '999,999.99')) = '123,456.10' and
+    btrim(to_char(123456.12::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.123::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.1234::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.12345::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.123456::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.1234567::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.12345678::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.123456789::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.12345678901234567890::numeric, '999,999.99')) = '123,456.12' and
+    btrim(to_char(123456.125000000::numeric, '999,999.99')) = '123,456.13' and
+    btrim(to_char(-123456.125000000::numeric, '999,999.99')) = '-123,456.13' and
+    btrim(to_char(123456789.123456789::numeric, '999,999,999.99')) = '123,456,789.12' and
+    btrim(to_char(-123456789.125000000::numeric, '999,999,999.99')) = '-123,456,789.13' and
+    to_char(999999.999::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-999999.999::numeric, '999,999.99') = '-###,###.##' and
+    to_char(1000000.00::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-1000000.00::numeric, '999,999.99') = '-###,###.##' and
+    to_char(999999999.999::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    to_char(-999999999.999::numeric, '999,999,999.99') = '-###,###,###.##' and
+    to_char(99999999999999999.999::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-99999999999999999.999::numeric, '999,999.99') = '-###,###.##' and
+    to_char(99999999999999999.999::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    to_char(-99999999999999999.999::numeric, '999,999,999.99') = '-###,###,###.##'
+then 'ok' else 'failed' end as to_char_fast_d_default;
+ to_char_fast_d_default 
+------------------------
+ ok
+(1 row)
+
+set behavior_compat_options='display_leading_zero,hide_tailing_zero';
+select case when
+    btrim(to_char(0.12::numeric, '999,999.99')) = '.12' and
+    btrim(to_char(0.90::numeric, '999,999.99')) = '.9' and
+    to_char(0::numeric, '999,999.99') = '0' and
+    btrim(to_char(10.10::numeric, '999,999.99')) = '10.1' and
+    to_char(999999.999::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-999999.999::numeric, '999,999.99') = '-###,###.##' and
+    to_char(99999999999999999.999::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-99999999999999999.999::numeric, '999,999.99') = '-###,###.##' and
+    to_char(99999999999999999.999::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    to_char(-99999999999999999.999::numeric, '999,999,999.99') = '-###,###,###.##'
+then 'ok' else 'failed' end as to_char_fast_d_options;
+ to_char_fast_d_options 
+------------------------
+ ok
+(1 row)
+
+set behavior_compat_options='display_leading_zero';
+select case when
+    btrim(to_char(0.12::numeric, '999,999.99')) = '.12' and
+    btrim(to_char(-0.12::numeric, '999,999.99')) = '-.12' and
+    btrim(to_char(999999.994::numeric, '999,999.99')) = '999,999.99' and
+    btrim(to_char(-999999.994::numeric, '999,999.99')) = '-999,999.99' and
+    to_char(999999.995::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-999999.995::numeric, '999,999.99') = '-###,###.##' and
+    btrim(to_char(100000000.1251::numeric, '999,999,999.99')) = '100,000,000.13' and
+    btrim(to_char(-100000000.1251::numeric, '999,999,999.99')) = '-100,000,000.13' and
+    to_char(999999999.995::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    to_char(-999999999.995::numeric, '999,999,999.99') = '-###,###,###.##'
+then 'ok' else 'failed' end as to_char_fast_d_display_leading_zero;
+ to_char_fast_d_display_leading_zero 
+-------------------------------------
+ ok
+(1 row)
+
+set behavior_compat_options='hide_tailing_zero';
+select case when
+    to_char(-0.0049::numeric, '999,999.99') = '0' and
+    btrim(to_char(-0.0050::numeric, '999,999.99')) = '-.01' and
+    btrim(to_char(0.9950::numeric, '999,999.99')) = '1' and
+    btrim(to_char(0.90::numeric, '999,999.99')) = '.9' and
+    btrim(to_char(-0.90::numeric, '999,999.99')) = '-.9' and
+    btrim(to_char(10.10::numeric, '999,999.99')) = '10.1' and
+    btrim(to_char(-10.10::numeric, '999,999.99')) = '-10.1' and
+    btrim(to_char(100000.00::numeric, '999,999.99')) = '100,000' and
+    btrim(to_char(-100000.00::numeric, '999,999.99')) = '-100,000' and
+    to_char(999999.999::numeric, '999,999.99') = ' ###,###.##' and
+    to_char(-999999.999::numeric, '999,999.99') = '-###,###.##' and
+    btrim(to_char(100000000.00::numeric, '999,999,999.99')) = '100,000,000' and
+    btrim(to_char(-100000000.00::numeric, '999,999,999.99')) = '-100,000,000' and
+    to_char(10000000000.00::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    to_char(-10000000000.00::numeric, '999,999,999.99') = '-###,###,###.##'
+then 'ok' else 'failed' end as to_char_fast_d_hide_tailing_zero;
+ to_char_fast_d_hide_tailing_zero 
+----------------------------------
+ ok
+(1 row)
+
+reset behavior_compat_options;
+select case when
+    to_char('NaN'::numeric, '999,999.99') is not null and
+    to_char('NaN'::numeric, '999,999,999.99') is not null and
+    to_char(cast('9223372036854775807' as number(20,0)), '999,999.99') = ' ###,###.##' and
+    to_char(cast('-9223372036854775808' as number(20,0)), '999,999.99') = '-###,###.##' and
+    to_char(cast('9223372036854775807' as number(20,0)), '999,999,999.99') = ' ###,###,###.##' and
+    to_char(cast('-9223372036854775808' as number(20,0)), '999,999,999.99') = '-###,###,###.##' and
+    to_char(-0.0049::numeric, '999,999.99') = '        .00' and
+    btrim(to_char(-0.0050::numeric, '999,999.99')) = '-.01' and
+    btrim(to_char(999999.9949::numeric, '999,999.99')) = '999,999.99' and
+    to_char(999999.9950::numeric, '999,999.99') = ' ###,###.##' and
+    btrim(to_char(-999999.9949::numeric, '999,999.99')) = '-999,999.99' and
+    to_char(-999999.9950::numeric, '999,999.99') = '-###,###.##' and
+    btrim(to_char(999999999.9949::numeric, '999,999,999.99')) = '999,999,999.99' and
+    to_char(999999999.9950::numeric, '999,999,999.99') = ' ###,###,###.##' and
+    btrim(to_char(-999999999.9949::numeric, '999,999,999.99')) = '-999,999,999.99' and
+    to_char(-999999999.9950::numeric, '999,999,999.99') = '-###,###,###.##'
+then 'ok' else 'failed' end as to_char_fast_d_special_edges;
+ to_char_fast_d_special_edges 
+------------------------------
+ ok
+(1 row)
+
 \c postgres
 DROP DATABASE to_char_fast_b;
 DROP DATABASE to_char_fast_c;
 DROP DATABASE to_char_fast_pg;
+DROP DATABASE to_char_fast_d;
