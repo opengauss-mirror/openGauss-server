@@ -108,6 +108,7 @@ typedef struct RangeVar {
     bool withVerExpr;
     List* partitionNameList; /* for FROM table PARTITION (p1, subp2, ...) clause */
     List* indexhints;        /* a list of b mode index hint indexHintDefinition members */
+    bool dummyTable;
 } RangeVar;
 
 /*

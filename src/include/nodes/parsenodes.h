@@ -370,6 +370,11 @@ typedef struct RangeTblEntry {
     char locator_type;      /*      keep subplan/cte's locator type */
 
     /*
+     * Fields valid for dummy table, like dual
+     */
+    bool dummyTable;
+
+    /*
      * Fields valid in all RTEs:
      */
     Alias* alias; /* user-written alias clause, if any */
