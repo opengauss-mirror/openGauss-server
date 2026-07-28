@@ -55,6 +55,7 @@
 /* USE_UB_TXN_CACHE - BEGIN */
 #include "access/ubmem_buf.h"
 #include "access/ub_sigbus_handler.h"
+#include "ddes/dms/ss_common_attr.h"
 /* USE_UB_TXN_CACHE - END */
 /*
  * Defines for CSNLOG page sizes.  A page is the same BLCKSZ as is used
@@ -972,6 +973,7 @@ bool UBGetCSNFromPrimary(TransactionId xid, uint64 *csn)
 
     uint32 slot_idx = (uint32)UBCSNLogCalSlotIndex(xid);
     uint64 expected_timeline = (uint64)UBCSNLogExpectedTimeline(xid);
+    uint64 start_time = SSGetTransactionSyncStartTime();
     __uint128_t slot_val = 0;
     int ub_fault_rc = sigsetjmp(jump_env, 1);
     if (ub_fault_rc == 0) {
@@ -982,10 +984,12 @@ bool UBGetCSNFromPrimary(TransactionId xid, uint64 *csn)
     } else {
         ub_sigbus_jump_active = 0;
         g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CSNLOG_UB, start_time);
         ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBGetCSNFromPrimary, xid=%lu, slot_idx=%u",
                                   (unsigned long)xid, slot_idx)));
         return false;
     }
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CSNLOG_UB, start_time);
 
     uint64 timelineid = UBCSNLogUnpackTimelineId(slot_val);
     uint64 csn_val = UBCSNLogUnpackCSN(slot_val);

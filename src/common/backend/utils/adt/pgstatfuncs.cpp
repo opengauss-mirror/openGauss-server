@@ -37,6 +37,7 @@
 #include "commands/user.h"
 #include "commands/vacuum.h"
 #include "commands/verify.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "funcapi.h"
 #include "gaussdb_version.h"
 #include "libpq/ip.h"
@@ -253,6 +254,7 @@ extern Datum pv_instance_time(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS);
 extern Datum get_local_rel_iostat(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS);
+extern Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS);
 extern Datum pv_session_stat(PG_FUNCTION_ARGS);
 extern Datum pv_session_memory(PG_FUNCTION_ARGS);
 
@@ -9283,6 +9285,90 @@ Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS)
         /* nothing left */
         SRF_RETURN_DONE(funcctx);
     }
+}
+
+typedef struct TransactionSyncStatusFuncCtx {
+    SsTxnSyncStatusT status[SS_TXN_SYNC_STATUS_TYPE_COUNT];
+    uint32 next_idx;
+} TransactionSyncStatusFuncCtx;
+
+static const char *const g_txnSyncMessageType[SS_TXN_SYNC_STATUS_TYPE_COUNT] = {
+    "clog",
+    "csnlog",
+    "snapshot_one",
+    "snapshot_total",
+    "clog",
+    "csnlog",
+    "snapshot_one",
+    "snapshot_total"
+};
+
+static const char *const g_txnSyncTransferType[SS_TXN_SYNC_STATUS_TYPE_COUNT] = {
+    "dms",
+    "dms",
+    "dms",
+    "dms",
+    "ub",
+    "ub",
+    "ub",
+    "ub"
+};
+
+Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS)
+{
+    FuncCallContext *funcctx = NULL;
+    TransactionSyncStatusFuncCtx *statusCtx = NULL;
+
+    if (SRF_IS_FIRSTCALL()) {
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
+
+        funcctx = SRF_FIRSTCALL_INIT();
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(5, false);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "message_type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "transfer_type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "times", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "total_cost", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "average_cost", INT8OID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = SS_TXN_SYNC_STATUS_TYPE_COUNT;
+        statusCtx = (TransactionSyncStatusFuncCtx *)palloc0(sizeof(TransactionSyncStatusFuncCtx));
+        SSGetTransactionSyncStatus(statusCtx->status, SS_TXN_SYNC_STATUS_TYPE_COUNT);
+        funcctx->user_fctx = (void *)statusCtx;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    statusCtx = (TransactionSyncStatusFuncCtx *)funcctx->user_fctx;
+
+    while (statusCtx->next_idx < SS_TXN_SYNC_STATUS_TYPE_COUNT) {
+        uint32 idx = statusCtx->next_idx++;
+        SsTxnSyncStatusT *status = &statusCtx->status[idx];
+
+        if (status->times == 0) {
+            continue;
+        }
+
+        Datum values[5];
+        bool nulls[5] = {false};
+        HeapTuple tuple = NULL;
+
+        values[0] = CStringGetTextDatum(g_txnSyncMessageType[idx]);
+        values[1] = CStringGetTextDatum(g_txnSyncTransferType[idx]);
+        values[2] = Int64GetDatum((int64)status->times);
+        values[3] = Int64GetDatum((int64)status->total_cost);
+        values[4] = Int64GetDatum((int64)(status->total_cost / status->times));
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    pfree_ext(statusCtx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 const char* SessionStatisticsTypeName[N_TOTAL_SESSION_STATISTICS_TYPES] = {"n_commit",

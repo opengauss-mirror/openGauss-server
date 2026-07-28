@@ -252,6 +252,23 @@ typedef enum SSOndemandRequestRedoStatus {
     ONDEMAND_REDO_TIMEOUT
 } SSOndemandRequestRedoStatus;
 
+typedef enum SsTxnSyncStatusTypeT {
+    SS_TXN_SYNC_CLOG_DMS = 0,
+    SS_TXN_SYNC_CSNLOG_DMS,
+    SS_TXN_SYNC_SNAPSHOT_ONE_DMS,
+    SS_TXN_SYNC_SNAPSHOT_TOTAL_DMS,
+    SS_TXN_SYNC_CLOG_UB,
+    SS_TXN_SYNC_CSNLOG_UB,
+    SS_TXN_SYNC_SNAPSHOT_ONE_UB,
+    SS_TXN_SYNC_SNAPSHOT_TOTAL_UB,
+    SS_TXN_SYNC_STATUS_TYPE_COUNT
+} SsTxnSyncStatusTypeT;
+
+typedef struct SsTxnSyncStatusT {
+    uint64 times;
+    uint64 total_cost;
+} SsTxnSyncStatusT;
+
 /* consider DFX stats reset were node role to change */
 typedef struct ss_dfx_stats_t {
     uint64 txnstatus_varcache_gets;
@@ -261,6 +278,12 @@ typedef struct ss_dfx_stats_t {
     uint64 txnstatus_total_hcgets_time;
     uint64 txnstatus_total_evictions;
     uint64 txnstatus_total_eviction_refcnt;
+    SsTxnSyncStatusT txn_sync_status[SS_TXN_SYNC_STATUS_TYPE_COUNT];
 } ss_dfx_stats_t;
+
+extern uint64 SSGetTransactionSyncStartTime(void);
+extern void SSRecordTransactionSyncStatusByStart(SsTxnSyncStatusTypeT type, uint64 start_time);
+extern void SSResetTransactionSyncStatus(void);
+extern void SSGetTransactionSyncStatus(SsTxnSyncStatusT *status, uint32 count);
 
 #endif

@@ -66,6 +66,7 @@
 
 extern bool BtRootbufCacheBeginRevoke(const BufferTag *tag);
 extern void BtRootbufCacheEndRevoke(const BufferTag *tag);
+extern void CalculateLocalLatestSnapshot(bool forceCalc);
 
 XLogRecPtr lastLsn = InvalidXLogRecPtr;
 long long lastDynLogTime = 0;
@@ -2353,6 +2354,12 @@ static int CBReformDoneNotify(void *db_handle)
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = false;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
+
+    if (ENABLE_UB && SS_PRIMARY_MODE) {
+        LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+        CalculateLocalLatestSnapshot(true);
+        LWLockRelease(ProcArrayLock);
+    }
 
     ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "

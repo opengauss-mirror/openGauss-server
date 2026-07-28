@@ -60,6 +60,7 @@
 #include "commands/dbcommands.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "funcapi.h"
 #include "instruments/instr_statement.h"
 #include "job/job_scheduler.h"
@@ -535,6 +536,7 @@ void logging_module_guc_assign(const char* newval, void* extra);
 /* Inplace Upgrade GUC hooks */
 static bool check_is_upgrade(bool* newval, void** extra, GucSource source);
 static void assign_is_inplace_upgrade(const bool newval, void* extra);
+static void AssignEnableUbSyncRecord(bool newval, void* extra);
 bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
 
 /* SQL DFx Options : Support different sql dfx option */
@@ -2139,6 +2141,19 @@ static void InitConfigureNamesBool()
             false,
             NULL,
             NULL,
+            NULL
+        },
+        {{"enable_ub_sync_record",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            STATS_COLLECTOR,
+            gettext_noop("Enable recording UB and DMS transaction sync latency."),
+            NULL
+            },
+            &u_sess->attr.attr_common.enable_ub_sync_record,
+            false,
+            NULL,
+            AssignEnableUbSyncRecord,
             NULL
         },
         {{"foreign_key_checks",
@@ -14137,6 +14152,15 @@ static void assign_is_inplace_upgrade(const bool newval, void* extra)
 {
     if (newval && u_sess->attr.attr_common.XactReadOnly)
         u_sess->attr.attr_common.XactReadOnly = false;
+}
+
+static void AssignEnableUbSyncRecord(bool newval, void* extra)
+{
+    (void)extra;
+    if (t_thrd.role == MASTER_THREAD &&
+        newval != u_sess->attr.attr_common.enable_ub_sync_record) {
+        SSResetTransactionSyncStatus();
+    }
 }
 
 /*

@@ -532,6 +532,7 @@ alarm_component = '/opt/snas/bin/snas_cm_cmd'
 #track_thread_wait_status_interval = 30min # 0 to disable
 #track_sql_count = off
 #enbale_instr_track_wait = on
+#enable_ub_sync_record = off
 
 # - Statistics Monitoring -
 
