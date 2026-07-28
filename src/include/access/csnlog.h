@@ -16,6 +16,7 @@
 #define CSNLOG_H
 
 #include "access/xlog.h"
+#include "access/ubmem_buf.h"
 #include <atomic>
 
 #define CSNBufHashPartition(hashcode) ((hashcode) % NUM_CSNLOG_PARTITIONS)
@@ -84,6 +85,8 @@ typedef struct {
 
 extern void UBCSNLogBufferInit(UBCSNLogBuffer *buf);
 extern void UBCSNLogBufferSetSlot(UBCSNLogBuffer *buf, TransactionId xid, uint64 csn);
+extern bool UBCSNLogBufferWarmupRange(TransactionId startXid, TransactionId endXid,
+    UBTxnCacheWarmupStats *stats);
 extern size_t UBCSNLogBufferSize(void);
 extern void UBCSNLogShmemInit(void);
 extern bool UBGetCSNFromPrimary(TransactionId xid, uint64 *csn);

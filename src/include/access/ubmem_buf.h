@@ -54,6 +54,12 @@ typedef struct {
     size_t total_size;
 } UBShmStdSize;
 
+/* Statistics collected by the page-at-a-time transaction cache warmup. */
+typedef struct {
+    uint64 pages;
+    uint64 rows;
+} UBTxnCacheWarmupStats;
+
 extern void UBMemRegionName(const char *host_name, char *region_name, size_t len);
 extern bool UBMemRegionInit(void);
 extern bool UBSMemAllocate(const char *buffer_name, size_t buffer_size);
