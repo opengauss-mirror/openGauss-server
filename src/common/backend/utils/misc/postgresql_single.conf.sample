@@ -569,6 +569,7 @@ alarm_component = '/opt/snas/bin/snas_cm_cmd'
 #track_sql_count = off
 #enbale_instr_track_wait = on
 #enable_sql_limit = off
+#enable_ub_sync_record = off
 
 # - Statistics Monitoring -
 

@@ -28,6 +28,7 @@
 
 #include "c.h"
 #include "pgstat.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_dms.h"
 #include "utils/elog.h"
 
@@ -262,17 +263,28 @@ int dms_request_opengauss_update_xid(dms_context_t *dms_ctx, unsigned short t_in
 int dms_request_opengauss_xid_csn(dms_context_t *dms_ctx, dms_opengauss_xid_csn_t *dms_txn_info,
     dms_opengauss_csn_result_t *xid_csn_result)
 {
-    return g_ss_dms_func.dms_request_opengauss_xid_csn(dms_ctx, dms_txn_info, xid_csn_result);
+    uint64 start_time = SSGetTransactionSyncStartTime();
+    int res = g_ss_dms_func.dms_request_opengauss_xid_csn(dms_ctx, dms_txn_info, xid_csn_result);
+
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CSNLOG_DMS, start_time);
+    return res;
 }
 int dms_request_opengauss_txn_status(dms_context_t *dms_ctx, unsigned char request, unsigned char *result)
 {
-    return g_ss_dms_func.dms_request_opengauss_txn_status(dms_ctx, request, result);
+    uint64 start_time = SSGetTransactionSyncStartTime();
+    int res = g_ss_dms_func.dms_request_opengauss_txn_status(dms_ctx, request, result);
+
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CLOG_DMS, start_time);
+    return res;
 }
 int dms_request_opengauss_txn_snapshot(dms_context_t *dms_ctx, dms_opengauss_txn_snapshot_t *dms_txn_snapshot)
 {
+    uint64 start_time = SSGetTransactionSyncStartTime();
+
     pgstat_report_dms_waitevent(WAIT_EVENT_TXN_REQ_SNAPSHOT);
     int res = g_ss_dms_func.dms_request_opengauss_txn_snapshot(dms_ctx, dms_txn_snapshot);
     pgstat_report_dms_waitevent(WAIT_EVENT_END);
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_ONE_DMS, start_time);
     return res;
 }
 
