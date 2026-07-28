@@ -2614,7 +2614,7 @@ unsigned char CBDmsGetInterceptType(unsigned int sid)
 void checkReformStatus(unsigned int current_step) {
     for (uint32 i = 0; i < (uint32)g_instance.attr.attr_storage.dms_attr.parallel_thread_num; i++) {
         if (t_thrd.dms_cxt.reform_check_status[i] == g_instance.dms_cxt.reform_check_status[i]) {
-            ereport(ERROR, (errmodule(MOD_DMS),
+            ereport(WARNING, (errmodule(MOD_DMS),
                 errmsg("[SS reform] Reform %s has been hanging for more than 2 minutes, db exit now.",
                        (current_step == DMS_REFORM_STEP_REBUILD) ? "Rebuild" : "Repair")));
             print_all_stack();
@@ -2643,20 +2643,20 @@ static void CBReformHealthCheck(void *db_handle, unsigned int current_step, unsi
                 DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_TRIGGER_THRESHOLD) {
                 return;
             }
-            ereport(ERROR, (errmodule(MOD_DMS),
+            ereport(WARNING, (errmodule(MOD_DMS),
                 errmsg("[SS reform] Reform Done has been hanging for more than 2 minutes, db exit now.")));
             print_all_stack();
             _exit(0);
             break;
 
-        case DMS_REFORM_STEP_RECOVERY:
+        case DMS_REFORM_STEP_RECOVERY_OPENGAUSS:
             currentLsn = GetXLogReplayRecPtr(NULL, NULL);
             if (dyn_log_time - lastDynLogTime <
                 DMS_REFORM_HEALTH_TRIGGER_DYN * MICROSECS_PER_SECOND * HEALTH_CHECK_INTERVFAL) {
                 return;
             }
             if (lastLsn == currentLsn) {
-                ereport(ERROR, (errmodule(MOD_DMS),
+                ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS reform] Reform Recovery has been hanging for more than 5 minutes, db exit now.")));
                 print_all_stack();
                 _exit(0);
