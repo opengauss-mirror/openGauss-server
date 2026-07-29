@@ -1616,23 +1616,7 @@ typedef enum ProgressCommandType
     PROGRESS_COMMAND_INVALID = 0,
     PROGRESS_COMMAND_COPY
 } ProgressCommandType;
-
-#define PGSTAT_NUM_PROGRESS_PARAM  20
-typedef struct PgStatProgressInfo {
-    /*
-     * Command progress reporting.  Any command which wishes can advertise
-     * that it is running by setting stProgressCommand,
-     * stProgressCommandTarget, and stProgressParam[].
-     * stProgressCommandTarget should be the OID of the relation which the
-     * command targets (we assume there's just one, as this is meant for
-     * utility commands), but the meaning of each element in the
-     * stProgressParam array is command-specific.
-     */
-    ProgressCommandType stProgressCommand;
-    Oid         stProgressCommandTarget;
-    int64       stProgressParam[PGSTAT_NUM_PROGRESS_PARAM];
-} PgStatProgressInfo;
-
+#define PGSTAT_NUM_PROGRESS_PARAM   20
 
 /* ----------
  * PgBackendStatus
@@ -1760,7 +1744,18 @@ typedef struct PgBackendStatus {
     HTAB* my_prepared_queries;
     pthread_mutex_t* my_pstmt_htbl_lock;
     RowDescriptionCacheStat* row_desc_cache_stats;
-    PgStatProgressInfo* pg_stat_progress_info;
+    /*
+     * Command progress reporting.  Any command which wishes can advertise
+     * that it is running by setting stProgressCommand,
+     * stProgressCommandTarget, and stProgressParam[].
+     * stProgressCommandTarget should be the OID of the relation which the
+     * command targets (we assume there's just one, as this is meant for
+     * utility commands), but the meaning of each element in the
+     * stProgressParam array is command-specific.
+     */
+    ProgressCommandType stProgressCommand;
+    Oid                 stProgressCommandTarget;
+    int64               stProgressParam[PGSTAT_NUM_PROGRESS_PARAM];
 } PgBackendStatus;
 
 typedef struct PgBackendStatusNode {
