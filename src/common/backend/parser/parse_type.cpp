@@ -43,6 +43,7 @@
 #include "catalog/gs_dependencies_fn.h"
 #include "catalog/pg_type_fn.h"
 #include "commands/extension.h"
+#include "parser/parse_coerce.h"
 
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
 
@@ -779,7 +780,8 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
 Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
     bool is_bin_type, Oid rel_coll_oid)
 {
-    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) && !type_is_enum(typeOid) && !type_is_set(typeOid)) {
+    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) &&
+        !targetissqlvariant(typeOid) && !type_is_enum(typeOid) && !type_is_set(typeOid)) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("type %s not support set charset", format_type_be(typeOid))));
     }
