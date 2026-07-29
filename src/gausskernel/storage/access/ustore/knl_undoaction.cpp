@@ -339,13 +339,12 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
-bool _get_valid_blkprev_undo_record(UndoRecord* record, TransactionId xid, BlockNumber blkno, bool is_sync_rollback)
+bool _get_valid_blkprev_undo_record(UndoRecord* record, TransactionId xid, BlockNumber blkno, bool is_sync_rollback, UndoPersistence upersistence)
 {
     if (record->Blkprev() == INVALID_UNDO_REC_PTR) {
         return false;
     }
 
-    DECLARE_NODE_COUNT();
     TransactionId subxid = record->sub_xid();
     record->Reset2Blkprev();
     UndoTraversalState rc = FetchUndoRecord(record, NULL, InvalidBlockNumber, InvalidOffsetNumber,
@@ -453,6 +452,8 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     Page page = BufferGetPage(buffer);
     Assert(!PageIsNew(page));
 
+    UndoPersistence upersistence = UndoPersistenceForRelation(relationData.relation);
+
     /*
      * If undo action has been already applied for this page then skip the
      * process altogether.  If we didn't find a slot corresponding to xid, we
@@ -489,7 +490,7 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
      * xid is all rollback on this page
      */
     UndoRecord *undorecord = (*urecvec)[startIdx];
-    undorecord->SetUrp(slotUrecPtr);
+    undorecord->Reset(slotUrecPtr);
     UndoTraversalState rc = FetchUndoRecord(undorecord, NULL, InvalidBlockNumber, InvalidOffsetNumber,
         InvalidTransactionId, false, NULL);
     if (rc != UNDO_TRAVERSAL_COMPLETE) {
@@ -622,7 +623,7 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
             default:
                 ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
         }
-    } while (_get_valid_blkprev_undo_record(undorecord, xid, blkno, is_sync_rollback));
+    } while (_get_valid_blkprev_undo_record(undorecord, xid, blkno, is_sync_rollback, upersistence));
 
     /*
      * If this is the first undo record created by this top transaction xid,
