@@ -27,6 +27,7 @@
 #include "commands/matview.h"
 #include "commands/sequence.h"
 #include "commands/tablecmds.h"
+#include "commands/extension.h"
 #include "executor/executor.h"
 #include "foreign/fdwapi.h"
 #include "nodes/makefuncs.h"
@@ -5688,6 +5689,181 @@ static void _copy_top_HintState(HintState *dest, HintState *src)
     dest->no_expand_hint = src->no_expand_hint;
 }
 
+static bool IsDolphinCtasInternalQuery(Query* selectQuery)
+{
+    return u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && selectQuery != NULL &&
+        OidIsValid(get_extension_oid("dolphin", true));
+}
+
+static bool IsInternalQuerySpace(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool IsInternalQueryIdentifierChar(char ch)
+{
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+        ch == '_' || ch == '$';
+}
+
+static const char* SkipInternalQueryComment(const char* pos)
+{
+    if (pos[0] == '-' && pos[1] == '-') {
+        /* 2: Skip the line comment marker. */
+        pos += 2;
+        while (*pos != '\0' && *pos != '\n' && *pos != '\r') {
+            pos++;
+        }
+    } else if (pos[0] == '/' && pos[1] == '*') {
+        /* 2: Skip the block comment start marker. */
+        pos += 2;
+        while (*pos != '\0') {
+            if (pos[0] == '*' && pos[1] == '/') {
+                /* 2: Skip the block comment end marker. */
+                return pos + 2;
+            }
+            pos++;
+        }
+    }
+    return pos;
+}
+
+static const char* SkipInternalQuerySpaceAndComment(const char* pos)
+{
+    for (;;) {
+        while (IsInternalQuerySpace(*pos)) {
+            pos++;
+        }
+        const char* next = SkipInternalQueryComment(pos);
+        if (next == pos) {
+            return pos;
+        }
+        pos = next;
+    }
+}
+
+static const char* SkipInternalQuotedText(const char* pos, char quote)
+{
+    pos++;
+    while (*pos != '\0') {
+        if (*pos == '\\' && pos[1] != '\0') {
+            /* 2: Skip the escaped character pair. */
+            pos += 2;
+            continue;
+        }
+        if (*pos == quote && pos[1] == quote) {
+            /* 2: Skip the doubled quote pair. */
+            pos += 2;
+            continue;
+        }
+        if (*pos == quote) {
+            return pos + 1;
+        }
+        pos++;
+    }
+    return pos;
+}
+
+static bool IsInternalQueryToken(const char* pos, const char* token)
+{
+    int len = strlen(token);
+    return pg_strncasecmp(pos, token, len) == 0 && !IsInternalQueryIdentifierChar(pos[len]);
+}
+
+static const char* FindInternalCtasAs(const char* start)
+{
+    int level = 0;
+    for (const char* pos = start; *pos != '\0'; pos++) {
+        if (*pos == '\'' || *pos == '"' || *pos == '`') {
+            pos = SkipInternalQuotedText(pos, *pos) - 1;
+            continue;
+        }
+        const char* next = SkipInternalQueryComment(pos);
+        if (next != pos) {
+            pos = next - 1;
+            continue;
+        }
+        if (*pos == '(') {
+            level++;
+            continue;
+        }
+        if (*pos == ')') {
+            level = level > 0 ? level - 1 : 0;
+            continue;
+        }
+        if (level == 0 && IsInternalQueryToken(pos, "AS") &&
+            (pos == start || !IsInternalQueryIdentifierChar(pos[-1]))) {
+            const char* queryPos = SkipInternalQuerySpaceAndComment(pos + strlen("AS"));
+            if (IsInternalQueryToken(queryPos, "SELECT") || IsInternalQueryToken(queryPos, "WITH") ||
+                IsInternalQueryToken(queryPos, "VALUES")) {
+                return pos;
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char* SkipInternalQuerySpaceBackward(const char* start, const char* pos)
+{
+    while (pos > start && IsInternalQuerySpace(*pos)) {
+        pos--;
+    }
+    return pos;
+}
+
+static bool NeedBackquoteForInternalQuery(RangeVar* relation, bool isDolphinCtas)
+{
+    if (!isDolphinCtas || relation == NULL || relation->location < 0 ||
+        t_thrd.postgres_cxt.debug_query_string == NULL) {
+        return false;
+    }
+
+    const char* queryString = t_thrd.postgres_cxt.debug_query_string;
+    int location = relation->location;
+    for (int pos = 0; pos <= location; pos++) {
+        if (queryString[pos] == '\0') {
+            return false;
+        }
+    }
+
+    const char* start = queryString + location;
+    const char* asPos = FindInternalCtasAs(start);
+    const char* end = asPos == NULL ? start : SkipInternalQuerySpaceBackward(start, asPos - 1);
+    if (*end == ')') {
+        int level = 1;
+        end--;
+        while (end > start && level > 0) {
+            if (*end == ')') {
+                level++;
+            } else if (*end == '(') {
+                level--;
+            }
+            end--;
+        }
+        end = SkipInternalQuerySpaceBackward(start, end);
+    }
+    return *end == '`' || queryString[location] == '`' || (location > 0 && queryString[location - 1] == '`');
+}
+
+static const char* quote_identifier_for_internal_query(const char* ident, bool needBackquote)
+{
+    if (!needBackquote) {
+        return quote_identifier(ident);
+    }
+
+    StringInfoData buf;
+    initStringInfo(&buf);
+    appendStringInfoChar(&buf, '`');
+    for (const char* pch = ident; *pch != '\0'; pch++) {
+        if (*pch == '`') {
+            appendStringInfoChar(&buf, '`');
+        }
+        appendStringInfoChar(&buf, *pch);
+    }
+    appendStringInfoChar(&buf, '`');
+    return buf.data;
+}
+
 char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
 
 {
@@ -5712,7 +5888,10 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
      * e.g. for START WITH cases we need to do this after rewriting
      */
     Query* select_query = (Query*)stmt->query;
-    if (selectNeedRecovery(select_query)) {
+    bool isDolphinCtas = IsDolphinCtasInternalQuery(select_query);
+    if (isDolphinCtas && select_query->sql_statement != NULL) {
+        selectstr = pstrdup(select_query->sql_statement);
+    } else if (selectNeedRecovery(select_query)) {
         selectstr = pstrdup(select_query->sql_statement);
     }
 
@@ -5726,11 +5905,14 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt, bool hasNewColumn)
     get_hint_string(top_hintState, cquery);
     if (top_hintState)
         pfree((void *)top_hintState);
+    bool needBackquote = NeedBackquoteForInternalQuery(relation, isDolphinCtas);
     if (relation->schemaname)
-        appendStringInfo(
-            cquery, " INTO %s.%s", quote_identifier(relation->schemaname), quote_identifier(relation->relname));
+        appendStringInfo(cquery,
+            " INTO %s.%s",
+            quote_identifier(relation->schemaname),
+            quote_identifier_for_internal_query(relation->relname, needBackquote));
     else
-        appendStringInfo(cquery, " INTO %s", quote_identifier(relation->relname));
+        appendStringInfo(cquery, " INTO %s", quote_identifier_for_internal_query(relation->relname, needBackquote));
 
     /* if has new column and have data to insert */
     if ((u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && hasNewColumn && !stmt->into->skipData) ||
