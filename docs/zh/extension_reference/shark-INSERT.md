@@ -14,6 +14,7 @@
 ```
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 INSERT [/*+ plan_hint */] [INTO] table_name [partition_clause] [ AS alias ] [table_hint_clause] [ ( column_name [, ...] ) ]
+    [ OVERRIDING { SYSTEM | USER } VALUE ]
     { DEFAULT VALUES
     | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] 
     | query }
@@ -45,9 +46,16 @@ INSERT [/*+ plan_hint */] [INTO] table_name [partition_clause] [ AS alias ] [tab
 
     - 针对hint，会打印相关NOTICE信息。
 
-## table_hint子句示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+- **OVERRIDING \{ SYSTEM | USER \} VALUE**
 
-```
+    该子句用于插入identity列时的行为控制。
+
+    - `OVERRIDING SYSTEM VALUE`用于覆盖identity列生成的系统值，`OVERRIDING USER VALUE`用于覆盖用户自定义值。
+    - 当开启`identity_insert`时可以插入用户值（包括default），否则只有使用`OVERRIDING SYSTEM VALUE`才能插入用户值，而insert overriding user value会忽略用户的值采用序列的值。
+
+## table_hint子句示例
+
+```sql
 create table t1(c1 int, c2 int);
 
 insert into t1 values(1, 2);
@@ -109,6 +117,62 @@ NOTICE:  The nowait option is currently ignored
 insert into partition_table1 partition for (2451176) as table1_alias with (nolock, nowait) values(2451176, 1);
 NOTICE:  The nolock option is currently ignored
 NOTICE:  The nowait option is currently ignored
+```
+
+## identity_insert 与 OVERRIDING clause 示例
+```sql
+openGauss=# create extension shark;
+CREATE EXTENSION
+openGauss=#  CREATE TABLE book(bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+CREATE TABLE
+openGauss=# \d+ book
+                                               Table "public.book"
+  Column  |     Type      |                   Modifiers                   | Storage  | Stats target | Description 
+----------+---------------+-----------------------------------------------+----------+--------------+-------------
+ bookid   | integer       | not null identity                             | plain    |              | 
+ bookname | nvarchar2(50) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ author   | nvarchar2(50) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
+
+openGauss=# set identity_insert = off;
+SET
+openGauss=# INSERT INTO book VALUES (2, 'xxx', 'xxx'); -- error;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO book VALUES (2, 'xxx', 'xxx');
+                                           ^
+openGauss=# INSERT INTO book (bookid, bookname, author) VALUES(11111, 'xxxx', 'xxx'); -- error, turn on identity_insert or use OVERRIDING
+ERROR:  cannot insert a non-DEFAULT value into column "bookid"
+DETAIL:  Column "bookid" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
+openGauss=# INSERT INTO book (bookid, bookname, author) OVERRIDING SYSTEM VALUE VALUES (33, 'xxx', 'xxx'); -- success; -- 33
+INSERT 0 1
+openGauss=# INSERT INTO book (bookid, bookname, author) OVERRIDING USER VALUE VALUES (11111, 'xxx', 'xxx'); -- success; -- 1
+INSERT 0 1
+openGauss=# set identity_insert = on;
+SET
+openGauss=# INSERT INTO book VALUES (44, 'xxx', 'xxx'); -- error;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO book VALUES (44, 'xxx', 'xxx');
+                                            ^
+openGauss=# INSERT INTO book (bookid, bookname, author) OVERRIDING USER VALUE VALUES (11111, 'xxx', 'xxx'); -- success; -- 2
+INSERT 0 1
+openGauss=# INSERT INTO book (bookid, bookname, author) OVERRIDING SYSTEM VALUE VALUES (55, 'xxx', 'xxx'); -- success; -- 55
+INSERT 0 1
+openGauss=# set identity_insert = off;
+SET
+openGauss=# select * from book order by 1, 2;
+ bookid | bookname | author 
+--------+----------+--------
+      1 | xxx      | xxx
+      2 | xxx      | xxx
+     33 | xxx      | xxx
+     55 | xxx      | xxx
+(4 rows)
+
 ```
 
 ## 相关链接<a name="section156744489391"></a>

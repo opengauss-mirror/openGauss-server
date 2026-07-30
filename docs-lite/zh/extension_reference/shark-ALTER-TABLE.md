@@ -30,6 +30,7 @@ COMPRESSION_DELAY选项的取值delay为[0, 10080]的整数;
 
 - 修改表语句中，针对UNIQUE和PRIMARY KEY约束，支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
 - filegroup为任意字符串，支持通过[]包裹。
+- 新增支持为列添加identity属性的语法。
 
 ## 语法格式<a name="zh-cn_topic_0283137126_zh-cn_topic_0237122076_zh-cn_topic_0059779051_s58bdce220c9f4292ba9af919b04ad25c"></a>
 
@@ -89,21 +90,23 @@ COMPRESSION_DELAY选项的取值delay为[0, 10080]的整数;
 
     ```
     [ CONSTRAINT constraint_name ]
-                { NOT NULL |
-                    NULL |
-                    CHECK ( expression ) |
-                    DEFAULT default_expr  |
-                    GENERATED ALWAYS AS ( generation_expr ) [STORED] |
-                    AUTO_INCREMENT |
-                    ON UPDATE update_expr |
-                    UNIQUE [KEY] index_parameters [ ON filegroup ] |
-                    PRIMARY KEY index_parameters [ ON filegroup ] |
-                    ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
-                    REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
-                        [ ON DELETE action ] [ ON UPDATE action ] }
-                        [ ENABLE [VALIDATE | NOVALIDATE] | DISABLE [VALIDATE | NOVALIDATE] ]
-                        [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ] |
-                    DEFAULT (expression) FOR (column_name)
+      { NOT NULL |
+        NULL |
+        CHECK ( expression ) |
+        DEFAULT default_expr  |
+        IDENTITY [ ( seed, increment ) ] |
+        GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+        ON UPDATE update_expr |
+        { UNIQUE [KEY] index_parameters [ ON filegroup ] |
+          PRIMARY KEY index_parameters [ ON filegroup ]
+        } [ { ENABLE | DISABLE } [ VALIDATE | NOVALIDATE ] |
+        REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+          [ ON DELETE action ] [ ON UPDATE action ] [ ENABLE ] |
+        { ENABLE | DISABLE } [ VALIDATE | NOVALIDATE ] Constraint constraint_name |
+        DEFAULT (expression) FOR (column_name) } |
+    AUTO_INCREMENT |
+    ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ] |
     [ COMMENT 'text' ]
     ```
 
@@ -211,22 +214,27 @@ COMPRESSION_DELAY选项的取值delay为[0, 10080]的整数;
     - 修改表语句中，针对UNIQUE和PRIMARY KEY约束，支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
     - filegroup为任意字符串，支持通过[]包裹。
 
-- **DEFAULT (expression) FOR (column_name)**
+- **DEFAULT \( expression \) FOR \( column\_name \)**
 
     - 该语法可以为指定列添加DEFAULT约束，该约束为一个表达式。
     - 对于显式声明约束名的场景，仅做语法支持，使用该语法创建的DEFAULT约束无法通过约束名进行删除。
 
-## opt\_clustered示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+- **IDENTITY \[ ( seed, increment ) \]**
 
-```
+    - 该语法为列添加identity属性，序列值递增，`seed`指定起始值，`increment`指定步长。
+    - 一张表只能定义一列（包括generated as identity）。
+
+## opt\_clustered示例
+
+```sql
 openGauss=# CREATE TABLE alter_table_tbl1 (a INT, b INT);
 openGauss=# ALTER TABLE alter_table_tbl1 ADD CONSTRAINT alter_table_tbl_a UNIQUE CLUSTERED (a);
 openGauss=# ALTER TABLE alter_table_tbl1 ADD CONSTRAINT alter_table_tbl_b PRIMARY KEY NONCLUSTERED (a);
 ```
 
-## WITH \( \{ storage\_parameter = value \} \[, ... \] \)示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+## WITH \( \{ storage\_parameter = value \} \[, ... \] \)示例
 
-```
+```sql
 create table test1(col1 int primary key with(fillfactor = 20), col2 int);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test1_pkey" for table "test1"
 
@@ -251,9 +259,9 @@ NOTICE:  parameter "data_compression" is currently ignored.
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test3_pkey" for table "test3"
 ```
 
-## filegroup示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+## filegroup示例
 
-```
+```sql
 create table test1(col1 int primary key with(fillfactor = 20), col2 int);
 
 alter table test1 add constraint unique_name unique(col2) with (fillfactor = 50, ignore_dup_key = on) on [primary1];
@@ -269,9 +277,44 @@ create table test3(col1 int, col2 int);
 alter table test3 add column col3 int primary key with (data_compression = none) on [primar4];
 ```
 
-## DEFAULT (expression) FOR (column_name) 示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+## IDENTITY \[ \( seed, increment \) \] 示例
+```sql
+openGauss=# create extension shark;
+CREATE EXTENSION
+openGauss=# create table t1 (a int identity(10, 20), b int);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_a_seq_identity" for serial column "t1.a"
+CREATE TABLE
+openGauss=# \d+ t1
+                              Table "public.t1"
+ Column |  Type   |     Modifiers     | Storage | Stats target | Description 
+--------+---------+-------------------+---------+--------------+-------------
+ a      | integer | not null identity | plain   |              | 
+ b      | integer |                   | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
+
+openGauss=# alter table t1 alter column b add identity ;
+NOTICE:  ALTER TABLE will create implicit sequence "t1_b_seq_identity" for serial column "t1.b"
+ERROR:  Multiple identity columns specified for table "t1". Only one identity column per table is allowed.
+openGauss=# create table t2 (a int, b int);
+CREATE TABLE
+openGauss=# alter table t2 alter column b add identity ;
+NOTICE:  ALTER TABLE will create implicit sequence "t2_b_seq_identity" for serial column "t2.b"
+ERROR:  column "b" of relation "t2" must be declared NOT NULL before identity can be added
+openGauss=# alter table t2 alter column b set not null;
+ALTER TABLE
+openGauss=# alter table t2 alter column b add identity ;
+NOTICE:  ALTER TABLE will create implicit sequence "t2_b_seq_identity" for serial column "t2.b"
+ALTER TABLE
+openGauss=# 
 
 ```
+
+## DEFAULT (expression) FOR (column_name) 示例
+
+```sql
 openGauss=# create table ADD_DEFAULT(id int, v1 varchar(20), v2 float);
 CREATE TABLE
 openGauss=# \d+ ADD_DEFAULT
