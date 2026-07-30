@@ -381,6 +381,8 @@ openGauss支持以下操作系统：
 
 - openEuler-24.03-LTS（x86_64架构）
 
+PS：在openEuler-24.03上编译openGauss 建议使用cmake版本为3.19
+
 适配其他系统，参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
 
 以下表格列举了编译openGauss的软件要求。
