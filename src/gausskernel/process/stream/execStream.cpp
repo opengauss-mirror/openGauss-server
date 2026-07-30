@@ -786,7 +786,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
             key.smpIdentifier = i;
             producer = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamProducer(
                 key, ctl->cursorPstmt != NULL ? ctl->cursorPstmt : pstmt, streamNode,
-                u_sess->stream_cxt.stream_runtime_mem_cxt, producerConnNum, transType);
+                u_sess->stream_cxt.stream_runtime_mem_cxt, producerConnNum, transType,
+                ctl->instrument_option);
             producer->setSharedContext(sharedContext);
             producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
                 u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
@@ -806,7 +807,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
     } else {
         key.smpIdentifier = 0;
         producer = New(u_sess->stream_cxt.stream_runtime_mem_cxt)
-            StreamProducer(key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, consumerNum, transType);
+            StreamProducer(key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, consumerNum, transType,
+                           ctl->instrument_option);
         producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
             u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
         producer->setGlobalSessionId(&u_sess->globalSessionId);
@@ -1077,7 +1079,7 @@ void InitStreamContext()
  * @param[IN] plan:  plan stmt
  * @return: void
  */
-void BuildStreamFlow(PlannedStmt* plan)
+void BuildStreamFlow(PlannedStmt* plan, int instrument_option)
 {
     List* consumerList = NIL;
     List* producerList = NIL;
@@ -1115,6 +1117,7 @@ void BuildStreamFlow(PlannedStmt* plan)
         ctl.threadNum = &threadNum;
         ctl.dummyThread = ThreadIsDummy(plan->planTree);
         ctl.cursorPstmt = NULL;
+        ctl.instrument_option = instrument_option;
         /* Init check info. */
         SetCheckInfo(&ctl.checkInfo, plan->planTree);
 

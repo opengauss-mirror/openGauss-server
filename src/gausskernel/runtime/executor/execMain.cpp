@@ -143,7 +143,7 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *pl
 extern char* ExecBuildSlotValueDescription(
     Oid reloid, TupleTableSlot *slot, TupleDesc tupdesc, Bitmapset *modifiedCols, int maxfieldlen);
 
-extern void BuildStreamFlow(PlannedStmt *plan);
+extern void BuildStreamFlow(PlannedStmt *plan, int instrument_option);
 extern void StartUpStreamInParallel(PlannedStmt* pstmt, EState* estate);
 
 extern void CodeGenThreadRuntimeSetup();
@@ -1514,7 +1514,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
 
     if (StreamTopConsumerAmI()) {
         uint64 stream_start_time = time(NULL);
-        BuildStreamFlow(plannedstmt);
+        BuildStreamFlow(plannedstmt, queryDesc->instrument_options);
         uint64 stream_end_time = time(NULL);
         if ((stream_end_time - stream_start_time) > THREAD_INTSERVAL_60S) {
             ereport(WARNING,
