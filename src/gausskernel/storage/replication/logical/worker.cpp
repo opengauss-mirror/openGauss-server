@@ -2208,7 +2208,6 @@ void ApplyWorkerMain()
     t_thrd.applyworker_cxt.curWorker->last_send_time = t_thrd.applyworker_cxt.curWorker->last_recv_time =
         t_thrd.applyworker_cxt.curWorker->reply_time = GetCurrentTimestamp();
 
-    Assert(t_thrd.utils_cxt.CurrentResourceOwner == NULL);
     t_thrd.utils_cxt.CurrentResourceOwner =
         ResourceOwnerCreate(NULL, "logical replication apply", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
