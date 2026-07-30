@@ -15,7 +15,7 @@ You can run the  **EXPLAIN**  command to view the execution plan generated for e
 
 ### Execution Plan Information<a name="en-us_topic_0283137711_en-us_topic_0237121510_en-us_topic_0073548187_section1708958594911"></a>
 
-In addition to setting different display formats for an execution plan, you can use different  **EXPLAIN**  syntax to display execution plan information in detail. The following lists the common  **EXPLAIN**  syntax. For details about more  **EXPLAIN**  syntax, see  [EXPLAIN](../sql_reference/explain.md).
+In addition to setting different display formats for an execution plan, you can use different  **EXPLAIN**  syntax to display execution plan information in detail. The following lists the common  **EXPLAIN**  syntax. For details about more  **EXPLAIN**  syntax, see  [EXPLAIN](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/explain.html).
 
 - EXPLAIN  _statement_: only generates an execution plan and does not execute. The  _statement_  indicates SQL statements.
 - EXPLAIN ANALYZE  _statement_: generates and executes an execution plan, and displays the execution summary. Then actual execution time statistics are added to the display, including the total elapsed time expended within each plan node \(in milliseconds\) and the total number of rows it actually returned.

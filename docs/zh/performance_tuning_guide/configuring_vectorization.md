@@ -9,7 +9,7 @@ openGauss数据库支持行执行引擎和向量化执行引擎，分别对应�
 
 openGauss数据库所以对于分析类的复杂查询能够获得更好的查询性能。但列存表在数据插入和数据更新上表现不佳，对于存在数据频繁插入和更新的业务无法使用列存表。
 
-为了提升行存表在分析类的复杂查询上的查询性能，openGauss数据库提供行存表使用向量化执行引擎的能力。通过设置GUC参数[try\_vector\_engine\_strategy](../database_reference/optimizer_method_configuration.md)，可以将包含行存表的查询语句转换为向量化执行计划执行。
+为了提升行存表在分析类的复杂查询上的查询性能，openGauss数据库提供行存表使用向量化执行引擎的能力。通过设置GUC参数[try\_vector\_engine\_strategy](https://docs.opengauss.org/zh/docs/latest/database_reference/optimizer_method_configuration.html)，可以将包含行存表的查询语句转换为向量化执行计划执行。
 
 行存表转换为向量化执行引擎执行不是对所有的查询场景都适用。参考向量化引擎的优势，如果查询语句中包含表达式计算、多表join、聚集等操作时，通过转换为向量化执行能够获得性能提升。从原理上分析，行存表转换为向量化执行，会产生转换的开销，导致性能下降。而上述操作的表达式计算、join操作、聚集操作转换为向量化执行之后，能够获得获得性能提升。所以查询转换为向量化执行后，性能是否提升，取决于查询转换为向量化之后获得的性能提升能否高于转换产生的性能开销。
 

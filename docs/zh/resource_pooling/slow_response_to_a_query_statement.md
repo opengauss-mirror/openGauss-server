@@ -31,7 +31,7 @@
 
    查询会返回按执行时间长短从大到小排列的查询语句列表。第一条结果就是当前系统中执行时间长的查询语句。
 
-   如果当前系统较为繁忙，可以使用[TIMESTAMPDIFF](../sql_reference/date_and_time_processing_functions_and_operators.md#zh-cn_topic_0283136846_section5629194495516)函数通过限制current\_timestamp和query\_start大于某一阈值查看执行时间超过此阈值的查询语句。timestampdiff的第一个参数为时间差单位。例如，执行超过2分钟的查询语句可以通过如下语句查询。
+   如果当前系统较为繁忙，可以使用[TIMESTAMPDIFF](https://docs.opengauss.org/zh/docs/latest/sql_reference/date_and_time_processing_functions_and_operators.html#zh-cn_topic_0283136846_section5629194495516)函数通过限制current\_timestamp和query\_start大于某一阈值查看执行时间超过此阈值的查询语句。timestampdiff的第一个参数为时间差单位。例如，执行超过2分钟的查询语句可以通过如下语句查询。
 
    ```
    SELECT query FROM pg_stat_activity WHERE timestampdiff(minutes, query_start, current_timestamp) > 2;

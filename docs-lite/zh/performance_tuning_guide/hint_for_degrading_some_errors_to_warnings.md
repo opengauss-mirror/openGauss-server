@@ -22,7 +22,7 @@
   
       >[!NOTE]说明
       >
-      >GUC参数sql_ignore_strategy相关信息请参考[sql_ignore_strategy](../database_reference/miscellaneous_parameters.md)。
+      >GUC参数sql_ignore_strategy相关信息请参考[sql_ignore_strategy](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/miscellaneous_parameters.html)。
 
 - **违反唯一约束时**
 

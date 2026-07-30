@@ -28,7 +28,7 @@ The directory specified by GUC parameter  **log\_directory**  cannot be read or 
 
 ### Procedure<a name="en-us_topic_0283137178_section485620163250"></a>
 
-Set  **log\_directory**  to a valid directory. For details, see  [log\_directory](../database_reference/logging_destination.md#en-us_topic_0283136719_en-us_topic_0237124721_en-us_topic_0059778787_sfbedf09fcf1a4223a4538679f80f12a9).
+Set  **log\_directory**  to a valid directory. For details, see  [log\_directory](https://docs.opengauss.org/en/docs/latest/database_reference/logging_destination.html#en-us_topic_0283136719_en-us_topic_0237124721_en-us_topic_0059778787_sfbedf09fcf1a4223a4538679f80f12a9).
 
 ## Core Dump Occurs when RemoveIPC Is Enabled<a name="EN-US_TOPIC_0289900135"></a>
 

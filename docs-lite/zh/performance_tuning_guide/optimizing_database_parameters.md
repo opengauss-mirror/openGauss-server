@@ -8,7 +8,7 @@
 
 ### 逻辑内存管理参数<a name="zh-cn_topic_0283136881_zh-cn_topic_0237121495_zh-cn_topic_0073253552_zh-cn_topic_0062863366_section6641095815423"></a>
 
-逻辑内存管理参数为max\_process\_memory，主要功能是控制数据库节点上可用内存的最大峰值，该参数的数值设置公式参考[max\_process\_memory](../database_reference/memory.md#zh-cn_topic_0283136786_zh-cn_topic_0237124699_zh-cn_topic_0059777577_sbebcee7acf2042dc8824982f22a2b4a8)。
+逻辑内存管理参数为max\_process\_memory，主要功能是控制数据库节点上可用内存的最大峰值，该参数的数值设置公式参考[max\_process\_memory](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/memory.html#zh-cn_topic_0283136786_zh-cn_topic_0237124699_zh-cn_topic_0059777577_sbebcee7acf2042dc8824982f22a2b4a8)。
 
 执行作业最终可用的内存为：
 

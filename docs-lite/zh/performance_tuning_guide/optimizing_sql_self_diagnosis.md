@@ -1,10 +1,10 @@
 # SQL自诊断<a name="ZH-CN_TOPIC_0289899908"></a>
 
-用户在执行查询或者执行INSERT/DELETE/UPDATE/CREATE TABLE AS语句时，可能会遇到性能问题。这种情况下，通过查询[GS\_WLM\_SESSION\_STATISTICS](../database_reference/GS_WLM_SESSION_STATISTICS.md)、[GS\_WLM\_SESSION\_HISTORY](../database_reference/GS_WLM_SESSION_HISTORY.md)视图的warning字段可以获得对应查询可能导致性能问题的告警信息，为性能调优提供参考。
+用户在执行查询或者执行INSERT/DELETE/UPDATE/CREATE TABLE AS语句时，可能会遇到性能问题。这种情况下，通过查询[GS\_WLM\_SESSION\_STATISTICS](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/GS_WLM_SESSION_STATISTICS.html)、[GS\_WLM\_SESSION\_HISTORY](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/GS_WLM_SESSION_HISTORY.html)视图的warning字段可以获得对应查询可能导致性能问题的告警信息，为性能调优提供参考。
 
-SQL自诊断的告警类型与[resource\_track\_level](../database_reference/workload_management.md#zh-cn_topic_0283137479_zh-cn_topic_0237124729_section153571329142612)的设置有关系。如果resource\_track\_level设置为query，则可以诊断多列/单列统计信息未收集和SQL不下推的告警。如果resource\_track\_level设置为operator，则可以诊断所有的告警场景。
+SQL自诊断的告警类型与[resource\_track\_level](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/workload_management.html#zh-cn_topic_0283137479_zh-cn_topic_0237124729_section153571329142612)的设置有关系。如果resource\_track\_level设置为query，则可以诊断多列/单列统计信息未收集和SQL不下推的告警。如果resource\_track\_level设置为operator，则可以诊断所有的告警场景。
 
-SQL自诊断的诊断范围与[resource\_track\_cost](../database_reference/workload_management.md#zh-cn_topic_0283137479_zh-cn_topic_0237124729_section1089022732713)的设置有关系。当SQL的代价大于resource\_track\_cost时，SQL才会被诊断。SQL的代价可以通过explain来确认。
+SQL自诊断的诊断范围与[resource\_track\_cost](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/workload_management.html#zh-cn_topic_0283137479_zh-cn_topic_0237124729_section1089022732713)的设置有关系。当SQL的代价大于resource\_track\_cost时，SQL才会被诊断。SQL的代价可以通过explain来确认。
 
 SQL自诊断功能受enable\_analyze\_check参数影响，使用前应确认该开关已打开。
 

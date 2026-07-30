@@ -57,7 +57,7 @@ UTC+8 2024-11-01 09:38:05.250|dssserver|761014|ERROR>dss failed to startup. [dss
 
 ## 三、问题根因
 
-系统共享内存不足，导致不满足数据库的共享内存大小的最低要求，从而导致集群的启动或重启失败。具体共享内存大小要求参考[gs_checkos](../tool_and_commandreference/gs_checkos.md)中的表2操作系统参数。
+系统共享内存不足，导致不满足数据库的共享内存大小的最低要求，从而导致集群的启动或重启失败。具体共享内存大小要求参考[gs_checkos](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/gs_checkos.html)中的表2操作系统参数。
 
 ## 四、解决方案
 

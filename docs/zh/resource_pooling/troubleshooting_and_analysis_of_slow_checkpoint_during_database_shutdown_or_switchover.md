@@ -48,6 +48,6 @@
 
 ## 三、收集相关信息
 
-1. 对于停库时checkpoint卡住的问题，一般先要确认卡在哪个阶段，除了前面提到的一些运行日志中的关键字信息外，最快的方式是通过打印数据库进程的堆栈来确认，打印数据库进程堆栈的方法可以使用`gstack <gaussdb进程的PID>`或者参考[内置stack工具](../characteristic_description/built_in_stack_tool.md)。
+1. 对于停库时checkpoint卡住的问题，一般先要确认卡在哪个阶段，除了前面提到的一些运行日志中的关键字信息外，最快的方式是通过打印数据库进程的堆栈来确认，打印数据库进程堆栈的方法可以使用`gstack <gaussdb进程的PID>`或者参考[内置stack工具](https://docs.opengauss.org/zh/docs/latest/characteristic_description/built_in_stack_tool.html)。
 2. 收集数据库运行日志：需要收集发生时刻的`$GAUSSLOG/pg_log`下面的日志，建议往前收集到包含最后一次正常运行时checkpoint执行的日志。
 3. 操作系统当前IO状态，通过`iostat -xdk 1`重定向到某个临时文件中，建议收集持续10~30秒的。

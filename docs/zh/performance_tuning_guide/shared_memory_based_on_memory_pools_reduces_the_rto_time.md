@@ -29,7 +29,7 @@ guc参数max\_smb\_memory控制本特性的开关，max\_smb\_memory的值为共
 
 **参数说明**： 从内存池中申请的共享内存大小，用于存放数据库修改的page。
 
-该参数属于POSTMASTER类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
+该参数属于POSTMASTER类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
 
 **取值范围**： 整型， 0 \~ 13107200, 单位为8kB。
 

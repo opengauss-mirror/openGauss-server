@@ -67,7 +67,7 @@ openGauss产品在备份基础上实现了三种功能，分别是增量备份�
 
 ## 使用指导
 
-参考[gs_probackup工具](../tool_and_commandreference/gs_probackup.md)使用指导。
+参考[gs_probackup工具](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/gs_probackup.html)使用指导。
 
 ## 使用场景
 

@@ -443,7 +443,7 @@ You are familiar with "Server Tools \> gs\_cgroup" and "Server Tools \> gs\_ssh"
 
 3. Obtain the Cgroup configuration in a system view.
 
-    1. Perform the steps in  [Using gsql to Connect to a Database](../database_administration_guide/using_gsql_to_operate_an_encrypted_database.md).
+    1. Perform the steps in  [Using gsql to Connect to a Database](https://docs.opengauss.org/en/docs/latest/database_administration_guide/using_gsql_to_operate_an_encrypted_database.html).
     2. Obtain the configuration about all Cgroups in the system.
 
     ```
@@ -578,13 +578,13 @@ After resource load management is enabled, the system automatically creates  **d
 
 ### Prerequisites<a name="section17352165513395"></a>
 
-You are familiar with the  [CREATE RESOURCE POOL](../sql_reference/create_resource_pool.md),  [ALTER RESOURCE POOL](../sql_reference/alter_resource_pool.md), and  [DROP RESOURCE POOL](../sql_reference/drop_resource_pool.md)syntax.
+You are familiar with the  [CREATE RESOURCE POOL](https://docs.opengauss.org/en/docs/latest/sql_reference/create_resource_pool.html),  [ALTER RESOURCE POOL](https://docs.opengauss.org/en/docs/latest/sql_reference/alter_resource_pool.html), and  [DROP RESOURCE POOL](https://docs.opengauss.org/en/docs/latest/sql_reference/drop_resource_pool.html)syntax.
 
 ### **Procedure** <a name="en-us_topic_0066854608_section16606579202019"></a>
 
 **Creating a resource pool**
 
-1. Perform the steps in  [gsql connection and usage](../getting_started/gsql_connection_and_usage.md).
+1. Perform the steps in  [gsql connection and usage](https://docs.opengauss.org/en/docs/latest/getting_started/gsql_connection_and_usage.html).
 
 2. Create a group resource pool and associate it with the specified sub-Class Cgroup. In the following example, the group resource pool named  **resource\_pool\_a**  is associated with the  **class\_a**  Cgroup.
 
@@ -659,7 +659,7 @@ DROP RESOURCE POOL
     (7 rows)
     ```
 
-- View information about Cgroups associated with a resource pool. For details, see  **[statistics-information-functions](../sql_reference/statistics_information_functions.md)**.
+- View information about Cgroups associated with a resource pool. For details, see  **[statistics-information-functions](https://docs.opengauss.org/en/docs/latest/sql_reference/statistics_information_functions.html)**.
 
     In the following example,  **resource\_pool\_a1**  is the name of the resource pool.
 

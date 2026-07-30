@@ -60,7 +60,7 @@ openGauss的算子内存借用功能是基于灵衢内存借用能力实现的�
 
 **参数说明**：灵衢场景下用于控制后台UBSE集群状态查询与残留内存清理线程。在UBSE故障场景下，算子借用功能通过该线程感知故障，停止内存借用并会退回原生流程，保证语句正常执行。同时故障场景下，借用内存的释放也会失败，开启该线程，会收集释放失败内存，并在UBSE功能可用后，进行统一释放。
 
-该参数属于SIGHUP类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
+该参数属于SIGHUP类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
 
 **取值范围**： 布尔型
 

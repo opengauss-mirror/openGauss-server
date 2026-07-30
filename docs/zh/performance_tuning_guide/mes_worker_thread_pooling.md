@@ -22,7 +22,7 @@
 
 ## 特性约束<a name="section06531946143616"></a>
 
-- 在资源池化架构下，ss_work_thread_pool_attr参数表示mes worker线程池化是否开启。具体参数说明请参见[资源池化参数](../database_reference/resource_pooling_parameters.md)。
+- 在资源池化架构下，ss_work_thread_pool_attr参数表示mes worker线程池化是否开启。具体参数说明请参见[资源池化参数](https://docs.opengauss.org/zh/docs/latest/database_reference/resource_pooling_parameters.html)。
 - 在资源池化架构下，MES提供了保序能力，由同一业务线程发的消息，在开启保序功能后，会由同一个worker线程进行处理，从而做到发消息和处理消息的顺序一致。当前保序功能在worker线程池化开启后，将不可用。当前DMS组件并未使用MES的保序能力，DMS也默认关闭这一能力，用户也无法开启这一能力。所以开启worker线程池化、关闭保序能力对于当前用户没有影响。
 
 ## 依赖关系<a name="section8406643144716"></a>

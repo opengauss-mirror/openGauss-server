@@ -43,7 +43,7 @@
 
 - DSS线程池化中的消息处理能力可通过调整DSS Server参数IO_THREADS和WORK_THREADS来控制。
 - DSS黑匣子日志默认开启，如需关闭，需配置 DSS Server参数_LOG_LEVEL=0，重启 DSS Server后生效。
-配置参数细则参见[dssserver](../tool_and_commandreference/dssserver.md)
+配置参数细则参见[dssserver](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/dssserver.html)
 
 ## 使用场景<a name="section8406643144716"></a>
 

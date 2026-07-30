@@ -20,9 +20,9 @@ DMS资源统计函数目前收集如下信息：
 
 DMS资源统计函数：
 
-- reform流程的状态信息：通过query_node_reform_info_from_dms函数查找。具体函数说明请参见[资源池化函数](../sql_reference/resource_pooling_function.md)。
-- 页面信息和锁信息：通过query_all_drc_info函数查找。具体函数说明请参见[资源池化函数](../sql_reference/resource_pooling_function.md)。
-- 命令字等待信息：通过get_instr_wait_event函数查找，该函数原本用于各种数据库等待事件的统计信息查询，本特性在其中新增了命令字内容。具体函数说明请参见[统计信息函数](../sql_reference/statistics_information_functions.md)。
+- reform流程的状态信息：通过query_node_reform_info_from_dms函数查找。具体函数说明请参见[资源池化函数](https://docs.opengauss.org/zh/docs/latest/sql_reference/resource_pooling_function.html)。
+- 页面信息和锁信息：通过query_all_drc_info函数查找。具体函数说明请参见[资源池化函数](https://docs.opengauss.org/zh/docs/latest/sql_reference/resource_pooling_function.html)。
+- 命令字等待信息：通过get_instr_wait_event函数查找，该函数原本用于各种数据库等待事件的统计信息查询，本特性在其中新增了命令字内容。具体函数说明请参见[统计信息函数](https://docs.opengauss.org/zh/docs/latest/sql_reference/statistics_information_functions.html)。
 
 ## 特性增强<a name="section1340684315478"></a>
 

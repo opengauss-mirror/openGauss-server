@@ -42,7 +42,7 @@
      node0     |                    32280595 |                1360 |                 49473 | A/500F0248              | A/5F6800A8    | A/5F830648
     292833864 | 247.2509765625
     ```
-当查询到的REDO GAP越大，系统故障后需要回放的日志越多，RTO时间越长。如果发现系统的REDO GAP不断增加，则说明主机当前刷脏速度跟不上脏页生成速度，需要考虑提高刷盘能力或降低业务压力。提高刷盘能力可以尝试降低pagewrite_sleep间隙、提高pagewriter_thread_num数量、降低incremental_checkpoint_timeout间隔等方式。(详见[后端写线程](../database_reference/background_writer.md)和[检查点](../database_reference/checkpoints.md))
+当查询到的REDO GAP越大，系统故障后需要回放的日志越多，RTO时间越长。如果发现系统的REDO GAP不断增加，则说明主机当前刷脏速度跟不上脏页生成速度，需要考虑提高刷盘能力或降低业务压力。提高刷盘能力可以尝试降低pagewrite_sleep间隙、提高pagewriter_thread_num数量、降低incremental_checkpoint_timeout间隔等方式。(详见[后端写线程](https://docs.opengauss.org/zh/docs/latest/database_reference/background_writer.html)和[检查点](https://docs.opengauss.org/zh/docs/latest/database_reference/checkpoints.html))
 
 ## 回放方式选择
 

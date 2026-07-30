@@ -31,7 +31,7 @@ either reduce the request the request size or reconfigure the kernel with larger
 
 ## 三、问题根因
 
-系统内存不足，导致数据库启动需要预留的内存不被支持，从而导致集群启动或重启失败。具体内存要求参考[准备软硬件安装环境](../getting_started/preparing_for_installation.md)中的表1硬件环境要求。
+系统内存不足，导致数据库启动需要预留的内存不被支持，从而导致集群启动或重启失败。具体内存要求参考[准备软硬件安装环境](https://docs.opengauss.org/zh/docs/latest/getting_started/preparing_for_installation.html)中的表1硬件环境要求。
 
 ## 四、解决方案
 

@@ -62,7 +62,7 @@ You can wait for a while and check whether the cluster starts, or increase the v
 
 ## 三、问题根因
 
-系统配置文件`postgresql.conf`内各种参数出现异常导致的启动或重启集群失败。具体参数说明参考[Guc参数说明](../database_reference/guc_parameter_usage.md)。
+系统配置文件`postgresql.conf`内各种参数出现异常导致的启动或重启集群失败。具体参数说明参考[Guc参数说明](https://docs.opengauss.org/zh/docs/latest/database_reference/guc_parameter_usage.html)。
 
 ## 四、解决方案
 
