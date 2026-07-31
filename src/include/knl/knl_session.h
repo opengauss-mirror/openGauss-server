@@ -3240,6 +3240,8 @@ typedef struct knl_u_bm25_context {
     bool isFirstTuple;
 
     BM25ScanDocScoreHashTable *scoreHashTable;
+
+    HTAB *globalDfMap;
 } knl_u_bm25_context;
 
 typedef struct knl_u_sqlLimit_context {
