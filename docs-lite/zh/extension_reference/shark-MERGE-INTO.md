@@ -24,8 +24,9 @@ ON ( condition )
 ]
 [
   WHEN NOT MATCHED THEN
-  INSERT { DEFAULT VALUES |
-  [ ( column_name [, ...] ) ] VALUES ( { expression | subquery | DEFAULT } [, ...] ) [, ...] [ WHERE condition ] }
+  INSERT [ ( column_name [, ...] ) ]
+  [ OVERRIDING { SYSTEM | USER } VALUE ]
+  { DEFAULT VALUES | VALUES ( { expression | subquery | DEFAULT } [, ...] ) [, ...] [ WHERE condition ] }
 ];
 NOTICE: 'subquery' in the UPDATE and INSERT clauses are only avaliable in CENTRALIZED mode!
 ```
@@ -50,9 +51,17 @@ NOTICE: 'subquery' in the UPDATE and INSERT clauses are only avaliable in CENTRA
 
     - 针对hint，会打印相关NOTICE信息。
 
+- **OVERRIDING \{ SYSTEM | USER \} VALUE**
+
+    该子句用于插入identity列时的行为控制。
+
+    - `OVERRIDING SYSTEM VALUE`用于覆盖identity列生成的系统值，`OVERRIDING USER VALUE`用于覆盖用户自定义值。
+    - 当开启`identity_insert`时可以插入用户值（包括default），否则只有使用`OVERRIDING SYSTEM VALUE`才能插入用户值，而insert overriding user value会忽略用户的值采用序列的值。
+
 ## 示例<a name="zh-cn_topic_0283137308_zh-cn_topic_0237122170_section3650125620712"></a>
 
-```
+- merge into语句基础示例
+```sql
 -- 创建目标表products和源表newproducts，并插入数据
 openGauss=# CREATE TABLE products
 (
@@ -152,6 +161,55 @@ NOTICE:  The nowait option is currently ignored
 -- 删除表
 openGauss=# DROP TABLE products;
 openGauss=# DROP TABLE newproducts;
+```
+
+- identity_insert 与 OVERRIDING clause 示例
+```sql
+openGauss=# create table target_table ( id int identity, name varhcar(50), age int);
+NOTICE:  CREATE TABLE will create implicit sequence "target_table_id_seq_identity" for serial column "target_table.id"
+ERROR:  type "varhcar" does not exist
+LINE 1: create table target_table ( id int identity, name varhcar(50...
+                                                          ^
+openGauss=# create table target_table ( id int identity, name varchar(50), age int);
+NOTICE:  CREATE TABLE will create implicit sequence "target_table_id_seq_identity" for serial column "target_table.id"
+CREATE TABLE
+openGauss=# create table source_table (id int, name varchar(50), age int);
+CREATE TABLE
+openGauss=# insert into source_table values (10, 'zliu', 28), (11, 'sqi', 30);
+INSERT 0 2
+openGauss=# set identity_insert = off;
+SET
+openGauss=#  merge into target_table AS t using source_table AS s ON t.id = s.id
+openGauss-#   when not matched then
+openGauss-#       insert (name, age) values (s.name, s.age);
+MERGE 2
+openGauss=# merge into target_table AS t using source_table AS s ON t.id = s.id
+openGauss-#   when not matched then
+openGauss-#       insert (id, name, age) values (1, 'error', 21);
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert"
+openGauss=# merge into target_table AS t using source_table AS s ON t.id = s.id
+openGauss-#   when not matched then
+openGauss-#       insert (id, name, age) OVERRIDING USER VALUE values (1, 'success', 22); -- 3
+MERGE 2
+openGauss=# set identity_insert = on;
+SET
+openGauss=# merge into target_table AS t using source_table AS s ON t.id = s.id
+openGauss-#   when not matched then
+openGauss-#       insert (id, name, age) values (s.id + 2, 'success', s.age);
+MERGE 2
+openGauss=# select * from target_table order by 1, 2,3;
+ id |  name   | age 
+----+---------+-----
+  1 | zliu    |  28
+  2 | sqi     |  30
+  3 | success |  22
+  4 | success |  22
+ 12 | success |  28
+ 13 | success |  30
+(6 rows)
+
 ```
 
 ## 相关链接<a name="section156744489391"></a>

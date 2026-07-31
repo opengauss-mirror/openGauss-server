@@ -28,7 +28,7 @@ GUC参数log\_directory设置的路径不可读取或无访问权限，数据库
 
 ### 处理办法<a name="zh-cn_topic_0283137178_section485620163250"></a>
 
-GUC参数log\_directory设置为合法路径，具体请参考[log\_directory](../database_reference/logging_destination.md#zh-cn_topic_0283136719_zh-cn_topic_0237124721_zh-cn_topic_0059778787_sfbedf09fcf1a4223a4538679f80f12a9)。
+GUC参数log\_directory设置为合法路径，具体请参考[log\_directory](https://docs.opengauss.org/zh/docs/latest/database_reference/logging_destination.html#zh-cn_topic_0283136719_zh-cn_topic_0237124721_zh-cn_topic_0059778787_sfbedf09fcf1a4223a4538679f80f12a9)。
 
 ## 开启RemoveIPC引起的core问题
 

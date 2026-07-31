@@ -1,6 +1,6 @@
 # SQL调优关键参数调整<a name="ZH-CN_TOPIC_0289900358"></a>
 
-本节将介绍影响openGauss SQL调优性能的关键数据库主节点配置参数，配置方法参见[参数配置](../database_administration_guide/parameter_configuration.md)。
+本节将介绍影响openGauss SQL调优性能的关键数据库主节点配置参数，配置方法参见[参数配置](https://docs.opengauss.org/zh/docs/latest-lite/database_administration_guide/parameter_configuration.html)。
 
 **表 1**  数据库主节点配置参数
 

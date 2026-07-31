@@ -1,6 +1,6 @@
 # Optimizing SQL Self-Diagnosis<a name="EN-US_TOPIC_0245374558"></a>
 
-Performance issues may occur when you query data or run the  **INSERT**,  **DELETE**,  **UPDATE**, or  **CREATE TABLE AS**  statement. In this case, you can query the  **warning**  column in the [GS\_WLM\_SESSION\_STATISTICS](../database_reference/gs_wlm_session_statistics.md)  and  [GS\_WLM\_SESSION\_HISTORY](../database_reference/gs_wlm_session_history.md) views to obtain reference for performance optimization.
+Performance issues may occur when you query data or run the  **INSERT**,  **DELETE**,  **UPDATE**, or  **CREATE TABLE AS**  statement. In this case, you can query the  **warning**  column in the [GS\_WLM\_SESSION\_STATISTICS](https://docs.opengauss.org/en/docs/latest/database_reference/gs_wlm_session_statistics.html)  and  [GS\_WLM\_SESSION\_HISTORY](https://docs.opengauss.org/en/docs/latest/database_reference/gs_wlm_session_history.html) views to obtain reference for performance optimization.
 
 Alarms that can trigger SQL self diagnosis depend on the settings of  **[resource\_track\_level](resource_load_management_overview.md)**. If  **resource\_track\_level**  is set to  **query**, alarms about the failures in collecting column statistics and pushing down SQL statements will trigger the diagnosis. If  **resource\_track\_level**  is set to  **operator**, all alarms will trigger the diagnosis.
 

@@ -1,4 +1,4 @@
-label: 插件参考
+label: 其他插件参考
 isManual: true
 sections:
   - label: NDPPlugin Extension
@@ -11,6 +11,8 @@ sections:
     href: ./gms_stats.md 
   - label: gms_output Extension
     href: ./gms_output.md
+  - label: gms_xmldom Extension
+    href: ./gms_xmldom.md  
   - label: gms_xmlgen Extension
     href: ./gms_xmlgen.md
   - label: gms_xmlparser Extension

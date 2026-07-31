@@ -20,7 +20,7 @@
   - sql_ignore_strategy为overwrite_null时，将违反约束的null值覆写为目标类型的默认值，并继续执行剩余数据操作。
   
       >[!NOTE]说明
-    >GUC参数sql_ignore_strategy相关信息请参考[sql_ignore_strategy](../database_reference/miscellaneous_parameters.md)。
+    >GUC参数sql_ignore_strategy相关信息请参考[sql_ignore_strategy](https://docs.opengauss.org/zh/docs/latest/database_reference/miscellaneous_parameters.html)。
 
 - **违反唯一约束时**
 

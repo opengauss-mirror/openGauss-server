@@ -30,7 +30,7 @@ You can wait for a while and check whether the cluster starts, or increase the v
 
 ## 三、问题根因
 
-系统信号量不足，导致不满足数据库的最低信号量要求，从而导致集群的启动或重启失败。具体内核信号量参数要求参考[gs_checkos](../tool_and_commandreference/gs_checkos.md)中的表2操作系统参数。
+系统信号量不足，导致不满足数据库的最低信号量要求，从而导致集群的启动或重启失败。具体内核信号量参数要求参考[gs_checkos](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/gs_checkos.html)中的表2操作系统参数。
 
 ## 四、解决方案
 

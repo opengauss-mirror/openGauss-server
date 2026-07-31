@@ -42,4 +42,4 @@ gs_collector借助openGauss内置工具以及操作系统工具，实现对数�
 
 ## 使用指导
 
-具体参考[gs_collector](../tool_and_commandreference/gs_collector.md)。
+具体参考[gs_collector](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/gs_collector.html)。

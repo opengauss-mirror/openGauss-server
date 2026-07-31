@@ -25,7 +25,7 @@
 - 本特性仅支持主节点开启归档参数，进行归档操作。
 - 当wal_level参数为minimal时，归档功能无法开启使用。
 - 本特性不会检测已归档的XLOG是否还有存在价值，若出现归档路径的盘空间满，则归档会停止直到归档路径盘存在可用空间(>1G，因为资源池化环境下的XLOG文件规格是1G)，因此需要用户自行进行归档的XLOG维护清理。
-- 资源池化环境下，归档命令参数（archive_command）为dsscmd cp，暂时仅支持 cp 基本的复制操作，并且文件路径参数不支持使用相对路径，详情可以参考[dsscmd](../tool_and_commandreference/dsscmd.md)
+- 资源池化环境下，归档命令参数（archive_command）为dsscmd cp，暂时仅支持 cp 基本的复制操作，并且文件路径参数不支持使用相对路径，详情可以参考[dsscmd](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/dsscmd.html)
 
 ## 依赖关系
 
@@ -43,6 +43,6 @@
 
 ## 使用指导
 
-XLOG归档部分仅archive\_command参数配置与传统主备有差异，其余参数配置限制与传统主备一致。参考[归档](../database_reference/archiving.md)使用指导。
+XLOG归档部分仅archive\_command参数配置与传统主备有差异，其余参数配置限制与传统主备一致。参考[归档](https://docs.opengauss.org/zh/docs/latest/database_reference/archiving.html)使用指导。
 
-PITR恢复部分参考[gs_probackup](../tool_and_commandreference/gs_probackup.md)使用指导
+PITR恢复部分参考[gs_probackup](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/gs_probackup.html)使用指导

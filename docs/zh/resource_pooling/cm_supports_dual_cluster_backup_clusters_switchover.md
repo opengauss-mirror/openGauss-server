@@ -36,7 +36,7 @@ CM支持双集群中备集群首备和从备的switchover，保证切换后和�
 
 ## 使用指导<a name="section8445461564354"></a>
 
-与单集群切换命令保持一致，参考[cm\_ctl工具介绍](../tool_and_commandreference/cm_ctl.md)。
+与单集群切换命令保持一致，参考[cm\_ctl工具介绍](https://docs.opengauss.org/zh/docs/latest/tool_and_commandreference/cm_ctl.html)。
 
 ## 使用场景<a name="section8445461564132"></a>
 

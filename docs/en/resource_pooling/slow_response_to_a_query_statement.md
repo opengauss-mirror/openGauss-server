@@ -31,7 +31,7 @@ After a query statement has been executed, no response is returned for a long ti
 
    Query statements are returned, sorted by execution time length in descending order. The first record is the query statement that takes the long time for execution.
 
-   Alternatively, you can use the [TIMESTAMPDIFF](../sql_reference/date_and_time_processing_functions_and_operators.md#en-us_topic_0283136846_section5629194495516) function to set **current\_timestamp** and **query\_start** to be greater than a threshold to identify query statements that are executed for a duration longer than this threshold. The first parameter of **timestampdiff** is the time difference unit. For example, execute the following statement to query the statements whose execution lasts more than 2 minutes.
+   Alternatively, you can use the [TIMESTAMPDIFF](https://docs.opengauss.org/en/docs/latest/sql_reference/date_and_time_processing_functions_and_operators.html#en-us_topic_0283136846_section5629194495516) function to set **current\_timestamp** and **query\_start** to be greater than a threshold to identify query statements that are executed for a duration longer than this threshold. The first parameter of **timestampdiff** is the time difference unit. For example, execute the following statement to query the statements whose execution lasts more than 2 minutes.
 
    ```
    SELECT query FROM pg_stat_activity WHERE timestampdiff(minutes, query_start, current_timestamp) > 2;

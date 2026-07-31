@@ -69,8 +69,8 @@
 
 本特性分为两种模式：
 
-1. 基于网络的流复制模式：[资源池化网络双集群部署](../database_administration_guide/resource_pooling_network_dual_cluster_deployent.md)
-2. 基于DORADO存储的同步复制模式：[资源池化DORADO双集群部署](../database_administration_guide/resource_pooling_dorado_dual_cluster_deployment.md)
+1. 基于网络的流复制模式：[资源池化网络双集群部署](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/resource_pooling_network_dual_cluster_deployent.html)
+2. 基于DORADO存储的同步复制模式：[资源池化DORADO双集群部署](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/resource_pooling_dorado_dual_cluster_deployment.html)
 
 ## 使用场景
 

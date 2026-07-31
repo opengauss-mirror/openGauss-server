@@ -8,7 +8,7 @@
 >此处的单步手动安装是指工程编译之后，可单步执行相关命令进行资源池化建库。openGauss常规安装请参照《安装指南》。
 
 - 前置条件
-    - 工程已完成代码编译，编译请参见[软件安装编译](../compilation_guide/compiling_the_version.md)。
+    - 工程已完成代码编译，编译请参见[软件安装编译](https://docs.opengauss.org/zh/docs/latest/compilation_guide/compiling_the_version.html)。
     - 主机已经挂载磁阵LUN设备，并且已经安装ultrapath多路径软件，磁阵设备可用。
 
 - 操作步骤

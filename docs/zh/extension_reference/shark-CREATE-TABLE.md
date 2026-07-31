@@ -28,7 +28,6 @@ FILLFACTOR = fillfactor
 其中FILLFACTOR选项的取值fillfactor为[1, 100]的整数，实际含义同A库（A库的取值范围为[10, 100]的整数），因此当D库中fillfactor的取值范围为[1, 10)，不报错，将打印notice信息，并将fillfactor的取值设置为A库的最小值10;
 COMPRESSION_DELAY选项的取值delay为[0, 10080]的整数;
 除FILLFACTOR选项含有实际功能，同A库，其余参数均无实际功能，仅语法支持。
-
 - 建表语句中，针对UNIQUE和PRIMARY KEY约束，支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
 - 建表语句新增支持ON {filegroup | "default" } 选项，无实际作用，仅语法支持。
 - 建表语句新增支持TEXTIMAGE_ON { filegroup | "default" } 选项，无实际作用，仅语法支持。
@@ -65,6 +64,7 @@ CREATE [ [ GLOBAL | LOCAL ] [ TEMPORARY | TEMP ] | UNLOGGED ] TABLE [ IF NOT EXI
       NULL |
       CHECK ( expression ) |
       DEFAULT default_expr |
+      IDENTITY [ ( seed, increment ) ] |
       GENERATED ALWAYS AS ( generation_expr ) [STORED] |
       AS ( generation_expr ) [PERSISTED] |
       AUTO_INCREMENT |
@@ -101,6 +101,11 @@ CREATE [ [ GLOBAL | LOCAL ] [ TEMPORARY | TEMP ] | UNLOGGED ] TABLE [ IF NOT EXI
     ```
 
 ## 参数说明
+
+- **IDENTITY \[ \( seed, increment \) \]**
+
+    - 该语法为列添加identity属性，序列值递增，`seed`指定起始值，`increment`指定步长。
+    - 一张表只能定义一列（包括generated as identity）。
 
 - **AS \( generation\_expr \) \[PERSISTED\]**
 
@@ -202,6 +207,7 @@ CREATE [ [ GLOBAL | LOCAL ] [ TEMPORARY | TEMP ] | UNLOGGED ] TABLE [ IF NOT EXI
     - table_constraint中，针对PRIMARY KEY和UNIQUE约束支持使用{ column_name [ ASC | DESC ] }语法, 为主键和唯一键提供升序或降序约束。
 
 ## 生成列示例
+
 ```sql
 opengauss=# CREATE TABLE Products(
 opengauss(#     QtyAvailable smallint,
@@ -234,6 +240,39 @@ opengauss=# ALTER TABLE Products DROP unitprice;
 ALTER TABLE
 ```
 
+## IDENTITY \[ \( seed, increment \) \] 示例
+```sql
+openGauss=# create extension shark;
+CREATE EXTENSION
+openGauss=# create table t1 (a int identity(10, 20), b int);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_a_seq_identity" for serial column "t1.a"
+CREATE TABLE
+openGauss=# \d+ t1
+                              Table "public.t1"
+ Column |  Type   |     Modifiers     | Storage | Stats target | Description 
+--------+---------+-------------------+---------+--------------+-------------
+ a      | integer | not null identity | plain   |              | 
+ b      | integer |                   | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
+
+openGauss=# insert into t1(b) values(10);
+INSERT 0 1
+openGauss=# insert into t1(a, b) overriding system value values(12, 10);
+INSERT 0 1
+openGauss=# insert into t1 default values;
+INSERT 0 1
+openGauss=# select * from t1;
+ a  | b  
+----+----
+ 10 | 10
+ 12 | 10
+ 30 |   
+(3 rows)
+
+```
 ## WITH \( \{ storage\_parameter = value \} \[, ... \] \)示例
 
 ```sql
@@ -316,7 +355,7 @@ Options: orientation=row, compression=no
 
 ```
 
-## 使用特殊前缀创建本地和全局临时表<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
+## 使用特殊前缀创建本地和全局临时表
 
 ```sql
 openGauss=# CREATE TEMPORARY TABLE #ltt1
@@ -326,7 +365,7 @@ openGauss=# CREATE TEMPORARY TABLE #ltt1
     ADDRESS                   VARCHAR(50)                   ,
     POSTCODE                  CHAR(6)
 ) ON COMMIT PRESERVE ROWS;
-
+CREATE TABLE
 openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
 (
     ID                        INTEGER               NOT NULL,
@@ -334,7 +373,7 @@ openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
     ADDRESS                   VARCHAR(50)                   ,
     POSTCODE                  CHAR(6)
 ) ON COMMIT PRESERVE ROWS;
-
+CREATE TABLE
 ```
 
 ## 相关链接<a name="section156744489391"></a>

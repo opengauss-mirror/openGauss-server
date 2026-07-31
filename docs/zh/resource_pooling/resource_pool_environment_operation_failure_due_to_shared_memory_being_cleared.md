@@ -114,4 +114,4 @@ node            node_ip         instance                                    stat
 
 ## 四、解决方案
 
-数据库运行环境上，应当避免清理共享内存，同时对于RemoveIPC参数也应当设置为false，详见[关闭RemoveIPC](../installation_guide/preparing_the_software_and_hardware_installation_environment_enterprise.md#关闭removeipc)。
+数据库运行环境上，应当避免清理共享内存，同时对于RemoveIPC参数也应当设置为false，详见[关闭RemoveIPC](https://docs.opengauss.org/zh/docs/latest/installation_guide/preparing_the_software_and_hardware_installation_environment_enterprise.html#%E5%85%B3%E9%97%ADremoveipc)。

@@ -77,4 +77,4 @@ HINT:  See server log for query details.
 
 ## 四、解决方案
 
-openGauss拥有死锁检测功能，当业务等锁超过一段时间后，会自动检测是否存在死锁问题。如果识别出死锁问题，数据库会对其中一个死锁线程报错处理。openGauss使用参数deadlock_timeout控制死锁检测时间，具体参数说明可以参考[锁管理](../database_reference/lock_management.md)。
+openGauss拥有死锁检测功能，当业务等锁超过一段时间后，会自动检测是否存在死锁问题。如果识别出死锁问题，数据库会对其中一个死锁线程报错处理。openGauss使用参数deadlock_timeout控制死锁检测时间，具体参数说明可以参考[锁管理](https://docs.opengauss.org/zh/docs/latest/database_reference/lock_management.html)。

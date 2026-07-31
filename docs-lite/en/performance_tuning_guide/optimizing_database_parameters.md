@@ -8,7 +8,7 @@ The performance of complex query statements strongly depends on the configuratio
 
 ### Parameter for Logical Memory Management<a name="en-us_topic_0283136881_en-us_topic_0237121495_en-us_topic_0073253552_en-us_topic_0062863366_section6641095815423"></a>
 
-**max\_process\_memory**  is a parameter used for logical memory management. It specifies the maximum available memory on each database node. Set this parameter by referring to  [max\_process\_memory](../database_reference/memory.md#en-us_topic_0283136786_en-us_topic_0237124699_en-us_topic_0059777577_sbebcee7acf2042dc8824982f22a2b4a8).
+**max\_process\_memory**  is a parameter used for logical memory management. It specifies the maximum available memory on each database node. Set this parameter by referring to  [max\_process\_memory](https://docs.opengauss.org/en/docs/latest-lite/database_reference/memory.html#en-us_topic_0283136786_en-us_topic_0237124699_en-us_topic_0059777577_sbebcee7acf2042dc8824982f22a2b4a8).
 
 Use the following formula to calculate the available memory for job execution:
 

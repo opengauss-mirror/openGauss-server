@@ -445,7 +445,7 @@ Class控制组为数据库业务运行所在的顶层控制组，集群部署时
 
 3. 通过系统视图获取控制组配置信息。
 
-    a.[使用gsql访问openGauss](../getting_started/gsql_connection_and_usage.md)数据库。
+    a.[使用gsql访问openGauss](https://docs.opengauss.org/zh/docs/latest/getting_started/gsql_connection_and_usage.html)数据库。
     
     b.获取系统中所有控制组的配置信息。
     
@@ -581,13 +581,13 @@ openGauss支持通过创建资源池对主机资源进行划分。开启资源�
 
 ### 前提条件<a name="section17352165513395"></a>
 
-已熟悉[CREATE RESOURCE POOL](../sql_reference/create_resource_pool.md)、[ALTER RESOURCE POOL](../sql_reference/alter_resource_pool.md)和[DROP RESOURCE POOL](../sql_reference/drop_resource_pool.md)语法的使用。
+已熟悉[CREATE RESOURCE POOL](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_resource_pool.html)、[ALTER RESOURCE POOL](https://docs.opengauss.org/zh/docs/latest/sql_reference/alter_resource_pool.html)和[DROP RESOURCE POOL](https://docs.opengauss.org/zh/docs/latest/sql_reference/drop_resource_pool.html)语法的使用。
 
 ### 操作过程<a name="zh-cn_topic_0066854608_section16606579202019"></a>
 
 **创建资源池**
 
-1. [使使用gsql访问openGauss](../getting_started/gsql_connection_and_usage.md)数据库。
+1. [使使用gsql访问openGauss](https://docs.opengauss.org/zh/docs/latest/getting_started/gsql_connection_and_usage.html)数据库。
 
 2. 创建组资源池关联到指定的子Class控制组。例如下面：名称为“resource\_pool\_a”的组资源池关联到了“class\_a”控制组。
 
@@ -666,7 +666,7 @@ DROP RESOURCE POOL
     (7 rows)
     ```
 
-- 查看某个资源池关联的控制组信息，具体内容可以参考[统计信息函数](../sql_reference/statistics_information_functions.md)章节的gs\_control\_group\_info\(pool text\)函数。
+- 查看某个资源池关联的控制组信息，具体内容可以参考[统计信息函数](https://docs.opengauss.org/zh/docs/latest/sql_reference/statistics_information_functions.html)章节的gs\_control\_group\_info\(pool text\)函数。
 
     如下命令中“resource\_pool\_a1”为资源池名称。
 

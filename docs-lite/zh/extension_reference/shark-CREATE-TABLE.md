@@ -64,6 +64,7 @@ CREATE [ [ GLOBAL | LOCAL ] [ TEMPORARY | TEMP ] | UNLOGGED ] TABLE [ IF NOT EXI
       NULL |
       CHECK ( expression ) |
       DEFAULT default_expr |
+      IDENTITY [ ( seed, increment ) ] |
       GENERATED ALWAYS AS ( generation_expr ) [STORED] |
       AS ( generation_expr ) [PERSISTED] |
       AUTO_INCREMENT |
@@ -100,6 +101,11 @@ CREATE [ [ GLOBAL | LOCAL ] [ TEMPORARY | TEMP ] | UNLOGGED ] TABLE [ IF NOT EXI
     ```
 
 ## 参数说明
+
+- **IDENTITY \[ \( seed, increment \) \]**
+
+    - 该语法为列添加identity属性，序列值递增，`seed`指定起始值，`increment`指定步长。
+    - 一张表只能定义一列（包括generated as identity）。
 
 - **AS \( generation\_expr \) \[PERSISTED\]**
 
@@ -234,6 +240,40 @@ opengauss=# ALTER TABLE Products DROP unitprice;
 ALTER TABLE
 ```
 
+## IDENTITY \[ \( seed, increment \) \] 示例
+```sql
+openGauss=# create extension shark;
+CREATE EXTENSION
+openGauss=# create table t1 (a int identity(10, 20), b int);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_a_seq_identity" for serial column "t1.a"
+CREATE TABLE
+openGauss=# \d+ t1
+                              Table "public.t1"
+ Column |  Type   |     Modifiers     | Storage | Stats target | Description 
+--------+---------+-------------------+---------+--------------+-------------
+ a      | integer | not null identity | plain   |              | 
+ b      | integer |                   | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
+
+openGauss=# insert into t1(b) values(10);
+INSERT 0 1
+openGauss=# insert into t1(a, b) overriding system value values(12, 10);
+INSERT 0 1
+openGauss=# insert into t1 default values;
+INSERT 0 1
+openGauss=# select * from t1;
+ a  | b  
+----+----
+ 10 | 10
+ 12 | 10
+ 30 |   
+(3 rows)
+
+```
+
 ## WITH \( \{ storage\_parameter = value \} \[, ... \] \)示例
 
 ```sql
@@ -326,7 +366,7 @@ openGauss=# CREATE TEMPORARY TABLE #ltt1
     ADDRESS                   VARCHAR(50)                   ,
     POSTCODE                  CHAR(6)
 ) ON COMMIT PRESERVE ROWS;
-
+CREATE TABLE
 openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
 (
     ID                        INTEGER               NOT NULL,
@@ -334,9 +374,9 @@ openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
     ADDRESS                   VARCHAR(50)                   ,
     POSTCODE                  CHAR(6)
 ) ON COMMIT PRESERVE ROWS;
-
+CREATE TABLE
 ```
 
 ## 相关链接<a name="section156744489391"></a>
 
-[CREATE TABLE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/create_table_1.html)
+[CREATE TABLE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/create_table.html)

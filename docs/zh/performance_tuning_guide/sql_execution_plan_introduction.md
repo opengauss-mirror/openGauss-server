@@ -15,7 +15,7 @@ SQL执行计划是一个节点树，显示openGauss执行一条SQL语句时执�
 
 ### 执行计划显示信息<a name="zh-cn_topic_0283137711_zh-cn_topic_0237121510_zh-cn_topic_0073548187_section1708958594911"></a>
 
-除了设置不同的执行计划显示格式外，还可以通过不同的EXPLAIN用法，显示不同详细程度的执行计划信息。常见有如下几种，关于更多用法请参见[EXPLAIN](../sql_reference/explain.md)语法说明。
+除了设置不同的执行计划显示格式外，还可以通过不同的EXPLAIN用法，显示不同详细程度的执行计划信息。常见有如下几种，关于更多用法请参见[EXPLAIN](https://docs.opengauss.org/zh/docs/latest/sql_reference/explain.html)语法说明。
 
 - EXPLAIN  _statement_：只生成执行计划，不实际执行。其中statement代表SQL语句。
 - EXPLAIN ANALYZE  _statement_：生成执行计划，进行执行，并显示执行的概要信息。显示中加入了实际的运行时间统计，包括在每个规划节点内部花掉的总时间（以毫秒计）和它实际返回的行数。
