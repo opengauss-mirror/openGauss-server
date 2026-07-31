@@ -84,7 +84,7 @@ void MatrixMemFuncInit(char* ubsMemPath)
 #ifdef FRONTEND
         fprintf(stderr, _("load matrix mem dynamic lib error: %s, lib not exists"), ubsMemPath);
 #else
-        int ret = ENABLE_UB ? ERROR : WARNING;
+        int ret = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb) ? ERROR : WARNING;
         ereport(ret, (errmsg("load matrix mem dynamic lib error: %s, lib not exists", ubsMemPath)));
 #endif
         return;
