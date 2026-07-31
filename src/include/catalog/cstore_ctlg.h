@@ -31,8 +31,8 @@
 
 extern void	AlterCStoreCreateTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
 
-extern bool	CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateStmt *mainTblStmt);
-extern bool	CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition);
+extern bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateStmt *mainTblStmt);
+extern bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition);
 extern bool createDeltaTableForPartition(Oid relOid, Oid partOid, Datum reloptions, CreateStmt *mainTblStmt);
 extern bool createCUDescTableForPartition(Oid relOid, Oid partOid, Datum reloptions);
 extern Datum AddInternalOption(Datum reloptions, int mask);

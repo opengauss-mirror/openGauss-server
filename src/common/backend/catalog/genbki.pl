@@ -393,8 +393,9 @@ sub emit_pgattr_row
 		# new fileld attinitdefval of pg_attribute
 		attinitdefval => '_null_',
 		attkvtype     => '0',
-		attdroppedname => '_null_'
-    );
+		attdroppedname => '_null_',
+		attidentity   => '',
+	);
 	return { %PGATTR_DEFAULTS, %row };
 }
 
@@ -404,7 +405,7 @@ sub bki_insert
 	my $row        = shift;
 	my @attnames   = @_;
 	my $oid        = $row->{oid} ? "OID = $row->{oid} " : '';
-	my $bki_values = join ' ', map $row->{$_}, @attnames;
+	my $bki_values = join ' ', map { $_ eq '' ? '""' : $_ } map $row->{$_}, @attnames;
 	printf BKI "insert %s( %s)\n", $oid, $bki_values;
 }
 
@@ -427,7 +428,9 @@ sub emit_schemapg_row
 	delete $row->{attfdwoptions};
 	# new fileld attinitdefval of pg_attribute
 	delete $row->{attinitdefval};
+	delete $row->{attkvtype};
 	delete $row->{attdroppedname};
+	delete $row->{attidentity};
 
 	# Expand booleans from 'f'/'t' to 'false'/'true'.
 	# Some values might be other macros (eg FLOAT4PASSBYVAL), don't change.

@@ -47,8 +47,9 @@ ERROR:  both default and generation expression specified for column "b" of table
 LINE 1: ... gtest_err_5a (a int PRIMARY KEY, b int DEFAULT 5 GENERATED ...
                                                              ^
 CREATE TABLE gtest_err_5b (a int PRIMARY KEY, b int GENERATED ALWAYS AS identity GENERATED ALWAYS AS (a * 2) STORED);
-ERROR:  syntax error at or near "identity"
-LINE 1: ..._5b (a int PRIMARY KEY, b int GENERATED ALWAYS AS identity G...
+NOTICE:  CREATE TABLE will create implicit sequence "gtest_err_5b_b_seq" for serial column "gtest_err_5b.b"
+ERROR:  both default and generation expression specified for column "b" of table "gtest_err_5b"
+LINE 1: ...t PRIMARY KEY, b int GENERATED ALWAYS AS identity GENERATED ...
                                                              ^
 -- reference to system column not allowed in generated column
 CREATE TABLE gtest_err_6a (a int PRIMARY KEY, b bool GENERATED ALWAYS AS (xmin <> 37) STORED);

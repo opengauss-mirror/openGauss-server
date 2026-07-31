@@ -5751,6 +5751,9 @@ static bool cost_qual_eval_walker(Node* node, cost_qual_eval_context* context)
 
             context->total.per_tuple += get_func_cost(get_opcode(opid)) * u_sess->attr.attr_sql.cpu_operator_cost;
         }
+    } else if (IsA(node, NextValueExpr)) {
+        /* Treat all these as having cost 1 */
+        context->total.per_tuple += u_sess->attr.attr_sql.cpu_operator_cost;
     } else if (IsA(node, CurrentOfExpr)) {
         /* Report high cost to prevent selection of anything but TID scan */
         context->total.startup += g_instance.cost_cxt.disable_cost;

@@ -212,6 +212,9 @@ extern Numeric numeric_div_opt_error(Numeric num1, Numeric num2, bool *haveError
 extern Numeric numeric_mod_opt_error(Numeric num1, Numeric num2, bool *haveError);
 extern int32 numeric_int4_opt_error(Numeric num, bool can_ignore, bool *haveError);
 extern int64 numeric_int8_opt_error(Numeric num, bool can_ignore, bool *haveError);
+extern Numeric int64_to_numeric(int64 v);
+extern Numeric int128_to_numeric(int128 v);
+
 
 //
 // Numeric Compression Codes Area

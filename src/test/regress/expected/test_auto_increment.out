@@ -5724,6 +5724,22 @@ select nextval('t_auto_nextval_test_b_seq'); -- error
 ERROR:  cannot change sequence owned by auto_increment column
 CONTEXT:  referenced column: nextval
 drop table t_auto_nextval_test;
+-- error cases
+CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_increment, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  multiple default values specified for column "a" of table "test_t1"
+LINE 1: ...TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_incre...
+                                                             ^
+CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+ERROR:  Identity column 'a' data type invalid.
+CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  column "a" is of type integer but default expression is of type timestamp with time zone
+HINT:  You will need to rewrite or cast the expression.
+CREATE TABLE test_t1 (a int ON UPDATE current_timestamp auto_increment, b text);
+ERROR:  multiple default values specified for column "a" of table "test_t1"
+LINE 1: ... TABLE test_t1 (a int ON UPDATE current_timestamp auto_incre...
+                                                             ^
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

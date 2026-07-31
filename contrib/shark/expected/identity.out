@@ -39,13 +39,14 @@ select * from book;
 (4 rows)
 
 ALTER table book add column id int identity;
-ERROR:  multiple identity specifications for column "bookid" of table "book"
+NOTICE:  ALTER TABLE will create implicit sequence "book_id_seq_identity" for serial column "book.id"
+ERROR:  Multiple identity columns specified for table "book". Only one identity column per table is allowed.
 ALTER table book alter bookId type text;
-ERROR:  Identity column 'bookid' data type invalid.
+ERROR:  Not supported alter identity column bookid type
 drop table if exists book;
 CREATE TABLE book(id int identity, bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
 NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq_identity" for serial column "book.id"
-ERROR:  table can only have one identity column
+ERROR:  Multiple identity columns specified for table "book". Only one identity column per table is allowed.
 CREATE TABLE book
 (
     bookId int NOT NULL PRIMARY KEY IDENTITY, 
@@ -265,6 +266,8 @@ CREATE TABLE book(id serial, bookId int identity default 5, bookname char(20));
 NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq" for serial column "book.id"
 NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
 ERROR:  multiple default values specified for column "bookid" of table "book"
+LINE 1: CREATE TABLE book(id serial, bookId int identity default 5, ...
+                                                         ^
 CREATE TABLE t_identity(id serial, col int identity(5,10), col2 text)
 partition by range(col)(
 partition p1 VALUES LESS THAN (10),
@@ -477,9 +480,8 @@ insert into t_identity_0013(name) values('lisi');
 insert into t_identity_0013(name) values('wangwu');
 --error
 update t_identity_0013 set id=4 where name='zhangsan';
-ERROR:  Cannot update identity column "id"
-LINE 1: update t_identity_0013 set id=4 where name='zhangsan';
-                                   ^
+ERROR:  column "id" can only be updated to DEFAULT
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
 drop table t_identity_0013;
 -- ## ident_current after truncate table. expected: success.
 create table t_identity_0021(id int identity(100,1), name varchar(10));
@@ -533,14 +535,30 @@ select scope_identity();
 (1 row)
 
 -- no option.
-create table t_identity_0023_1 (like t_identity_0023);
+create table t_identity_0023_1_1 (like t_identity_0023);
+\d+ t_identity_0023_1_1
+                                      Table "identity_schema.t_identity_0023_1_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer               | not null                                      | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
+
+insert t_identity_0023_1_1 (name) values('xxx1');
+ERROR:  null value in column "id" violates not-null constraint
+DETAIL:  Failing row contains (null, xxx1).
+-- including IDENTITY.
+create table t_identity_0023_1 (like t_identity_0023 INCLUDING IDENTITY);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0023_1_id_seq_identity" for serial column "t_identity_0023_1.id"
 \d+ t_identity_0023_1
-                                                    Table "identity_schema.t_identity_0023_1"
- Column |         Type          |                                Modifiers                                | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------+----------+--------------+-------------
- id     | integer               | not null default nextval('t_identity_0023_1_id_seq_identity'::regclass) | plain    |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                           | extended |              | 
+                                       Table "identity_schema.t_identity_0023_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer               | not null identity                             | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -590,24 +608,27 @@ select * from t_identity_0023_1 order by id;
 
 -- including DEFAULTS.
 create table t_identity_0023_2 (like t_identity_0023 INCLUDING DEFAULTS);
-NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0023_2_id_seq_identity" for serial column "t_identity_0023_2.id"
 \d+ t_identity_0023_2
-                                                    Table "identity_schema.t_identity_0023_2"
- Column |         Type          |                                Modifiers                                | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------+----------+--------------+-------------
- id     | integer               | not null default nextval('t_identity_0023_2_id_seq_identity'::regclass) | plain    |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                           | extended |              | 
+                                       Table "identity_schema.t_identity_0023_2"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer               | not null                                      | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
 Collate: utf8mb4_general_ci
 
 insert t_identity_0023_2 (name) values('xxx1');
+ERROR:  null value in column "id" violates not-null constraint
+DETAIL:  Failing row contains (null, xxx1).
 insert t_identity_0023_2 (name) values('xxx1');
+ERROR:  null value in column "id" violates not-null constraint
+DETAIL:  Failing row contains (null, xxx1).
 select ident_current('t_identity_0023_2');
  ident_current 
 ---------------
-           101
+              
 (1 row)
 
 select scope_identity();
@@ -616,7 +637,7 @@ select scope_identity();
             101
 (1 row)
 
-drop table t_identity_0023;
+drop table t_identity_0023, t_identity_0023_1_1;
 drop table t_identity_0023_1;
 drop table t_identity_0023_2;
 -- ## can't insert identity column, expected error.
@@ -626,9 +647,9 @@ create table t_identity(id int identity, col text);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_id_seq_identity" for serial column "t_identity.id"
 -- expected error.
 insert into t_identity(id, col) values(2,'zshan');
-ERROR:  Cannot insert identity column "id"
-LINE 1: insert into t_identity(id, col) values(2,'zshan');
-                               ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 select ident_current('t_identity');
  ident_current 
 ---------------
@@ -665,9 +686,9 @@ insert into t_identity(col) select 'test';
 insert into t_identity(col) select 'test';
 -- expected error.
 insert into t_identity(id, col) select 1, 'test';
-ERROR:  Cannot insert identity column "id"
-LINE 1: insert into t_identity(id, col) select 1, 'test';
-                               ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 -- expected success.
 set identity_insert = on;
 insert into t_identity(id, col) select 1, 'test';
@@ -699,9 +720,9 @@ select * from t_identity order by id;
 -- expected error.
 insert into t_identity(id, col) values(100, 'newtest')
     on duplicate key update col = VALUES(col);
-ERROR:  Cannot insert identity column "id"
-LINE 1: insert into t_identity(id, col) values(100, 'newtest')
-                               ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 -- expected error.
 insert into t_identity(col) values(100, 'newtest')
     on duplicate key update col = VALUES(col);
@@ -740,9 +761,9 @@ when not matched then
 merge into target_table AS t using source_table AS s ON t.id = s.id
 when not matched then
     insert (id, name, age) values (s.id, s.name, s.age);
-ERROR:  Cannot insert identity column "id"
-LINE 3:     insert (id, name, age) values (s.id, s.name, s.age);
-                    ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert"
 -- expected success.
 set identity_insert = on;
 merge into target_table AS t using source_table AS s ON t.id = s.id
@@ -795,10 +816,10 @@ NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0024_02_id_seq_i
 select id as id_alias into t_identity_0024_02_1 from t_identity_0024;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0024_02_1_id_alias_seq_identity" for serial column "t_identity_0024_02_1.id_alias"
 \d+ t_identity_0024_02_1
-                                                 Table "identity_schema.t_identity_0024_02_1"
-  Column  |  Type   |                                    Modifiers                                     | Storage | Stats target | Description 
-----------+---------+----------------------------------------------------------------------------------+---------+--------------+-------------
- id_alias | integer | not null default nextval('t_identity_0024_02_1_id_alias_seq_identity'::regclass) | plain   |              | 
+                 Table "identity_schema.t_identity_0024_02_1"
+  Column  |  Type   |     Modifiers     | Storage | Stats target | Description 
+----------+---------+-------------------+---------+--------------+-------------
+ id_alias | integer | not null identity | plain   |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -813,12 +834,12 @@ select ident_current('t_identity_0024_02_1');
 select * into t_identity_0024_03 from t_identity_0024;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0024_03_id_seq_identity" for serial column "t_identity_0024_03.id"
 \d+ t_identity_0024_03
-                                                    Table "identity_schema.t_identity_0024_03"
- Column |         Type          |                                Modifiers                                 | Storage  | Stats target | Description 
---------+-----------------------+--------------------------------------------------------------------------+----------+--------------+-------------
- id     | integer               | not null default nextval('t_identity_0024_03_id_seq_identity'::regclass) | plain    |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                            | extended |              | 
- age    | integer               |                                                                          | plain    |              | 
+                                       Table "identity_schema.t_identity_0024_03"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer               | not null identity                             | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
+ age    | integer               |                                               | plain    |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -833,11 +854,11 @@ select ident_current('t_identity_0024_03');
 select id, age as alias_age into t_identity_0024_04 from t_identity_0024;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0024_04_id_seq_identity" for serial column "t_identity_0024_04.id"
 \d+ t_identity_0024_04
-                                              Table "identity_schema.t_identity_0024_04"
-  Column   |  Type   |                                Modifiers                                 | Storage | Stats target | Description 
------------+---------+--------------------------------------------------------------------------+---------+--------------+-------------
- id        | integer | not null default nextval('t_identity_0024_04_id_seq_identity'::regclass) | plain   |              | 
- alias_age | integer |                                                                          | plain   |              | 
+                   Table "identity_schema.t_identity_0024_04"
+  Column   |  Type   |     Modifiers     | Storage | Stats target | Description 
+-----------+---------+-------------------+---------+--------------+-------------
+ id        | integer | not null identity | plain   |              | 
+ alias_age | integer |                   | plain   |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -868,9 +889,9 @@ select * from t_identity_0024_04 order by id;
 set identity_insert = off;
 -- expected: error
 insert into t_identity_0024_04(id, alias_age) values (1000, 22);
-ERROR:  Cannot insert identity column "id"
-LINE 1: insert into t_identity_0024_04(id, alias_age) values (1000, ...
-                                       ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 set identity_insert = on;
 -- expected: success
 insert into t_identity_0024_04(id, alias_age) values (1000, 22);
@@ -947,9 +968,9 @@ NOTICE:  CREATE TABLE will create implicit sequence "t_serial_identity_001_id1_s
 select * into t_serial_identity_001_1 from t_serial_identity_001;
 NOTICE:  CREATE TABLE will create implicit sequence "t_serial_identity_001_1_id_seq_identity" for serial column "t_serial_identity_001_1.id"
 NOTICE:  CREATE TABLE will create implicit sequence "t_serial_identity_001_1_id1_seq" for serial column "t_serial_identity_001_1.id1"
-ERROR:  Cannot insert identity column "id"
-LINE 1: ...t * into t_serial_identity_001_1 from t_serial_identity_001;
-                                                                 ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 set identity_insert = on;
 -- expected: success
 select * into t_serial_identity_001_1 from t_serial_identity_001;
@@ -957,12 +978,12 @@ NOTICE:  CREATE TABLE will create implicit sequence "t_serial_identity_001_1_id_
 NOTICE:  CREATE TABLE will create implicit sequence "t_serial_identity_001_1_id1_seq" for serial column "t_serial_identity_001_1.id1"
 set identity_insert = off;
 \d+ t_serial_identity_001_1
-                                                    Table "identity_schema.t_serial_identity_001_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | integer               | not null default nextval('t_serial_identity_001_1_id_seq_identity'::regclass) | plain    |              | 
- id1    | integer               | not null default nextval('t_serial_identity_001_1_id1_seq'::regclass)         | plain    |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                                Table "identity_schema.t_serial_identity_001_1"
+ Column |         Type          |                               Modifiers                               | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------------------------------+----------+--------------+-------------
+ id     | integer               | not null identity                                                     | plain    |              | 
+ id1    | integer               | not null default nextval('t_serial_identity_001_1_id1_seq'::regclass) | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                         | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -992,11 +1013,11 @@ set identity_insert = on;
 select id, name into t_identity_numeric_t1_1 from t_identity_numeric_t1;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t1_1_id_seq_identity" for serial column "t_identity_numeric_t1_1.id"
 \d+ t_identity_numeric_t1_1
-                                                    Table "identity_schema.t_identity_numeric_t1_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | numeric(25,0)         | not null default nextval('t_identity_numeric_t1_1_id_seq_identity'::regclass) | main     |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                    Table "identity_schema.t_identity_numeric_t1_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | numeric(25,0)         | not null identity                             | main     |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -1021,11 +1042,11 @@ select id, name into t_identity_numeric_t2_1 from t_identity_numeric_t2;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t2_1_id_seq_identity" for serial column "t_identity_numeric_t2_1.id"
 set identity_insert = off;
 \d+ t_identity_numeric_t2_1
-                                                    Table "identity_schema.t_identity_numeric_t2_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | numeric(25,0)         | not null default nextval('t_identity_numeric_t2_1_id_seq_identity'::regclass) | main     |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                    Table "identity_schema.t_identity_numeric_t2_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | numeric(25,0)         | not null identity                             | main     |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -1049,11 +1070,11 @@ select id, name into t_identity_numeric_t3_1 from t_identity_numeric_t3;
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t3_1_id_seq_identity" for serial column "t_identity_numeric_t3_1.id"
 set identity_insert = off;
 \d+ t_identity_numeric_t3_1
-                                                    Table "identity_schema.t_identity_numeric_t3_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | numeric(25,0)         | not null default nextval('t_identity_numeric_t3_1_id_seq_identity'::regclass) | main     |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                    Table "identity_schema.t_identity_numeric_t3_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | numeric(25,0)         | not null identity                             | main     |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -1074,14 +1095,14 @@ drop table t_identity_numeric_t3_1;
 -- max/min value
 create table t_identity_numeric_t4(id numeric(38, 0) identity, name varchar(10));
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t4_id_seq_identity" for serial column "t_identity_numeric_t4.id"
-create table t_identity_numeric_t4_1 (like t_identity_numeric_t4);
+create table t_identity_numeric_t4_1 (like t_identity_numeric_t4 including identity);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t4_1_id_seq_identity" for serial column "t_identity_numeric_t4_1.id"
 \d+ t_identity_numeric_t4_1;
-                                                    Table "identity_schema.t_identity_numeric_t4_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | numeric(38,0)         | not null default nextval('t_identity_numeric_t4_1_id_seq_identity'::regclass) | main     |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                    Table "identity_schema.t_identity_numeric_t4_1"
+ Column |         Type          |                   Modifiers                   | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------+----------+--------------+-------------
+ id     | numeric(38,0)         | not null identity                             | main     |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -1102,7 +1123,7 @@ drop table t_identity_numeric_t4_1;
 create table t_identity_numeric_t5(id numeric(38, 0) identity(987654321098765432100000, 2), id1 serial, name varchar(10));
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t5_id_seq_identity" for serial column "t_identity_numeric_t5.id"
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t5_id1_seq" for serial column "t_identity_numeric_t5.id1"
-create table t_identity_numeric_t5_1 (like t_identity_numeric_t5);
+create table t_identity_numeric_t5_1 (like t_identity_numeric_t5 including identity);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t5_1_id_seq_identity" for serial column "t_identity_numeric_t5_1.id"
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t5_1_id1_seq" for serial column "t_identity_numeric_t5_1.id1"
 insert into t_identity_numeric_t5_1(name) values('xxx'); -- over int64
@@ -1118,16 +1139,16 @@ drop table t_identity_numeric_t5_1;
 create table t_identity_numeric_t6(id numeric(38, 0) identity(2, 987654321098765432100000), id1 serial, name varchar(10));
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t6_id_seq_identity" for serial column "t_identity_numeric_t6.id"
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t6_id1_seq" for serial column "t_identity_numeric_t6.id1"
-create table t_identity_numeric_t6_1 (like t_identity_numeric_t6);
+create table t_identity_numeric_t6_1 (like t_identity_numeric_t6 including identity);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t6_1_id_seq_identity" for serial column "t_identity_numeric_t6_1.id"
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_numeric_t6_1_id1_seq" for serial column "t_identity_numeric_t6_1.id1"
 \d+ t_identity_numeric_t6_1
-                                                    Table "identity_schema.t_identity_numeric_t6_1"
- Column |         Type          |                                   Modifiers                                   | Storage  | Stats target | Description 
---------+-----------------------+-------------------------------------------------------------------------------+----------+--------------+-------------
- id     | numeric(38,0)         | not null default nextval('t_identity_numeric_t6_1_id_seq_identity'::regclass) | main     |              | 
- id1    | integer               | not null default nextval('t_identity_numeric_t6_1_id1_seq'::regclass)         | plain    |              | 
- name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                                 | extended |              | 
+                                                Table "identity_schema.t_identity_numeric_t6_1"
+ Column |         Type          |                               Modifiers                               | Storage  | Stats target | Description 
+--------+-----------------------+-----------------------------------------------------------------------+----------+--------------+-------------
+ id     | numeric(38,0)         | not null identity                                                     | main     |              | 
+ id1    | integer               | not null default nextval('t_identity_numeric_t6_1_id1_seq'::regclass) | plain    |              | 
+ name   | character varying(10) | character set UTF8 collate utf8mb4_general_ci                         | extended |              | 
 Has OIDs: no
 Options: orientation=row, compression=no, collate=1537
 Character Set: UTF8
@@ -1148,11 +1169,11 @@ drop table t_identity_numeric_t6_1;
 create table t_ident (id int identity, col text) with (orientation=column);
 NOTICE:  CREATE TABLE will create implicit sequence "t_ident_id_seq_identity" for serial column "t_ident.id"
 \d+ t_ident;
-                                             Table "identity_schema.t_ident"
- Column |  Type   |                           Modifiers                           | Storage  | Stats target | Description 
---------+---------+---------------------------------------------------------------+----------+--------------+-------------
- id     | integer | not null default nextval('t_ident_id_seq_identity'::regclass) | plain    |              | 
- col    | text    | character set UTF8 collate utf8mb4_general_ci                 | extended |              | 
+                                     Table "identity_schema.t_ident"
+ Column |  Type   |                   Modifiers                   | Storage  | Stats target | Description 
+--------+---------+-----------------------------------------------+----------+--------------+-------------
+ id     | integer | not null identity                             | plain    |              | 
+ col    | text    | character set UTF8 collate utf8mb4_general_ci | extended |              | 
 Has OIDs: no
 Options: orientation=column, compression=low, collate=1537
 Character Set: UTF8
@@ -1178,7 +1199,7 @@ drop table t_ident;
 create sequence identity_t2_id_seq_identity;
 create table identity_t2(id numeric(38, 0) identity(10, 2), b int);
 NOTICE:  CREATE TABLE will create implicit sequence "identity_t2_id_seq_identity1" for serial column "identity_t2.id"
-create table identity_t2_1 (like identity_t2);
+create table identity_t2_1 (like identity_t2 including identity);
 NOTICE:  CREATE TABLE will create implicit sequence "identity_t2_1_id_seq_identity" for serial column "identity_t2_1.id"
 insert into identity_t2_1(b) values (10);
 insert into identity_t2_1(b) values (10);
@@ -1211,5 +1232,16 @@ select id, b from identity_t3_1;
 drop sequence identity_t3_id_seq_identity;
 drop table identity_t3;
 drop table identity_t3_1;
+-- compatiable with pg identity
+-- error
+create table identity_t1(id numeric(38, 0) identity(1, 2) generated always as identity);
+NOTICE:  CREATE TABLE will create implicit sequence "identity_t1_id_seq_identity" for serial column "identity_t1.id"
+ERROR:  multiple identity specifications for column "id" of table "identity_t1"
+LINE 1: ...able identity_t1(id numeric(38, 0) identity(1, 2) generated ...
+                                                             ^
+-- error
+create table identity_t1(id numeric(38, 0) identity(1, 2), id2 numeric(37, 0) generated always as identity);
+NOTICE:  CREATE TABLE will create implicit sequence "identity_t1_id_seq_identity" for serial column "identity_t1.id"
+ERROR:  Multiple identity columns specified for table "identity_t1". Only one identity column per table is allowed.
 reset current_schema;
 drop schema identity_schema;

@@ -375,7 +375,7 @@ static void append_array_varchar_delete(StringInfo sqlBuf);
 %type <plnode> assign_el
 %type <declhdr> decl_sect
 %type <varname> decl_varname declare_condname
-%type <list> decl_varname_list opt_subtype_range
+%type <list> decl_varname_list
 %type <boolean>	decl_const decl_notnull exit_type
 %type <expr>	decl_defval decl_rec_defval decl_cursor_query
 %type <dtype>	decl_datatype opt_cursor_returntype subtype_base_type
@@ -2328,10 +2328,7 @@ init_proc        :
                  {
                      $$ = get_init_proc(yychar);
                      yyclearin;
-                 }    
-
-opt_subtype_range : 
-                 { $$ = NIL; };
+                 }
 
 record_attr_list : record_attr
                    {
@@ -5576,7 +5573,6 @@ stmt_execsql			: K_ALTER
             {
                 int tok = -1;
                 bool FuncNoarg = false;
-                char* serverName = NULL;
                 PLwdatum *objtypwdatum = NULL;
                 PLwdatum objtypwdatumtemp;
                 objtypwdatumtemp.datum = yylval.wdatum.datum;
@@ -8722,8 +8718,9 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
         bool found = false;
         List* funcname = NIL;
         FuncCandidateList clist = NULL;
-        char *cp[3] = {0};
-            
+        const int SIZE = 3;
+        char *cp[SIZE] = {0};
+
         for (i = 0; i < target_nest_typnames->length; i++) {
             if (target_ntype->layer == ntype->layer &&
                (target_ntype->index == -1 || target_ntype->index == ntype->index)) {
@@ -8757,8 +8754,8 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
             continue;
         }
 
-        plpgsql_parser_funcname(ntype->typname, cp, 3);
-        for (int i = 0; i < (sizeof(cp) / sizeof(cp[0]) - 1) ; i++) {
+        plpgsql_parser_funcname(ntype->typname, cp, SIZE);
+        for (int i = 0; i < SIZE; i++) {
             if (cp[i] && cp[i][0] != '\0') {
                 if (i != 0) {
                     funcname = lappend(funcname, makeString(cp[i]));
@@ -8782,7 +8779,8 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
         errno_t rc = snprintf_s(mes, length, length -1, "%s\"%s\"", report_mes, ntype->typname);
         securec_check_ss(rc, "", "");
         InsertErrorMessage(mes, plpgsql_yylloc);
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg(mes)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("Wrong type of expression, should not use type \"%s\"", ntype->typname)));
     }
 }
 
@@ -9006,7 +9004,7 @@ static bool construct_object_type(StringInfo ds, ArrayParseContext *context, Typ
         return construct_array_start(ds, context, type, tok, parenlevel, loc);
     }
     if (type->typtyp == TYPTYPE_ABSTRACT_OBJECT)
-        appendStringInfo(ds, name_str);
+        appendStringInfoString(ds, name_str);
     else
         appendStringInfo(ds, "ROW");
     pfree_ext(name_str);
@@ -9186,7 +9184,6 @@ read_sql_construct6(int until,
     ArrayParseContext	context;
     List				*idents = 0;
     List*				nest_typnames = NIL;
-    int					comma_cnt = 0;
     int					typname_indexs[MAX_LAYER] = {0};
     const char			left_bracket[2] = "[";
     const char			right_bracket[2] = "]";
@@ -9199,7 +9196,7 @@ read_sql_construct6(int until,
     int					left_brace_count = 0;
     int					right_brace_count = 0;
     bool				stop_count = false;
-    int					stop_tok;
+    int					stop_tok = -1;
     bool				record_typename = false;
     int					bracket_diff=0;
     /* mark if there are 2 table of index by var call functions in an expr */
@@ -14112,7 +14109,6 @@ static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, co
     Form_pg_type baseType;
     ObjectAddress referenced;
     PLpgSQL_type* res = NULL;
-    SubTypeRange* typerange = NULL;
 
     /* check is typname too long */
     if (strlen(typname) >= NAMEDATALEN) {
@@ -14227,7 +14223,6 @@ plpgsql_build_function_package_subtype(char* typname, PLpgSQL_type* newp, const 
     char* pkgtypname = NULL;
     char* schamaname = NULL;
     Oid pkgoid = InvalidOid;
-    SubTypeRange* typerange = NULL;
     char* casttypename = NULL;
     bool sameType = false;
 
@@ -14419,7 +14414,8 @@ check_labels(const char *start_label, const char *end_label, int end_location)
                 ereport(errstate,
                     (errcode(ERRCODE_SYNTAX_ERROR),
                      errmsg("end label \"%s\" differs from block's label \"%s\"",
-                            end_label, start_label),
+                            end_label == NULL ? "NULL" : end_label,
+                            start_label == NULL ? "NULL" : start_label),
                      parser_errposition(end_location)));
             }
         }

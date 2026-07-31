@@ -1925,7 +1925,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     AssertEreport(pstate->p_ctenamespace == NIL, MOD_OPT, "para should be NIL");
 
     RightRefState* rightRefState = MakeRightRefStateIfSupported((SelectStmt*)stmt->selectStmt);
-    
+
     qry->commandType = CMD_INSERT;
     pstate->p_is_insert = true;
     pstate->p_has_ignore = stmt->hasIgnore;
@@ -1943,7 +1943,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
             selectStmt = (SelectStmt *)stmt->selectStmt;
             ListCell* o_target = NULL;
             List *ctext_expr_list = NULL;
-            
+
             foreach (o_target, stmt->targetList) {
                 ResTarget* res = (ResTarget*)lfirst(o_target);
 
@@ -2039,7 +2039,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
-    
+
     AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistent");
 
     /*
@@ -2431,6 +2431,9 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
                     errdetail("column stored relation doesn't support INSERT returning")));
         }
     }
+
+    /* overriding clause */
+    qry->override = stmt->override;
 
     /* done building the range table and jointree */
     qry->rtable = pstate->p_rtable;
@@ -5121,10 +5124,8 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             UndefinedColumnError(pstate, origTarget, targetRelationNum);
         }
 
-        checkIdentityColumn(pstate, targetrel, origTarget, attrno, "update");
-
         updateTargetListEntry(pstate, tle, origTarget->name, attrno, origTarget->indirection, origTarget->location,
-            targetrel, target_rte);
+                              targetrel, target_rte);
         checkSRFInMultiUpdate(tle->expr, targetRelationNum);
         tle->rtindex = rtindex;
         new_tle[rtindex - 1] = lappend(new_tle[rtindex - 1], tle);

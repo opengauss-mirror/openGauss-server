@@ -227,6 +227,7 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
     TupleDesc mainTableTupDesc = rel->rd_att;
 
     TupleDesc tupdesc = CreateTupleDescCopyConstr(mainTableTupDesc);
+    Form_pg_attribute_extra attrExtra = CreatePGAttributeExtra(mainTableTupDesc);
 
     // if psort index change relkind to relation
     char relkind = rel->rd_rel->relkind == RELKIND_INDEX ? RELKIND_RELATION : rel->rd_rel->relkind;
@@ -266,7 +267,15 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
         NULL,
         REL_CMPRS_NOT_SUPPORT,
         NULL,
-        false);
+        false,
+        NULL,
+        HEAP_DISK,
+        AccessExclusiveLock,
+        NULL,
+        NIL,
+        InvalidOid,
+        InvalidOid,
+        attrExtra);
     Assert(delta_relid != InvalidOid);
 
     /* make the delta relation visible, else heap_open will fail */

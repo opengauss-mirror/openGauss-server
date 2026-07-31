@@ -398,7 +398,6 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <str>		character
 %type <str>		character_national
 %type <str>		extract_arg
-%type <str>		opt_charset
 %type <boolean> opt_varying opt_timezone opt_no_inherit
 
 %type <ival>	Iconst SignedIconst
@@ -430,7 +429,6 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <node>	func_application func_expr_common_subexpr
 %type <node>	common_table_expr
-%type <keep>    keep_clause
 %type <with>	with_clause opt_with_clause
 %type <list>	cte_list
 
@@ -580,7 +578,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NTH_VALUE_P NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
-	ORDER ORDINALITY OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
+	ORDER ORDINALITY OUT_P OUTER_P OVER OVERLAPS OVERLAY OVERRIDING OWNED OWNER OUTFILE
 
 	PACKAGE PACKAGES PARALLEL_ENABLE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 	PIPELINED
@@ -9102,11 +9100,6 @@ opt_varying:
 			| /*EMPTY*/								{ $$ = FALSE; }
 		;
 
-opt_charset:
-			CHARACTER SET ColId						{ $$ = $3; }
-			| /*EMPTY*/								{ $$ = NULL; }
-		;
-
 /*
  * SQL92 date/time types
  */
@@ -12191,6 +12184,7 @@ unreserved_keyword:
 			| OPTIONALLY
 			| OPTIONS
 			| ORDINALITY
+			| OVERRIDING
 			| OWNED
 			| OWNER
 			| OUTFILE

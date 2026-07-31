@@ -3581,6 +3581,19 @@ static CurrentOfExpr* _copyCurrentOfExpr(const CurrentOfExpr* from)
 }
 
 /*
+ * _copyNextValueExpr
+ */
+static NextValueExpr* _copyNextValueExpr(const NextValueExpr* from)
+{
+    NextValueExpr* newnode = makeNode(NextValueExpr);
+
+    COPY_SCALAR_FIELD(seqid);
+    COPY_SCALAR_FIELD(typeId);
+
+    return newnode;
+}
+
+/*
  * _copyTargetEntry
  */
 static TargetEntry* _copyTargetEntry(const TargetEntry* from)
@@ -4747,6 +4760,10 @@ static ColumnDef* _copyColumnDef(const ColumnDef* from)
     COPY_NODE_FIELD(raw_default);
     COPY_SCALAR_FIELD(generatedCol);
     COPY_NODE_FIELD(cooked_default);
+    if (t_thrd.proc->workingVersionNum >= PG_IDENTITY_VERSION_NUM) {
+        COPY_SCALAR_FIELD(identity);
+        COPY_NODE_FIELD(identitySequence);
+    }
     COPY_NODE_FIELD(collClause);
     COPY_SCALAR_FIELD(collOid);
     COPY_NODE_FIELD(constraints);
@@ -5262,6 +5279,7 @@ static Query* _copyQuery(const Query* from)
         COPY_SCALAR_FIELD(isFetch);
     }
     COPY_NODE_FIELD(rowMarks);
+    COPY_SCALAR_FIELD(override);
     COPY_NODE_FIELD(setOperations);
     COPY_NODE_FIELD(constraintDeps);
     COPY_NODE_FIELD(hintState);
@@ -5353,6 +5371,7 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     COPY_NODE_FIELD(returningList);
     COPY_NODE_FIELD(withClause);
     COPY_NODE_FIELD(upsertClause);
+    COPY_SCALAR_FIELD(override);
     COPY_NODE_FIELD(hintState);
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         COPY_NODE_FIELD(targetList);
@@ -6463,6 +6482,7 @@ static CreateSeqStmt* _copyCreateSeqStmt(const CreateSeqStmt* from)
     COPY_SCALAR_FIELD(is_large);
     COPY_SCALAR_FIELD(missing_ok);
     COPY_SCALAR_FIELD(is_autoinc);
+    COPY_SCALAR_FIELD(forIdentity);
 
     return newnode;
 }
@@ -6476,6 +6496,7 @@ static AlterSeqStmt* _copyAlterSeqStmt(const AlterSeqStmt* from)
     COPY_SCALAR_FIELD(missing_ok);
     COPY_SCALAR_FIELD(is_large);
     COPY_SCALAR_FIELD(is_autoinc);
+    COPY_SCALAR_FIELD(forIdentity);
 
     return newnode;
 }
@@ -8757,6 +8778,9 @@ void* copyObject(const void* from)
             break;
         case T_CurrentOfExpr:
             retval = _copyCurrentOfExpr((CurrentOfExpr*)from);
+            break;
+        case T_NextValueExpr:
+            retval = _copyNextValueExpr((NextValueExpr*)from);
             break;
         case T_TargetEntry:
             retval = _copyTargetEntry((TargetEntry*)from);

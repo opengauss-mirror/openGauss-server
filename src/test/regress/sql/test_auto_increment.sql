@@ -1703,6 +1703,12 @@ create table t_auto_nextval_test(a int, b int auto_increment primary key);
 select nextval('t_auto_nextval_test_b_seq'); -- error
 drop table t_auto_nextval_test;
 
+-- error cases
+CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_increment, b text);
+CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t1 (a int ON UPDATE current_timestamp auto_increment, b text);
+
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

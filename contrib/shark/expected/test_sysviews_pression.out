@@ -121,13 +121,13 @@ select count(*) from synonyms;
 (1 row)
 
 set d_format_behavior_compat_options = '';
-select count(*) from syscolumns;              
+select count(*) from syscolumns;
  count 
 --?.*
 --?.*
 (1 row)
 
-set d_format_behavior_compat_options = 'enable_sbr_identifier, default_collation';
+reset d_format_behavior_compat_options;
 select count(*) from sysdatabases;       
  count 
 --?.*

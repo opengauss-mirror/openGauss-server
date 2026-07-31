@@ -426,8 +426,8 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
 #endif
 
 #define TsRelWithImplDistColumn(attribute, pos)     \
-    (((attribute)[pos].attkvtype == ATT_KV_HIDE) &&  \
-        namestrcmp(&((attribute)[pos].attname), TS_PSEUDO_DIST_COLUMN) == 0)
+        (GET_ATTR_KVTYPE(&(attribute)[pos]) == ATT_KV_HIDE &&  \
+         namestrcmp(&((attribute)[pos].attname), TS_PSEUDO_DIST_COLUMN) == 0)
 
 // Helper Macro Defination
 //
@@ -646,6 +646,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
                                      RELKIND_LARGE_SEQUENCE == (relation)->rd_rel->relkind || \
                                      RELKIND_SEQUENCE_GSC == (relation)->rd_rel->relkind || \
                                      RELKIND_LARGE_SEQUENCE_GSC == (relation)->rd_rel->relkind)
+
+#define RelationIsLargeSequnce(relation) (RELKIND_LARGE_SEQUENCE == (relation)->rd_rel->relkind || \
+                                          RELKIND_LARGE_SEQUENCE_GSC == (relation)->rd_rel->relkind)
 
 #define RelationIsToast(relation) (RELKIND_TOASTVALUE == (relation)->rd_rel->relkind)
 

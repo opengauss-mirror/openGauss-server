@@ -805,42 +805,47 @@ Oid get_opfamily_proc(Oid opfamily, Oid lefttype, Oid righttype, int16 procnum)
 char* get_attname(Oid relid, AttrNumber attnum, bool allowDropped)
 {
     HeapTuple tp;
+    char* attname = NULL;
+
     tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
     if (HeapTupleIsValid(tp)) {
         Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
-        char* result = NULL;
         if (!att_tup->attisdropped) {
-            result = pstrdup(NameStr(att_tup->attname));
+            attname = pstrdup(NameStr(att_tup->attname));
         } else if (allowDropped && att_tup->attisdropped) {
-            result = pstrdup(NameStr(att_tup->attdroppedname));
+            attname = get_attdroppedname(relid, attnum);
         }
         ReleaseSysCache(tp);
-        return result;
-    } else {
-        return NULL;
     }
+
+    return attname;
 }
 
 /*
- * get_kvtype
+ * get_attkvtype
  *      Given the relation id and the attribute number,
  *      return the field type(ATT_KV_UNDEFINED/ATT_KV_TAG/ATT_KV_FIELD/ATT_KV_TIME/ATT_KV_HIDE)
  *      from the attribute relation.
  *
  * Note: -1 if no such attribute.
  */
-int get_kvtype(Oid relid, AttrNumber attnum)
+int get_attkvtype(Oid relid, AttrNumber attnum)
 {
     HeapTuple tp;
+    Datum     kv;
+    int       kvtype = ATT_KV_UNDEFINED;
+    bool      isNull = false;
+
     tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
     if (HeapTupleIsValid(tp)) {
-        Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
-        int kvtype = att_tup->attkvtype;
+        kv = SysCacheGetAttr(ATTNUM, tp, Anum_pg_attribute_attkvtype, &isNull);
+        if (!isNull) {
+            kvtype = DatumGetInt8(kv);
+        }
         ReleaseSysCache(tp);
-        return kvtype;
-    } else {
-        return -1;
     }
+
+    return kvtype;
 }
 
 /*
@@ -872,16 +877,69 @@ char* get_relid_attribute_name(Oid relid, AttrNumber attnum, bool allowDropped)
 AttrNumber get_attnum(Oid relid, const char* attname)
 {
     HeapTuple tp;
+    Form_pg_attribute att_tup;
+    AttrNumber result = InvalidAttrNumber;
+
     tp = SearchSysCacheAttName(relid, attname);
     if (HeapTupleIsValid(tp)) {
-        Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
-        AttrNumber result;
+        att_tup = (Form_pg_attribute)GETSTRUCT(tp);
         result = att_tup->attnum;
         ReleaseSysCache(tp);
-        return result;
-    } else {
-        return InvalidAttrNumber;
     }
+
+    return result;
+}
+
+char* get_attdroppedname(Oid relid, AttrNumber attnum)
+{
+    HeapTuple   tp;
+    Datum        name;
+    bool        isNull;
+    char*       droppedName = NULL;
+
+    tp = SearchSysCache2(ATTNUM,
+                         ObjectIdGetDatum(relid),
+                         Int16GetDatum(attnum));
+    if (HeapTupleIsValid(tp)) {
+        name = SysCacheGetAttr(ATTNUM, tp, Anum_pg_attribute_attdroppedname, &isNull);
+        if (!isNull) {
+            droppedName = pstrdup(NameStr(*DatumGetName(name)));
+        }
+        ReleaseSysCache(tp);
+    }
+
+    return droppedName;
+}
+
+/*
+ * get_attidentity
+ *
+ *     Given the relation id and the attribute name,
+ *     return the "attidentity" field from the attribute relation.
+ *
+ *     Returns '\0' if not found.
+ *
+ *     Since no identity is represented by '\0', this can also be used as a
+ *     Boolean test.
+ */
+char get_attidentity(Oid relid, AttrNumber attnum)
+{
+    HeapTuple   tp;
+    Datum       identity;
+    bool        isNull = false;
+    char        attidentity  = '\0';
+    tp = SearchSysCache2(ATTNUM,
+                         ObjectIdGetDatum(relid),
+                         Int16GetDatum(attnum));
+    if (HeapTupleIsValid(tp)) {
+        identity = SysCacheGetAttr(ATTNUM, tp, Anum_pg_attribute_attidentity, &isNull);
+        if (!isNull) {
+            attidentity = DatumGetChar(identity);
+        }
+        ReleaseSysCache(tp);
+    }
+
+    return attidentity;
 }
 
 /*

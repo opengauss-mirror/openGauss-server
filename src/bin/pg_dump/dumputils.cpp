@@ -237,6 +237,32 @@ const char* fmtBUserHostId(const char* name)
 }
 
 /*
+ * fmtQualifiedId - construct a schema-qualified name, with quoting as needed.
+ *
+ * Like fmtId, use the result before calling again.
+ *
+ * Since we call fmtId and it also uses getLocalPQExpBuffer() we cannot
+ * use that buffer until we're finished with calling fmtId().
+ */
+const char* fmtQualifiedId(const char *schema, const char *id)
+{
+    static PQExpBuffer id_return = NULL;
+
+    if (id_return != NULL) /* first time through? */
+        resetPQExpBuffer(id_return);
+    else
+        id_return = createPQExpBuffer();
+
+    /* Suppress schema name if fetching from pre-7.3 DB */
+    if (schema && *schema) {
+        appendPQExpBuffer(id_return, "%s.", fmtId(schema));
+    }
+    appendPQExpBuffer(id_return, "%s", fmtId(id));
+
+    return id_return->data;
+}
+
+/*
  * Convert a string value to an SQL string literal and append it to
  * the given buffer.  We assume the specified client_encoding and
  * standard_conforming_strings settings.
@@ -1859,6 +1885,29 @@ bool is_column_exists(PGconn* conn, Oid relid, const char* column_name)
     destroyPQExpBuffer(query);
 
     return isExists;
+}
+
+bool StrEndWith(const char *str, const char *suffix)
+{
+    int strLen = strlen(str);
+    int suffixLen = strlen(suffix);
+    if (strLen < suffixLen) {
+        return false;
+    }
+    /* skip the rear digits */
+    int len = strLen - 1;
+    while (len >= 0 && isdigit(str[len])) {
+        --len;
+    }
+    if (len < 0 || len + 1 < suffixLen) {
+        return false;
+    }
+    for (int i = 0; i < suffixLen; i++) {
+        if (str[len - i] != suffix[suffixLen - 1 - i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 #ifndef ENABLE_MULTIPLE_NODES

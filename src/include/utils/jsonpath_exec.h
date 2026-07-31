@@ -256,7 +256,6 @@ int JsonbType(JsonbValue *jb);
 JsonbValue *getScalar(JsonbValue *scalar, enum jbvType type);
 
 Datum DirectInputFunctionCall(Oid typoid, char* str, int32 typmod);
-extern Numeric int64_to_numeric(int64 v);
 JsonbValue *getJsonPathVariableFromJsonb(
     Jsonb* vars, char *varName, int varNameLength, JsonbValue *baseObject, int *baseObjectId);
 

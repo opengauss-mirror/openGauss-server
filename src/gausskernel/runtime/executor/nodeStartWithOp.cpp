@@ -776,12 +776,6 @@ bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlo
     return true;
 }
 
-static void DiscardSWLastTuple(StartWithOpState *node)
-{
-    node->sw_rownum--;
-    node->sw_numtuples--;
-}
-
 static SWDfsOpState* InitSWDfsOpState()
 {
     SWDfsOpState* state = (SWDfsOpState*)palloc0(sizeof(SWDfsOpState));

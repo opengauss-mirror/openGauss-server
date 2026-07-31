@@ -749,13 +749,20 @@ CREATE VIEW columns AS
            CAST(a.attnum AS sql_identifier) AS dtd_identifier,
            CAST('NO' AS yes_or_no) AS is_self_referencing,
 
-           CAST('NO' AS yes_or_no) AS is_identity,
-           CAST(null AS character_data) AS identity_generation,
-           CAST(null AS character_data) AS identity_start,
-           CAST(null AS character_data) AS identity_increment,
-           CAST(null AS character_data) AS identity_maximum,
-           CAST(null AS character_data) AS identity_minimum,
-           CAST(null AS yes_or_no) AS identity_cycle,
+           CAST(CASE WHEN a.attidentity IN ('a', 'd') THEN 'YES' ELSE 'NO' END AS yes_or_no) AS is_identity,
+           CAST(CASE a.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' END AS character_data) AS identity_generation,
+           CAST(CASE WHEN seq.oid IS NOT NULL THEN (pg_catalog.pg_sequence_parameters(seq.oid)).start_value ELSE NULL END
+                AS character_data) AS identity_start,
+           CAST(CASE WHEN seq.oid IS NOT NULL THEN (pg_catalog.pg_sequence_parameters(seq.oid)).increment ELSE NULL END
+                AS character_data) AS identity_increment,
+           CAST(CASE WHEN seq.oid IS NOT NULL THEN (pg_catalog.pg_sequence_parameters(seq.oid)).maximum_value ELSE NULL END
+                AS character_data) AS identity_maximum,
+           CAST(CASE WHEN seq.oid IS NOT NULL THEN (pg_catalog.pg_sequence_parameters(seq.oid)).minimum_value ELSE NULL END
+                AS character_data) AS identity_minimum,
+           CAST(CASE WHEN seq.oid IS NOT NULL THEN
+                     CASE WHEN (pg_catalog.pg_sequence_parameters(seq.oid)).cycle_option
+                     THEN 'YES' ELSE 'NO' END
+                ELSE NULL END AS yes_or_no) AS identity_cycle,
 
            CAST(CASE WHEN ad.adgencol = 's' THEN 'ALWAYS' ELSE 'NEVER' END AS character_data) AS is_generated,
            CAST(CASE WHEN ad.adgencol = 's' THEN pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) END AS character_data) AS generation_expression,
@@ -783,8 +790,7 @@ CREATE VIEW columns AS
                   ELSE null
                   END
                END 
-               AS character_data)
-            AS EXTRA,
+               AS character_data) AS EXTRA,
             CAST(array_to_string(ARRAY[
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'SELECT') THEN 'select' END,
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'INSERT') THEN 'insert' END,
@@ -801,7 +807,9 @@ CREATE VIEW columns AS
            ON (t.typtype = 'd' AND t.typbasetype = bt.oid)
          LEFT JOIN (pg_collation co JOIN pg_namespace nco ON (co.collnamespace = nco.oid))
            ON a.attcollation = co.oid AND (nco.nspname, co.collname) <> ('pg_catalog', 'default')
-         LEFT JOIN pg_description d on d.objoid = a.attrelid  and d.objsubid = a.attnum
+         LEFT JOIN (pg_depend dep JOIN pg_class seq ON (dep.classid = 'pg_class'::regclass AND dep.objid = seq.oid AND dep.deptype = 'i' AND seq.relkind in ('s', 'S', 'z', 'Z')))
+           ON (dep.refclassid = 'pg_class'::regclass AND dep.refobjid = seq.oid AND dep.refobjsubid = a.attnum)
+         LEFT JOIN pg_description d on d.objoid = a.attrelid and d.objsubid = a.attnum
 
     WHERE (NOT pg_catalog.pg_is_other_temp_schema(nc.oid))
 
@@ -1640,9 +1648,10 @@ CREATE VIEW sequences AS
     FROM pg_namespace nc, pg_class c
     WHERE c.relnamespace = nc.oid
           AND (c.relkind = 'L' or c.relkind = 'S' or c.relkind = 'z' or c.relkind = 'Z')
+          AND NOT EXISTS (SELECT 1 FROM pg_depend WHERE classid = 'pg_class'::regclass AND objid = c.oid AND deptype = 'i') /* not internal sequence */
           AND (NOT pg_catalog.pg_is_other_temp_schema(nc.oid))
           AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
-               OR pg_catalog.has_sequence_privilege(c.oid, 'SELECT, UPDATE, USAGE') );
+               OR pg_catalog.has_sequence_privilege(c.oid, 'SELECT, UPDATE, USAGE'));
 
 GRANT SELECT ON sequences TO PUBLIC;
 

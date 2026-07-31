@@ -312,7 +312,11 @@ insert into t_identity_0023(name) values('x3');
 select ident_current('t_identity_0023');
 select scope_identity();
 -- no option.
-create table t_identity_0023_1 (like t_identity_0023);
+create table t_identity_0023_1_1 (like t_identity_0023);
+\d+ t_identity_0023_1_1
+insert t_identity_0023_1_1 (name) values('xxx1');
+-- including IDENTITY.
+create table t_identity_0023_1 (like t_identity_0023 INCLUDING IDENTITY);
 \d+ t_identity_0023_1
 select ident_current('t_identity_0023_1');
 insert t_identity_0023_1 (name) values('xxx1');
@@ -333,7 +337,7 @@ insert t_identity_0023_2 (name) values('xxx1');
 select ident_current('t_identity_0023_2');
 select scope_identity();
 
-drop table t_identity_0023;
+drop table t_identity_0023, t_identity_0023_1_1;
 drop table t_identity_0023_1;
 drop table t_identity_0023_2;
 -- ## can't insert identity column, expected error.
@@ -527,7 +531,7 @@ drop table t_identity_numeric_t3_1;
 ---- create table like.
 -- max/min value
 create table t_identity_numeric_t4(id numeric(38, 0) identity, name varchar(10));
-create table t_identity_numeric_t4_1 (like t_identity_numeric_t4);
+create table t_identity_numeric_t4_1 (like t_identity_numeric_t4 including identity);
 \d+ t_identity_numeric_t4_1;
 set identity_insert = on;
 insert into t_identity_numeric_t4_1(id, name) values(987654321098765432109876543210, 'xxx'); -- over int64
@@ -538,7 +542,7 @@ drop table t_identity_numeric_t4_1;
 
 -- start
 create table t_identity_numeric_t5(id numeric(38, 0) identity(987654321098765432100000, 2), id1 serial, name varchar(10));
-create table t_identity_numeric_t5_1 (like t_identity_numeric_t5);
+create table t_identity_numeric_t5_1 (like t_identity_numeric_t5 including identity);
 insert into t_identity_numeric_t5_1(name) values('xxx'); -- over int64
 select * from t_identity_numeric_t5_1 order by id;
 drop table t_identity_numeric_t5;
@@ -546,7 +550,7 @@ drop table t_identity_numeric_t5_1;
 
 -- increment
 create table t_identity_numeric_t6(id numeric(38, 0) identity(2, 987654321098765432100000), id1 serial, name varchar(10));
-create table t_identity_numeric_t6_1 (like t_identity_numeric_t6);
+create table t_identity_numeric_t6_1 (like t_identity_numeric_t6 including identity);
 \d+ t_identity_numeric_t6_1
 insert into t_identity_numeric_t6_1(name) values('xxx'); -- over int64
 insert into t_identity_numeric_t6_1(name) values('xxx1');
@@ -568,7 +572,7 @@ drop table t_ident;
 -- create table like
 create sequence identity_t2_id_seq_identity;
 create table identity_t2(id numeric(38, 0) identity(10, 2), b int);
-create table identity_t2_1 (like identity_t2);
+create table identity_t2_1 (like identity_t2 including identity);
 insert into identity_t2_1(b) values (10);
 insert into identity_t2_1(b) values (10);
 select id, b from identity_t2_1;
@@ -586,5 +590,14 @@ select id, b from identity_t3_1;
 drop sequence identity_t3_id_seq_identity;
 drop table identity_t3;
 drop table identity_t3_1;
+
+
+-- compatiable with pg identity
+-- error
+create table identity_t1(id numeric(38, 0) identity(1, 2) generated always as identity);
+-- error
+create table identity_t1(id numeric(38, 0) identity(1, 2), id2 numeric(37, 0) generated always as identity);
+
+
 reset current_schema;
 drop schema identity_schema;

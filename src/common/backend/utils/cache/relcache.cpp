@@ -1785,8 +1785,8 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
                 ereport(eLevel,(errmsg("Catalog attribute %d for relation \"%s\" has been updated concurrently",
                     attp->attnum, RelationGetRelationName(relation))));
             }
-            errno_t rc = memcpy_s(
-                &relation->rd_att->attrs[attp->attnum - 1], ATTRIBUTE_FIXED_PART_SIZE, attp, ATTRIBUTE_FIXED_PART_SIZE);
+            errno_t rc = memcpy_s(&relation->rd_att->attrs[attp->attnum - 1], ATTRIBUTE_FIXED_PART_SIZE,
+                                  attp, ATTRIBUTE_FIXED_PART_SIZE);
             securec_check(rc, "\0", "\0");
         }
         if (initdvals != NULL) {
@@ -1829,7 +1829,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
             for (int i = 0; i < relation->rd_att->natts; i++) {
                 if (relation->rd_att->attrs[i].attnum == 0) {
                     errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
-                        attp, ATTRIBUTE_FIXED_PART_SIZE);
+                                          attp, ATTRIBUTE_FIXED_PART_SIZE);
                     securec_check(rc, "\0", "\0");
 
                     if (initdvals != NULL) {
@@ -2247,6 +2247,7 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
         errno_t rc = EOK;
         rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
+
         has_not_null = has_not_null || attrs[i].attnotnull;
         /* make sure attcacheoff is valid */
         relation->rd_att->attrs[i].attcacheoff = -1;
@@ -3348,7 +3349,7 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     has_not_null = false;
     for (i = 0; i < natts; i++) {
         errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
-            &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+                              &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "", "");
         has_not_null = has_not_null || attrs[i].attnotnull;
         /* make sure attcacheoff is valid */
@@ -5026,8 +5027,6 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      * done building relcache entry.
      */
     (void)MemoryContextSwitchTo(oldcxt);
-
-
 
     /*
      * Caller expects us to pin the returned entry.
@@ -8791,7 +8790,6 @@ RelationMetaData* make_relmeta(Relation rel)
 
         attr->attalign = rel->rd_att->attrs[i].attalign;
         attr->attbyval = rel->rd_att->attrs[i].attbyval;
-        attr->attkvtype = rel->rd_att->attrs[i].attkvtype;
         attr->attcmprmode = rel->rd_att->attrs[i].attcmprmode;
         attr->attcollation = rel->rd_att->attrs[i].attcollation;
         attr->atthasdef = rel->rd_att->attrs[i].atthasdef;
@@ -8857,7 +8855,6 @@ Relation get_rel_from_meta(RelationMetaData* node)
 
         rel->rd_att->attrs[i].attalign = attr->attalign;
         rel->rd_att->attrs[i].attbyval = attr->attbyval;
-        rel->rd_att->attrs[i].attkvtype = attr->attkvtype;
         rel->rd_att->attrs[i].attcmprmode = attr->attcmprmode;
         rel->rd_att->attrs[i].attcollation = attr->attcollation;
         rel->rd_att->attrs[i].atthasdef = attr->atthasdef;

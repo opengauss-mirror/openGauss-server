@@ -41,6 +41,7 @@
 #include "utils/gs_bitmap.h"
 #include "utils/guc.h"
 #include "utils/int8.h"
+#include "utils/int16.h"
 #include "utils/numeric.h"
 #include "utils/sortsupport.h"
 #include "vecexecutor/vechashtable.h"
@@ -3280,6 +3281,21 @@ int64 numeric_int8_opt_error(Numeric num, bool can_ignore, bool *haveError)
     }
 
     return result;
+}
+
+
+Numeric int64_to_numeric(int64 v)
+{
+    Datum d = Int64GetDatum(v);
+
+    return DatumGetNumeric(DirectFunctionCall1(int8_numeric, d));
+}
+
+Numeric int128_to_numeric(int128 v)
+{
+    Datum d = Int128GetDatum(v);
+
+    return DatumGetNumeric(DirectFunctionCall1(int16_numeric, d));
 }
 
 Datum numeric_pg_lsn(PG_FUNCTION_ARGS)

@@ -54,10 +54,9 @@
 #define AT_PASS_ADD_COL 5    /* ADD COLUMN */
 #define AT_PASS_ADD_INDEX 6  /* ADD indexes */
 #define AT_PASS_ADD_CONSTR 7 /* ADD constraints, defaults */
-
 #define AT_PASS_ADD_PARTITION 8
-
 #define AT_PASS_MISC 9 /* other stuff */
+
 #ifdef PGXC
 #define AT_PASS_DISTRIB 10 /* Redistribution pass */
 #define AT_COMMENT 11
@@ -314,13 +313,12 @@ extern void spq_btbuild_update_pg_class(Relation heap, Relation index);
 #endif
 typedef void (*InvokePreDropColumnHookType) (Relation rel, AttrNumber attnum);
 extern bool IsComputedColumn(Oid adrelid, int2 asnum);
-
-extern void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
-extern void CopyTempAutoIncrement(Relation oldrel, Relation newrel);
-extern void UpdateValueModifyFirstAfter(NewColumnValue *ex, Datum* values, bool* isnull);
-extern void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
-extern void CopyTempAutoIncrement(Relation oldrel, Relation newrel);
 extern void UpdateGeneratedColumnIsnull(AlteredTableInfo* tab, bool* isnull, bool has_generated);
+extern void UpdateValueModifyFirstAfter(NewColumnValue *ex, Datum* values, bool* isnull);
+
+extern void CopyTempAutoIncrement(Relation oldrel, Relation newrel);
+extern void SetRelAutoIncrement(Relation rel, TupleDesc desc, int128 autoinc);
+extern void CopyTempAutoIncrement(Relation oldrel, Relation newrel);
 extern int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Datum* value, bool* is_null);
 extern bool OnlineDDLCheckSetCompressOptFeasible(Relation rel, List* defList, AlterTableType operation,
                                                  LOCKMODE lockmode, AlteredTableInfo* tab);

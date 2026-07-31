@@ -72,6 +72,7 @@
 #include "utils/datetime.h"
 #include "utils/formatting.h"
 #include "utils/int8.h"
+#include "utils/numeric.h"
 #include "utils/json.h"
 #include "utils/jsonpath.h"
 #include "utils/memutils.h"

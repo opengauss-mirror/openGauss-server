@@ -706,6 +706,12 @@ void UniqueSql::JumbleExpr(pgssJumbleState* jstate, Node* node)
 
             break;
         }
+        case T_NextValueExpr: {
+            NextValueExpr* nve = (NextValueExpr*)node;
+            APP_JUMB(nve->seqid);
+            APP_JUMB(nve->typeId);
+            break;
+        }
         case T_TargetEntry: {
             TargetEntry* tle = (TargetEntry*)node;
             APP_JUMB(tle->resno);

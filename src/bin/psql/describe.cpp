@@ -18,6 +18,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_default_acl.h"
+#include "catalog/pg_attribute.h"
 #include "catalog/pg_attrdef.h"
 #include "catalog/pg_collation.h"
 #include "securec.h"
@@ -537,7 +538,7 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
             "  CASE WHEN t.typtype = 's'\n"
             "      THEN pg_catalog.array_to_string(\n"
             "          ARRAY(\n"
-            "		     SELECT s.setlabel\n"
+            "          SELECT s.setlabel\n"
             "          FROM pg_catalog.pg_set s\n"
             "          WHERE s.settypid = t.oid\n"
             "          ORDER BY s.setsortorder\n"
@@ -547,7 +548,7 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
         appendPQExpBuffer(&buf,
             "      pg_catalog.array_to_string(\n"
             "        ARRAY(\n"
-            "		     SELECT e.enumlabel\n"
+            "          SELECT e.enumlabel\n"
             "          FROM pg_catalog.pg_enum e\n"
             "          WHERE e.enumtypid = t.oid\n");
 
@@ -1450,8 +1451,27 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     PQExpBufferData tmpbuf;
     /* this is used for partition table */
     PQExpBufferData tmp_part_buf;
-    int cols;
+    int cols = 0;
+    int colcnt = 0;
     int numrows = 0;
+    int attnameCol = -1;  /* column indexes in "res" */
+    int atttypeCol = -1;
+    int attrdefCol = -1;
+    int attnotnullCol = -1;
+    int attrNumCol = -1;
+    int attrdefUpdateCol = -1;
+    int attcollCol = -1;
+    int indexdefCol = -1;
+    int fdwoptsCol = -1;
+    int clientLogicOrgTypeCol = -1;
+    int clientLogicOrgTypeOidCol = -1;
+    int attidentityCol = -1;
+    int attgeneratedCol = -1;
+    int attstorageCol = -1;
+    int attstattargetCol = -1;
+    int attdescrCol = -1;
+    int attkvtypeCol = -1;
+
     int exprForNum = 128;
     struct {
         int16 checks;
@@ -1467,6 +1487,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         char relpersistence;
         char relreplident;
     } tableinfo;
+
     bool show_modifiers = false;
     bool retval = false;
     bool hasreplident = is_column_exists(pset.db, RelationRelationId, "relreplident");
@@ -1518,7 +1539,6 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         if (NULL == res) {
             goto error_return;
         }
-
         PQclear(res);
         res = NULL;
     }
@@ -1690,38 +1710,49 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     }
 #endif
 
-    printfPQExpBuffer(&buf, "SELECT a.attname,");
-    if (!hasOnUpdateFeature) {
+    printfPQExpBuffer(&buf, "SELECT a.attname");
+    attnameCol = colcnt++;
+    appendPQExpBuffer(&buf, ",\n pg_catalog.format_type(a.atttypid, a.atttypmod) as atttype");
+    atttypeCol = colcnt++;
+    appendPQExpBuffer(&buf, ",\n (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
+                            "   FROM pg_catalog.pg_attrdef d"
+                            "   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef) as attdef",
+                            exprForNum);
+    attrdefCol = colcnt++;
+    appendPQExpBuffer(&buf, ",\n a.attnotnull");
+    attnotnullCol = colcnt++;
+    appendPQExpBuffer(&buf, ",\n a.attnum");
+    attrNumCol = colcnt++;
+
+    if (hasOnUpdateFeature) {
         appendPQExpBuffer(&buf,
-            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
-            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
-            "\n   FROM pg_catalog.pg_attrdef d"
-            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-            "\n  a.attnotnull, a.attnum,", exprForNum);
+                ",\n (SELECT substring(pg_catalog.pg_get_expr(d.adbin_on_update, d.adrelid) for %d)"
+                "   FROM pg_catalog.pg_attrdef d"
+                "   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef) as attdefupdate",
+                exprForNum);
     } else {
         appendPQExpBuffer(&buf,
-            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
-            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
-            "\n   FROM pg_catalog.pg_attrdef d"
-            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin_on_update, d.adrelid) for %d)"
-            "\n   FROM pg_catalog.pg_attrdef d"
-            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-            "\n  a.attnotnull, a.attnum,", exprForNum, exprForNum);
+                ",\n ''::text as attdefupdate");
     }
+    attrdefUpdateCol = colcnt++;
+
     if (pset.sversion >= 90100) {
         appendPQExpBuffer(&buf,
-            "\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
+            ",\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
             "   WHERE c.oid = a.attcollation AND t.oid = a.atttypid AND a.attcollation <> t.typcollation) AS "
             "attcollation");
     } else {
-        appendPQExpBuffer(&buf, "\n  NULL AS attcollation");
+        appendPQExpBuffer(&buf, ",\n  NULL AS attcollation");
     }
+    attcollCol = colcnt++;
+
     if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
         appendPQExpBuffer(&buf, ",\n  pg_catalog.pg_get_indexdef(a.attrelid, a.attnum, TRUE) AS indexdef");
     } else {
         appendPQExpBuffer(&buf, ",\n  NULL AS indexdef");
     }
+    indexdefCol = colcnt++;
+
     if (tableinfo.relkind == 'f' && pset.sversion >= 90200) {
         appendPQExpBuffer(&buf,
             ",\n  CASE WHEN attfdwoptions IS NULL THEN '' ELSE "
@@ -1731,6 +1762,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     } else {
         appendPQExpBuffer(&buf, ",\n  NULL AS attfdwoptions");
     }
+    fdwoptsCol = colcnt++;
+
 #ifdef HAVE_CE
     if (hasFullEncryptFeature && pset.sversion >= 90100) {
         appendPQExpBuffer(&buf,
@@ -1747,11 +1780,17 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         appendPQExpBuffer(&buf, "\n  NULL AS clientlogic_original_type");
         appendPQExpBuffer(&buf, ",\n NULL AS clientlogic_original_type_oid");
     }
+    clientLogicOrgTypeCol = colcnt++;
+    clientLogicOrgTypeOidCol = colcnt++;
 #endif
+
     if (verbose) {
         appendPQExpBuffer(&buf, ",\n  a.attstorage");
+        attstorageCol = colcnt++;
+
         appendPQExpBuffer(
             &buf, ",\n  CASE WHEN a.attstattarget=-1 THEN NULL ELSE a.attstattarget END AS attstattarget");
+        attstattargetCol = colcnt++;
 
         /*
          * In 9.0+, we have column comments for: relations, views, composite
@@ -1760,18 +1799,31 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'f' ||
             tableinfo.relkind == 'c' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' || 
             tableinfo.relkind == 'o') {
-            appendPQExpBuffer(&buf, ", pg_catalog.col_description(a.attrelid, a.attnum)");
+            appendPQExpBuffer(&buf, ", pg_catalog.col_description(a.attrelid, a.attnum) as coldesc");
+            attdescrCol = colcnt++;
         }
+
         appendPQExpBuffer(&buf, ",\n  a.attkvtype");
+        attkvtypeCol = colcnt++;
     }
+
     if (hasGenColFeature) {
         appendPQExpBuffer(&buf, ",\n (SELECT  h.adgencol"
             "\n   FROM pg_catalog.pg_attrdef h"
             "\n   WHERE h.adrelid = a.attrelid AND h.adnum = a.attnum AND a.atthasdef)"
             " AS generated_column");
     } else {
-        appendPQExpBuffer(&buf, ", '' AS generated_column ");
+        appendPQExpBuffer(&buf, ",\n ''::\"char\" AS generated_column ");
     }
+    attgeneratedCol = colcnt++;
+
+    /* describe new attribute `attidentity` */
+    if (pset.sversion >= 90200) {
+        appendPQExpBufferStr(&buf, ",\n a.attidentity");
+    } else {
+        appendPQExpBufferStr(&buf, ",\n ''::\"char\" AS attidentity");
+    }
+    attidentityCol = colcnt++;
 
     if (tableinfo.relkind == 'r' && atooid(oid) < FirstBootstrapObjectId) {
         appendPQExpBuffer(&buf, "\nFROM (select * from pg_catalog.gs_catalog_attribute_records('%s')) as a", oid);
@@ -1889,30 +1941,30 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     /* Generate table cells to be printed */
     for (i = 0; i < numrows; i++) {
         /* Column */
-        printTableAddCell(&cont, PQgetvalue(res, i, 0), false, false);
+        printTableAddCell(&cont, PQgetvalue(res, i, attnameCol), false, false);
 
         /* Type */
 #ifdef HAVE_CE
-        if (hasFullEncryptFeature && (strncmp(
-            PQgetvalue(res, i, 1), "byteawithoutorderwithequalcol", sizeof("byteawithoutorderwithequalcol") - 1) == 0 ||
-            strncmp(PQgetvalue(res, i, 1), "byteawithoutordercol", sizeof("byteawithoutordercol") - 1) == 0)) {
-            printTableAddCell(&cont, PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type")), false, false);
+        if (hasFullEncryptFeature &&
+            (strncmp(PQgetvalue(res, i, atttypeCol),
+                     "byteawithoutorderwithequalcol",
+                     sizeof("byteawithoutorderwithequalcol") - 1) == 0 ||
+            strncmp(PQgetvalue(res, i, atttypeCol),
+                    "byteawithoutordercol",
+                    sizeof("byteawithoutordercol") - 1) == 0)) {
+            printTableAddCell(&cont, PQgetvalue(res, i, clientLogicOrgTypeCol), false, false);
         } else {
-            printTableAddCell(&cont, PQgetvalue(res, i, 1), false, false);
+            printTableAddCell(&cont, PQgetvalue(res, i, atttypeCol), false, false);
         }
 #else
-        printTableAddCell(&cont, PQgetvalue(res, i, 1), false, false);
+        printTableAddCell(&cont, PQgetvalue(res, i, atttypeCol), false, false);
 #endif /* HAVE_CE */
 
         /* Modifiers: collate, not null, default */
         if (show_modifiers) {
             resetPQExpBuffer(&tmpbuf);
-
-
-        if (hasOnUpdateFeature) {
-            if (!PQgetisnull(res, i, 6)) {
-                if (tmpbuf.len > 0)
-                    appendPQExpBufferStr(&tmpbuf, " ");
+            /* collate */
+            if (!PQgetisnull(res, i, attcollCol)) {
                 char* collate = PQgetvalue(res, i, 6);
                 PQExpBufferData charsetbuf;
                 initPQExpBuffer(&charsetbuf);
@@ -1929,92 +1981,84 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 termPQExpBuffer(&charsetbuf);
                 PQclear(charset_res);
             }
-        } else {
-            if (!PQgetisnull(res, i, 5)) {
-                if (tmpbuf.len > 0)
-                    appendPQExpBufferStr(&tmpbuf, " ");
-                char* collate = PQgetvalue(res, i, 5);
-                PQExpBufferData charsetbuf;
-                initPQExpBuffer(&charsetbuf);
-                appendPQExpBuffer(&charsetbuf, _("select oid,collencoding from pg_collation where collname = '%s';"), collate);
-                PGresult* charset_res = PSQLexec(charsetbuf.data, false);
-                int collid = atoi(PQgetvalue(charset_res, 0, 0));
-                if (COLLATION_IN_B_FORMAT(collid)) {
-                    int charset = atoi(PQgetvalue(charset_res, 0, 1));
-                    const char* encoding = pg_encoding_to_char(charset);
-                    appendPQExpBuffer(&tmpbuf, _("character set %s collate %s"), encoding, collate);
-                } else {
-                    appendPQExpBuffer(&tmpbuf, _("collate %s"), collate);
-                }
-                termPQExpBuffer(&charsetbuf);
-                PQclear(charset_res);
-            }
-        }
 
-
-        if (hasOnUpdateFeature) {
-            if (strcmp(PQgetvalue(res, i, 4), "t") == 0) {
+            /* not null */
+            if (strcmp(PQgetvalue(res, i, attnotnullCol), "t") == 0) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
                 appendPQExpBufferStr(&tmpbuf, _("not null"));
             }
-        } else {
-            if (strcmp(PQgetvalue(res, i, 3), "t") == 0) {
-                if (tmpbuf.len > 0)
-                    appendPQExpBufferStr(&tmpbuf, " ");
-                appendPQExpBufferStr(&tmpbuf, _("not null"));
-            }
-        }
 
             /* handle "default" here */
             /* (note: above we cut off the 'default' string at 128) */
-            char *default_value = PQgetvalue(res, i, 2);
+            char *defaultValue = PQgetvalue(res, i, attrdefCol);
 #ifdef HAVE_CE
             unsigned char *plaintext = NULL;
 #endif
-            if (strlen(default_value) != 0) {
+            if (strlen(defaultValue) != 0) {
 #ifdef HAVE_CE
                 if (hasFullEncryptFeature &&
-                    strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
+                    strlen(PQgetvalue(res, i, clientLogicOrgTypeCol)) > 0) {
                     size_t plainTextSize = 0;
-                    int original_type_id = atoi(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type_oid")));
+                    int original_type_id = atoi(PQgetvalue(res, i, clientLogicOrgTypeOidCol));
                     ProcessStatus process_status = ADD_TYPE;
-                    ValuesProcessor::deprocess_value(pset.db, (unsigned char *)default_value, strlen(default_value),
+                    ValuesProcessor::deprocess_value(pset.db, (unsigned char *)defaultValue, strlen(defaultValue),
                         original_type_id, 0, &plaintext, plainTextSize, process_status);
                     if (plaintext != NULL) {
-                        default_value = (char *)plaintext;
+                        defaultValue = (char *)plaintext;
                     }
                 }
 #endif
                 if (tmpbuf.len > 0) {
                     appendPQExpBufferStr(&tmpbuf, " ");
                 }
+
                 /* translator: default values of column definitions */
-                char* gencolType = PQgetvalue(res, i, PQfnumber(res, "generated_column"));
-                if (gencolType && strlen(gencolType) > 0) {
-                    appendPQExpBuffer(&tmpbuf, (strcmp(gencolType, "p") == 0 ? _("as (%s) persisted") :
-                                      _("generated always as (%s) stored")), default_value);
-                } else if (strcmp(default_value, "AUTO_INCREMENT") == 0) {
-                    appendPQExpBuffer(&tmpbuf, _("%s"), default_value);
+                const char* gencolType = PQgetvalue(res, i, attgeneratedCol);
+
+                if (gencolType[0] == ATTRIBUTE_GENERATED_STORED) {
+                    appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), defaultValue);
+                } else if (gencolType[0] == ATTRIBUTE_GENERATED_PERSISTED) {
+                    appendPQExpBuffer(&tmpbuf, _("as (%s) persisted"), defaultValue);
+                } else if (strcmp(defaultValue, "AUTO_INCREMENT") == 0) {
+                    appendPQExpBuffer(&tmpbuf, _("%s"), defaultValue);
                 } else {
-                    appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+                    appendPQExpBuffer(&tmpbuf, _("default %s"), defaultValue);
                 }
             }
 
-
-            if (hasOnUpdateFeature) {
-                char *on_update_value = PQgetvalue(res, i, 3);
-                if (strlen(on_update_value) > 0) {
-                    if (tmpbuf.len > 0) {
-                        appendPQExpBufferStr(&tmpbuf, " ");
-                    }
-                    /* translator: on_update values of column definitions */
-                    appendPQExpBuffer(&tmpbuf, _("on update %s"), on_update_value);
+            /* identity column */
+            const char* identity = PQgetvalue(res, i, attidentityCol);
+            if (identity[0] == ATTRIBUTE_IDENTITY_ALWAYS) {
+                if (tmpbuf.len > 0) {
+                    appendPQExpBufferStr(&tmpbuf, " ");
                 }
+                appendPQExpBuffer(&tmpbuf, _("generated always as identity"));
+            } else if (identity[0] == ATTRIBUTE_IDENTITY_BY_DEFAULT) {
+                if (tmpbuf.len > 0) {
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                }
+                appendPQExpBuffer(&tmpbuf, _("generated by default as identity"));
+            } else if (identity[0] == ATTRIBUTE_IDENTITY_D) {
+                if (tmpbuf.len > 0) {
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                }
+                appendPQExpBuffer(&tmpbuf, _("identity"));
             }
+
+            /* on update default */
+            const char *onUpdateValue = PQgetvalue(res, i, attrdefUpdateCol);
+            if (strlen(onUpdateValue) > 0) {
+                if (tmpbuf.len > 0) {
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                }
+                /* translator: on_update values of column definitions */
+                appendPQExpBuffer(&tmpbuf, _("on update %s"), onUpdateValue);
+            }
+
 #ifdef HAVE_CE
             if (hasFullEncryptFeature &&
-                strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
+                strlen(PQgetvalue(res, i, clientLogicOrgTypeCol)) > 0) {
                 appendPQExpBufferStr(&tmpbuf, _(" encrypted"));
                 if (plaintext != NULL) {
                     free(plaintext);
@@ -2034,33 +2078,17 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         /* Expression for index column */
         if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
-            if (hasOnUpdateFeature) {
-                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
-            } else {
-                printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
-            }
+            printTableAddCell(&cont, PQgetvalue(res, i, indexdefCol), false, false);
         }
 
         /* FDW options for foreign table column, only for 9.2 or later */
         if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200) {
-            if (hasOnUpdateFeature) {
-                printTableAddCell(&cont, PQgetvalue(res, i, 8), false, false);
-            } else {
-                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
-            }
+            printTableAddCell(&cont, PQgetvalue(res, i, fdwoptsCol), false, false);
         }
 
         /* Storage and Description */
         if (verbose) {
-#ifdef HAVE_CE
-            int firstvcol = (hasFullEncryptFeature ? 10 : 8);
-#else
-            int firstvcol = 8;
-#endif
-            if (hasOnUpdateFeature) {
-                firstvcol++;
-            }
-            char* storage = PQgetvalue(res, i, firstvcol);
+            char* storage = PQgetvalue(res, i, attstorageCol);
 
             /* these strings are literal in our syntax, so not translated. */
             printTableAddCell(&cont,
@@ -2075,21 +2103,21 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             /* Statistics target, if the relkind supports this feature */
             if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || 
                 tableinfo.relkind == 'e') {
-                printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 1), false, false);
+                printTableAddCell(&cont, PQgetvalue(res, i, attstattargetCol), false, false);
             }
 
             /* Column comments, if the relkind supports this feature. */
             if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'c' ||
                 tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' ||
                 tableinfo.relkind == 'o')
-                printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 2), false, false);
+                printTableAddCell(&cont, PQgetvalue(res, i, attdescrCol), false, false);
 
             /* For timeseries table, 1,2,3 stands for column type: ATT_KV_TAG, ATT_KV_FIELD, ATT_KV_TIMETAG,
              * see parsenodes.h
              */
             if ((tableinfo.relkind == 'r' || tableinfo.relkind == 'm') && (tableinfo.reloptions != NULL) &&
                 strstr(tableinfo.reloptions, ORIENTATION_TIMESERIES)) {
-                char* kvtype = PQgetvalue(res, i, firstvcol + 3);
+                char* kvtype = PQgetvalue(res, i, attkvtypeCol);
                 printTableAddCell(&cont, (char*)((kvtype[0] == '1' ? "kvtag" : (kvtype[0] == '2'
                     ? "kvfield" : (kvtype[0] == '3' ?  "kvtime" : (kvtype[0] == '4' ? "kvhide" : "none"))))),
                     false,
@@ -2229,7 +2257,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         printfPQExpBuffer(&buf,
             "SELECT pg_catalog.quote_ident(nspname) || '.' ||"
             "\n   pg_catalog.quote_ident(relname) || '.' ||"
-            "\n   pg_catalog.quote_ident(attname)"
+            "\n   pg_catalog.quote_ident(attname),"
+            "\n   d.deptype"
             "\nFROM pg_catalog.pg_class c"
             "\nINNER JOIN pg_catalog.pg_depend d ON c.oid=d.refobjid"
             "\nINNER JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace"
@@ -2239,14 +2268,24 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             "\nWHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass"
             "\n AND d.refclassid='pg_catalog.pg_class'::pg_catalog.regclass"
             "\n AND d.objid=%s"
-            "\n AND d.deptype='a'",
+            "\n AND d.deptype IN ('a', 'i')",
             oid);
 
         result = PSQLexec(buf.data, false);
         if (result == NULL)
             goto error_return;
         else if (PQntuples(result) == 1) {
-            printfPQExpBuffer(&buf, _("Owned by: %s"), PQgetvalue(result, 0, 0));
+            switch (PQgetvalue(result, 0, 1)[0]) {
+                case 'a':
+                    printfPQExpBuffer(&buf, _("Owned by: %s"), PQgetvalue(result, 0, 0));
+                    break;
+                case 'i':
+                    printfPQExpBuffer(&buf, _("Sequence for identity column: %s"),
+                                      PQgetvalue(result, 0, 0));
+                    break;
+                default:
+                    break;
+            }
             printTableAddFooter(&cont, buf.data);
         }
 
@@ -4614,8 +4653,8 @@ bool listTSDictionaries(const char* pattern, bool verbose)
         appendPQExpBuffer(&buf,
             "  ( SELECT COALESCE(nt.nspname, '(null)')::pg_catalog.text || '.' || t.tmplname FROM \n"
             "    pg_catalog.pg_ts_template t \n"
-            "			 LEFT JOIN pg_catalog.pg_namespace nt ON nt.oid = t.tmplnamespace \n"
-            "			 WHERE d.dicttemplate = t.oid ) AS  \"%s\", \n"
+            "       LEFT JOIN pg_catalog.pg_namespace nt ON nt.oid = t.tmplnamespace \n"
+            "       WHERE d.dicttemplate = t.oid ) AS  \"%s\", \n"
             "  d.dictinitoption as \"%s\", \n",
             gettext_noop("Template"),
             gettext_noop("Init options"));
@@ -5460,7 +5499,7 @@ void ut_test_listOneExtensionContents()
  * printACLColumn
  *
  * Helper function for consistently formatting ACL (privilege) columns.
- * The proper targetlist entry is appended to buf.	Note lack of any
+ * The proper targetlist entry is appended to buf. Note lack of any
  * whitespace or comma decoration.
  */
 static void printACLColumn(PQExpBuffer buf, const char* colname)

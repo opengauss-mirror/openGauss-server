@@ -1461,15 +1461,18 @@ Datum gs_catalog_attribute_records(PG_FUNCTION_ARGS)
         values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(attr.attcmprmode);
         values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr.attinhcount);
         values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr.attcollation);
+
         /* kvtype of catalog relations is always 0 */
         values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(0);
-        values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&attr.attdroppedname);
+        /* attidentity of catalog relations is always '\0' */
+        values[Anum_pg_attribute_attidentity - 1] = CharGetDatum('\0');
 
         /* Variable length attribute fields have little significance for catalog relations */
         nulls[Anum_pg_attribute_attacl - 1] = true;
         nulls[Anum_pg_attribute_attoptions - 1] = true;
         nulls[Anum_pg_attribute_attfdwoptions - 1] = true;
         nulls[Anum_pg_attribute_attinitdefval - 1] = true;
+        nulls[Anum_pg_attribute_attdroppedname - 1] = true;
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));

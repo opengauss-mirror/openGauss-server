@@ -28,7 +28,7 @@
  */
 %type <list> tsql_stmtmulti
 
-%type <list> identity_seed_increment
+%type <list> identity_seed_increment identity_seq_options
 %type <node> DBCCCheckIdentStmt DBCCStmt tsql_stmt tsql_CreateProcedureStmt tsql_IndexStmt tsql_TransactionStmt tsql_InsertStmt
 %type <node> tsql_UseStmt
 %token <keyword> CATCH CHECKIDENT DBCC NO_INFOMSGS NORESEED RESEED SAVE TRAN TRY TSQL_CLUSTERED TSQL_NONCLUSTERED TSQL_COLUMNSTORE TSQL_PERSISTED TSQL_TOP TSQL_PERCENT

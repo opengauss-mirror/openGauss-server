@@ -215,6 +215,7 @@ typedef enum ExprEvalOp
 	EEOP_CONVERT_ROWTYPE,
 	EEOP_SCALARARRAYOP,
 	EEOP_HASHED_SCALARARRAYOP,
+	EEOP_NEXTVALUEEXPR,
 	EEOP_XMLEXPR,
 	EEOP_AGGREF,
 	EEOP_GROUPING_FUNC,
@@ -579,6 +580,12 @@ typedef struct ExprEvalStep
             ScalarArrayOpExpr *saop;
         } hashedscalararrayop;
 
+        /* for EEOP_NEXTVALUEEXPR */
+        struct {
+            Oid seqid; /* sequence id of identity column */
+            Oid seqtypid; /* sequence type id */
+        } nextvalueexpr;
+
 		/* for EEOP_XMLEXPR */
 		struct
 		{
@@ -754,6 +761,7 @@ extern void ExecEvalParamExec(ExprState *state, ExprEvalStep *op,
 extern void ExecEvalParamExtern(ExprState *state, ExprEvalStep *op,
 					ExprContext *econtext);
 extern void ExecEvalCurrentOfExpr(ExprState *state, ExprEvalStep *op);
+extern void ExecEvalNextValueExpr(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalRowNull(ExprState *state, ExprEvalStep *op,
 				ExprContext *econtext);
 extern void ExecEvalRowNotNull(ExprState *state, ExprEvalStep *op,

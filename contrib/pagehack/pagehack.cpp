@@ -2379,10 +2379,6 @@ static void ParsePgAttributeTupleData(binary tupdata, int len, binary nullBitmap
         "attcollation: %d",
         indents[indentLevel],
         (pgAttributeTupData->attcollation));
-    fprintf(stdout,
-        "\n%s" "attkvtype: %d",
-        indents[indentLevel],
-        (pgAttributeTupData->attkvtype));
 
 #ifdef DEBUG
     int remain = len - ATTRIBUTE_FIXED_PART_SIZE;

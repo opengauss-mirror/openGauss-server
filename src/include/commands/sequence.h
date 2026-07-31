@@ -247,7 +247,7 @@ extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_last_value(PG_FUNCTION_ARGS);
 
-extern int128 nextval_internal(Oid relid);
+extern int128 nextval_internal(Oid relid, bool checkPermissions);
 extern int128 nextval_internal_for_global_seq_cache(Oid relid);
 extern void autoinc_setval(Oid relid, int128 next, bool iscalled);
 extern int128 autoinc_get_nextval(Oid relid);
@@ -338,7 +338,6 @@ extern char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** sc
 extern uint32 RelidGetHash(Oid seq_relid);
 extern uint32 GetGSCBucket(uint32 hashvalue);
 extern SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
-extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_identity = false);
 extern bool StrEndWith(const char *str, const char *suffix);
 typedef void (*InvokeNextvalHookType) (Oid relid, int128 val);
 template<typename T_Type>

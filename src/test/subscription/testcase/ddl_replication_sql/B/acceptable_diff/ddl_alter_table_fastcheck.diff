@@ -1,3 +1,3 @@
-<     "g" timestamp(0) with time zone GENERATED ALWAYS AS ((("b")::double precision + 1::double precision)) STORED,
+< CREATE definer=ddl_test_user EVENT testb.ee12 ON SCHEDULE AT '2055-12-09 17:24:11' ON COMPLETION NOT PRESERVE ENABLE DO  insert into t values(0);
 ---
->     "g" timestamp(0) with time zone GENERATED ALWAYS AS ((("b")::double precision + (1)::double precision)) STORED,
+> CREATE definer=ddl_test_user EVENT testb.ee12 ON SCHEDULE AT '2055-12-09 17:24:11' ON COMPLETION NOT PRESERVE ENABLE COMMENT '' DO  insert into t values(0);

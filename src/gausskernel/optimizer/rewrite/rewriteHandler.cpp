@@ -88,21 +88,30 @@ struct SetNewRteIfExistContext {
     int* newRtIndex;
 };
 
-static bool acquireLocksOnSubLinks(Node* node, void* context);
-static Query* rewriteRuleAction(
-    Query* parsetree, Query* rule_action, Node* rule_qual, int rt_index, CmdType event, bool* returning_flag);
-static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index);
-static List *rewriteTargetListIU(List *targetList, CmdType commandType, Relation target_relation, int result_rtindex,
-    List **attrno_list, bool *hasGenCol);
-static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior_tle, const char* attrName);
 static Node* get_assignment_input(Node* node);
-static bool rewriteValuesRTE(Query* parsetree, RangeTblEntry* rte, Relation target_relation, List* attrnos,
-    bool force_nulls);
+static Bitmapset *findDefaultOnlyColumns(RangeTblEntry *rte);
+static bool acquireLocksOnSubLinks(Node* node, void* context);
+static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index);
+
+static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior_tle,
+                                        const char* attrName);
+static Query* rewriteRuleAction(Query* parsetree, Query* rule_action, Node* rule_qual,
+                                int rt_index, CmdType event, bool* returning_flag);
+static bool rewriteValuesRTE(Query* parsetree, RangeTblEntry* rte, Relation targetRelation,
+                             List* attrnos, bool forceNulls);
+static List *rewriteTargetListIU(List *targetList, CmdType commandType, Relation target_relation,
+                                 RangeTblEntry *valuesRTE, int valuesRTEIndex, OverridingKind override,
+                                 int result_rtindex, List **attrno_list, bool *hasGenCol);
+static List* rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations,
+                                          RangeTblEntry *valuesRTE, int valuesRTEIndex, OverridingKind override);
+static List* rewriteTargetListMergeInto(List* targetList, CmdType commandType, Relation target_relation,
+                                        RangeTblEntry *valuesRTE, int valuesRTEIndex, OverridingKind override,
+                                        int result_rti, List** attrno_list);
 static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation, int rtindex);
 static void rewriteTargetListMutilUD(Query* parsetree, List* rtable, List* resultRelations);
-static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations);
-static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, LockWaitPolicy waitPolicy, bool pushedDown,
-                                int waitSec);
+
+static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, LockWaitPolicy waitPolicy,
+                                bool pushedDown, int waitSec);
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
 static Bitmapset* adjust_view_column_set(Bitmapset* cols, List* targetlist);
@@ -703,15 +712,18 @@ static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index)
  * order of the original tlist's non-junk entries.  This is needed for
  * processing VALUES RTEs.
  */
-static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation target_relation,
-    int result_rtindex, List** attrno_list, bool* hasGenCol)
+static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation targetRelation,
+                                 RangeTblEntry *valuesRTE, int valuesRTEIndex, OverridingKind override,
+                                 int result_rtindex, List** attrno_list, bool* hasGenCol)
 {
     TargetEntry** new_tles;
     List* new_tlist = NIL;
     List* junk_tlist = NIL;
-    Form_pg_attribute att_tup;
+    Form_pg_attribute attTup;
     int attrno, next_junk_attrno, numattrs;
     ListCell* temp = NULL;
+    Bitmapset *defaultOnlyCols = NULL;
+    char attidentity = '\0';
 
     if (attrno_list != NULL) /* initialize optional result list */
         *attrno_list = NIL;
@@ -725,7 +737,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
      * Junk attributes are tossed into a separate list during the same tlist
      * scan, then appended to the reconstructed tlist.
      */
-    numattrs = RelationGetNumberOfAttributes(target_relation);
+    numattrs = RelationGetNumberOfAttributes(targetRelation);
     new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
     next_junk_attrno = numattrs + 1;
 
@@ -739,18 +751,18 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
                 ereport(ERROR,
                     (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("bogus resno %d in targetlist", attrno)));
             }
-            att_tup = &target_relation->rd_att->attrs[attrno - 1];
+            attTup = TupleDescAttr(targetRelation->rd_att, attrno - 1);
 
             /* put attrno into attrno_list even if it's dropped */
             if (attrno_list != NULL && IsA(old_tle->expr, Var))
                 *attrno_list = lappend_int(*attrno_list, attrno);
 
             /* We can (and must) ignore deleted attributes */
-            if (att_tup->attisdropped)
+            if (attTup->attisdropped)
                 continue;
 
             /* Merge with any prior assignment to same attribute */
-            new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(att_tup->attname));
+            new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(attTup->attname));
         } else {
             /*
              * Copy all resjunk tlist entries to junk_tlist, and assign them
@@ -772,15 +784,13 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
     }
 
     for (attrno = 1; attrno <= numattrs; attrno++) {
-        TargetEntry* new_tle = new_tles[attrno - 1];
+        TargetEntry* newTle = new_tles[attrno - 1];
         bool applyDefault = false;
-        bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
-        int rtindex = new_tle == NULL ? 0 : new_tle->rtindex;
-
-        att_tup = &target_relation->rd_att->attrs[attrno - 1];
-
+        attTup = TupleDescAttr(targetRelation->rd_att, attrno - 1);
+        bool generateCol = ISGENERATEDCOL(targetRelation->rd_att, attrno - 1);
+        attidentity = GET_ATTR_IDENTITY(attTup);
         /* We can (and must) ignore deleted attributes */
-        if (att_tup->attisdropped)
+        if (attTup->attisdropped)
             continue;
 
         /*
@@ -788,19 +798,105 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
          * it's an INSERT and there's no tlist entry for the column, or the
          * tlist entry is a DEFAULT placeholder node.
          */
-        applyDefault = ((new_tle == NULL && commandType == CMD_INSERT) ||
-            (new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault)));
+        applyDefault = (newTle == NULL && commandType == CMD_INSERT) ||
+                        (newTle != NULL && newTle->expr != NULL && IsA(newTle->expr, SetToDefault));
 
-        if (generateCol && !applyDefault) {
-            if (commandType == CMD_INSERT && attrno_list == NULL) {
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
-                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+        if (commandType == CMD_INSERT) {
+            int valuesAttrno = 0;
+            /* Source attribute number for values that come from a VALUES RTE */
+            if (valuesRTE && newTle && IsA(newTle->expr, Var)) {
+                Var *var = (Var *) newTle->expr;
+                if (var->varno == valuesRTEIndex) {
+                    valuesAttrno = var->varattno;
+                }
             }
-            if (commandType == CMD_UPDATE && new_tle) {
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(att_tup->attname)),
-                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+
+            if ((attidentity == ATTRIBUTE_IDENTITY_ALWAYS ||
+                 attidentity == ATTRIBUTE_IDENTITY_D) &&
+                 !applyDefault) {
+                if (override == OVERRIDING_USER_VALUE) {
+                    applyDefault = true;
+                } else {
+                    /*
+                     * If this column's values come from a VALUES RTE, test
+                     * whether it contains only SetToDefault items.  Since the
+                     * VALUES list might be quite large, we arrange to only
+                     * scan it once.
+                     */
+                    if (valuesAttrno != 0) {
+                        if (defaultOnlyCols == NULL) {
+                            defaultOnlyCols = findDefaultOnlyColumns(valuesRTE);
+                        }
+
+                        if (bms_is_member(valuesAttrno, defaultOnlyCols)) {
+                            applyDefault = true;
+                        }
+                    }
+                    /*
+                    * D format, not allowed to insert identity column by user value(except default),
+                    * except set identity_insert = on.
+                    */
+                    if (DB_IS_CMPT(D_FORMAT) && u_sess->enable_identity_insert) {
+                        /* do nothing */
+                    } else if (override != OVERRIDING_SYSTEM_VALUE) {
+                        if (!applyDefault) {
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_GENERATED_ALWAYS),
+                                    errmsg("cannot insert a non-DEFAULT value into column \"%s\"",
+                                            NameStr(attTup->attname)),
+                                    errdetail("Column \"%s\" is an identity column defined as \"%s\".",
+                                            NameStr(attTup->attname),
+                                            attidentity == ATTRIBUTE_IDENTITY_D ?
+                                            "IDENTITY" : "GENERATED ALWAYS"),
+                                    errhint("Use OVERRIDING SYSTEM VALUE to override%s.",
+                                            DB_IS_CMPT(D_FORMAT) ? ", Or turn on \"identity_insert\"" : "")));
+                        }
+                    }
+                }
+            }
+
+            if (attidentity == ATTRIBUTE_IDENTITY_BY_DEFAULT &&
+                override == OVERRIDING_USER_VALUE) {
+                applyDefault = true;
+            }
+
+            if (generateCol && !applyDefault) {
+                /*
+                 * If this column's values come from a VALUES RTE, test
+                 * whether it contains only SetToDefault items, as above.
+                 */
+                if (valuesAttrno != 0) {
+                    if (defaultOnlyCols == NULL)
+                        defaultOnlyCols = findDefaultOnlyColumns(valuesRTE);
+
+                    if (bms_is_member(valuesAttrno, defaultOnlyCols))
+                        applyDefault = true;
+                }
+
+                if (!applyDefault) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_GENERATED_ALWAYS),
+                        errmsg("cannot insert into column \"%s\"", NameStr(attTup->attname)),
+                        errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
+                };
+            }
+        }
+
+        if (commandType == CMD_UPDATE) {
+            if ((attidentity == ATTRIBUTE_IDENTITY_ALWAYS ||
+                 attidentity == ATTRIBUTE_IDENTITY_D) && newTle && !applyDefault) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_GENERATED_ALWAYS),
+                         errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
+                         errdetail("Column \"%s\" is an identity column defined as \"%s\".",
+                                   NameStr(attTup->attname),
+                                   attidentity == ATTRIBUTE_IDENTITY_D ?
+                                   "IDENTITY" : "GENERATED ALWAYS")));
+            }
+
+            if (generateCol && newTle && !applyDefault) {
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_GENERATED_ALWAYS),
+                        errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
+                        errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
             }
         }
 
@@ -808,13 +904,11 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
             /*
              * stored generated column will be fixed in executor
              */
-            new_tle = NULL;
+            newTle = NULL;
             *hasGenCol = true;
         } else if (applyDefault) {
             Node* new_expr = NULL;
-
-            new_expr = build_column_default(target_relation, attrno, true);
-
+            new_expr = build_column_default(targetRelation, attrno, true);
             /*
              * If there is no default (ie, default is effectively NULL), we
              * can omit the tlist entry in the INSERT case, since the planner
@@ -824,46 +918,46 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
              */
             if (new_expr == NULL) {
                 if (commandType == CMD_INSERT) {
-                    new_tle = NULL;
+                    newTle = NULL;
                     ereport(DEBUG2, (errmodule(MOD_PARSER), errcode(ERRCODE_LOG),
                         errmsg("default column \"%s\" is effectively NULL, and hence omitted.",
-                            NameStr(att_tup->attname))));
-                } else if (target_relation->rd_rel->relkind != RELKIND_VIEW) {
-                    new_expr = (Node*)makeConst(att_tup->atttypid,
-                        -1,
-                        att_tup->attcollation,
-                        att_tup->attlen,
-                        (Datum)0,
-                        true, /* isnull */
-                        att_tup->attbyval);
+                            NameStr(attTup->attname))));
+                } else if (targetRelation->rd_rel->relkind != RELKIND_VIEW) {
+                    new_expr = (Node*)makeConst(attTup->atttypid,
+                                                -1,
+                                                attTup->attcollation,
+                                                attTup->attlen,
+                                                (Datum)0,
+                                                true, /* isnull */
+                                                attTup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
-                    new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
-                        NULL, NULL, -1, false, false);
+                    new_expr = coerce_to_domain(new_expr, InvalidOid, -1,
+                                                attTup->atttypid, COERCE_IMPLICIT_CAST,
+                                                NULL, NULL, -1, false, false);
                 }
             }
 
             if (new_expr != NULL)
-                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                newTle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(attTup->attname)), false);
         }
 
         /*
          * For an UPDATE on a view, provide a dummy entry whenever there is no
          * explicit assignment.
          */
-        if (new_tle == NULL && commandType == CMD_UPDATE && ((target_relation->rd_rel->relkind == RELKIND_VIEW
-            && view_has_instead_trigger(target_relation, CMD_UPDATE))
-            || target_relation->rd_rel->relkind == RELKIND_CONTQUERY)) {
+        if (newTle == NULL && commandType == CMD_UPDATE && ((targetRelation->rd_rel->relkind == RELKIND_VIEW
+            && view_has_instead_trigger(targetRelation, CMD_UPDATE))
+            || targetRelation->rd_rel->relkind == RELKIND_CONTQUERY)) {
             Node* new_expr = NULL;
 
-            new_expr = (Node*)makeVar(
-                result_rtindex, attrno, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
-            new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+            new_expr = (Node*)makeVar(result_rtindex, attrno,
+                                      attTup->atttypid, attTup->atttypmod,
+                                      attTup->attcollation, 0);
+            newTle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(attTup->attname)), false);
         }
 
-        if (new_tle != NULL) {
-            new_tle->rtindex = rtindex;
-            new_tlist = lappend(new_tlist, new_tle);
+        if (newTle != NULL) {
+            new_tlist = lappend(new_tlist, newTle);
         }
     }
 
@@ -873,15 +967,18 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
     return targetList;
 }
 
-static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations)
+static List* rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations,
+                                          RangeTblEntry *valuesRTE, int valuesRTEIndex,
+                                          OverridingKind override)
 {
     TargetEntry** new_tles;
-    List* new_tlist = NIL;
+    List* newTlist = NIL;
     List* junk_tlist = NIL;
-    Form_pg_attribute att_tup;
-    int attrno, numattrs;
     ListCell* l = NULL;
-    int result_relation;
+    int resultRelation;
+    int attrno, numattrs;
+    RangeTblEntry* rt_entry;
+    Relation targetRelation = InvalidRelation;
 
     /*
      * We process the normal (non-junk) attributes by scanning the input tlist
@@ -896,27 +993,26 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
     TargetEntry* old_tle = (TargetEntry*)lfirst(temp);
 
     foreach (l, resultRelations) {
-        result_relation = lfirst_int(l);
-        Assert(((TargetEntry*)lfirst(temp))->rtindex == (Index)result_relation);
+        resultRelation = lfirst_int(l);
+        Assert(((TargetEntry*)lfirst(temp))->rtindex == (Index)resultRelation);
 
-        RangeTblEntry* rt_entry = rt_fetch(result_relation, rtable);
-        Relation target_relation = InvalidRelation;
+        rt_entry = rt_fetch(resultRelation, rtable);
         if (rt_entry->rtekind == RTE_RELATION) {
-            target_relation = heap_open(rt_entry->relid, NoLock);
-            numattrs = RelationGetNumberOfAttributes(target_relation);
+            targetRelation = heap_open(rt_entry->relid, NoLock);
+            numattrs = RelationGetNumberOfAttributes(targetRelation);
         } else if (rt_entry->rtekind == RTE_SUBQUERY) {
             numattrs = list_length(rt_entry->subquery->targetList);
         }
 
         new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
-        
+
         while (temp != NULL) {
             old_tle = (TargetEntry*)lfirst(temp);
             /*
              * For multi-relations update, old_tle has been sorted according to the order of each result relation.
-             * So when old_tle->rtindex != (Index)result_relation, break and process the next step.
+             * So when old_tle->rtindex != (Index)resultRelation, break and process the next step.
              */
-            if (old_tle->rtindex != (Index)result_relation)
+            if (old_tle->rtindex != (Index)resultRelation)
                 break;
 
             if (!old_tle->resjunk) {
@@ -934,8 +1030,8 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                     continue;
                 }
                 /* Merge with any prior assignment to same attribute */
-                new_tles[attrno - 1] = process_matched_tle(
-                    old_tle, new_tles[attrno - 1], get_rte_attribute_name(rt_entry, attrno));
+                new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1],
+                                                           get_rte_attribute_name(rt_entry, attrno));
             } else {
                 /*
                 * Copy all resjunk tlist entries to junk_tlist, and assign them
@@ -953,36 +1049,56 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             temp = lnext(temp);
         }
 
+        char* attname;
+        char  attidentity;
+        Oid   atttype,
+              attcollation;
+        int32 atttypmod;
+        int16 attlen;
+        bool  attbyval;
+        Type  typTuple;
+        bool  applyDefault;
+        bool  generateCol;
+        TargetEntry* newTle;
+
         for (attrno = 1; attrno <= numattrs; attrno++) {
-            TargetEntry* new_tle = new_tles[attrno - 1];
+            newTle = new_tles[attrno - 1];
             /*
-            * We need to insert a default expression when the
-            * tlist entry is a DEFAULT placeholder node.
-            */
-            bool applyDefault =
-                RelationIsValid(target_relation) && new_tle != NULL &&
-                new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault);
-            bool generateCol = RelationIsValid(target_relation) &&
-                 ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+             * We need to insert a default expression when the
+             * tlist entry is a DEFAULT placeholder node.
+             */
+            applyDefault = RelationIsValid(targetRelation) &&
+                           (newTle != NULL && newTle->expr != NULL &&
+                            IsA(newTle->expr, SetToDefault));
+            generateCol = RelationIsValid(targetRelation) && 
+                          ISGENERATEDCOL(targetRelation->rd_att, attrno - 1);
+            attidentity = RelationIsValid(targetRelation) ?
+                          IDENTITYCOL(targetRelation->rd_att, attrno - 1) :
+                          '\0';
+            attname = get_rte_attribute_name(rt_entry, attrno);
+            get_rte_attribute_type(rt_entry, attrno, &atttype, &atttypmod, &attcollation);
+            typTuple = typeidType(atttype);
+            attbyval = typeByVal(typTuple);
+            attlen = typeLen(typTuple);
+            ReleaseSysCache(typTuple);
 
-            char* attname = get_rte_attribute_name(rt_entry, attrno);
-            Oid attrtype;
-            int32 attrtypmod;
-            int16 attrlen;
-            Oid attrcollation;
-            bool attrbyval;
-            Type typ;
-            get_rte_attribute_type(rt_entry, attrno, &attrtype, &attrtypmod, &attrcollation);
-            typ = typeidType(attrtype);
-            attrbyval = typeByVal(typ);
-            attrlen = typeLen(typ);
-            ReleaseSysCache(typ);
+             /* We can (and must) ignore deleted attributes */ 
+             if (get_rte_attribute_is_dropped(rt_entry, attrno)) 
+                 continue;
 
-            /* We can (and must) ignore deleted attributes */
-            if (get_rte_attribute_is_dropped(rt_entry, attrno))
-                continue;
+            if ((attidentity == ATTRIBUTE_IDENTITY_ALWAYS ||
+                 attidentity == ATTRIBUTE_IDENTITY_D) &&
+                 newTle && !applyDefault) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_GENERATED_ALWAYS),
+                         errmsg("column \"%s\" can only be updated to DEFAULT", attname),
+                         errdetail("Column \"%s\" is an identity column defined as \"%s\".",
+                                   attname,
+                                   attidentity == ATTRIBUTE_IDENTITY_D ?
+                                   "IDENTITY" : "GENERATED ALWAYS")));
+            }
 
-            if (generateCol && !applyDefault && new_tle) {
+            if (generateCol && newTle && !applyDefault) {
                     ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("column \"%s\" can only be updated to DEFAULT", attname),
                         errdetail("Column \"%s\" is a generated column.", attname)));
@@ -992,55 +1108,59 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                 /*
                 * stored generated column will be fixed in executor
                 */
-                new_tle = NULL;
+                newTle = NULL;
             } else if (applyDefault) {
-                Node* new_expr = build_column_default(target_relation, attrno, true);
-                if (new_expr == NULL && target_relation->rd_rel->relkind != RELKIND_VIEW) {
-                    new_expr = (Node*)makeConst(attrtype,
-                        -1,
-                        attrcollation,
-                        attrlen,
-                        (Datum)0,
-                        true, /* isnull */
-                        attrbyval);
+                Node* new_expr = build_column_default(targetRelation, attrno, true);
+                if (new_expr == NULL && targetRelation->rd_rel->relkind != RELKIND_VIEW) {
+                    new_expr = (Node*)makeConst(atttype,
+                                                -1,
+                                                attcollation,
+                                                attlen,
+                                                (Datum)0,
+                                                true, /* isnull */
+                                                attbyval);
                     /* this is to catch a NOT NULL domain constraint */
-                    new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, attrtype, COERCE_IMPLICIT_CAST,
-                        NULL, NULL, -1, false, false);
+                    new_expr = coerce_to_domain(new_expr, InvalidOid, -1,
+                                                atttype, COERCE_IMPLICIT_CAST,
+                                                NULL, NULL, -1, false, false);
                 }
+
                 if (new_expr != NULL) {
-                    new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
+                    newTle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
                 }
-                new_tle->rtindex = result_relation;
+
+                newTle->rtindex = resultRelation;
             }
 
             /*
             * For an UPDATE on a view, provide a dummy entry whenever there is no
             * explicit assignment.
             */
-            if (new_tle == NULL && RelationIsValid(target_relation)
-                && ((target_relation->rd_rel->relkind == RELKIND_VIEW
-                && view_has_instead_trigger(target_relation, CMD_UPDATE))
-                || target_relation->rd_rel->relkind == RELKIND_CONTQUERY)) {
+            if (newTle == NULL && RelationIsValid(targetRelation)
+                && ((targetRelation->rd_rel->relkind == RELKIND_VIEW
+                && view_has_instead_trigger(targetRelation, CMD_UPDATE))
+                || targetRelation->rd_rel->relkind == RELKIND_CONTQUERY)) {
                 Node* new_expr = NULL;
-
-                new_expr = (Node*)makeVar(
-                    result_relation, attrno, attrtype, attrtypmod, attrcollation, 0);
-                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
-                new_tle->rtindex = result_relation;
+                new_expr = (Node*)makeVar(resultRelation,
+                                          attrno,
+                                          atttype,
+                                          atttypmod,
+                                          attcollation, 0);
+                newTle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
+                newTle->rtindex = resultRelation;
             }
 
-            if (new_tle != NULL)
-                new_tlist = lappend(new_tlist, new_tle);
+            if (newTle != NULL)
+                newTlist = lappend(newTlist, newTle);
         }
-    
-        if (RelationIsValid(target_relation)) {
-            heap_close(target_relation, NoLock);
+
+        if (RelationIsValid(targetRelation)) {
+            heap_close(targetRelation, NoLock);
         }
         pfree_ext(new_tles);
     }
 
-    int next_junk_attrno = list_length(new_tlist) + 1;
+    int next_junk_attrno = list_length(newTlist) + 1;
 
     foreach (l, junk_tlist) {
         old_tle = (TargetEntry*)lfirst(l);
@@ -1048,13 +1168,11 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             old_tle = flatCopyTargetEntry(old_tle);
             old_tle->resno = next_junk_attrno;
         }
-        new_tlist = lappend(new_tlist, old_tle);
+        newTlist = lappend(newTlist, old_tle);
         next_junk_attrno++;
     }
 
-    parsetree->targetList = new_tlist;
-
-    rewriteTargetListMutilUD(parsetree, rtable, resultRelations);
+    return newTlist;
 }
 
 static void multiUpdateSetExtraUpdatedCols(Query* parsetree)
@@ -1099,7 +1217,7 @@ static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior
     }
 
     /* ----------
-     * Multiple assignments to same attribute.	Allow only if all are
+     * Multiple assignments to same attribute.    Allow only if all are
      * FieldStore or ArrayRef assignment operations.  This is a bit
      * tricky because what we may actually be looking at is a nest of
      * such nodes; consider
@@ -1249,6 +1367,18 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool need
     int32 atttypmod = att_tup->atttypmod;
     Node* expr = NULL;
     Oid exprtype;
+    char attidentity = '\0';
+
+    attidentity = GET_ATTR_IDENTITY(att_tup);
+    /* for identity column */
+    if (attidentity) {
+        NextValueExpr *nve = makeNode(NextValueExpr);
+        bool forDIdentity = attidentity == ATTRIBUTE_IDENTITY_D;
+        nve->seqid = getIdentitySequence(RelationGetRelid(rel), attrno, false, forDIdentity);
+        nve->typeId = att_tup->atttypid;
+
+        return (Node *) nve;
+    }
 
     /*
      * Scan to see if relation has a default for this column.
@@ -1363,32 +1493,54 @@ static bool searchForDefault(RangeTblEntry* rte)
     return false;
 }
 
-static void checkGenDefault(RangeTblEntry* rte, Relation target_relation, List* attrnos, bool hasGenCol)
+/*
+ * Search a VALUES RTE for columns that contain only SetToDefault items,
+ * returning a Bitmapset containing the attribute numbers of any such columns.
+ */
+static Bitmapset* findDefaultOnlyColumns(RangeTblEntry *rte)
 {
-    ListCell* lc = NULL;
+    Bitmapset  *defaultOnlyCols = NULL;
+    ListCell   *lc;
 
-    if (!hasGenCol) {
-        return ;
-    }
+    foreach(lc, rte->values_lists) {
+        List       *subList = (List *) lfirst(lc);
+        ListCell   *lc2;
+        int         i;
 
-    foreach (lc, rte->values_lists) {
-        List* sublist = (List*)lfirst(lc);
-        ListCell* lc2 = NULL;
-        ListCell* lc3 = NULL;
+        if (defaultOnlyCols == NULL) {
+            /* Populate the initial result bitmap from the first row */
+            i = 0;
+            foreach(lc2, subList) {
+                Node       *col = (Node *) lfirst(lc2);
+                i++;
 
-        forboth (lc2, sublist, lc3, attrnos) {
-            Node* col = (Node*)lfirst(lc2);
-            int attrno = lfirst_int(lc3);
-            Form_pg_attribute att_tup = &target_relation->rd_att->attrs[attrno - 1];
-            bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
-            bool applyDefault = IsA(col, SetToDefault);
+                if (IsA(col, SetToDefault)) {
+                    defaultOnlyCols = bms_add_member(defaultOnlyCols, i);
+                }
+            }
+        } else {
+            /* Update the result bitmap from this next row */
+            i = 0;
+            foreach(lc2, subList) {
+                Node       *col = (Node *) lfirst(lc2);
+                i++;
 
-            if (!applyDefault && generatedCol)
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
-                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+                if (!IsA(col, SetToDefault)) {
+                    defaultOnlyCols = bms_del_member(defaultOnlyCols, i);
+                }
+            }
+        }
+
+        /*
+         * If no column in the rows read so far contains only DEFAULT items,
+         * we are done.
+         */
+        if (bms_is_empty(defaultOnlyCols)) {
+            break;
         }
     }
+
+    return defaultOnlyCols;
 }
 
 /*
@@ -1622,7 +1774,7 @@ static bool pull_qual_vars_walker(Node* node, pull_qual_vars_context* context)
  * rewriteTargetListUD - rewrite UPDATE/DELETE targetlist as needed
  *
  * This function adds a "junk" TLE that is needed to allow the executor to
- * find the original row for the update or delete.	When the target relation
+ * find the original row for the update or delete. When the target relation
  * is a regular table, the junk TLE emits the ctid attribute of the original
  * row.  When the target relation is a view, there is no ctid, so we instead
  * emit a whole-row Var that will contain the "old" values of the view row.
@@ -1680,8 +1832,9 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
 
         parsetree->targetList = lappend(parsetree->targetList, tle);
     }
-    parsetree->equalVars = list_concat(
-        parsetree->equalVars, pull_qual_vars((Node*)parsetree->targetList, rtindex, 0, true));
+
+    parsetree->equalVars = list_concat(parsetree->equalVars,
+                                       pull_qual_vars((Node*)parsetree->targetList, rtindex, 0, true));
 
     if (IS_PGXC_COORDINATOR && RelationGetLocInfo(target_relation) &&
         IsRelationReplicated(RelationGetLocInfo(target_relation)) && RelationIsRelation(target_relation)) {
@@ -2585,34 +2738,23 @@ static Query* CopyAndAddInvertedQual(Query* parsetree, Node* rule_qual, int rt_i
 
     return parsetree;
 }
-/*
- * Generated column can not be manually insert or updated. 
- */
-static void CheckGeneratedColConstraint(CmdType commandType, Form_pg_attribute attTup, const TargetEntry *newTle)
-{
-    if (commandType == CMD_INSERT) {
-        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-            errmsg("cannot insert into column \"%s\"", NameStr(attTup->attname)),
-            errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
-    } else if (commandType == CMD_UPDATE && newTle) {
-        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-            errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
-            errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
-    }
-}
 
 /*
  * very same to pg's rewriteTargetListIU. we adapt it to use for MergeInto
  */
-static List* rewriteTargetListMergeInto(
-    List* targetList, CmdType commandType, Relation target_relation, int result_rti, List** attrno_list)
+static List* rewriteTargetListMergeInto(List* targetList, CmdType commandType, Relation targetRelation,
+                                        int result_rti, List** attrno_list,
+                                        RangeTblEntry *valuesRTE, int valuesRTEIndex,
+                                        OverridingKind override)
 {
     TargetEntry** new_tles;
     List* new_tlist = NIL;
     List* junk_tlist = NIL;
-    Form_pg_attribute att_tup;
+    Form_pg_attribute attTup;
     int attrno, next_junk_attrno, numattrs;
     ListCell* temp = NULL;
+    Bitmapset *defaultOnlyCols = NULL;
+    char attidentity = '\0';
 
     if (attrno_list != NULL) /* initialize optional result list */
         *attrno_list = NIL;
@@ -2626,7 +2768,7 @@ static List* rewriteTargetListMergeInto(
      * Junk attributes are tossed into a separate list during the same tlist
      * scan, then appended to the reconstructed tlist.
      */
-    numattrs = RelationGetNumberOfAttributes(target_relation);
+    numattrs = RelationGetNumberOfAttributes(targetRelation);
     new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
     next_junk_attrno = numattrs + 1;
 
@@ -2639,19 +2781,18 @@ static List* rewriteTargetListMergeInto(
             if (attrno < 1 || attrno > numattrs) {
                 ereport(ERROR, (errcode(ERRCODE_AMBIGUOUS_COLUMN), errmsg("bogus resno %d in targetlist", attrno)));
             }
-
-            att_tup = &target_relation->rd_att->attrs[attrno - 1];
+            attTup = TupleDescAttr(targetRelation->rd_att, attrno - 1);
 
             /* put attrno into attrno_list even if it's dropped */
             if (attrno_list != NULL)
                 *attrno_list = lappend_int(*attrno_list, attrno);
 
             /* We can (and must) ignore deleted attributes */
-            if (att_tup->attisdropped)
+            if (attTup->attisdropped)
                 continue;
 
             /* Merge with any prior assignment to same attribute */
-            new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(att_tup->attname));
+            new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(attTup->attname));
         } else {
             /*
              * Copy all resjunk tlist entries to junk_tlist, and assign them
@@ -2672,39 +2813,133 @@ static List* rewriteTargetListMergeInto(
     }
 
     for (attrno = 1; attrno <= numattrs; attrno++) {
-        TargetEntry* new_tle = new_tles[attrno - 1];
-        bool apply_default = false;
-
-        att_tup = &target_relation->rd_att->attrs[attrno - 1];
-
+        bool applyDefault = false;
+        TargetEntry* newTle = new_tles[attrno - 1];
+        attTup = TupleDescAttr(targetRelation->rd_att, attrno - 1);
+        attidentity = GET_ATTR_IDENTITY(attTup);
         /* We can (and must) ignore deleted attributes */
-        if (att_tup->attisdropped)
+        if (attTup->attisdropped) {
             continue;
+        }
+
+        bool generateCol = ISGENERATEDCOL(targetRelation->rd_att, attrno - 1);
 
         /*
          * Handle the two cases where we need to insert a default expression:
          * it's an INSERT and there's no tlist entry for the column, or the
          * tlist entry is a DEFAULT placeholder node.
          */
-        apply_default = ((new_tle == NULL && commandType == CMD_INSERT) ||
-                         (new_tle && new_tle->expr && IsA(new_tle->expr, SetToDefault)));
-        
-        bool isGeneratedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+        applyDefault = ((newTle == NULL && commandType == CMD_INSERT) ||
+                         (newTle && newTle->expr && IsA(newTle->expr, SetToDefault)));
 
-
-        if (isGeneratedCol) {
-            if (!apply_default) {
-                CheckGeneratedColConstraint(commandType, att_tup, new_tle);
+        if (commandType == CMD_INSERT) {
+            int valuesAttrno = 0;
+            /* Source attribute number for values that come from a VALUES RTE */
+            if (valuesRTE && newTle && IsA(newTle->expr, Var)) {
+                Var *var = (Var *) newTle->expr;
+                if (var->varno == valuesRTEIndex) {
+                    valuesAttrno = var->varattno;
+                }
             }
+
+            if ((attidentity == ATTRIBUTE_IDENTITY_ALWAYS ||
+                 attidentity == ATTRIBUTE_IDENTITY_D) && !applyDefault) {
+                if (override == OVERRIDING_USER_VALUE) {
+                    applyDefault = true;
+                } else {
+                    /*
+                     * If this column's values come from a VALUES RTE, test
+                     * whether it contains only SetToDefault items.  Since the
+                     * VALUES list might be quite large, we arrange to only
+                     * scan it once.
+                     */
+                    if (valuesAttrno != 0) {
+                        if (defaultOnlyCols == NULL) {
+                            defaultOnlyCols = findDefaultOnlyColumns(valuesRTE);
+                        }
+
+                        if (bms_is_member(valuesAttrno, defaultOnlyCols)) {
+                            applyDefault = true;
+                        }
+                    }
+
+                    /*
+                    * D format, not allowed to insert identity column by user value(except default),
+                    * except set identity_insert = on.
+                    */
+                    if (DB_IS_CMPT(D_FORMAT) && u_sess->enable_identity_insert) {
+                       /* do nothing */
+                    } else if (override != OVERRIDING_SYSTEM_VALUE) {
+                        if (!applyDefault) {
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_GENERATED_ALWAYS),
+                                    errmsg("cannot insert a non-DEFAULT value into column \"%s\"",
+                                            NameStr(attTup->attname)),
+                                    errdetail("Column \"%s\" is an identity column defined as \"%s\".",
+                                            NameStr(attTup->attname),
+                                            attidentity == ATTRIBUTE_IDENTITY_D ?
+                                            "IDENTITY" : "GENERATED ALWAYS"),
+                                    errhint("Use OVERRIDING SYSTEM VALUE to override%s",
+                                            DB_IS_CMPT(D_FORMAT) ? ", Or turn on \"identity_insert\"" : "")));
+                        }
+                    }
+                }
+            }
+
+            if (attidentity == ATTRIBUTE_IDENTITY_BY_DEFAULT &&
+                override == OVERRIDING_USER_VALUE) {
+                applyDefault = true;
+            }
+
+            if (generateCol && !applyDefault) {
+                /*
+                 * If this column's values come from a VALUES RTE, test
+                 * whether it contains only SetToDefault items, as above.
+                 */
+                if (valuesAttrno != 0) {
+                    if (defaultOnlyCols == NULL)
+                        defaultOnlyCols = findDefaultOnlyColumns(valuesRTE);
+
+                    if (bms_is_member(valuesAttrno, defaultOnlyCols))
+                        applyDefault = true;
+                }
+
+                if (!applyDefault) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_GENERATED_ALWAYS),
+                            errmsg("cannot insert into column \"%s\"", NameStr(attTup->attname)),
+                            errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
+                }
+            }
+        }
+
+        if (commandType == CMD_UPDATE) {
+            if ((attidentity == ATTRIBUTE_IDENTITY_ALWAYS ||
+                 attidentity == ATTRIBUTE_IDENTITY_D) &&
+                 newTle && !applyDefault) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_GENERATED_ALWAYS),
+                         errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
+                         errdetail("Column \"%s\" is an identity column defined as \"%s\".",
+                                   NameStr(attTup->attname),
+                                   attidentity == ATTRIBUTE_IDENTITY_D ?
+                                   "IDENTITY" : "GENERATED ALWAYS")));
+            }
+
+            if (generateCol && newTle && !applyDefault) {
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
+            }
+        }
+
+        if (generateCol) {
             /*
              * stored generated column will be fixed in executor
              */
-            new_tle = NULL;
-        } else if (apply_default) {
+            newTle = NULL;
+        } else if (applyDefault) {
             Node* new_expr = NULL;
-
-            new_expr = build_column_default(target_relation, attrno, (commandType == CMD_INSERT));
-
+            new_expr = build_column_default(targetRelation, attrno, (commandType == CMD_INSERT));
             /*
              * If there is no default (ie, default is effectively NULL), we
              * can omit the tlist entry in the INSERT case, since the planner
@@ -2714,28 +2949,28 @@ static List* rewriteTargetListMergeInto(
              */
             if (new_expr == NULL) {
                 if (commandType == CMD_INSERT)
-                    new_tle = NULL;
+                    newTle = NULL;
                 else {
-                    new_expr = (Node*)makeConst(att_tup->atttypid,
-                        -1,
-                        att_tup->attcollation,
-                        att_tup->attlen,
-                        (Datum)0,
-                        true, /* isnull */
-                        att_tup->attbyval);
+                    new_expr = (Node*)makeConst(attTup->atttypid,
+                                                -1,
+                                                attTup->attcollation,
+                                                attTup->attlen,
+                                                (Datum)0,
+                                                true, /* isnull */
+                                                attTup->attbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        new_expr, InvalidOid, -1, attTup->atttypid, COERCE_IMPLICIT_CAST,
                         NULL, NULL, -1, false, false);
                 }
             }
 
             if (new_expr != NULL)
-                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                newTle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(attTup->attname)), false);
         }
 
-        if (new_tle != NULL)
-            new_tlist = lappend(new_tlist, new_tle);
+        if (newTle != NULL)
+            new_tlist = lappend(new_tlist, newTle);
     }
 
     pfree_ext(new_tles);
@@ -3995,6 +4230,7 @@ static int FindBaseRteForInsertOrUpdate(List* parse_targetlist, List* view_targe
 {
     ListCell* targetCell = NULL;
     int baseRtIndex = 0;
+
     foreach (targetCell, parse_targetlist) {
         /* view's targetlist Vars have been adjusted to reference new target RTE */
         TargetEntry* tle = (TargetEntry*)lfirst(targetCell);
@@ -4082,6 +4318,12 @@ static int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rt
         baseRtIndex = GetNewResultRelation((Node*)(viewquery->jointree), rtables);
     } else if (parsetree->commandType == CMD_UPDATE || parsetree->commandType == CMD_INSERT) {
         baseRtIndex = FindBaseRteForInsertOrUpdate(parse_targetlist, view_targetlist, resultRelation);
+        if (baseRtIndex < 1 && parsetree->commandType == CMD_INSERT) {
+            /* INSERT ... DEFAULT VALUES,  parse_targetlist will be NIL,
+             * see transformInsertStmt.
+             */
+            baseRtIndex = list_length(rtables);
+        }
     }
 
     if ((parsetree->commandType == CMD_DELETE || parsetree->commandType == CMD_UPDATE) && baseRtIndex < 1) {
@@ -4681,13 +4923,14 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
         ListCell* resultRel = NULL;
         bool rewriteView = false;
         List* rewriteRelations = NIL;
+        int len = 0;
 
         result_relation = linitial2_int(parsetree->resultRelations);
         if (result_relation == 0)
             return rewritten;
-
+        len = list_length(parsetree->resultRelations);
         rt_entry = rt_fetch(result_relation, parsetree->rtable);
-        if (rt_entry->rtekind == RTE_SUBQUERY) {
+        if (len == 1 && rt_entry->rtekind == RTE_SUBQUERY) {
             parsetree = rewriteTargetSubquery(parsetree, result_relation);
             return RewriteQuery(parsetree, rewrite_events);
         }
@@ -4727,9 +4970,9 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 /* Process the main targetlist ... */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, result_relation, &attrnos,
-                                        &hasGenCol);
-                checkGenDefault(values_rte, rt_entry_relation, attrnos, hasGenCol);
+                                        rt_entry_relation, values_rte,
+                                        values_rte_index, parsetree->override,
+                                        result_relation, &attrnos, &hasGenCol);
                 /* ... and the VALUES expression lists */
                 if (!rewriteValuesRTE(parsetree, values_rte, rt_entry_relation, attrnos, false)) {
                     defaults_remaining = true;
@@ -4738,8 +4981,9 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 /* Process just the main targetlist */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, result_relation, NULL,
-                                        &hasGenCol);
+                                        rt_entry_relation, values_rte,
+                                        values_rte_index, parsetree->override,
+                                        result_relation, NULL, &hasGenCol);
             }
 
             if (parsetree->upsertClause != NULL &&
@@ -4747,22 +4991,28 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 parsetree->upsertClause->upsertAction == ONCONFLICT_UPDATE)) {
                 parsetree->upsertClause->updateTlist =
                     rewriteTargetListIU(parsetree->upsertClause->updateTlist, CMD_UPDATE,
-                                        rt_entry_relation, result_relation, NULL,
-                                        &hasGenCol);
+                                        rt_entry_relation, values_rte,
+                                        values_rte_index, parsetree->override,
+                                        result_relation, NULL, &hasGenCol);
             }
         } else if (event == CMD_UPDATE) {
             if (list_length(parsetree->resultRelations) > 1) {
-                rewriteTargetListMutilUpdate(parsetree, parsetree->rtable, parsetree->resultRelations);
+                parsetree->targetList =
+                    rewriteTargetListMutilUpdate(parsetree, parsetree->rtable,
+                                                 parsetree->resultRelations,
+                                                 NULL, 0, parsetree->override);
+                rewriteTargetListMutilUD(parsetree,  parsetree->rtable, parsetree->resultRelations);
                 /* Also populate extraUpdatedCols (for generated columns) */
                 multiUpdateSetExtraUpdatedCols(parsetree);
             } else {
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, result_relation, NULL,
-                                        &hasGenCol);
+                                        rt_entry_relation, NULL, 0,
+                                        parsetree->override,
+                                        result_relation, NULL, &hasGenCol);
+                rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
                 /* Also populate extraUpdatedCols (for generated columns) */
                 setExtraUpdatedCols(rt_entry, rt_entry_relation->rd_att);
-                rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
             }
         } else if (event == CMD_DELETE) {
             if (list_length(parsetree->resultRelations) > 1) {
@@ -4781,24 +5031,22 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
                     case CMD_DELETE: /* Nothing to do here */
                         break;
                     case CMD_UPDATE:
-                        action->targetList = rewriteTargetListMergeInto(action->targetList,
-                            action->commandType,
-                            rt_entry_relation,
-                            result_relation,
-                            NULL);
-                        break;
                     case CMD_INSERT: {
                         action->targetList = rewriteTargetListMergeInto(action->targetList,
                             action->commandType,
                             rt_entry_relation,
                             result_relation,
-                            NULL);
-                    } break;
+                            NULL,
+                            NULL,
+                            0,
+                            action->override);
+                        break;
+                    }
                     default: {
                         ereport(ERROR,
                             (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
                                 errmsg("unrecognized commandType: %d", action->commandType)));
-                    } break;
+                    }
                 }
             }
             if (parsetree->upsertQuery != NULL) {
@@ -5464,7 +5712,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
                             format_type_be(ColTypProperty->vartype)),
                         errhint("Use the COLLATE clause to set the collation explicitly.")));
         }
-    
+
         /* Ignore junk columns from the targetlist */
         if (tle->resjunk)
             continue;
@@ -5513,7 +5761,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
             coldef_enc = get_column_enc_def(tle->resorigtbl, tle->resname);
             if (coldef_enc != NULL) { /* should never be NULL */
                 coldef_enc->dest_typname = makeTypeNameFromOid(tpname->typeOid, -1);
-                
+
                 tpname->typeOid = coldef_enc->orig_typname->typeOid;
                 tpname->typemod = coldef_enc->orig_typname->typemod;
             }
@@ -5533,7 +5781,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
                 Oid seqId = InvalidOid;
                 /* only one identity column. */
                 if (!identity_data) {
-                    if (seqId = pg_get_serial_sequence_internal(rte->relid, tle->resorigcol, true, NULL);
+                    if (seqId = getIdentitySequence(rte->relid, tle->resorigcol, true, true);
                         OidIsValid(seqId)) {
                         GTM_UUID uuid = 0;
                         int128 start = 0;
@@ -5558,13 +5806,13 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
                                                 (Node *)makeFloat(IdentityInt16Out(identity_data->start))),
                             (Node *)makeDefElem("increment",
                                                 (Node *)makeFloat(IdentityInt16Out(identity_data->increment))));
-                        constraint->contype = CONSTR_IDENTITY;
+                        constraint->contype = CONSTR_D_IDENTITY;
                         /* keep same to grammer rules in shark extension. */
-                        constraint->generated_when = ATTRIBUTE_IDENTITY_ALWAYS;
+                        constraint->generated_when = ATTRIBUTE_IDENTITY_D;
                         constraint->options = options;
                         constraint->location = -1;
                         coldef->constraints = lappend(coldef->constraints, constraint);
-                        coldef->is_identity = true;
+                        coldef->identity = ATTRIBUTE_IDENTITY_D;
                         /* calculate numberic precision and scale. */
                         if (tpname->typeOid == NUMERICOID) {
                             int32 precision = (int32)((((uint32)(tpname->typemod - VARHDRSZ)) >> 16) & 0xffff);
@@ -5575,12 +5823,14 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
                     }
                 }
                 /*
-                 * for serial type, maybe more than one serial columns.
-                 * can't be defined with identity in same column.
+                 * for other column constraint which has underlying sequence,
+                 * currently in D format, it's serial column, can't be
+                 * defined with identity in same column.
+                 * but maybe more than one serial columns.
                  */
-                if (!coldef->is_identity) {
-                    if (seqId = pg_get_serial_sequence_internal(rte->relid, tle->resorigcol, false, NULL);
-                        OidIsValid(seqId)) {
+                if (!get_attidentity(rte->relid, tle->resorigcol)) {
+                    seqId = getOwnedSequence(rte->relid, tle->resorigcol, NULL);
+                    if (OidIsValid(seqId)) {
                         char *typName = "unknown";
                         if (tpname->typeOid == INT2OID) typName = "smallserial";
                         else if (tpname->typeOid == INT4OID) typName = "serial";

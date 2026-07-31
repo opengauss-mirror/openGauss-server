@@ -133,7 +133,6 @@ extern void hint_scanner_yyerror(const char* msg, yyscan_t yyscanner);
 extern Datum GetDatumFromString(Oid typeOid, int4 typeMod, char* value);
 extern Const* makeConst(Oid consttype, int32 consttypmod, Oid constcollid, int constlen, Datum constvalue,
     bool constisnull, bool constbyval, Cursor_Data* vars = NULL);
-extern Numeric int64_to_numeric(int64 v);
 
 static bool IsScanUseDesthint(void* val1, void* val2);
 

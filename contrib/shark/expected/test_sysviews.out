@@ -1177,7 +1177,10 @@ from sys.sysdatabases;
   10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
   10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
   10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-(5 rows)
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+(8 rows)
 
 select name, schema_id, principal_id
 from sys.schemas where schema_id < 10000 order by schema_id;
@@ -1242,3 +1245,4 @@ drop table employees;
 drop view high_salary_employees;
 reset search_path;
 drop schema sys_view_test_02 cascade;
+reset d_format_behavior_compat_options;

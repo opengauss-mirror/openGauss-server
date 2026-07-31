@@ -62,9 +62,11 @@ extern List* get_op_btree_interpretation(Oid opno);
 extern bool equality_ops_are_compatible(Oid opno1, Oid opno2);
 extern Oid get_opfamily_proc(Oid opfamily, Oid lefttype, Oid righttype, int16 procnum);
 extern char* get_attname(Oid relid, AttrNumber attnum, bool allowDropped = false);
-extern int get_kvtype(Oid relid, AttrNumber attnum);
+extern int get_attkvtype(Oid relid, AttrNumber attnum);
 extern char* get_relid_attribute_name(Oid relid, AttrNumber attnum, bool allowDropped = false);
 extern AttrNumber get_attnum(Oid relid, const char* attname);
+extern char* get_attdroppedname(Oid relid, AttrNumber attnum);
+extern char get_attidentity(Oid relid, AttrNumber attnum);
 extern char GetGenerated(Oid relid, AttrNumber attnum);
 extern Oid get_atttype(Oid relid, AttrNumber attnum);
 extern int32 get_atttypmod(Oid relid, AttrNumber attnum);
@@ -316,5 +318,8 @@ extern Oid SearchSubTypeByType(Form_pg_type type_struct, int32 *typmod);
 #define type_is_array_domain(typid) (get_base_element_type(typid) != InvalidOid)
 
 #define TypeIsToastable(typid) (get_typstorage(typid) != 'p')
+#define GET_ATTR_KVTYPE(attr) (get_attkvtype((attr)->attrelid, (attr)->attnum))
+#define GET_ATTR_IDENTITY(attr) (get_attidentity((attr)->attrelid, (attr)->attnum))
+#define GET_ATTR_DROPPEDNAME(attr) (get_attdroppedname((attr)->attrelid, (attr)->attnum))
 
 #endif /* LSYSCACHE_H */

@@ -3401,42 +3401,14 @@ static void checkSequenceForReplace(Relation rel)
 {
     Form_pg_attribute att_tup;
     Oid seqOid = InvalidOid;
-    static int tableNameSize = NAMEDATALEN * 2 + 2;
-    char tableName[tableNameSize] = {0};
 
-    for (int attrno = 1; attrno <= rel->rd_att->natts; ++attrno) {
-        att_tup = &rel->rd_att->attrs[attrno-1];
-        errno_t rc;
-        char *nspname = get_namespace_name(rel->rd_rel->relnamespace);
-        text *tbname;
-        text *attname;
-
+    for (int attrnum = 1; attrnum <= rel->rd_att->natts; ++attrnum) {
+        att_tup = &rel->rd_att->attrs[attrnum-1];
         if (att_tup->attisdropped) {
             continue;
         }
 
-        rc = memset_s(tableName, tableNameSize, 0, tableNameSize);
-        securec_check(rc, "\0", "\0");
-
-        if (nspname != NULL) {
-            const char *sym = ".";
-            int nspnameLen = strlen(nspname);
-            int symLen = strlen(sym);
-            int tbnameLen = strlen(rel->rd_rel->relname.data);
-            rc = memcpy_s(&tableName[0], tableNameSize, nspname, nspnameLen);
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(&tableName[nspnameLen], tableNameSize, sym, symLen);
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(&tableName[nspnameLen + symLen], tableNameSize, rel->rd_rel->relname.data, tbnameLen);
-            securec_check(rc, "\0", "\0");
-            tableName[nspnameLen + symLen + tbnameLen] = 0;
-            tbname = cstring_to_text(&tableName[0]);
-        } else {
-            tbname = cstring_to_text(rel->rd_rel->relname.data);
-        }
-
-        attname = cstring_to_text(att_tup->attname.data);
-        seqOid = pg_get_serial_sequence_oid(tbname, attname);
+        seqOid = getOwnedSequence(RelationGetRelid(rel), attrnum, NULL);
         if (OidIsValid(seqOid) && !CheckSeqOwnedByAutoInc(seqOid)) {
             elog(ERROR, "REPLACE can not work on sequence!");
         }

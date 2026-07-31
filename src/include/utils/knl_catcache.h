@@ -40,7 +40,7 @@ extern bool CatalogCacheCompareTuple(
 extern uint32 CatalogCacheComputeTupleHashValue(
     int cc_id, int* cc_keyno, TupleDesc cc_tupdesc, CCHashFN *cc_hashfunc, Oid cc_reloid, int nkeys, HeapTuple tuple);
 extern uint32 CatalogCacheComputeHashValue(CCHashFN *cc_hashfunc, int nkeys, Datum *arguments);
-HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr);
+HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr, Form_pg_attribute_extra attrExtra);
 void GetCCHashEqFuncs(Oid keytype, CCHashFN *hashfunc, RegProcedure *eqfunc, CCFastEqualFN *fasteqfunc);
 void SearchCatCacheCheck();
 typedef HeapTuple (*searchCatFunc)(Relation relation, Oid indexoid, int cacheId, int nkeys, ScanKeyData* cur_skey, SysScanDesc *scandesc);

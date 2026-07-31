@@ -1735,11 +1735,17 @@ static int get_table_attribute(
     int natts = get_relnatts(tableoid);
     int i;
     int actual_atts = 0;
+    int kvtype = ATT_KV_UNDEFINED;
+    char identity = '\0';
+
     for (i = 0; i < natts; i++) {
         HeapTuple tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(tableoid), Int16GetDatum(i + 1));
         if (HeapTupleIsValid(tp)) {
             Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
-            if (att_tup->attkvtype == ATT_KV_HIDE) {
+            kvtype = GET_ATTR_KVTYPE(att_tup);
+            identity = GET_ATTR_IDENTITY(att_tup);
+
+            if (kvtype == ATT_KV_HIDE) {
                 ReleaseSysCache(tp);
                 continue;
             }
@@ -1775,11 +1781,11 @@ static int get_table_attribute(
             } else {
                 appendStringInfo(buf, "%s %s", quote_identifier(NameStr(att_tup->attname)), result);
             }
-            if (att_tup->attkvtype == ATT_KV_TAG)
+            if (kvtype == ATT_KV_TAG)
                 appendStringInfo(buf, " TSTag");
-            else if (att_tup->attkvtype == ATT_KV_FIELD)
+            else if (kvtype == ATT_KV_FIELD)
                 appendStringInfo(buf, " TSField");
-            else if (att_tup->attkvtype == ATT_KV_TIMETAG)
+            else if (kvtype == ATT_KV_TIMETAG)
                 appendStringInfo(buf, " TSTime");
             /* Compression mode */
             get_compression_mode(att_tup, buf);
@@ -1822,7 +1828,25 @@ static int get_table_attribute(
                 }
             }
 
-            if (att_tup->atthasdef) {
+            /* identity column */
+            if (identity) {
+                /* identity in D format */
+                if (identity == ATTRIBUTE_IDENTITY_D) {
+                    Oid seqid = getIdentitySequence(tableoid, att_tup->attnum, true, true);
+                    if (OidIsValid(seqid)) {
+                        sequence_values* sv = get_sequence_values(seqid);
+                        appendStringInfo(buf, " IDENTITY (%s, %s)",
+                                         sv->start_value, sv->increment_by);
+                    } else {
+                        appendStringInfo(buf, " IDENTITY (%s, %s)",
+                                         "UNKNOWN", "UNKNOWN");
+                    }
+                } else {
+                    appendStringInfo(buf, " GENERATED %s AS IDENTITY", 
+                                    identity == ATTRIBUTE_IDENTITY_ALWAYS ?
+                                    "ALWAYS" : "BY DEFAULT");
+                }
+            } else if (att_tup->atthasdef) {
                 Form_pg_attrdef attrdef;
                 Relation attrdefDesc;
                 ScanKeyData skey[1];
@@ -1962,7 +1986,7 @@ bool IsHideTagDistribute(Oid relOid)
 
     pgxc_class = (Form_pgxc_class)GETSTRUCT(htup);
 
-    if (pgxc_class->pcattnum.dim1 == 1 && get_kvtype(relOid, pgxc_class->pcattnum.values[0]) == ATT_KV_HIDE) {
+    if (pgxc_class->pcattnum.dim1 == 1 && get_attkvtype(relOid, pgxc_class->pcattnum.values[0]) == ATT_KV_HIDE) {
         hide = true;
     }
     
@@ -4560,121 +4584,9 @@ Datum pg_check_authid(PG_FUNCTION_ARGS)
     }
 }
 
-Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name)
-{
-    Oid sequenceId = InvalidOid;
-    Relation depRel;
-    ScanKeyData key[3];
-    SysScanDesc scan;
-    HeapTuple tup;
-
-    /* Search the dependency table for the dependent sequence */
-    depRel = heap_open(DependRelationId, AccessShareLock);
-
-    ScanKeyInit(
-        &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
-    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
-    ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attnum));
-
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
-
-    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
-        Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
-
-        /*
-         * We assume any auto dependency of a sequence on a column must be
-         * what we are looking for.  (We need the relkind test because indexes
-         * can also have auto dependencies on columns.)
-         */
-        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
-            RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
-            if (find_identity) {
-                char* relname = get_rel_name(deprec->objid);
-                if (relname && StrEndWith(relname, "_seq_identity")) {
-                    sequenceId = deprec->objid;
-                    break;
-                } else {
-                    continue;
-                }
-            }
-            sequenceId = deprec->objid;
-            break;
-        }
-    }
-
-    systable_endscan(scan);
-    heap_close(depRel, AccessShareLock);
-
-    if (OidIsValid(sequenceId)) {
-        HeapTuple classtup;
-        Form_pg_class classtuple;
-        char* nspname = NULL;
-
-        /* Get the sequence's pg_class entry */
-        classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(sequenceId));
-        if (!HeapTupleIsValid(classtup)) {
-            if (find_identity) {
-                return InvalidOid;
-            }
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", sequenceId)));
-        }
-
-        classtuple = (Form_pg_class)GETSTRUCT(classtup);
-
-        /* Get the namespace */
-        nspname = get_namespace_name(classtuple->relnamespace);
-        if (nspname == NULL) {
-            if (find_identity) {
-                return InvalidOid;
-            }
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for namespace %u", classtuple->relnamespace)));
-        }
-
-        /* And construct the result string */
-        if (out_seq_name != NULL) {
-            *out_seq_name = quote_qualified_identifier(nspname, NameStr(classtuple->relname));
-        }
-
-        ReleaseSysCache(classtup);
-    }
-
-    return sequenceId;
-}
-
-/*
- * Get the table's identity sequence OID.
- */
-Oid get_table_identity(Oid tableOid)
-{
-    Relation	rel = nullptr;
-    TupleDesc	tupdesc = nullptr;
-    AttrNumber	attnum = 0;
-    Oid			seqid = InvalidOid;
-
-    rel = RelationIdGetRelation(tableOid);
-    tupdesc = RelationGetDescr(rel);
-
-    for (attnum = 0; attnum < tupdesc->natts; attnum++) {
-        Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum);
-        if (attr->attisdropped) {
-            continue;
-        }
-        seqid = pg_get_serial_sequence_internal(tableOid, attr->attnum, true, NULL);
-        if (OidIsValid(seqid)) {
-            break;
-        }
-    }
-
-    RelationClose(rel);
-    return seqid;
-}
-
 /*
  * pg_get_serial_sequence
- *		Get the name of the sequence used by a serial column,
+ *		Get the name of the sequence used by a identity or serial column,
  *		formatted suitably for passing to setval, nextval or currval.
  *		First parameter is not treated as double-quoted, second parameter
  *		is --- see documentation for reason.
@@ -4705,7 +4617,7 @@ Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
 
     list_free_ext(names);
 
-    if (OidIsValid(pg_get_serial_sequence_internal(tableOid, attnum, false, &result))) {
+    if (OidIsValid(getOwnedSequence(tableOid, attnum, &result))) {
         PG_RETURN_TEXT_P(string_to_text(result));
     }
 
@@ -7910,6 +7822,15 @@ static void get_insert_query_def(Query* query, deparse_context* context)
         appendStringInfo(buf, ") ");
     }
 
+    if (query->override) {
+        if (query->override == OVERRIDING_SYSTEM_VALUE) {
+            appendStringInfoString(buf, "OVERRIDING SYSTEM VALUE ");
+        }
+        else if (query->override == OVERRIDING_USER_VALUE) {
+            appendStringInfoString(buf, "OVERRIDING USER VALUE ");
+        }
+    }
+
     if (select_rte != NULL) {
         /* Add the SELECT */
         get_query_def(select_rte->subquery, buf, NIL, NULL, context->prettyFlags,
@@ -8584,7 +8505,7 @@ static void get_utility_query_def(Query* query, deparse_context* context)
                         quote_identifier(coldef->colname),
                         format_type_with_typemod(tpname->typeOid, tpname->typemod));
                 }
-                if (DB_IS_CMPT(D_FORMAT) && coldef->is_identity) {
+                if (DB_IS_CMPT(D_FORMAT) && coldef->identity) {
                     Assert(context->seqValue != NULL);
                     appendStringInfo(buf,
                         " IDENTITY (%s, %s) ",
@@ -9831,6 +9752,7 @@ static bool isSimpleNode(Node* node, Node* parentNode, int prettyFlags)
         case T_CoalesceExpr:
         case T_MinMaxExpr:
         case T_XmlExpr:
+        case T_NextValueExpr:
         case T_NullIfExpr:
         case T_Aggref:
         case T_WindowFunc:
@@ -10988,6 +10910,19 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                 appendStringInfo(buf, "CURRENT OF %s", quote_identifier(cexpr->cursor_name));
             else
                 appendStringInfo(buf, "CURRENT OF $%d", cexpr->cursor_param);
+        } break;
+
+        case T_NextValueExpr: {
+            NextValueExpr *nvexpr = (NextValueExpr *) node;
+            /*
+             * This isn't exactly nextval(), but that seems close enough
+             * for EXPLAIN's purposes.
+             */
+            appendStringInfoString(buf, "nextval(");
+            simple_quote_literal(buf,
+                                 generate_relation_name(nvexpr->seqid,
+                                                        NIL));
+            appendStringInfoChar(buf, ')');
         } break;
 
         case T_List: {
@@ -13619,7 +13554,8 @@ char* deparse_create_sequence(Node* stmt, bool owned_by_none)
     bool istemp = (seqname->relpersistence == RELPERSISTENCE_TEMP);
 
     initStringInfo(&str);
-    appendStringInfo(&str, "CREATE %s SEQUENCE ", istemp ? "TEMP" : "");
+    appendStringInfo(&str, "CREATE %s %s SEQUENCE ", istemp ? "TEMP" : "",
+                     create_seq->is_large ? "LARGE" : "");
 
     if (seqname->schemaname && seqname->schemaname[0])
         appendStringInfo(&str, "%s.", quote_identifier(seqname->schemaname));
@@ -13733,31 +13669,4 @@ static void replace_cl_types_in_argtypes(Oid func_id, int numargs, Oid* argtypes
     if (HeapTupleIsValid(gs_oldtup)) {
         ReleaseSysCache(gs_oldtup);
     }
-}
-
-Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_identity)
-{
-    RangeVar* tablerv = NULL;
-    Oid tableOid;
-    char* column = NULL;
-    AttrNumber attnum;
-    List* names = NIL;
-
-    /* Look up table name. */
-    names = textToQualifiedNameList(tablename);
-    tablerv = makeRangeVarFromNameList(names);
-    tableOid = RangeVarGetRelid(tablerv, NoLock, false);
-
-    /* Get the number of the column */
-    column = text_to_cstring(columnname);
-    attnum = get_attnum(tableOid, column);
-    if (attnum == InvalidAttrNumber)
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
-
-    pfree_ext(column);
-    list_free_ext(names);
-
-    return pg_get_serial_sequence_internal(tableOid, attnum, find_identity, NULL);
 }

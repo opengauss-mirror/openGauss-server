@@ -1430,6 +1430,7 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("UPDATE/DELETE/INSERT through subquery is only supported in A-format database")));
         }
+
         /* add startinfo if needed */
         if (pstate->p_addStartInfo) {
             AddStartWithTargetRelInfo(pstate, sw_backup, rte, rtr);

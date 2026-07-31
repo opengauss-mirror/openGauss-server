@@ -1474,7 +1474,8 @@ HeapTuple SearchBuiltinProcCacheMiss(int cache_id, int nkeys, Datum* arguments)
     }
 }
 
-HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr)
+HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr,
+                                  Form_pg_attribute_extra attrExtra)
 {
     Datum values[Natts_pg_attribute];
     bool isnull[Natts_pg_attribute];
@@ -1504,8 +1505,10 @@ HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute a
     values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(attr->attcmprmode);
     values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr->attinhcount);
     values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr->attcollation);
-    values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(attr->attkvtype);
-    values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&(attr->attdroppedname));
+
+    values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(attrExtra->attkvtype);
+    values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&(attrExtra->attdroppedname));
+    values[Anum_pg_attribute_attidentity - 1] = CharGetDatum(attrExtra->attidentity);
 
     /* start out with empty permissions and empty options */
     isnull[Anum_pg_attribute_attacl - 1] = true;
@@ -1528,6 +1531,8 @@ HeapTuple SearchPgAttributeCacheMiss(int cache_id, TupleDesc cc_tupdesc, int nke
     }
     const FormData_pg_attribute* catlogAttrs = catalogDesc.attrs;
     FormData_pg_attribute tempAttr;
+    FormData_pg_attribute_extra attrExtra = {0};
+
     if (cache_id == ATTNUM) {
         int16 attNum = DatumGetInt16(arguments[1]);
         Form_pg_attribute attr;
@@ -1545,14 +1550,14 @@ HeapTuple SearchPgAttributeCacheMiss(int cache_id, TupleDesc cc_tupdesc, int nke
         } else {
             return NULL;
         }
-        return GetPgAttributeAttrTuple(cc_tupdesc, attr);
+        return GetPgAttributeAttrTuple(cc_tupdesc, attr, &attrExtra);
     } else if (cache_id == ATTNAME) {
         Form_pg_attribute attr;
         for (int16 attnum = 0; attnum < catalogDesc.natts; attnum++) {
             tempAttr = catlogAttrs[attnum];
             attr = &tempAttr;
             if (strcmp(NameStr(*DatumGetName(arguments[1])), NameStr(attr->attname)) == 0) {
-                return GetPgAttributeAttrTuple(cc_tupdesc, attr);
+                return GetPgAttributeAttrTuple(cc_tupdesc, attr, &attrExtra);
             }
         }
         attr = SystemAttributeByName(NameStr(*DatumGetName(arguments[1])), catalogDesc.hasoids);
@@ -1560,7 +1565,7 @@ HeapTuple SearchPgAttributeCacheMiss(int cache_id, TupleDesc cc_tupdesc, int nke
             return NULL;
         }
         attr->attrelid = relOid;
-        return GetPgAttributeAttrTuple(cc_tupdesc, attr);
+        return GetPgAttributeAttrTuple(cc_tupdesc, attr, &attrExtra);
     } else {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -2302,6 +2307,8 @@ List* SearchPgAttributeCacheList(CatCache* cache, int nkey, Datum* arguments, Li
             Index hashIndex;
             Form_pg_attribute attr;
             FormData_pg_attribute tempAttr;
+            FormData_pg_attribute_extra attrExtra = {0};
+
             if (attnum < catalogDesc.natts) {
                 tempAttr = catlogAttrs[attnum];
                 attr = &tempAttr;
@@ -2314,7 +2321,7 @@ List* SearchPgAttributeCacheList(CatCache* cache, int nkey, Datum* arguments, Li
                 attr = SystemAttributeDefinition(-(index + 1), catalogDesc.hasoids, false, false);
                 attr->attrelid = relOid;
             }
-            heapTuple = GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+            heapTuple = GetPgAttributeAttrTuple(cache->cc_tupdesc, attr, &attrExtra);
             cTup = NULL;
             hashValue = CatalogCacheComputeTupleHashValue(cache->id, cache->cc_keyno, cache->cc_tupdesc,
                 cache->cc_hashfunc, cache->cc_reloid, cache->cc_nkeys, heapTuple);

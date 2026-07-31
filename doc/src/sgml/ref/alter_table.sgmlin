@@ -75,6 +75,9 @@ ADD [ COLUMN ] [IF NOT EXISTS] column_name data_type [ CHARACTER SET | CHARSET c
     | ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
     | ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
     | ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+    | ALTER [ COLUMN ] column_name ADD GENERATED generated_when AS IDENTITY [ ( seq_options) ]
+    | ALTER [ COLUMN ] column_name alter_identity_column_option [ ... ]
+    | ALTER [ COLUMN ] column_name DROP IDENTITY [ IF EXISTS ]
 NOTICE: 'MODIFY [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
 NOTICE: 'CHANGE [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
 where column_constraint can be:
@@ -84,6 +87,7 @@ where column_constraint can be:
       CHECK ( expression ) |
       DEFAULT default_expr |
       GENERATED ALWAYS AS ( generation_expr ) [STORED] |
+      GENERATED generated_when AS IDENTITY ( seq_options ) |
       AUTO_INCREMENT |
       IDENTITY [ (seed , increment) ] |
       UNIQUE [KEY] index_parameters |
@@ -93,6 +97,7 @@ where column_constraint can be:
         [ ON DELETE action ] [ ON UPDATE action ] }
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'GENERATED generated_when' in column_constraint not supported in MODIFY and CHANGE syntax!
 where compress_mode can be:
 { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
 where table_constraint can be:
@@ -111,6 +116,20 @@ where table_constraint_using_index can be:
 [ CONSTRAINT constraint_name ]
     { UNIQUE | PRIMARY KEY } USING INDEX index_name
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where generated_when can be:
+    ALWAYS
+    | BY DEFAULT
+where alter_identity_column_option can be:
+    RESTART [ WITH ] NumericOnly
+    | SET GENERATED generated_when
+    | SET seq_option
+where seq_option can be:
+     { MAXVALUE | MINVALUE | START WITH | START | INCREMENT [ BY ] | CACHE } NumericOnly
+    | { NOMAXVALUE | NOMINVALUE | NO MAXVALUE | NO MINVALUE | NOCYCLE | [ NO ] CYCLE }
+where seq_options can be:
+    seq_option
+    | OWNED BY name
+    | RESTART [ WITH ] NumericOnly
 
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
 NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
@@ -124,6 +143,7 @@ NOTICE: '[ FIRST | AFTER column_name ]' in 'MODIFY | CHANGE [ COLUMN ] ...' clau
 NOTICE: '[ CHARACTER SET | CHARSET charset ]' is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-format database!
 NOTICE: 'IDENTITY [ (seed , increment) ]' is only avaliable in D-format database!
+
 </synopsis>
 </refsynopsisdiv>
 </refentry>

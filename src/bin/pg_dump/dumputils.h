@@ -99,6 +99,7 @@ extern char* binary_upgrade_newowner;
 extern void init_parallel_dump_utils(void);
 extern const char* fmtId(const char* identifier);
 extern const char* fmtBUserHostId(const char* name);
+extern const char* fmtQualifiedId(const char* schema, const char* id);
 extern void appendStringLiteral(PQExpBuffer buf, const char* str, int encoding, bool std_strings);
 extern void appendStringLiteralConn(PQExpBuffer buf, const char* str, PGconn* conn);
 extern void appendStringLiteralDQ(PQExpBuffer buf, const char* str, const char* dqprefix);
@@ -137,6 +138,7 @@ extern bool IsDir(const char* dirpath);
 extern char* make_absolute_path(const char* path);
 extern bool isExistsSQLResult(PGconn* conn, const char* sqlCmd);
 extern bool is_column_exists(PGconn* conn, Oid relid, const char* column_name);
+extern bool StrEndWith(const char *str, const char *suffix);
 #ifndef ENABLE_MULTIPLE_NODES
 extern bool SetUppercaseAttributeNameToOff(PGconn* conn);
 #endif

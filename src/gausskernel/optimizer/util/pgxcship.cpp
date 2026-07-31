@@ -965,9 +965,11 @@ static List* ts_get_taglist(Oid relid)
     List* tag_name_list = NIL;
     bool valid_ts_table = false;
     char* str = NULL;
+    int kvtype = ATT_KV_UNDEFINED;
 
     for (int i = 0; i < tup_desc->natts; i++) {
-        if (attr[i].attkvtype == ATT_KV_TAG && IsTypeDistributable(attr[i].atttypid)) {
+        kvtype = GET_ATTR_KVTYPE(&attr[i]);
+        if (kvtype == ATT_KV_TAG && IsTypeDistributable(attr[i].atttypid)) {
             str = pstrdup(NameStr(attr[i].attname));
             if (str != NULL) {
                 tag_name_list = lappend(tag_name_list, makeString(str));
@@ -976,7 +978,7 @@ static List* ts_get_taglist(Oid relid)
                         errmsg("Timeseries relation %u cloud not find tag column %d", relid, i)));
             }
         }
-        if (attr[i].attkvtype == ATT_KV_HIDE) {
+        if (kvtype == ATT_KV_HIDE) {
             valid_ts_table = true;
         }
     }

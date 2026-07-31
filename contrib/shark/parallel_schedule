@@ -39,3 +39,4 @@ test: sharksysfunction
 test: alter_sequence
 test: target_alias
 
+test: pg_identity pg_identity_dump_restore

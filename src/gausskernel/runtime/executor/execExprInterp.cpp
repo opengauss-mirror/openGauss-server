@@ -74,6 +74,7 @@
 #include "utils/typcache.h"
 #include "utils/xml.h"
 #include "utils/elog.h"
+#include "utils/numeric.h"
 #include "utils/expandeddatum.h"
 #include "access/tableam.h"
 #include "access/tupconvert.h"
@@ -643,6 +644,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		&&CASE_EEOP_CONVERT_ROWTYPE,
 		&&CASE_EEOP_SCALARARRAYOP,
 		&&CASE_EEOP_HASHED_SCALARARRAYOP,
+		&&CASE_EEOP_NEXTVALUEEXPR,
 		&&CASE_EEOP_XMLEXPR,
 		&&CASE_EEOP_AGGREF,
 		&&CASE_EEOP_GROUPING_FUNC,
@@ -1738,6 +1740,17 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             EEO_NEXT();
         }
 
+        EEO_CASE(EEOP_NEXTVALUEEXPR)
+        {
+            /*
+             * Doesn't seem worthwhile to have an inline implementation
+             * efficiency-wise.
+             */
+            ExecEvalNextValueExpr(state, op);
+
+            EEO_NEXT();
+        }
+
 		EEO_CASE(EEOP_DOMAIN_NOTNULL)
 		{
 			/* too complex for an inline implementation */
@@ -2729,12 +2742,56 @@ ExecEvalParamExtern(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
  * If we get here, we suppose we must be dealing with CURRENT OF on a foreign
  * table whose FDW doesn't handle it, and complain accordingly.
  */
-void
-ExecEvalCurrentOfExpr(ExprState *state, ExprEvalStep *op)
+void ExecEvalCurrentOfExpr(ExprState *state, ExprEvalStep *op)
 {
 	ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_EXECUTOR), errmsg("CURRENT OF cannot be executed")));
     return; /* keep compiler quiet */
+}
+
+/*
+ * Evaluate NextValueExpr.
+ */
+void ExecEvalNextValueExpr(ExprState *state, ExprEvalStep *op)
+{
+    int128 newval;
+    /*
+     * In D mode, the sequence created by
+     * the identity column can be independently deleted.
+     */
+    if (!OidIsValid(op->d.nextvalueexpr.seqid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmodule(MOD_EXECUTOR),
+            errmsg("no owned sequence found")));
+    }
+
+    newval = nextval_internal(op->d.nextvalueexpr.seqid, false);
+    switch (op->d.nextvalueexpr.seqtypid) {
+        case INT1OID:
+            *op->resvalue = Int8GetDatum((int8) newval);
+            break;
+        case INT2OID:
+            *op->resvalue = Int16GetDatum((int16) newval);
+            break;
+        case INT4OID:
+            *op->resvalue = Int32GetDatum((int32) newval);
+            break;
+        case INT8OID:
+            *op->resvalue = Int64GetDatum((int64) newval);
+            break;
+        case INT16OID:
+            *op->resvalue = Int128GetDatum((int128) newval);
+        case NUMERICOID:
+            *op->resvalue = NumericGetDatum(int128_to_numeric((int128) newval));
+            break;
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("unsupported sequence type %u", op->d.nextvalueexpr.seqtypid)));
+    }
+    *op->resnull = false;
 }
 
 /*
@@ -2743,7 +2800,7 @@ ExecEvalCurrentOfExpr(ExprState *state, ExprEvalStep *op)
 void
 ExecEvalRowNull(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	ExecEvalRowNullInt(state, op, econtext, true);
+    ExecEvalRowNullInt(state, op, econtext, true);
 }
 
 /*
@@ -2752,12 +2809,12 @@ ExecEvalRowNull(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 void
 ExecEvalRowNotNull(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	ExecEvalRowNullInt(state, op, econtext, false);
+    ExecEvalRowNullInt(state, op, econtext, false);
 }
 
 void ExecEvalNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	ExecEvalNanInt(state, op, econtext, true);
+    ExecEvalNanInt(state, op, econtext, true);
 }
 
 void ExecEvalNotNan(ExprState *state, ExprEvalStep *op, ExprContext *econtext)

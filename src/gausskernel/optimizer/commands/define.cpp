@@ -164,13 +164,14 @@ bool defGetBoolean(DefElem* def)
 /*
 * Extract a boolean/int mixed value from a DefElem.(copy from fill_missing_fields)
 */
-int defGetMixdInt(DefElem *def)
+int defGetMixdBoolean(DefElem *def)
 {
     /*
      * If no parameter given, assume "true" is meant.
      */
-    if (def->arg == NULL)
+    if (def->arg == NULL) {
         return 1;
+    }
 
     /*
      * Allow 0, 1, "true", "false", "on", "off", "one", "multi"
@@ -187,29 +188,49 @@ int defGetMixdInt(DefElem *def)
                     break;
             }
             break;
-        default: {
+        default:
             char *sval = defGetString(def);
 
             /*
              * The set of strings accepted here should match up with the
              * grammar's opt_boolean production.
              */
-            if (pg_strcasecmp(sval, "true") == 0)
+            if (pg_strcasecmp(sval, "true") == 0 ||
+                pg_strcasecmp(sval, "on") == 0 ||
+                pg_strcasecmp(sval, "one") == 0) {
                 return 1;
-            if (pg_strcasecmp(sval, "false") == 0)
+            } else if (pg_strcasecmp(sval, "false") == 0 ||
+                       pg_strcasecmp(sval, "off") == 0) {
                 return 0;
-            if (pg_strcasecmp(sval, "on") == 0)
-                return 1;
-            if (pg_strcasecmp(sval, "off") == 0)
-                return 0;
-            if (pg_strcasecmp(sval, "one") == 0)
-                return 1;
-            if (pg_strcasecmp(sval, "multi") == 0)
+            } else if (pg_strcasecmp(sval, "multi") == 0) {
                 return -1;
-        } break;
+            }
+            break;
     }
     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a Boolean value", def->defname)));
     return 0; /* keep compiler quiet */
+}
+
+/*
+ * Extract an int32 value from a DefElem.
+ */
+int32 defGetInt32(DefElem *def)
+{
+    if (def->arg == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("%s requires an integer value",
+                        def->defname)));
+    switch (nodeTag(def->arg)) {
+        case T_Integer:
+            return (int32) intVal(def->arg);
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("%s requires an integer value",
+                            def->defname)));
+    }
+    return 0;                    /* keep compiler quiet */
 }
 
 /*

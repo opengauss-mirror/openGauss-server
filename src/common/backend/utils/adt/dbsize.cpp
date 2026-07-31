@@ -1843,13 +1843,6 @@ static char* numeric_to_cstring(Numeric n)
     return DatumGetCString(DirectFunctionCall1(numeric_out, d));
 }
 
-Numeric int64_to_numeric(int64 v)
-{
-    Datum d = Int64GetDatum(v);
-
-    return DatumGetNumeric(DirectFunctionCall1(int8_numeric, d));
-}
-
 static bool numeric_is_less(Numeric a, Numeric b)
 {
     Datum da = NumericGetDatum(a);

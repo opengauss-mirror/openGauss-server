@@ -77,15 +77,17 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93098;
+const uint32 GRAND_VERSION_NUM = 93101;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PG_IDENTITY_VERSION_NUM = 93101;
+const uint32 SMP_VERSION_NUM = 93098;
 const uint32 LOCKS_WAITSTART_VERSION_NUM = 93097;
 const uint32 SUPPORT_CREATE_ACCESS_METHOD_VERSION_NUM = 93094;
-const uint32 SMP_VERSION_NUM = 93098;
+const uint32 INSERT_ON_CONFLICT_VERSION_NUMBER = 93094;
 const uint32 NEON_VERSION_NUM = 93090;
 const uint32 WITH_ORDINALITY_VERSION_NUM = 93089;
 const uint32 OGAI_VERSION_NUM = 93088;
@@ -98,8 +100,7 @@ const uint32 UPGRADE_SHARK_3_0_VERSION_NUM = 93070;
 const uint32 PGSTAT_LAST_SCAN_VERSION_NUM = 93065;
 const uint32 INLINEVIEW_DML_VERSION_NUM = 93063;
 const uint32 HALFVEC_VERSION_NUM = 93060;
-const uint32 INSERT_ON_CONFLICT_VERSION_NUMBER = 93094;
-const uint32 IDENTITY_VERSION_NUM = 93059;
+const uint32 D_IDENTITY_VERSION_NUM = 93059;
 const uint32 DISKANN_INDEX = 93058;
 const uint32 INSTR_TRACE_VERSION_NUMBER = 93053;
 const uint32 SELECT_STMT_HAS_ROTATE = 93047;

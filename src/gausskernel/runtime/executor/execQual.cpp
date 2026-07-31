@@ -42,6 +42,7 @@
 #include "access/tableam.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
+#include "commands/sequence.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeSubplan.h"
 #include "executor/node/nodeAgg.h"
@@ -58,6 +59,7 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/numeric.h"
 #include "utils/typcache.h"
 #include "utils/xml.h"
 #include "access/hash.h"
@@ -149,6 +151,7 @@ static Datum ExecEvalRelabelType(
 static Datum ExecEvalCoerceViaIO(CoerceViaIOState* iostate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalArrayCoerceExpr(
    ArrayCoerceExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+static Datum ExecEvalNextValueExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalCurrentOfExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalGroupingFuncExpr(
    GroupingFuncExprState* gstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -5852,7 +5855,7 @@ static Datum ExecEvalArrayCoerceExpr(
 }
 
 /* ----------------------------------------------------------------
-*		ExecEvalCurrentOfExpr
+*   ExecEvalCurrentOfExpr
 *
 * The planner must convert CURRENT OF into a TidScan qualification.
 * So, we have to be able to do ExecInitExpr on a CurrentOfExpr,
@@ -5865,6 +5868,63 @@ static Datum ExecEvalCurrentOfExpr(ExprState* exprstate, ExprContext* econtext, 
            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_EXECUTOR), errmsg("CURRENT OF cannot be executed")));
    return 0; /* keep compiler quiet */
 }
+
+/* ----------------------------------------------------------------
+*   ExecEvalNextValueExpr
+*   Evaluate NextValueExpr.
+* ----------------------------------------------------------------
+*/
+static Datum ExecEvalNextValueExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    int128         newval;
+    Datum          result = 0;
+    NextValueExpr* nve = (NextValueExpr*)exprstate->expr;
+
+    /*
+     * In D mode, the sequence created by
+     * the identity column can be independently deleted.
+     */
+    if (!OidIsValid(nve->seqid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmodule(MOD_EXECUTOR),
+            errmsg("no owned sequence found")));
+    }
+
+    newval = nextval_internal(nve->seqid, false);
+    switch (nve->typeId) {
+        case INT1OID:
+            result = Int8GetDatum((int8) newval);
+            break;
+        case INT2OID:
+            result = Int16GetDatum((int16) newval);
+            break;
+        case INT4OID:
+            result = Int32GetDatum((int32) newval);
+            break;
+        case INT8OID:
+            result = Int64GetDatum((int64) newval);
+            break;
+        case INT16OID:
+            result = Int128GetDatum((int128) newval);
+            break;
+        case NUMERICOID:
+            result = NumericGetDatum(int128_to_numeric((int128) newval));
+            break;
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("unsupported sequence type %u", nve->typeId)));
+    }
+
+    *isNull = false;
+    if (isDone) {
+        *isDone = ExprSingleResult;
+    }
+    return result;
+}
+
 
 /* ----------------------------------------------------------------
  *		ExecEvalPrefixText
@@ -6194,7 +6254,6 @@ ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent)
            fstate->xprstate.is_flt_frame = false;
            fstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalFunc;
 
-
            fstate->args = (List*)ExecInitExprByRecursion((Expr*)funcexpr->args, parent);
            fstate->func.fn_oid = InvalidOid; /* not initialized */
            fstate->is_plpgsql_func_with_outparam = is_function_with_plpgsql_language_and_outparam(funcexpr->funcid);
@@ -6245,6 +6304,11 @@ ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent)
            sstate->element_type = InvalidOid;          /* ditto */
            state = (ExprState*)sstate;
        } break;
+        case T_NextValueExpr: {
+            state = (ExprState*)makeNode(ExprState);
+            state->is_flt_frame = false;
+            state->evalfunc = ExecEvalNextValueExpr;
+        } break;
        case T_BoolExpr: {
            BoolExpr* boolexpr = (BoolExpr*)node;
            BoolExprState* bstate = makeNode(BoolExprState);
@@ -6777,7 +6841,6 @@ ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent)
             state = (ExprState*)dstate;
          } break;
 
-        
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

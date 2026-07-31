@@ -38,12 +38,13 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 PG_IDENTITY_VERSION_NUM;
 extern const uint32 LSG_VERSION_NUM;
 extern const uint32 RABITQ_VERSION_NUM;
 extern const uint32 UHEAP_LOCK_VERSION_NUM;
 extern const uint32 PGSTAT_LAST_SCAN_VERSION_NUM;
 extern const uint32 INLINEVIEW_DML_VERSION_NUM;
-extern const uint32 IDENTITY_VERSION_NUM;
+extern const uint32 D_IDENTITY_VERSION_NUM;
 extern const uint32 COMPUTED_COLUMNS_VERSION_NUMBER;
 extern const uint32 SWCB_OPTIMIZATION_VERSION_NUM;
 extern const uint32 SUPPORT_D_FORMAT_DATABASE;
@@ -381,7 +382,7 @@ static const struct behavior_compat_entry restrict_nonsystem_relation_kind[OPT_R
 
 /* similar with SUPPORT_D_FORMAT_DATABASE_MACRO */
 #define IDENTITY_VERSION_NUM_MACRO \
-    (t_thrd.proc->workingVersionNum >= IDENTITY_VERSION_NUM || \
+    (t_thrd.proc->workingVersionNum >= D_IDENTITY_VERSION_NUM || \
      (t_thrd.proc->workingVersionNum >= 92976 && \
      t_thrd.proc->workingVersionNum < 93000))
 

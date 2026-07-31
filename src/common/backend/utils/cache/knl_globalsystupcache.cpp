@@ -1234,6 +1234,8 @@ void GlobalSysTupCache::SearchPgAttributeCacheList(InsertCatListInfo *list_info)
         for (int16 attnum = 0; attnum < catalogDesc.natts + GetSysAttLength(hasBucketAttr); attnum++) {
             Form_pg_attribute attr;
             FormData_pg_attribute tempAttr;
+            FormData_pg_attribute_extra attrExtra = {0};
+
             if (attnum < catalogDesc.natts) {
                 tempAttr = catlogAttrs[attnum];
                 attr = &tempAttr;
@@ -1246,7 +1248,7 @@ void GlobalSysTupCache::SearchPgAttributeCacheList(InsertCatListInfo *list_info)
                 attr = SystemAttributeDefinition(-(index + 1), catalogDesc.hasoids, false, false);
                 attr->attrelid = relOid;
             }
-            HeapTuple ntp = GetPgAttributeAttrTuple(m_relinfo.cc_tupdesc, attr);
+            HeapTuple ntp = GetPgAttributeAttrTuple(m_relinfo.cc_tupdesc, attr, &attrExtra);
             InsertCatTupInfo tup_info;
             tup_info.find_type = PGATTR_LIST_SKIP;
             InitInsertCatTupInfo(&tup_info, ntp, list_info->arguments);

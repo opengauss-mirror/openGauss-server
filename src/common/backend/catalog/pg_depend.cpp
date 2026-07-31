@@ -28,6 +28,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_synonym.h"
 #include "commands/extension.h"
+#include "commands/sequence.h"
 #include "miscadmin.h"
 #include "storage/tcap.h"
 #include "utils/fmgroids.h"
@@ -707,7 +708,7 @@ Oid getExtensionOfObject(Oid classId, Oid objectId)
 /*
  * Detect whether a sequence is marked as "owned" by a column
  *
- * An ownership marker is an AUTO dependency from the sequence to the
+ * An ownership marker is an AUTO  or INTERNAL dependency from the sequence to the
  * column.	If we find one, store the identity of the owning column
  * into *tableId and *colId and return TRUE; else return FALSE.
  *
@@ -715,7 +716,7 @@ Oid getExtensionOfObject(Oid classId, Oid objectId)
  * a random one of them returned into the out parameters.  This should
  * not happen, though.
  */
-bool sequenceIsOwned(Oid seqId, Oid* tableId, int32* colId)
+bool sequenceIsOwned(Oid seqId, char deptype, Oid* tableId, int32* colId)
 {
     bool ret = false;
     Relation depRel = NULL;
@@ -732,8 +733,8 @@ bool sequenceIsOwned(Oid seqId, Oid* tableId, int32* colId)
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
-
-        if (depform->refclassid == RelationRelationId && depform->deptype == DEPENDENCY_AUTO) {
+        if (depform->refclassid == RelationRelationId &&
+            depform->deptype == deptype) {
             *tableId = depform->refobjid;
             *colId = depform->refobjsubid;
             ret = true;
@@ -748,21 +749,198 @@ bool sequenceIsOwned(Oid seqId, Oid* tableId, int32* colId)
     return ret;
 }
 
+
 /*
- * Remove any existing "owned" markers for the specified sequence.
- *
- * Note: we don't provide a special function to install an "owned"
- * marker; just use recordDependencyOn().
+ * Collect a list of OIDs of all sequences owned by the specified relation,
+ * and column if specified.  If deptype is not zero, then only find sequences
+ * with the specified dependency type.
  */
-void markSequenceUnowned(Oid seqId)
+static List* getOwnedSequences_internal(Oid relid, AttrNumber attnum, char deptype)
 {
-    (void)deleteDependencyRecordsForClass(RelationRelationId, seqId, RelationRelationId, DEPENDENCY_AUTO);
+    List       *result = NIL;
+    Relation    depRel;
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    HeapTuple    tup;
+
+    depRel = heap_open(DependRelationId, AccessShareLock);
+
+    ScanKeyInit(&key[0],
+                Anum_pg_depend_refclassid,
+                BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(RelationRelationId));
+    ScanKeyInit(&key[1],
+                Anum_pg_depend_refobjid,
+                BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(relid));
+    if (attnum)
+        ScanKeyInit(&key[2],
+                    Anum_pg_depend_refobjsubid,
+                    BTEqualStrategyNumber, F_INT4EQ,
+                    Int32GetDatum(attnum));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true,
+                              NULL, attnum ? 3 : 2, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        Form_pg_depend deprec = (Form_pg_depend) GETSTRUCT(tup);
+        /*
+         * We assume any auto or internal dependency of a sequence on a column
+         * must be what we are looking for.  (We need the relkind test because
+         * indexes can also have auto dependencies on columns.)
+         */
+        if (deprec->classid == RelationRelationId &&
+            deprec->objsubid == 0 &&
+            deprec->refobjsubid != 0 &&
+            (deprec->deptype == DEPENDENCY_AUTO || deprec->deptype == DEPENDENCY_INTERNAL) &&
+            RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
+            if (!deptype || deprec->deptype == deptype)
+                result = lappend_oid(result, deprec->objid);
+        }
+    }
+
+    systable_endscan(scan);
+
+    heap_close(depRel, AccessShareLock);
+
+    return result;
 }
 
 /*
- * Collect a list of OIDs of all sequences owned by the specified relation.
+ * Get oid of sequence owned (identity or serial) by the
+ * column of specified relation.
  */
-List* getOwnedSequences(Oid relid, List* attrList)
+Oid getOwnedSequence(Oid relid, AttrNumber attnum, char** seqname)
+{
+    Oid seqid;
+    List       *seqlist = getOwnedSequences_internal(relid, attnum, 0);
+
+    if (list_length(seqlist) > 1) {
+        elog(ERROR, "more than one owned sequence found");
+    } else if (seqlist == NIL) {
+        return InvalidOid;
+    }
+
+    if (seqname) {
+        *seqname = NULL;
+    }
+
+    seqid = linitial_oid(seqlist);
+    if (OidIsValid(seqid) && seqname) {
+        HeapTuple classtup;
+        Form_pg_class classtuple;
+        char* nspname = NULL;
+
+        /* Get the sequence's pg_class entry */
+        classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(seqid));
+        if (!HeapTupleIsValid(classtup)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for relation %u", seqid)));
+        }
+
+        classtuple = (Form_pg_class)GETSTRUCT(classtup);
+
+        /* Get the namespace */
+        nspname = get_namespace_name(classtuple->relnamespace);
+        if (nspname == NULL) {
+            ReleaseSysCache(classtup);
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for namespace %u", classtuple->relnamespace)));
+        }
+
+        /* And construct the result string */
+        *seqname = quote_qualified_identifier(nspname, NameStr(classtuple->relname));
+
+        ReleaseSysCache(classtup);
+    }
+    return seqid;
+}
+
+/*
+ * Collect a list of OIDs of all sequences owned (identity or serial) by the
+ * specified relation.
+ */
+List* getOwnedSequences(Oid relid)
+{
+    return getOwnedSequences_internal(relid, 0, 0);
+}
+
+/*
+ * Get owned identity sequence, error if not exactly one.
+ * if forIdentityOfD, check sequence name suffix
+ */
+Oid getIdentitySequence(Oid relid, AttrNumber attnum, bool missing_ok, bool forIdentityOfD)
+{
+    List       *seqlist = getOwnedSequences_internal(relid, attnum,
+                                                    forIdentityOfD ? DEPENDENCY_AUTO : DEPENDENCY_INTERNAL);
+
+    if (list_length(seqlist) > 1) {
+        elog(ERROR, "more than one owned sequence found");
+    } else if (seqlist == NIL) {
+        if (missing_ok)
+            return InvalidOid;
+        else
+            elog(ERROR, "no owned sequence found");
+    }
+
+    Oid seqid = linitial_oid(seqlist);
+    if (forIdentityOfD && OidIsValid(seqid)) {
+        return StrEndWith(get_rel_name(seqid), "_seq_identity") ? seqid : InvalidOid;
+    }
+
+    return seqid;
+}
+
+/*
+ * Get owned identity sequence by the specified relation in D format,
+ * not generated as identity, if outAttrName != NULL, return attrname
+ * which owned identity sequence.
+ * if attrname != NULL, return the identity sequence owned by this attrname,
+ * return InvalidOid if not.
+ */
+Oid getIdentitySequenceForD(Oid relid, const char* attrname, char** outAttrName)
+{
+    Relation    rel = nullptr;
+    TupleDesc   tupdesc = nullptr;
+    AttrNumber  attnum = InvalidAttrNumber;
+    Oid         seqid = InvalidOid;
+
+    rel = RelationIdGetRelation(relid);
+    tupdesc = RelationGetDescr(rel);
+
+    for (attnum = 1; attnum <= tupdesc->natts; attnum++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
+        if (attr->attisdropped) {
+            continue;
+        }
+
+        const char* attname = NameStr(attr->attname);
+        if (attrname && (strcmp(attname, attrname) != 0)) {
+            continue;
+        }
+
+        seqid = getIdentitySequence(relid, attnum, true, true);
+        if (OidIsValid(seqid)) {
+            if (outAttrName) {
+                *outAttrName = pstrdup(attname);
+            }
+            break;
+        } else if (attrname) {
+            RelationClose(rel);
+            return InvalidOid;
+        }
+    }
+
+    RelationClose(rel);
+    return seqid;
+}
+
+/*
+ * Collect a list of OIDs of all sequences owned by attriList of the specified relation.
+ */
+List* getOwnedSequencesOfAttrList(Oid relid, List* attrList)
 {
     List* result = NIL;
     Relation depRel = NULL;
@@ -780,14 +958,15 @@ List* getOwnedSequences(Oid relid, List* attrList)
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
-
         /*
          * We assume any auto dependency of a sequence on a column must be
          * what we are looking for.  (We need the relkind test because indexes
          * can also have auto dependencies on columns.)
          */
-        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->refobjsubid != 0 &&
-            deprec->deptype == DEPENDENCY_AUTO && RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
+        if (deprec->classid == RelationRelationId &&
+            deprec->objsubid == 0 && deprec->refobjsubid != 0 &&
+            (deprec->deptype == DEPENDENCY_AUTO || deprec->deptype == DEPENDENCY_INTERNAL) &&
+            RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
             if (attrList != NULL) {
                 if (list_member_int(attrList, deprec->refobjsubid))
                     result = lappend_oid(result, deprec->objid);
@@ -806,8 +985,8 @@ List* getOwnedSequences(Oid relid, List* attrList)
 
 /*
  * get_constraint_index
- *		Given the OID of a unique or primary-key constraint, return the
- *		OID of the underlying unique index.
+ *    Given the OID of a unique or primary-key constraint, return the
+ *    OID of the underlying unique index.
  *
  * Return InvalidOid if the index couldn't be found; this suggests the
  * given OID is bogus, but we leave it to caller to decide what to do.
@@ -1162,7 +1341,6 @@ void fillDepsrcIfNeeded(const ObjectAddress* origObject)
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         depTuple = (Form_pg_depend)GETSTRUCT(tup);
-        Datum depsrc = heap_getattr(tup, Anum_pg_depend_depsrc, RelationGetDescr(depRel), &isnull);
         /* skip those whose depsrc were already valid */
         if (!isnull) {
             continue;

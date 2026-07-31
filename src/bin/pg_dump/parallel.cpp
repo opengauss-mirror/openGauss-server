@@ -147,34 +147,8 @@ static void ShutdownWorkersHard(ParallelStateN* pstate);
 static void WaitForTerminatingWorkers(ParallelStateN* pstate);
 static void sigTermHandler(SIGNAL_ARGS);
 static void setup_cancel_handler(void);
-static const char* fmtQualifiedId(const char* schema, const char* id);
 static void archive_close_connection(int code, void* arg);
 
-/*
- * fmtQualifiedId - construct a schema-qualified name, with quoting as needed.
- *
- * Like fmtId, use the result before calling again.
- *
- * Since we call fmtId and it also uses getLocalPQExpBuffer() we cannot
- * use that buffer until we're finished with calling fmtId().
- */
-static const char* fmtQualifiedId(const char* schema, const char* id)
-{
-    static PQExpBuffer id_return = NULL;
-
-    if (id_return != NULL) /* first time through? */
-        resetPQExpBuffer(id_return);
-    else
-        id_return = createPQExpBuffer();
-
-    /* Suppress schema name if fetching from pre-7.3 DB */
-    if (schema != NULL && *schema) {
-        appendPQExpBuffer(id_return, "%s.", fmtId(schema));
-    }
-    appendPQExpBuffer(id_return, "%s", fmtId(id));
-
-    return id_return->data;
-}
 /*
  * Find the ParallelSlotN for the current worker process or thread.
  *
