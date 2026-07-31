@@ -1631,8 +1631,6 @@ static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
     bm25_context->isFirstTuple = true;
 
     bm25_context->scoreHashTable = nullptr;
-
-    bm25_context->globalDfMap = nullptr;
 }
 
 static void knl_u_hook_init(knl_u_hook_context* hook_context)

@@ -61,14 +61,14 @@ typedef struct BM25QueryTokensInfo {
     BM25QueryToken *queryTokens;
     uint32 size;
 } BM25QueryTokensInfo;
-static HTAB* ParseGlobalDfMap(const char* dfStr)
+static HTAB* ParseGlobalDfMap(const char* dfStr, MemoryContext mcxt)
 {
     HASHCTL hashCtl;
     errno_t rc = memset_s(&hashCtl, sizeof(hashCtl), 0, sizeof(hashCtl));
     securec_check(rc, "\0", "\0");
     hashCtl.keysize = BM25_MAX_TOKEN_LEN;
     hashCtl.entrysize = sizeof(GlobalDfEntry);
-    hashCtl.hcxt = CurrentMemoryContext;
+    hashCtl.hcxt = mcxt;
     HTAB* map = hash_create("BM25 GlobalDf", 32, &hashCtl,
                             HASH_ELEM | HASH_CONTEXT);
 
@@ -82,13 +82,23 @@ static HTAB* ParseGlobalDfMap(const char* dfStr)
             char* term = pair;
             uint32 df = (uint32)atoi(colon + 1);
             if (df > 0) {
+                /*
+                 * Build a fully zeroed fixed-length key so dynahash reads exactly
+                 * keysize bytes; never pass a variable-length string directly.
+                 */
+                char key[BM25_MAX_TOKEN_LEN];
+                rc = memset_s(key, BM25_MAX_TOKEN_LEN, 0, BM25_MAX_TOKEN_LEN);
+                securec_check(rc, "\0", "\0");
+                rc = strncpy_s(key, BM25_MAX_TOKEN_LEN, term, BM25_MAX_TOKEN_LEN - 1);
+                securec_check(rc, "\0", "\0");
                 bool found = false;
                 GlobalDfEntry* entry = (GlobalDfEntry*)hash_search(
-                    map, term, HASH_ENTER, &found);
+                    map, key, HASH_ENTER, &found);
                 if (entry != NULL) {
-                    rc = strncpy_s(entry->token, BM25_MAX_TOKEN_LEN,
-                                   term, BM25_MAX_TOKEN_LEN - 1);
-                    securec_check(rc, "\0", "\0");
+                    /*
+                     * HASH_ENTER already copied our zeroed key into entry->token
+                     * (the key area). Do NOT overwrite it; only set df.
+                     */
                     entry->df = df;
                 }
             }
@@ -137,7 +147,7 @@ static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery,
 }
 
 static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocData &tokenizedQuery,
-    BM25QueryToken *queryTokens, size_t tokenIdx, uint32 &tokenFoundCount)
+    BM25QueryToken *queryTokens, size_t tokenIdx, uint32 &tokenFoundCount, HTAB* globalDfMap)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnoTokenMeta = FirstOffsetNumber; offnoTokenMeta <= maxoffno; offnoTokenMeta++) {
@@ -148,10 +158,12 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
             uint32 N = meta.documentCount;
             uint32 df = tokenMeta->docCount;
             if (u_sess->attr.attr_sql.enable_bm25_global_idf &&
-                u_sess->attr.attr_sql.bm25_global_doc_count > 0 && u_sess->bm25_ctx.globalDfMap != NULL) {
-                uint32 gdf = LookupGlobalDf(u_sess->bm25_ctx.globalDfMap, tokenMeta->token);
-                if (gdf > 0) {
-                    N = (uint32)u_sess->attr.attr_sql.bm25_global_doc_count;
+                u_sess->attr.attr_sql.bm25_global_doc_count > 0 && globalDfMap != NULL) {
+                uint32 gdf = LookupGlobalDf(globalDfMap, tokenMeta->token);
+                uint32 globalN = (uint32)u_sess->attr.attr_sql.bm25_global_doc_count;
+                /* Only use global stats when 1 <= gdf <= globalN to prevent negative IDF */
+                if (gdf >= 1 && gdf <= globalN && globalN > 0) {
+                    N = globalN;
                     df = gdf;
                 }
             }
@@ -175,7 +187,7 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
 }
 
 static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentence, uint32 &tokenCount,
-    uint32 &tokenFoundCount, bool cutForSearch = false)
+    uint32 &tokenFoundCount, HTAB* globalDfMap, bool cutForSearch = false)
 {
     BM25TokenizedDocData tokenizedQuery = BM25DocumentTokenize(sentence, Bm25GetDictPath(index), cutForSearch);
     if (tokenizedQuery.tokenCount == 0) {
@@ -222,7 +234,8 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
             cTokenMetasbuf = ReadBuffer(index, nextTokenMetasBlkno);
             LockBuffer(cTokenMetasbuf, BUFFER_LOCK_SHARE);
             cTokenMetaspage = BufferGetPage(cTokenMetasbuf);
-            FindTokenInfo(meta, cTokenMetaspage, tokenizedQuery, queryTokens, tokenIdx, tokenFoundCount);
+            FindTokenInfo(meta, cTokenMetaspage, tokenizedQuery, queryTokens, tokenIdx, tokenFoundCount,
+                globalDfMap);
             nextTokenMetasBlkno = BM25PageGetOpaque(cTokenMetaspage)->nextblkno;
             UnlockReleaseBuffer(cTokenMetasbuf);
         }
@@ -238,14 +251,16 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
     return queryTokens;
 }
 
-static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
+static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence, HTAB* globalDfMap)
 {
     uint32 tokenCount = 0;
     uint32 tokenFoundCount = 0;
-    BM25QueryToken *queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount);
+    BM25QueryToken *queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount,
+        globalDfMap);
     if (queryTokens == nullptr) {
         /* no token found, try to use cutForSearch to get tokens */
-        queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount, true);
+        queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount,
+            globalDfMap, true);
     }
     if (queryTokens == nullptr) {
         BM25QueryTokensInfo tokensInfo{0};
@@ -927,9 +942,10 @@ IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
     so->expandedTimes = 0;
     so->docIdMaskSize = bm25MetaData.nextDocId / 8 + 1;
     so->docIdMask = (unsigned char*)palloc0(sizeof(unsigned char) * (so->docIdMaskSize));
+    so->globalDfMap = NULL;
+    so->scanMcxt = CurrentMemoryContext;
 
     scan->opaque = so;
-    u_sess->bm25_ctx.globalDfMap = NULL;
     return scan;
 }
 
@@ -1020,10 +1036,10 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
         if (u_sess->attr.attr_sql.enable_bm25_global_idf &&
             u_sess->attr.attr_sql.bm25_global_doc_count > 0 && u_sess->attr.attr_sql.bm25_global_df != NULL &&
-            u_sess->attr.attr_sql.bm25_global_df[0] != '\0' && u_sess->bm25_ctx.globalDfMap == NULL) {
-            u_sess->bm25_ctx.globalDfMap = ParseGlobalDfMap(u_sess->attr.attr_sql.bm25_global_df);
+            u_sess->attr.attr_sql.bm25_global_df[0] != '\0' && so->globalDfMap == NULL) {
+            so->globalDfMap = ParseGlobalDfMap(u_sess->attr.attr_sql.bm25_global_df, so->scanMcxt);
         }
-        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, queryString);
+        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, queryString, so->globalDfMap);
         if (queryTokenInfo.size == 0) {
             return false;
         }
@@ -1056,13 +1072,13 @@ void bm25endscan_internal(IndexScanDesc scan)
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
     pfree_ext(so->docIdMask);
     pfree_ext(so->candDocs);
+    if (so->globalDfMap != NULL) {
+        DestroyGlobalDfMap(so->globalDfMap);
+        so->globalDfMap = NULL;
+    }
     pfree_ext(so);
     if (u_sess->bm25_ctx.scoreHashTable != NULL) {
         DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
-    }
-    if (u_sess->bm25_ctx.globalDfMap != NULL) {
-        DestroyGlobalDfMap(u_sess->bm25_ctx.globalDfMap);
-        u_sess->bm25_ctx.globalDfMap = NULL;
     }
     scan->opaque = NULL;
 }
