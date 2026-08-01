@@ -1,4 +1,4 @@
-﻿/* -------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -175,6 +175,7 @@
 #include "storage/pg_shmem.h"
 #include "storage/lock/pg_sema.h"
 #include "storage/pmsignal.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/proc.h"
 #include "storage/remote_read.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
@@ -14577,6 +14578,8 @@ static void SetAuxType()
 template <knl_thread_role role>
 void SetExtraThreadInfo(knl_thread_arg* arg)
 {
+    InitWorkerCPUGroup();
+
     if (arg->payload == NULL)
         return;
 
@@ -14584,6 +14587,7 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
         case THREADPOOL_WORKER: {
             t_thrd.threadpool_cxt.worker = (ThreadPoolWorker*)arg->payload;
             t_thrd.threadpool_cxt.group  = t_thrd.threadpool_cxt.worker->GetGroup();
+            InitWorkerCPUGroup(t_thrd.threadpool_cxt.group->GetNumaId());
             break;
         }
         case STREAM_WORKER: {
@@ -14594,6 +14598,7 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
         case THREADPOOL_STREAM: {
             t_thrd.threadpool_cxt.stream = (ThreadPoolStream*)arg->payload;
             t_thrd.threadpool_cxt.group  = t_thrd.threadpool_cxt.stream->GetGroup();
+            InitWorkerCPUGroup(t_thrd.threadpool_cxt.group->GetNumaId());
             StreamProducer* proObj = (StreamProducer*)t_thrd.threadpool_cxt.stream->GetProducer();
             SetStreamWorkerInfo(proObj);
             break;

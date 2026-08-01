@@ -1603,6 +1603,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->dmsBufCtl = NULL;
     storage_cxt->ondemandXLogMem = NULL;
     storage_cxt->ondemandXLogFileIdCache = NULL;
+    storage_cxt->cached_group_ref_counts = NULL;
 }
 
 static void knl_t_port_init(knl_t_port_context* port_cxt)

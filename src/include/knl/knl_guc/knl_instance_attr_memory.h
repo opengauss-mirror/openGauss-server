@@ -60,6 +60,7 @@ typedef struct knl_instance_attr_memory {
     int borrow_work_mem;
     int avail_borrow_mem;
     bool enable_rack_memory_cleaner;
+    bool enable_group_ref_cnt;
 } knl_instance_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_MEMORY_H_ */

@@ -59,6 +59,7 @@
 #include "service/remote_read_client.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/smgr/segment.h"
@@ -161,7 +162,6 @@ static int ts_ckpt_progress_comparator(Datum a, Datum b, void *arg);
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
     BlockNumber blockNum, ReadBufferMode mode, bool isExtend, Block bufBlock, const XLogPhyBlock *pblk,
     bool *need_repair);
-
 /*
  * DMS read repair failed and the caller should return InvalidBuffer instead of
  * continuing the retry loop. Failover uses cancel cause to exit; primary restart
@@ -242,6 +242,10 @@ static inline void SSCleanupReadBufferCommonForPageReadExit(BufferDesc *bufHdr, 
         ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
     }
 }
+
+static void PinBufferGroup_Locked(volatile BufferDesc *buf);
+static void UnpinBufferGroup(BufferDesc *buf, bool fixOwner);
+static bool PinBufferGroup(BufferDesc *buf, BufferAccessStrategy strategy);
 
 char* BufferTagToString(const BufferTag* buftag, char* resBuffer, int len)
 {
@@ -730,7 +734,7 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
         buf = (BufferDesc*)StrategyGetBuffer(strategy, &buf_state);
         pgstat_report_waitevent(WAIT_EVENT_END);
 
-        Assert(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
+        Assert(IsBufferRefCountZero(buf_state, buf->buf_id));
 
         /* Must copy buffer flags while we still hold the spinlock */
         old_flags = buf_state & BUF_FLAG_MASK;
@@ -833,7 +837,7 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
 
         /* Everything is fine, the buffer is ours, so break */
         old_flags = buf_state & BUF_FLAG_MASK;
-        if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) && !(old_flags & BM_IS_META)) {
+        if (IsBufferRefCountOne(buf_state, buf->buf_id) && !(old_flags & BM_DIRTY) && !(old_flags & BM_IS_META)) {
             if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
                 if (DmsReleaseOwner(buf->tag, buf->buf_id)) {
                     ClearReadHint(buf->buf_id, true);
@@ -1365,7 +1369,7 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
              * Count the number of buffers that were *not* recently used
              * these will be written out regardless of the caller.
              */
-            if (BUF_STATE_GET_REFCOUNT(buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(buf_state) == 0) {
+            if (IsBufferRefCountZero(buf_state, bufHdr->buf_id) && BUF_STATE_GET_USAGECOUNT(buf_state) == 0) {
                 ++bufs_reusable_local;
             } else if (!checkpoint_backwrite) {
                 /*
@@ -1731,11 +1735,11 @@ void AsyncCompltrUnpinBuffer(volatile void *buf_desc)
     buf_state = LockBufHdr(buf);
 
     /* Decrement the shared reference count */
-    Assert(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
+    Assert(IsBufferRefCountGreaterThanZero(buf_state, buf->buf_id));
     buf_state -= 1;
 
     /* Support the function LockBufferForCleanup() */
-    if ((buf_state & BM_PIN_COUNT_WAITER) && BUF_STATE_GET_REFCOUNT(buf_state) == 1) {
+    if ((buf_state & BM_PIN_COUNT_WAITER) && IsBufferRefCountOne(buf_state, buf->buf_id)) {
         /* we just released the last pin other than the waiter's */
         ThreadId wait_backend_pid = buf->wait_backend_pid;
 
@@ -3464,7 +3468,7 @@ retry:
         buf = (BufferDesc *)StrategyGetBuffer(strategy, &buf_state);
         pgstat_report_waitevent(WAIT_EVENT_END);
 
-        Assert(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
+        Assert(IsBufferRefCountZero(buf_state, buf->buf_id));
 
         /* Must copy buffer flags while we still hold the spinlock */
         old_flags = buf_state & BUF_FLAG_MASK;
@@ -3719,7 +3723,7 @@ smb_retry_new_buffer:
          */
         old_flags = buf_state & BUF_FLAG_MASK;
 
-        if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) 
+        if (IsBufferRefCountOne(buf_state, buf->buf_id) && !(old_flags & BM_DIRTY)
             && !(old_flags & BM_IS_META)) {
             bool dmsReleaseFailed = false;
             if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
@@ -3945,7 +3949,7 @@ retry:
      * yet done StartBufferIO, WaitIO will fall through and we'll effectively
      * be busy-looping here.)
      */
-    if (BUF_STATE_GET_REFCOUNT(buf_state) != 0) {
+    if (IsBufferRefCountNotZero(buf_state, buf->buf_id)) {
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(old_partition_lock);
         /* safety check: should definitely not be our *own* pin */
@@ -4194,6 +4198,11 @@ Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber block_
  */
 bool PinBuffer(BufferDesc *buf, BufferAccessStrategy strategy)
 {
+    /* Group refcounts replace state refcounts only for normal shared buffers. */
+    if (g_group_ref_counts.initialized && IsNormalBufferID(buf->buf_id)) {
+        return PinBufferGroup(buf, strategy);
+    }
+
     Buffer b = BufferDescriptorGetBuffer(buf);
     bool result = false;
     PrivateRefCountEntry *ref = NULL;
@@ -4239,6 +4248,72 @@ bool PinBuffer(BufferDesc *buf, BufferAccessStrategy strategy)
     ref->refcount++;
     Assert(ref->refcount > 0);
     ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
+
+    return result;
+}
+
+static bool PinBufferGroup(BufferDesc *buf, BufferAccessStrategy strategy)
+{
+    Assert(g_group_ref_counts.initialized);
+    Assert(IsNormalBufferID(buf->buf_id));
+    Buffer b = BufferDescriptorGetBuffer(buf);
+    bool result = false;
+    PrivateRefCountEntry *ref = NULL;
+
+    ref = GetPrivateRefCountEntry(b, true);
+
+    if (ref == NULL) {
+        pg_atomic_uint16 *refcount = &t_thrd.storage_cxt.cached_group_ref_counts[buf->buf_id];
+        uint64 buf_state;
+        uint64 new_buf_state;
+
+        ReservePrivateRefCountEntry();
+        ref = NewPrivateRefCountEntry(b);
+
+        for (;;) {
+            buf_state = pg_atomic_read_u64(&buf->state);
+            if (buf_state & BM_LOCKED) {
+                WaitBufHdrUnlocked(buf);
+                continue;
+            }
+
+            pg_atomic_fetch_add_u16(refcount, 1);
+
+            /*
+             * Re-read state after publishing the group pin.  A concurrent
+             * backend could have locked the header after our initial read.
+             */
+            buf_state = pg_atomic_read_u64(&buf->state);
+            while (BUF_STATE_GET_USAGECOUNT(buf_state) != BM_MAX_USAGE_COUNT) {
+                if (buf_state & BM_LOCKED) {
+                    break;
+                }
+
+                new_buf_state = buf_state + BUF_USAGECOUNT_ONE;
+                if (pg_atomic_compare_exchange_u64(&buf->state, &buf_state, new_buf_state)) {
+                    buf_state = new_buf_state;
+                    break;
+                }
+            }
+
+            if (buf_state & BM_LOCKED) {
+                pg_atomic_fetch_sub_u16(refcount, 1);
+                WaitBufHdrUnlocked(buf);
+                continue;
+            }
+
+            result = (buf_state & BM_VALID) != 0;
+            break;
+        }
+    } else {
+        /* If we previously pinned the buffer, it must surely be valid */
+        result = true;
+    }
+
+    ref->refcount++;
+    Assert(ref->refcount > 0);
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
+
     return result;
 }
 
@@ -4265,6 +4340,12 @@ bool PinBuffer(BufferDesc *buf, BufferAccessStrategy strategy)
  */
 void PinBuffer_Locked(volatile BufferDesc *buf)
 {
+    /* Group refcounts replace state refcounts only for normal shared buffers. */
+    if (g_group_ref_counts.initialized && IsNormalBufferID(buf->buf_id)) {
+        PinBufferGroup_Locked(buf);
+        return;
+    }
+
     Buffer b;
     PrivateRefCountEntry *ref = NULL;
     uint64 buf_state;
@@ -4294,6 +4375,33 @@ void PinBuffer_Locked(volatile BufferDesc *buf)
 }
 
 /*
+ * PinBufferGroup_Locked -- per-group version, caller already locked the buffer header.
+ */
+static void PinBufferGroup_Locked(volatile BufferDesc *buf)
+{
+    Buffer b;
+    PrivateRefCountEntry *ref = NULL;
+    uint64 buf_state;
+
+    Assert(IsNormalBufferID(buf->buf_id));
+    Assert(GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), false) == NULL);
+
+    buf_state = pg_atomic_read_u64(&buf->state);
+    Assert(buf_state & BM_LOCKED);
+
+    /* Publish the group pin before making the buffer header available. */
+    pg_atomic_fetch_add_u16(&t_thrd.storage_cxt.cached_group_ref_counts[buf->buf_id], 1);
+    UnlockBufHdr(buf, buf_state);
+
+    b = BufferDescriptorGetBuffer(buf);
+
+    ref = NewPrivateRefCountEntry(b);
+    ref->refcount++;
+
+    ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
+}
+
+/*
  * UnpinBuffer -- make buffer available for replacement.
  *
  * This should be applied only to shared buffers, never local ones.
@@ -4303,6 +4411,12 @@ void PinBuffer_Locked(volatile BufferDesc *buf)
  */
 void UnpinBuffer(BufferDesc *buf, bool fixOwner)
 {
+    /* Group refcounts replace state refcounts only for normal shared buffers. */
+    if (g_group_ref_counts.initialized && IsNormalBufferID(buf->buf_id)) {
+        UnpinBufferGroup(buf, fixOwner);
+        return;
+    }
+
     PrivateRefCountEntry *ref = NULL;
     Buffer b = BufferDescriptorGetBuffer(buf);
 
@@ -4318,12 +4432,14 @@ void UnpinBuffer(BufferDesc *buf, bool fixOwner)
     }
 
     ref->refcount--;
+
     if (ref->refcount == 0) {
         uint64 buf_state;
 
         /* I'd better not still hold any locks on the buffer */
         Assert(!LWLockHeldByMe(buf->content_lock));
         Assert(!LWLockHeldByMe(buf->io_in_progress_lock));
+
         for(;;) {
             buf_state = __sync_add_and_fetch(&buf->state, -1);
             if(buf_state & BM_LOCKED) {
@@ -4344,7 +4460,7 @@ void UnpinBuffer(BufferDesc *buf, bool fixOwner)
              * waiter.
              */
             buf_state = LockBufHdr(buf);
-            if ((buf_state & BM_PIN_COUNT_WAITER) && BUF_STATE_GET_REFCOUNT(buf_state) == 1) {
+            if ((buf_state & BM_PIN_COUNT_WAITER) && IsBufferRefCountOne(buf_state, buf->buf_id)) {
                 /* we just released the last pin other than the waiter's */
                 ThreadId wait_backend_pid = buf->wait_backend_pid;
 
@@ -4355,6 +4471,66 @@ void UnpinBuffer(BufferDesc *buf, bool fixOwner)
                 UnlockBufHdr(buf, buf_state);
             }
         }
+
+        ForgetPrivateRefCountEntry(ref);
+
+        if (SS_STANDBY_MODE && SS_AM_WORKER) {
+            if (!(IsSegmentBufferID(buf->buf_id))) {
+                ForgetBufferNeedCheckPin(buf->buf_id + 1);
+            }
+        }
+    }
+}
+
+/*
+ * UnpinBufferGroup -- per-group version, make buffer available for replacement.
+ */
+static void UnpinBufferGroup(BufferDesc *buf, bool fixOwner)
+{
+    PrivateRefCountEntry *ref = NULL;
+    Buffer b = BufferDescriptorGetBuffer(buf);
+
+    Assert(IsNormalBufferID(buf->buf_id));
+    ref = GetPrivateRefCountEntry(b, false);
+    Assert(ref != NULL);
+
+    if (fixOwner) {
+        ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, b);
+    }
+    if (ref->refcount <= 0) {
+        ereport(PANIC, (errmsg("[exception] private ref->refcount is %d in UnpinBufferGroup", ref->refcount)));
+    }
+
+    ref->refcount--;
+    if (ref->refcount == 0) {
+        /* I'd better not still hold any locks on the buffer */
+        Assert(!LWLockHeldByMe(buf->content_lock));
+        Assert(!LWLockHeldByMe(buf->io_in_progress_lock));
+
+        pg_atomic_fetch_sub_u16(&t_thrd.storage_cxt.cached_group_ref_counts[buf->buf_id], 1);
+        uint64 buf_state = WaitBufHdrUnlocked(buf);
+        /* Support the function LockBufferForCleanup() */
+        if (buf_state & BM_PIN_COUNT_WAITER) {
+            /*
+             * Acquire the buffer header lock, re-check that there's a waiter.
+             * Another backend could have unpinned this buffer, and already
+             * woken up the waiter.  There's no danger of the buffer being
+             * replaced after we unpinned it above, as it's pinned by the
+             * waiter.
+             */
+            buf_state = LockBufHdr(buf);
+            if ((buf_state & BM_PIN_COUNT_WAITER) && IsBufferRefCountOne(buf_state, buf->buf_id)) {
+                /* we just released the last pin other than the waiter's */
+                ThreadId wait_backend_pid = buf->wait_backend_pid;
+
+                buf_state &= ~BM_PIN_COUNT_WAITER;
+                UnlockBufHdr(buf, buf_state);
+                ProcSendSignal(wait_backend_pid);
+            } else {
+                UnlockBufHdr(buf, buf_state);
+            }
+        }
+
         ForgetPrivateRefCountEntry(ref);
 
         if (SS_STANDBY_MODE && SS_AM_WORKER) {
@@ -5061,7 +5237,7 @@ uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_c
      * upcoming changes and so we are not required to write such dirty buffer.
      */
     buf_state = LockBufHdr(buf_desc);
-    if (BUF_STATE_GET_REFCOUNT(buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(buf_state) == 0) {
+    if (IsBufferRefCountZero(buf_state, buf_desc->buf_id) && BUF_STATE_GET_USAGECOUNT(buf_state) == 0) {
         result |= BUF_REUSABLE;
     } else if (skip_recently_used) {
         /* Caller told us not to write recently-used buffers */
@@ -5330,9 +5506,9 @@ void PrintBufferLeakWarning(Buffer buffer)
     path = relpathbackend(((BufferDesc *)buf)->tag.rnode, backend, ((BufferDesc *)buf)->tag.forkNum);
     buf_state = pg_atomic_read_u64(&buf->state);
     ereport(WARNING, (errmsg("buffer refcount leak: [%03d] "
-                             "(rel=%s, blockNum=%u, flags=0x%lx, refcount=%lu %d)",
+                             "(rel=%s, blockNum=%u, flags=0x%lx, refcount=%u %d)",
                              buffer, path, buf->tag.blockNum, buf_state & BUF_FLAG_MASK,
-                             BUF_STATE_GET_REFCOUNT(buf_state), loccount)));
+                             GetBufferRefCount(buf_state, buf->buf_id), loccount)));
     pfree(path);
 }
 
@@ -6758,7 +6934,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 
         old_buf_state = LockBufHdr(buf_desc);
 
-        Assert(BUF_STATE_GET_REFCOUNT(old_buf_state) > 0);
+        Assert(IsBufferRefCountGreaterThanZero(old_buf_state, buf_desc->buf_id));
 
         if (!(old_buf_state & BM_DIRTY)) {
             /*
@@ -7163,8 +7339,8 @@ void LockBufferForCleanup(Buffer buffer)
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         buf_state = LockBufHdr(buf_desc);
 
-        Assert(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
-        if (BUF_STATE_GET_REFCOUNT(buf_state) == 1) {
+        Assert(IsBufferRefCountGreaterThanZero(buf_state, buf_desc->buf_id));
+        if (IsBufferRefCountOne(buf_state, buf_desc->buf_id)) {
             /* Successfully acquired exclusive lock with pincount 1 */
             UnlockBufHdr(buf_desc, buf_state);
             return;
@@ -7299,7 +7475,7 @@ bool ConditionalLockBufferForCleanup(Buffer buffer)
 
     buf_desc = GetBufferDescriptor(buffer - 1);
     buf_state = LockBufHdr(buf_desc);
-    refcount = BUF_STATE_GET_REFCOUNT(buf_state);
+    refcount = GetBufferRefCount(buf_state, buf_desc->buf_id);
 
     Assert(refcount > 0);
     if (refcount == 1) {
@@ -7348,8 +7524,8 @@ bool IsBufferCleanupOK(Buffer buffer)
 
     buf_state = LockBufHdr(bufHdr);
 
-    Assert(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
-    if (BUF_STATE_GET_REFCOUNT(buf_state) == 1) {
+    Assert(IsBufferRefCountGreaterThanZero(buf_state, bufHdr->buf_id));
+    if (IsBufferRefCountOne(buf_state, bufHdr->buf_id)) {
         /* pincount is OK. */
         UnlockBufHdr(bufHdr, buf_state);
         return true;
@@ -8482,7 +8658,7 @@ void SSTryEliminateBuf(uint64 times)
         return;
     }
 
-    if (BUF_STATE_GET_REFCOUNT(buf_state) != 0) {
+    if (IsBufferRefCountNotZero(buf_state, buf->buf_id)) {
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(partition_lock);
         return;

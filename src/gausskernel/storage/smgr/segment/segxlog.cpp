@@ -30,6 +30,7 @@
 #include "catalog/storage_xlog.h"
 #include "commands/tablespace.h"
 #include "executor/executor.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/smgr/segment.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/batch_redo.h"
@@ -863,7 +864,7 @@ static void redo_new_page(XLogReaderState *record)
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
         UnpinBuffer(buf_desc, true);
         buf_state = LockBufHdr(buf_desc);
-        if (BUF_STATE_GET_REFCOUNT(buf_state) > 0) {
+        if (IsBufferRefCountGreaterThanZero(buf_state, buf_desc->buf_id)) {
             UnlockBufHdr(buf_desc, buf_state);
             ereport(WARNING, (errmodule(MOD_SEGMENT_PAGE),
                               errmsg("[COPY_EXTENT] block %u has reference count, skip evict buffer",
