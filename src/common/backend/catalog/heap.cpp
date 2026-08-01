@@ -2655,6 +2655,10 @@ Node* GetColumnRef(Node* key, bool* isExpr, bool* isFunc)
                     break;
             }
             break;
+        case T_TypeCast:
+            *isExpr = true;
+            result = GetColumnRef(((TypeCast*)key)->arg, isExpr, isFunc);
+            break;
         default:
             break;
     }
