@@ -83,7 +83,7 @@ ORDER BY feature <-> '[0,1,2,3,4,5]';
 
 ## 3. 全文检索
 
-[全文检索](../sql_reference/full_text_retrieval.md)（Full-Text Search, FTS）是一项能够解析自然语言中的单词和词语，并基于关键词在数据库中查找和检索文本数据，最终按文档相关性对结果进行排序的技术。openGauss提供了完整的全文检索功能，包含特定的数据类型及排序函数。
+[全文检索](https://docs.opengauss.org/zh/docs/latest/sql_reference/full_text_retrieval.html)（Full-Text Search, FTS）是一项能够解析自然语言中的单词和词语，并基于关键词在数据库中查找和检索文本数据，最终按文档相关性对结果进行排序的技术。openGauss提供了完整的全文检索功能，包含特定的数据类型及排序函数。
 
 以下通过一个案例展示全文检索的基本流程。假设有一个存储原始文档数据的表格`chunks_table_test`，主键字段为`chunk_id`，文本字段为`chunk_content`，需要根据输入的文本查询表格中关联的所有文档。实现全文检索功能需遵循以下主要步骤。
 
@@ -164,7 +164,7 @@ LIMIT 2;
 在上述SQL查询中：
 
 - `to_tsvector@@to_tsquery`: `@@`是openGauss的全文检索匹配算子，当`tsvector`（docunment）匹配到`tsquery`（query）时返回true。
-- `ts_rank(to_tsvector, to_tsquery, integer)`：openGauss提供了两个预置的[排序方法](../sql_reference/ranking_search_results.md)（`ts_rank`， `ts_rank_cd`），可将相关性最高的文档排在前面。同时，通过设置`integer`类型的标准化选项来定义文档长度的影响程度。
+- `ts_rank(to_tsvector, to_tsquery, integer)`：openGauss提供了两个预置的[排序方法](https://docs.opengauss.org/zh/docs/latest/sql_reference/ranking_search_results.html)（`ts_rank`， `ts_rank_cd`），可将相关性最高的文档排在前面。同时，通过设置`integer`类型的标准化选项来定义文档长度的影响程度。
 
 综合以上步骤，即可实现高效的全文检索。
 

@@ -74,7 +74,7 @@ BM25全文检索索引对普通表的文档列构建全文索引，实现对文�
 
     >[!NOTE]说明
     >
-    >BM25索引扫描性能可以通过相关GUC参数调优，执行语句前可先进行参数设置，详情参考[BM25参数调优](../database_reference/bm25_full_text_retrieval_index_parameters.md)。
+    >BM25索引扫描性能可以通过相关GUC参数调优，执行语句前可先进行参数设置，详情参考[BM25参数调优](https://docs.opengauss.org/zh/docs/latest/database_reference/bm25_full_text_retrieval_index_parameters.html)。
 
 - **索引删除**
 

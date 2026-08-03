@@ -4,7 +4,7 @@
 
 **参数说明**： 使用BM25索引扫描时，参数开启使用 TAAT 方法按搜索词遍历，对包含搜索词所有文档进行打分、汇总、排序，最终返回 limit n 个分数最高的文档，速度较慢，召回率更高。关闭时，通过 DAAT MaxScore 方法对文档进行剪枝，速度更快，召回率可能会有一定损失。
 
-该参数属于USERSET类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
+该参数属于USERSET类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
 
 **取值范围**： 布尔型
 
@@ -25,7 +25,7 @@ set enable_bm25_taat = on;
 
 **参数说明**： 使用BM25索引扫描时的动态top-k候选集大小。
 
-该参数属于USERSET类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
+该参数属于USERSET类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
 
 **取值范围**： 整型，5~200
 
@@ -48,7 +48,7 @@ set bm25_topk = 10;
 
 **参数说明**： BM25算法参数，影响词频对文档得分。该参数值越大，词频得分就越大。一般保持默认值 1.2 即可。
 
-该参数属于USERSET类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
+该参数属于USERSET类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
 
 **取值范围**： 浮点型，0.0\~3.0
 
@@ -64,7 +64,7 @@ set bm25_k1 = 1.5;
 
 **参数说明**： BM25算法参数，用于调整文档长度对文档评分影响。bm25_b 越大，对文档长度的惩罚力度就越大。bm25_b = 0时，长短文档词频一样，则得分一样，bm25_b 越大，长文档分数越低，短文档分数越高。一般保持默认值 0.75 即可。
 
-该参数属于USERSET类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
+该参数属于USERSET类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应方法三进行设置。
 
 **取值范围**： 浮点型，0.0\~1.0
 
@@ -80,7 +80,7 @@ set bm25_b = 0.5;
 
 **参数说明**： 使用BM25索引 DAAT MaxScore 扫描时，用于控制搜索词 MaxScore 的缩放比例。
 
-该参数属于USERSET类型参数，请参考[表1](../database_administration_guide/reset_parameters.md#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
+该参数属于USERSET类型参数，请参考[表1](https://docs.opengauss.org/zh/docs/latest/database_administration_guide/reset_parameters.html#zh-cn_topic_0283137176_zh-cn_topic_0237121562_zh-cn_topic_0059777490_t91a6f212010f4503b24d7943aed6d846)中对应设置方法进行设置。
 
 **取值范围**： 浮点型，0.5~1.3
 
