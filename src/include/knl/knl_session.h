@@ -3066,6 +3066,8 @@ typedef struct knl_u_datavec_context {
     int rbq_query_bits;
     int rbq_sample_rows;
     double rbq_refinek;
+    int hnsw_iterative_scan;
+    int hnsw_max_scan_tuples;
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;

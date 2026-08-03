@@ -449,6 +449,12 @@ typedef enum {
     ALL_OPTION
 } MultiStatsOptions;
 
+typedef enum {
+    HNSW_ITERATIVE_SCAN_OFF = 0,
+    HNSW_ITERATIVE_SCAN_RELAXED,
+    HNSW_ITERATIVE_SCAN_STRICT
+} HnswIterativeScanOptions;
+
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
 
