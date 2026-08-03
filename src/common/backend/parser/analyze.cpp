@@ -6883,6 +6883,22 @@ static Node* TransformAconstToTarget(A_Const* con, ColumnTypeForm& typeItem, boo
     }
 }
 
+static bool CheckInsertOnConflictCompatibility(char* format)
+{
+    if (DB_IS_CMPT(A_FORMAT) || DB_IS_CMPT(PG_FORMAT)) {
+        return true;
+    }
+
+    if (DB_IS_CMPT(B_FORMAT)) {
+        *format = 'B';
+    } else if (DB_IS_CMPT(C_FORMAT)) {
+        *format = 'C';
+    } else if (DB_IS_CMPT(D_FORMAT)) {
+        *format = 'D';
+    }
+    return false;
+}
+
 static void CheckInsertTargetRelation(ParseState* pstate, InsertStmt* stmt, Relation targetrel, bool isRelationNullOk)
 {
     if (unlikely(targetrel == NULL)) {
@@ -6931,6 +6947,19 @@ static void CheckInsertTargetRelation(ParseState* pstate, InsertStmt* stmt, Rela
                    stmt->upsertClause->action == ONCONFLICT_NOTHING) {
             clauseTypeStr = "ON CONFLICT DO";
         }
+        /*
+         * ON CONFLICT syntax is only supported in A and PG compatibility modes.
+         * ON DUPLICATE KEY (B compatibility) is not affected.
+         */
+        if ((stmt->upsertClause->action == ONCONFLICT_UPDATE || stmt->upsertClause->action == ONCONFLICT_NOTHING)) {
+            char format = 0;
+            bool surpport = CheckInsertOnConflictCompatibility(&format);
+            if (!surpport) {
+                ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                 errmsg("INSERT ON CONFLICT is not supported in %c_FORMAT", format))));
+            }
+        }
+
         /* non-supported upsert cases */
         if (unlikely(!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(targetrel))) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
