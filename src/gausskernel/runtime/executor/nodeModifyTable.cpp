@@ -657,6 +657,16 @@ checktest:
              * rule and update the same row which is created within the command.
              */
             ReleaseBuffer(buffer);
+            /*
+             * Same as PostgreSQL: ON CONFLICT DO UPDATE must not affect the
+             * same row a second time within one command.
+             */
+            if (upsertState->us_action == ONCONFLICT_UPDATE) {
+                ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                    errmsg("ON CONFLICT DO UPDATE command cannot affect row a second time"),
+                    errhint("Ensure that no rows proposed for insertion within the same command "
+                        "have duplicate constrained values.")));
+            }
 #ifdef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),

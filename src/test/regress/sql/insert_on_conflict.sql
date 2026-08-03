@@ -331,6 +331,37 @@ insert into tbl_1_view as t values (1, 'aa') on conflict(key) do update set id=i
 drop view tbl_1_view;
 drop table tbl_1;
 
+-- ON CONFLICT DO UPDATE cannot affect the same row a second time within one command (same as PostgreSQL)
+CREATE TABLE test_scene3 (
+    key INT PRIMARY KEY,
+    fruit TEXT,
+    quantity INT
+);
+INSERT INTO test_scene3 (key, fruit, quantity) VALUES (0, 'Zero', 0);
+-- fails: duplicate constrained values within the same command
+INSERT INTO test_scene3 (key, fruit, quantity) VALUES
+    (1, 'First', 100),
+    (1, 'Second', 200)
+ON CONFLICT (key)
+DO UPDATE SET
+    fruit = EXCLUDED.fruit,
+    quantity = EXCLUDED.quantity;
+-- verify that the data was not modified
+SELECT * FROM test_scene3 ORDER BY key;
+-- single-row conflict update still works
+INSERT INTO test_scene3 (key, fruit, quantity) VALUES (1, 'First', 100)
+ON CONFLICT (key)
+DO UPDATE SET
+    fruit = EXCLUDED.fruit,
+    quantity = EXCLUDED.quantity;
+INSERT INTO test_scene3 (key, fruit, quantity) VALUES (1, 'First_updated', 150)
+ON CONFLICT (key)
+DO UPDATE SET
+    fruit = EXCLUDED.fruit,
+    quantity = EXCLUDED.quantity;
+SELECT * FROM test_scene3 ORDER BY key;
+drop table test_scene3;
+
 -- clean
 drop table user_profiles cascade;
 drop table users cascade;
