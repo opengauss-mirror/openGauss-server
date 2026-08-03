@@ -772,10 +772,18 @@ void UndoZone::RecoveryUndoZone(int fd)
     pfree(persistBlock);
 }
 
-static int AllocateUndoZoneId (UndoPersistence upersistence)
+static int AllocateUndoZoneId (UndoPersistence upersistence, int prevZoneId)
 {
     int retZid = -1;
-    retZid = bms_first_member(g_instance.undo_cxt.uZoneBitmap[upersistence]);
+    if (prevZoneId == INVALID_ZONE_ID) {
+        retZid = bms_first_member(g_instance.undo_cxt.uZoneBitmap[upersistence]);
+    } else {
+        /* this branch is only used for stream thread in SMP */
+        int zoneBit = prevZoneId % PERSIST_ZONE_COUNT;
+        retZid = bms_next_member(g_instance.undo_cxt.uZoneBitmap[upersistence], zoneBit);
+        g_instance.undo_cxt.uZoneBitmap[upersistence] =
+            bms_del_member(g_instance.undo_cxt.uZoneBitmap[upersistence], retZid);
+    }
     if (retZid >= 0 && retZid < PERSIST_ZONE_COUNT) {
         retZid += (int)upersistence * PERSIST_ZONE_COUNT;
     } else {
@@ -967,6 +975,7 @@ void AllocateZonesBeforeXid(TransactionId cur_xid)
 
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
+        int prevZoneId = INVALID_ZONE_ID;
         int zid = -1;
         UndoZone *uzone = NULL;
         if (IS_VALID_ZONE_ID(t_thrd.undo_cxt.zids[upersistence])) {
@@ -985,7 +994,7 @@ void AllocateZonesBeforeXid(TransactionId cur_xid)
         UndoZoneGroup::InitUndoCxtUzones();
         LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
 reallocate_zone:
-        zid = AllocateUndoZoneId(upersistence);
+        zid = AllocateUndoZoneId(upersistence, prevZoneId);
         if (!IS_VALID_ZONE_ID(zid) || (bms_num_members(g_instance.undo_cxt.uZoneBitmap[i])) == 0) {
             ereport(WARNING,
                 (errmsg(UNDOFORMAT("failed to allocate a undo zone, bitmap num %d."),
@@ -993,7 +1002,7 @@ reallocate_zone:
             RebuildUndoZoneBitmap();
             goto reallocate_zone;
         }
-        int bitMapIdx = (zid - (int)upersistence * PERSIST_ZONE_COUNT) / BITS_PER_BITMAPWORD;
+        int bitMapIdx = (zid % PERSIST_ZONE_COUNT) / BITS_PER_BITMAPWORD;
         if (!UndoZoneGroup::UndoZoneInUse(zid, upersistence)) {
             ereport(PANIC, (errmsg(UNDOFORMAT("undo zone %d not inuse, bitmap word %" PRIu64"."),
                 zid, g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
@@ -1024,9 +1033,10 @@ reallocate_zone:
             goto reallocate_zone;
         }
         if (TransactionIdIsValid(cur_xid) && TransactionIdPrecedes(cur_xid, uzone->get_max_xid())) {
-            int temp_zid = zid - (int)upersistence * PERSIST_ZONE_COUNT;
+            int temp_zid = zid % PERSIST_ZONE_COUNT;
             g_instance.undo_cxt.uZoneBitmap[upersistence] =
                 bms_add_member(g_instance.undo_cxt.uZoneBitmap[upersistence], temp_zid);
+            prevZoneId = zid;
             goto reallocate_zone;
         }
         uzone->Attach();
