@@ -884,7 +884,8 @@ void HnswLoadNeighbors(HnswElement element, Relation index, int m)
 /*
  * Load an element from a tuple
  */
-void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids, bool loadVec, Datum eRbqDiskVec)
+void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids, bool loadVec,
+                              Datum eRbqDiskVec)
 {
     element->level = etup->level;
     element->deleted = etup->deleted;
@@ -1089,7 +1090,8 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
                 RabitqVector *rbqVec = (RabitqVector *)PointerGetDatum(&etup->data);
                 RabitQConfig *rbqConfig = rbqQueryParams->rbqConfig;
                 QueryRabitqVector* qrbqVec = rbqQueryParams->qrbqVec;
-                *distance = ComputeRbqDistance(rbqQueryParams->dim, rbqConfig->rbqQueryBits, rbqVec, qrbqVec, rbqQueryParams->funcType);
+                *distance = ComputeRbqDistance(rbqQueryParams->dim, rbqConfig->rbqQueryBits, rbqVec, qrbqVec,
+                                               rbqQueryParams->funcType);
             } else {
                 *distance = (float)DatumGetFloat8(FunctionCall2Coll(
                             procinfo, collation, *q, PointerGetDatum(&etup->data)));
@@ -1536,14 +1538,15 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 }
             } else {
                 bool vacuumVisibility;
+                float *maxDistance = (alwaysAdd || discarded != NULL) ? NULL : &f->distance;
                 if (tryMmap) {
                     vacuumVisibility = MmapLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ, rbqParams, rbqDiskParams,
-                                    NULL, enablePQ, pqinfo);
+                                                        maxDistance, enableRabitQ, rbqParams, rbqDiskParams, NULL,
+                                                        enablePQ, pqinfo);
                 } else {
                     vacuumVisibility = HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ, rbqParams, rbqDiskParams,
-                                    NULL, enablePQ, pqinfo, enableLsg);
+                                                       maxDistance, enableRabitQ, rbqParams, rbqDiskParams, NULL,
+                                                       enablePQ, pqinfo, enableLsg);
                 }
                 if (enableRabitQ && !vacuumVisibility) {
                     continue;
