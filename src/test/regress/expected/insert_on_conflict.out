@@ -486,7 +486,7 @@ CREATE FOREIGN TABLE test_foreign_tbl (id INT)
 SERVER foreign_server
 OPTIONS (filename '/tmp/foreign_tbl.csv', format 'csv');
 insert into test_foreign_tbl values(1) on conflict(emp_id) do nothing;
-ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on foreign table.
+ERROR:  INSERT ON CONFLICT DO NOTHING is not supported on foreign table.
 insert into test_foreign_tbl values(1) on conflict(emp_id) do update set emp_id = 10;
 ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on foreign table.
 drop foreign table test_foreign_tbl;
@@ -495,7 +495,7 @@ drop server foreign_server;
 create table tbl_col (c1 int primary key, c2 text) with (orientation = column);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tbl_col_pkey" for table "tbl_col"
 insert into tbl_col values (1, 'a001') on conflict(c1) do nothing;
-ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on column orientated table.
+ERROR:  INSERT ON CONFLICT DO NOTHING is not supported on column orientated table.
 insert into tbl_col values (1, 'a001') on conflict(c1) do update set id= id*10;
 ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on column orientated table.
 drop table tbl_col;
@@ -503,7 +503,7 @@ drop table tbl_col;
 create table tbl_1(key int4, fruit text);
 create view tbl_1_view as select * from tbl_1;
 insert into tbl_1_view as t values (1, 'aa') on conflict(key) do nothing;
-ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on VIEW.
+ERROR:  INSERT ON CONFLICT DO NOTHING is not supported on VIEW.
 insert into tbl_1_view as t values (1, 'aa') on conflict(key) do update set id=id*10;
 ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on VIEW.
 drop view tbl_1_view;

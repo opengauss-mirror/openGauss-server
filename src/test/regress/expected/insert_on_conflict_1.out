@@ -18,7 +18,7 @@ ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT spec
 explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (fruit) do nothing;
 ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
 explain (costs off) insert into insertconflictview values(0, 'Crowberry') on conflict (lower(fruit), key, lower(fruit), key) do nothing;
-ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on VIEW.
+ERROR:  INSERT ON CONFLICT DO NOTHING is not supported on VIEW.
 -- succeeds
 explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do nothing;
                                   QUERY PLAN                                   
@@ -384,7 +384,7 @@ insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where
 insert into insertconflicttest as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing;
 -- fails
 insert into insertconflictview as t values (23, 'Blackberry') on conflict (key) where fruit like '%berry' and t.fruit = 'inconsequential' do nothing;
-ERROR:  INSERT ON CONFLICT DO UPDATE is not supported on VIEW.
+ERROR:  INSERT ON CONFLICT DO NOTHING is not supported on VIEW.
 insert into insertconflicttest values (23, 'Blackberry') on conflict (key) do update set fruit = excluded.fruit;
 ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
 insert into insertconflicttest values (23, 'Blackberry') on conflict (key) where fruit like '%berry' or fruit = 'consequential' do nothing;
