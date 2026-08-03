@@ -392,7 +392,8 @@ BEGIN
 select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='snapshot_sequence' and n.nspname='db4ai') into ans;
     if ans = false THEN
         CREATE SEQUENCE IF NOT EXISTS db4ai.snapshot_sequence;
-        GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;
+        REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
+        GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     end if;
 END$$;
 
@@ -562,6 +563,7 @@ BEGIN
     IF ans = true THEN
         DROP SEQUENCE IF EXISTS db4ai.snapshot_sequence;
         CREATE SEQUENCE IF NOT EXISTS db4ai.snapshot_sequence;
-        GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;
+        REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
+        GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     END IF;
 END$$;

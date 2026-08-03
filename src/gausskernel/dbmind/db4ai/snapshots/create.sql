@@ -45,7 +45,7 @@ BEGIN
         IF CURRENT_SCHEMA = 'db4ai' THEN
             e_stack_act := pg_catalog.replace(e_stack_act, 'ion cre', 'ion db4ai.cre');
         END IF;
-        
+
         IF e_stack_act NOT LIKE E'referenced column: create_snapshot_internal\n'
             'SQL statement "SELECT db4ai.create_snapshot_internal(s_id, i_schema, i_name, i_commands, i_comment, CURRENT_USER)"\n'
             'PL/pgSQL function db4ai.create_snapshot(name,name,text[],name,text) line 302 at PERFORM%'
@@ -163,8 +163,10 @@ BEGIN
     EXECUTE 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || pg_catalog.quote_ident(i_schema)
         || '.' || pg_catalog.quote_ident(i_name) || '''';
     EXECUTE 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || i_commands[5] || ', xc_node_id, ctid FROM db4ai.t' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ''snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
-        || ' backed by db4ai.t' || s_id::TEXT || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ' || pg_catalog.quote_literal(
+        'snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
+        || ' backed by db4ai.t' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'GRANT SELECT ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '" WITH GRANT OPTION';
     EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id::TEXT INTO STRICT row_count;
 
@@ -223,7 +225,7 @@ BEGIN
     END IF;
 
     BEGIN
-        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        EXECUTE 'SELECT rolsystemadmin FROM pg_catalog.pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
         IF adminuser IS FALSE THEN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
@@ -476,7 +478,7 @@ BEGIN
            pg_catalog.string_agg('t' || s_id::TEXT || '.f' || ordinal_position::TEXT || ' AS ' || ident::TEXT, ', ')
     FROM ( SELECT ordinal_position, pg_catalog.quote_ident(column_name) AS ident
         FROM information_schema.columns
-        WHERE table_schema = (SELECT nspname FROM pg_namespace WHERE oid=pg_catalog.pg_my_temp_schema())
+        WHERE table_schema = (SELECT nspname FROM pg_catalog.pg_namespace WHERE oid=pg_catalog.pg_my_temp_schema())
             AND table_name = '_db4ai_tmp_x' || s_id::TEXT
             ORDER BY ordinal_position
     ) INTO STRICT proj_cmd, i_commands[4], i_commands[5];
@@ -492,8 +494,9 @@ BEGIN
 
     -- create custom view, owned by current user
     EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || proj_cmd || ' FROM db4ai.v' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
-        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ' || pg_catalog.quote_literal(
+        'snapshot view backed by db4ai.v' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER::TEXT || '"';
 
     -- return final snapshot name

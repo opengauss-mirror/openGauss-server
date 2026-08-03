@@ -38,6 +38,7 @@ DECLARE
     m_id BIGINT;                    -- matrix id
     r_id BIGINT;                    -- root id
     adminuser BOOLEAN;              -- current user privilieges
+    effective_user NAME;            -- current effective role, evaluated per call
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
@@ -56,6 +57,8 @@ DECLARE
     s_name db4ai.snapshot_name;     -- snapshot sample name
 BEGIN
 
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
+
     -- obtain active message level
     BEGIN
         EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.quote_ident(pg_catalog.current_setting('db4ai.message_level'));
@@ -64,7 +67,7 @@ BEGIN
     END;
 
     BEGIN
-        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        EXECUTE 'SELECT rolsystemadmin FROM pg_catalog.pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
         IF adminuser IS FALSE THEN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
@@ -155,6 +158,15 @@ BEGIN
     EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
+
+    IF NOT pg_catalog.has_table_privilege(
+        effective_user,
+        pg_catalog.quote_ident(i_schema)::TEXT || '.' || pg_catalog.quote_ident(i_parent)::TEXT,
+        'SELECT')
+    THEN
+        RAISE EXCEPTION 'permission denied for parent snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
+    END IF;
 
     IF i_sample_infixes IS NULL OR pg_catalog.array_length(i_sample_infixes, 1) = none_represent OR pg_catalog.array_length(i_sample_infixes, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_infixes array malformed'
@@ -304,8 +316,9 @@ BEGIN
 
         -- create custom view, owned by current user
         EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
-        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
-            || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END || '''';
+        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ' || pg_catalog.quote_literal(
+            'snapshot view backed by db4ai.v' || s_id::TEXT
+            || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END);
         EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
 
         exec_cmds := NULL;
