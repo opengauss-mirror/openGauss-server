@@ -1455,7 +1455,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
         if (aggref->aggstage == 0 && aggref->aggfnoid != COUNTOID) {
             numSimpleVars = projInfo->pi_numSimpleVars;
             if (numSimpleVars > 0) {
-                int* varNumbers = projInfo->pi_varNumbers;
+                AttrNumber* varNumbers = projInfo->pi_varNumbers;
                 int varNumber = varNumbers[0] - 1;
                 /* m_arr[varNumber].m_vals */
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
@@ -1652,7 +1652,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
              * be var, so get the value from batch directly (projInfo is not null).
              */
             if (projInfo != NULL) {
-                int* varNumbers = projInfo->pi_varNumbers;
+                AttrNumber* varNumbers = projInfo->pi_varNumbers;
                 int varNumber = varNumbers[0] - 1;
                 /* m_arr[varNumber].m_vals */
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
@@ -3519,7 +3519,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
         if (aggref->aggstage == 0 && aggref->aggfnoid != COUNTOID) {
             numSimpleVars = projInfo->pi_numSimpleVars;
             if (numSimpleVars > 0) {
-                int* varNumbers = projInfo->pi_varNumbers;
+                AttrNumber* varNumbers = projInfo->pi_varNumbers;
                 int varNumber = varNumbers[0] - 1;
                 /* m_arr[varNumber].m_vals */
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
@@ -3713,7 +3713,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
              * be var, so get the value from batch directly (projInfo is not null).
              */
             if (projInfo != NULL) {
-                int* varNumbers = projInfo->pi_varNumbers;
+                AttrNumber* varNumbers = projInfo->pi_varNumbers;
                 int varNumber = varNumbers[0] - 1;
                 /* m_arr[varNumber].m_vals */
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);

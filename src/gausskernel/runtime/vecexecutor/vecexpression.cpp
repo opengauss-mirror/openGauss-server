@@ -3624,8 +3624,8 @@ VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCon
     numSimpleVars = projInfo->pi_numSimpleVars;
     if (numSimpleVars > 0) {
         ScalarVector* values = pProjBatch->m_arr;
-        int* varSlotOffSet = projInfo->pi_varSlotOffsets;
-        int* varNumbers = projInfo->pi_varNumbers;
+        uint8* varSlotOffSet = projInfo->pi_varSlotOffsets;
+        AttrNumber* varNumbers = projInfo->pi_varNumbers;
         int i;
 
         if (projInfo->pi_directMap) {
@@ -3640,7 +3640,7 @@ VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCon
             }
         } else {
             /* we have to pay attention to varOutputCols[] */
-            int* varOutputCols = projInfo->pi_varOutputCols;
+            AttrNumber* varOutputCols = projInfo->pi_varOutputCols;
 
             for (i = 0; i < numSimpleVars; i++) {
                 char* ptr = ((char*)econtext) + varSlotOffSet[i];

@@ -1836,7 +1836,7 @@ static List* get_relation_constraints(PlannerInfo* root, Oid relationObjectId, R
         }
 
         /* Add NOT NULL constraints in expression form, if requested */
-        if (include_notnull && constr->has_not_null) {
+        if (include_notnull && constr->not_null_cnt > 0) {
             int natts = relation->rd_att->natts;
 
             for (i = 1; i <= natts; i++) {

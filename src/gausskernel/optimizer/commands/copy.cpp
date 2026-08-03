@@ -4111,7 +4111,7 @@ static void CStoreCopyConstraintsCheck(ResultRelInfo* resultRelInfo, Datum* valu
     TupleConstr* constr = rel->rd_att->constr;
 
     Assert(constr);
-    if (constr->has_not_null) {
+    if (constr->not_null_cnt > 0) {
         int natts = rel->rd_att->natts;
         int attrChk;
 

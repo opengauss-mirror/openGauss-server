@@ -2773,12 +2773,19 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
     Assert(constr);
 
     /* Get the Table Accessor Method*/
+    uint16 not_null_cnt = 0;
     Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
-    if (constr->has_not_null) {
+    if (constr->not_null_cnt > 0) {
         int natts = tupdesc->natts;
         int attrChk;
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
+            if (constr->not_null_cnt == not_null_cnt) {
+                break;
+            }
+            if (tupdesc->attrs[attrChk - 1].attnotnull) {
+                not_null_cnt++;
+            }
             if (tupdesc->attrs[attrChk - 1].attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
                  /* Skip auto_increment attribute not null check, ExecAutoIncrement will deal with it. */
                 if (skipAutoInc && constr->cons_autoinc && constr->cons_autoinc->attnum == attrChk) {

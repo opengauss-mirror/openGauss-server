@@ -1704,7 +1704,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
         relation->rd_att->tdhasoid = relation->rd_rel->relhasoids;
 
         constr = (TupleConstr*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(TupleConstr));
-        constr->has_not_null = false;
+        constr->not_null_cnt = 0;
         constr->has_generated_stored = false;
         constr->has_disable_constr = false;
     }
@@ -1795,7 +1795,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
 
         /* Update constraint/default info */
         if (attp->attnotnull && !onlyLoadInitDefVal)
-            constr->has_not_null = true;
+            constr->not_null_cnt++;
 
         if (attp->atthasdef && !onlyLoadInitDefVal) {
             if (attrdef == NULL)
@@ -1837,7 +1837,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
                     }
 
                     if (attp->attnotnull && !onlyLoadInitDefVal) {
-                        constr->has_not_null = true;
+                        constr->not_null_cnt++;
                     }
 
                     if (attp->atthasdef && !onlyLoadInitDefVal) {
@@ -1969,7 +1969,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
 
     /*
      * some condition we need keep rd_att->constr:
-     * 1. has_not_null, we need to save constr->has_not_null attr
+     * 1. not_null_cnt > 0, we need to save constr->not_null_cnt attr
      * 2. ndef > 0, we need to save constr->num_defval and related attr
      * 3. relation->rd_rel->relchecks > 0 or relation->rd_rel->relhasclusterkey, we need to access pg_constraint
      *      and save constr->check, constr->clusterKeys
@@ -1980,7 +1980,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      * pg_constraint.
      */
     fetch_constr |= (RelationIsRelation(relation) && relation->rd_id >= FirstNormalObjectId);
-    if (constr->has_not_null || ndef > 0 || fetch_constr) {
+    if (constr->not_null_cnt > 0 || ndef > 0 || fetch_constr) {
         if (fetch_constr) {
             /* fetch all kinds of constaint belong to relation */
             ConstraintFetch(relation);
@@ -2196,7 +2196,7 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
 {
     Relation relation;
     int i;
-    bool has_not_null = false;
+    uint16 not_null_cnt = 0;
     MemoryContext oldcxt;
     /* Relcache entries must live in t_thrd.mem_cxt.cache_mem_cxt */
     oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
@@ -2242,13 +2242,13 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     relation->rd_att->tdtypmod = -1;
     /* initialize the relreplident field */
     relation->relreplident = REPLICA_IDENTITY_NOTHING;
-    has_not_null = false;
     for (i = 0; i < natts; i++) {
         errno_t rc = EOK;
         rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
-
-        has_not_null = has_not_null || attrs[i].attnotnull;
+        if (attrs[i].attnotnull) {
+            not_null_cnt++;
+        }
         /* make sure attcacheoff is valid */
         relation->rd_att->attrs[i].attcacheoff = -1;
     }
@@ -2257,10 +2257,10 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     relation->rd_att->attrs[0].attcacheoff = 0;
 
     /* mark not-null status */
-    if (has_not_null) {
+    if (not_null_cnt > 0) {
         TupleConstr* constr = (TupleConstr*)palloc0(sizeof(TupleConstr));
 
-        constr->has_not_null = true;
+        constr->not_null_cnt = not_null_cnt;
         relation->rd_att->constr = constr;
     }
 
@@ -3264,7 +3264,7 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
 {
     Relation relation;
     int i;
-    bool has_not_null = false;
+    uint16 not_null_cnt = 0;
 
     /*
      * allocate new relation desc, clear all fields of reldesc
@@ -3346,12 +3346,13 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     /*
      * initialize tuple desc info
      */
-    has_not_null = false;
     for (i = 0; i < natts; i++) {
         errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
                               &attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "", "");
-        has_not_null = has_not_null || attrs[i].attnotnull;
+        if (attrs[i].attnotnull) {
+            not_null_cnt++;
+        }
         /* make sure attcacheoff is valid */
         relation->rd_att->attrs[i].attcacheoff = -1;
     }
@@ -3361,10 +3362,10 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
         relation->rd_att->attrs[0].attcacheoff = 0;
 
     /* mark not-null status */
-    if (has_not_null) {
+    if (not_null_cnt > 0) {
         TupleConstr* constr = (TupleConstr*)palloc0(sizeof(TupleConstr));
 
-        constr->has_not_null = true;
+        constr->not_null_cnt = not_null_cnt;
         relation->rd_att->constr = constr;
     }
 
@@ -4824,7 +4825,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     MemoryContext oldcxt;
     int natts = tupDesc->natts;
     int i;
-    bool has_not_null = false;
+    uint16 not_null_cnt = 0;
     bool nailit = false;
     const TableAmRoutine* tam_ops = GetTableAmRoutine(tam_type);
 
@@ -4906,16 +4907,17 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     rel->rd_indexsplit = relindexsplit;
     rel->rd_att->td_tam_ops = tam_ops;
     rel->rd_att->tdrefcount = 1; /* mark as refcounted */
-    has_not_null = false;
     for (i = 0; i < natts; i++) {
         rel->rd_att->attrs[i].attnotnull = tupDesc->attrs[i].attnotnull;
-        has_not_null = has_not_null || tupDesc->attrs[i].attnotnull;
+        if (tupDesc->attrs[i].attnotnull) {
+            not_null_cnt++;
+        }
     }
 
-    if (has_not_null) {
+    if (not_null_cnt > 0) {
         TupleConstr* constr = (TupleConstr*)palloc0(sizeof(TupleConstr));
 
-        constr->has_not_null = true;
+        constr->not_null_cnt = not_null_cnt;
         rel->rd_att->constr = constr;
     }
 
@@ -7717,7 +7719,7 @@ static bool load_relcache_init_file(bool shared)
         size_t nread;
         Relation rel;
         Form_pg_class relform;
-        bool has_not_null = false;
+        uint16 not_null_cnt = 0;
         int default_num;
 
         /* first read the relation descriptor length */
@@ -7774,7 +7776,6 @@ static bool load_relcache_init_file(bool shared)
         rel->rd_att->tdtypmod = -1; /* unnecessary, but... */
 
         /* next read all the attribute tuple form data entries */
-        has_not_null = false;
         default_num = 0;
         for (i = 0; i < relform->relnatts; i++) {
             if (fread_wrap(&len, 1, sizeof(len), fp) != sizeof(len))
@@ -7784,7 +7785,9 @@ static bool load_relcache_init_file(bool shared)
             if (fread_wrap(&rel->rd_att->attrs[i], 1, len, fp) != len)
                 goto read_failed;
 
-            has_not_null = has_not_null || rel->rd_att->attrs[i].attnotnull;
+            if (rel->rd_att->attrs[i].attnotnull) {
+                not_null_cnt++;
+            }
 
             if (rel->rd_att->attrs[i].atthasdef) {
                 /*
@@ -7816,10 +7819,10 @@ static bool load_relcache_init_file(bool shared)
             rel->rd_att->tdisredistable = true;
 
         /* mark not-null status */
-        if (has_not_null || default_num) {
+        if (not_null_cnt > 0 || default_num) {
             TupleConstr* constr = (TupleConstr*)palloc0(sizeof(TupleConstr));
 
-            constr->has_not_null = has_not_null;
+            constr->not_null_cnt = not_null_cnt;
             constr->num_defval = default_num;
             rel->rd_att->constr = constr;
         }

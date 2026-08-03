@@ -89,7 +89,7 @@ void ExecVecConstraints(ResultRelInfo* resultRelInfo, VectorBatch* batch, EState
 
     Assert(constr);
 
-    if (constr->has_not_null) {
+    if (constr->not_null_cnt > 0) {
         int natts = rel->rd_att->natts;
         int attrChk;
 
