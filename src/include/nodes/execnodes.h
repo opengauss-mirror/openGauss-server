@@ -300,6 +300,7 @@ typedef ScalarVector* (*vecqual_func)(ExprContext* econtext);
  *	  cleanMap:			A map with the correspondence between the non-junk
  *						attribute numbers of the "original" tuple and the
  *						attribute numbers of the "clean" tuple.
+ *	  cleanMapIsConsecutive:	whether every cleanMap entry advances by one.
  *	  resultSlot:		tuple slot used to hold cleaned tuple.
  *	  junkAttNo:		not used by junkfilter code.  Can be used by caller
  *						to remember the attno of a specific junk attribute
@@ -329,6 +330,7 @@ typedef struct JunkFilter {
     AttrNumber jf_xc_bucket_id;	
     List* jf_primary_keys;
 #endif
+    bool jf_cleanMapIsConsecutive;
 } JunkFilter;
 
 typedef struct MergeState {
@@ -471,6 +473,8 @@ struct ExprState {
  *		varSlotOffsets	array indicating which slot each simple Var is from
  *		varNumbers		array containing input attr numbers of simple Vars
  *		varOutputCols	array containing output attr numbers of simple Vars
+ *		copyRanges		array containing simple Var ranges eligible for bulk copy
+ *		numCopyRanges	number of ranges in copyRanges
  *		lastInnerVar	highest attnum from inner tuple slot (0 if none)
  *		lastOuterVar	highest attnum from outer tuple slot (0 if none)
  *		lastScanVar		highest attnum from scan tuple slot (0 if none)
@@ -478,6 +482,12 @@ struct ExprState {
  * ----------------
  */
 typedef bool (*vectarget_func)(ExprContext* econtext, VectorBatch* pBatch);
+/* Half-open index range [startIdx, endIdx) in the simple-Var mapping arrays. */
+typedef struct ProjectionCopyRange {
+    int startIdx;
+    int endIdx;
+} ProjectionCopyRange;
+
 typedef struct ProjectionInfo {
     NodeTag type;
     List* pi_targetlist;
@@ -490,9 +500,11 @@ typedef struct ProjectionInfo {
     bool pi_directMap;
     bool pi_topPlan;             /* Whether the outermost layer query */
     int pi_numSimpleVars;
-    int* pi_varSlotOffsets;
-    int* pi_varNumbers;
-    int* pi_varOutputCols;
+    uint8* pi_varSlotOffsets;
+    AttrNumber* pi_varNumbers;
+    AttrNumber* pi_varOutputCols;
+    int pi_numCopyRanges;
+    ProjectionCopyRange* pi_copyRanges;
     int pi_lastInnerVar;
     int pi_lastOuterVar;
     int pi_lastScanVar;

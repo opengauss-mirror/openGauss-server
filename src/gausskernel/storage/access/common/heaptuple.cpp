@@ -72,6 +72,7 @@
 #include "storage/pagecompress.h"
 #include "utils/memutils.h"
 #include "utils/elog.h"
+#include "utils/nullcheck.h"
 #include "access/ustore/knl_utuple.h"
 #include "vecexecutor/vectorbatch.h"
 
@@ -90,6 +91,30 @@
  */
 #define isAttrCompressed(attrIdx, bits) (!((bits)[(attrIdx) >> 3] & (1 << ((attrIdx)&0x07))))
 
+#ifdef __aarch64__
+/*
+ * Advance the bitmap cursor to the last skipped NULL attribute. Preserve the
+ * current byte because it can already contain bits for preceding attributes,
+ * and clear only bitmap bytes entered by the skipped range.
+ */
+static inline void advance_null_bitmap(
+    bits8* bit, int startAttribute, int nullCount, bits8** bitP, uint32* bitmask)
+{
+    Assert(bit != NULL);
+    Assert(nullCount > 0 && nullCount <= NULL_CHECK_NEON_WIDTH);
+
+    const int lastAttribute = startAttribute + nullCount - 1;
+    const int firstNewByte = (startAttribute + BITS_PER_BYTE - 1) / BITS_PER_BYTE;
+    const int lastByte = lastAttribute / BITS_PER_BYTE;
+    for (int byteIdx = firstNewByte; byteIdx <= lastByte; byteIdx++) {
+        bit[byteIdx] = 0;
+    }
+
+    *bitP = &bit[lastByte];
+    *bitmask = 1U << (lastAttribute % BITS_PER_BYTE);
+}
+#endif
+
 /* ----------------------------------------------------------------
  *						misc support routines
  * ----------------------------------------------------------------
@@ -104,11 +129,16 @@ Size heap_compute_data_size(TupleDesc tupleDesc, Datum *values, const bool *isnu
     int i;
     int numberOfAttributes = tupleDesc->natts;
     FormData_pg_attribute *att = tupleDesc->attrs;
-
     for (i = 0; i < numberOfAttributes; i++) {
         Datum val;
 
         if (isnull[i]) {
+#ifdef __aarch64__
+            if (numberOfAttributes >= MIN_NULL_SKIP_ATTRIBUTE_COUNT &&
+                numberOfAttributes - i >= NULL_CHECK_NEON_WIDTH) {
+                i += count_leading_nulls(&isnull[i]) - 1;
+            }
+#endif
             continue;
         }
 
@@ -161,14 +191,19 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
         bitP = NULL;
         bitmask = 0;
     }
-
     *infomask &= ~(HEAP_HASNULL | HEAP_HASVARWIDTH | HEAP_HASEXTERNAL);
-
     for (i = 0; i < numberOfAttributes; i++) {
-        Size data_length;
-        Size remain_length = data_size - (size_t)(data - begin);
-
         if (bit != NULL) {
+#ifdef __aarch64__
+            if (isnull[i] && numberOfAttributes >= MIN_NULL_SKIP_ATTRIBUTE_COUNT &&
+                numberOfAttributes - i >= NULL_CHECK_NEON_WIDTH) {
+                int nullCount = count_leading_nulls(&isnull[i]);
+                *infomask |= HEAP_HASNULL;
+                advance_null_bitmap(bit, i, nullCount, &bitP, &bitmask);
+                i += nullCount - 1;
+                continue;
+            }
+#endif
             if (bitmask != HIGHBIT) {
                 bitmask <<= 1;
             } else {
@@ -185,6 +220,8 @@ void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, cha
             *bitP |= bitmask;
         }
 
+        Size data_length;
+        Size remain_length = data_size - (size_t)(data - begin);
         /*
          * XXX we use the att_align macros on the pointer value itself, not on
          * an offset.  This is a bit of a hack.
@@ -791,6 +828,14 @@ HeapTuple heap_form_tuple_impl(TupleDesc tupleDescriptor, Datum *values, bool *i
      */
     for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
+#ifdef __aarch64__
+            if (numberOfAttributes >= MIN_NULL_SKIP_ATTRIBUTE_COUNT &&
+                numberOfAttributes - i >= NULL_CHECK_NEON_WIDTH) {
+                hasnull = true;
+                i += count_leading_nulls(&isnull[i]) - 1;
+                continue;
+            }
+#endif
             hasnull = true;
         } else if (att[i].attlen == -1 && att[i].attalign == 'd' && att[i].attndims == 0 &&
                    !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
@@ -1241,42 +1286,35 @@ static FORCE_INLINE void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
     FormData_pg_attribute *att = tupleDesc->attrs;
-    uint32 attnum;
-    char *tp = NULL;         /* ptr to tuple data */
-    long off;                /* offset in tuple data */
+    uint32 attnum = slot->tts_nvalid;
+    char *tp = (char *)tup + tup->t_hoff; /* ptr to tuple data */
+    long off = attnum == 0 ? 0 : slot->tts_off; /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
-    bool slow = false;       /* can we use/set attcacheoff? */
-    bool heapToUHeap = tupleDesc->td_tam_ops == TableAmUstore;
-	
-    /*
-     * Check whether the first call for this tuple, and initialize or restore
-     * loop state.
-     */
-    attnum = slot->tts_nvalid;
-    if (attnum == 0) {
-        /* Start from the first attribute */
-        off = 0;
-        slow = false;
-    } else {
-        /* Restore state from previous execution */
-        off = slot->tts_off;
-        slow = TTS_SLOW(slot);
+    /* Can we use/set attcacheoff? */
+    bool slow = tupleDesc->td_tam_ops == TableAmUstore || (attnum != 0 && TTS_SLOW(slot));
+    bool useWideNullFastPath = hasnulls && tupleDesc->natts >= MIN_NULL_SKIP_ATTRIBUTE_COUNT;
+
+    if (useWideNullFastPath) {
+        const Size remainingAttributes = natts - attnum;
+        const Size valuesSize = sizeof(Datum) * remainingAttributes;
+        const Size nullsSize = sizeof(bool) * remainingAttributes;
+        errno_t rc = memset_s(&values[attnum], valuesSize, 0, valuesSize);
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(&isnull[attnum], nullsSize, true, nullsSize);
+        securec_check(rc, "\0", "\0");
     }
-
-    /*
-     * Ustore has different alignment rules so we force slow = true here.
-     * See the comments in heap_deform_tuple() for more information.
-     */
-    slow = heapToUHeap ? true : slow;
-
-    tp = (char *)tup + tup->t_hoff;
 
     for (; attnum < natts; attnum++) {
         Form_pg_attribute thisatt = &att[attnum];
 
         if (hasnulls && att_isnull(attnum, bp)) {
-            values[attnum] = (Datum)0;
-            isnull[attnum] = true;
+            if (useWideNullFastPath && attnum % BITS_PER_BYTE == 0 && natts - attnum >= BITS_PER_BYTE &&
+                bp[attnum / BITS_PER_BYTE] == 0) {
+                attnum += BITS_PER_BYTE - 1;
+            } else if (!useWideNullFastPath) {
+                values[attnum] = (Datum)0;
+                isnull[attnum] = true;
+            }
             slow = true; /* can't use attcacheoff anymore */
             continue;
         }

@@ -1,0 +1,265 @@
+--
+-- Wide row-table UPDATE correctness around the 512-attribute fast-path
+-- threshold.  Keep the row count small: this is a correctness regression
+-- test, while the large data-volume cases are covered by performance tests.
+--
+DO $$
+DECLARE
+    column_index integer;
+    sql_text text;
+BEGIN
+    sql_text := 'CREATE TABLE wide_update_511(f1 integer';
+    FOR column_index IN 2..511 LOOP
+        sql_text := sql_text || ', f' || column_index || ' integer';
+    END LOOP;
+    EXECUTE sql_text || ')';
+
+    sql_text := 'CREATE TABLE wide_update_512(f1 integer';
+    FOR column_index IN 2..512 LOOP
+        sql_text := sql_text || ', f' || column_index || ' integer';
+    END LOOP;
+    EXECUTE sql_text || ')';
+
+    sql_text := 'CREATE TABLE wide_projection_512(f1 integer';
+    FOR column_index IN 2..512 LOOP
+        sql_text := sql_text || ', f' || column_index || ' integer';
+    END LOOP;
+    EXECUTE sql_text || ')';
+END
+$$;
+
+-- The 511-column row stays below the fast-path threshold.
+DO $$
+DECLARE
+    column_index integer;
+    sql_text text := 'INSERT INTO wide_update_511 VALUES (1';
+BEGIN
+    FOR column_index IN 2..511 LOOP
+        sql_text := sql_text || ', NULL';
+    END LOOP;
+    EXECUTE sql_text || ')';
+END
+$$;
+
+-- The three 512-column rows cover all NULL, an unaligned 16-NULL run, and
+-- no NULL.  The f6..f21 run crosses multiple NULL-bitmap bytes.
+DO $$
+DECLARE
+    column_index integer;
+    sql_text text;
+BEGIN
+    sql_text := 'INSERT INTO wide_update_512 VALUES (1';
+    FOR column_index IN 2..512 LOOP
+        sql_text := sql_text || ', NULL';
+    END LOOP;
+    EXECUTE sql_text || ')';
+
+    sql_text := 'INSERT INTO wide_update_512 VALUES (2';
+    FOR column_index IN 2..512 LOOP
+        IF column_index BETWEEN 6 AND 21 THEN
+            sql_text := sql_text || ', NULL';
+        ELSE
+            sql_text := sql_text || ', ' || column_index;
+        END IF;
+    END LOOP;
+    EXECUTE sql_text || ')';
+
+    sql_text := 'INSERT INTO wide_update_512 VALUES (3';
+    FOR column_index IN 2..512 LOOP
+        sql_text := sql_text || ', ' || column_index;
+    END LOOP;
+    EXECUTE sql_text || ')';
+END
+$$;
+
+-- Check all 512 attributes without printing a 512-column result row.
+DO $$
+DECLARE
+    column_index integer;
+    null_expression text := '0';
+    sum_expression text := '0::bigint';
+    actual_nulls integer;
+    actual_sum bigint;
+BEGIN
+    FOR column_index IN 1..512 LOOP
+        null_expression := null_expression || ' + CASE WHEN f' || column_index ||
+            ' IS NULL THEN 1 ELSE 0 END';
+        sum_expression := sum_expression || ' + COALESCE(f' || column_index || ', 0)::bigint';
+    END LOOP;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 1' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 511 OR actual_sum != 1 THEN
+        RAISE EXCEPTION 'all-NULL wide row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 2' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 16 OR actual_sum != 131113 THEN
+        RAISE EXCEPTION 'unaligned NULL-run row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 3' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 0 OR actual_sum != 131330 THEN
+        RAISE EXCEPTION 'non-NULL wide row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+END
+$$;
+
+-- Exercise UPDATE ... RETURNING without placing a 512-column table in the
+-- expected output.  The returned boundary values are checked in the block.
+DO $$
+DECLARE
+    returned_f1 integer;
+    returned_f2 integer;
+    returned_middle integer;
+    returned_last integer;
+    returned_f5 integer;
+    returned_f6 integer;
+    returned_f21 integer;
+    returned_f22 integer;
+    returned_f7_null boolean;
+    returned_f20_null boolean;
+    returned_f512_null boolean;
+BEGIN
+    UPDATE wide_update_511
+    SET f2 = 2, f256 = 256, f511 = 511
+    WHERE f1 = 1
+    RETURNING f1, f2, f256, f511
+    INTO returned_f1, returned_f2, returned_middle, returned_last;
+    IF returned_f1 != 1 OR returned_f2 != 2 OR returned_middle != 256 OR returned_last != 511 THEN
+        RAISE EXCEPTION '511-column UPDATE RETURNING is incorrect';
+    END IF;
+
+    UPDATE wide_update_512
+    SET f2 = 2, f257 = 257, f512 = 512
+    WHERE f1 = 1
+    RETURNING f1, f2, f257, f512
+    INTO returned_f1, returned_f2, returned_middle, returned_last;
+    IF returned_f1 != 1 OR returned_f2 != 2 OR returned_middle != 257 OR returned_last != 512 THEN
+        RAISE EXCEPTION 'all-NULL UPDATE RETURNING is incorrect';
+    END IF;
+
+    UPDATE wide_update_512
+    SET f6 = 6, f21 = 21, f512 = NULL
+    WHERE f1 = 2
+    RETURNING f1, f5, f6, f7 IS NULL, f20 IS NULL, f21, f22, f512 IS NULL
+    INTO returned_f1, returned_f5, returned_f6, returned_f7_null, returned_f20_null,
+        returned_f21, returned_f22, returned_f512_null;
+    IF returned_f1 != 2 OR returned_f5 != 5 OR returned_f6 != 6 OR
+        NOT returned_f7_null OR NOT returned_f20_null OR returned_f21 != 21 OR
+        returned_f22 != 22 OR NOT returned_f512_null THEN
+        RAISE EXCEPTION 'mixed-NULL UPDATE RETURNING is incorrect';
+    END IF;
+
+    UPDATE wide_update_512
+    SET f2 = 2002, f257 = 2257, f512 = 2512
+    WHERE f1 = 3
+    RETURNING f1, f2, f257, f512
+    INTO returned_f1, returned_f2, returned_middle, returned_last;
+    IF returned_f1 != 3 OR returned_f2 != 2002 OR returned_middle != 2257 OR returned_last != 2512 THEN
+        RAISE EXCEPTION 'non-NULL UPDATE RETURNING is incorrect';
+    END IF;
+END
+$$;
+
+-- Recheck every attribute after UPDATE.  These statements exercise tuple
+-- formation, NULL bitmap construction, junk filtering, and tuple deforming.
+DO $$
+DECLARE
+    column_index integer;
+    null_expression text := '0';
+    sum_expression text := '0::bigint';
+    actual_nulls integer;
+    actual_sum bigint;
+BEGIN
+    FOR column_index IN 1..511 LOOP
+        null_expression := null_expression || ' + CASE WHEN f' || column_index ||
+            ' IS NULL THEN 1 ELSE 0 END';
+        sum_expression := sum_expression || ' + COALESCE(f' || column_index || ', 0)::bigint';
+    END LOOP;
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_511 WHERE f1 = 1' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 507 OR actual_sum != 770 THEN
+        RAISE EXCEPTION '511-column UPDATE row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+
+    null_expression := '0';
+    sum_expression := '0::bigint';
+    FOR column_index IN 1..512 LOOP
+        null_expression := null_expression || ' + CASE WHEN f' || column_index ||
+            ' IS NULL THEN 1 ELSE 0 END';
+        sum_expression := sum_expression || ' + COALESCE(f' || column_index || ', 0)::bigint';
+    END LOOP;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 1' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 508 OR actual_sum != 772 THEN
+        RAISE EXCEPTION 'all-NULL UPDATE row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 2' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 15 OR actual_sum != 130628 THEN
+        RAISE EXCEPTION 'mixed-NULL UPDATE row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+
+    EXECUTE 'SELECT ' || null_expression || ', ' || sum_expression ||
+        ' FROM wide_update_512 WHERE f1 = 3' INTO actual_nulls, actual_sum;
+    IF actual_nulls != 0 OR actual_sum != 137330 THEN
+        RAISE EXCEPTION 'non-NULL UPDATE row is incorrect: nulls %, sum %', actual_nulls, actual_sum;
+    END IF;
+END
+$$;
+
+-- Break the projection at f1, f129, f257, and f385.  The remaining simple
+-- Vars form four independent ranges long enough for the memcpy fast path.
+DO $$
+DECLARE
+    column_index integer;
+    sql_text text := 'INSERT INTO wide_projection_512 SELECT ';
+BEGIN
+    FOR column_index IN 1..512 LOOP
+        IF column_index > 1 THEN
+            sql_text := sql_text || ', ';
+        END IF;
+
+        IF column_index = 1 THEN
+            sql_text := sql_text || 'f1 + 1000';
+        ELSIF column_index IN (129, 257, 385) THEN
+            sql_text := sql_text || 'f' || column_index || ' + 0';
+        ELSE
+            sql_text := sql_text || 'f' || column_index;
+        END IF;
+    END LOOP;
+    EXECUTE sql_text || ' FROM wide_update_512';
+END
+$$;
+
+-- Compare every copied column with its source to validate all memcpy ranges.
+DO $$
+DECLARE
+    column_index integer;
+    difference_expression text := 'false';
+    copied_rows integer;
+    mismatch_rows integer;
+BEGIN
+    FOR column_index IN 2..512 LOOP
+        difference_expression := difference_expression || ' OR p.f' || column_index ||
+            ' IS DISTINCT FROM s.f' || column_index;
+    END LOOP;
+
+    SELECT count(*) INTO copied_rows FROM wide_projection_512;
+    EXECUTE 'SELECT count(*) FROM wide_projection_512 p JOIN wide_update_512 s ' ||
+        'ON p.f1 = s.f1 + 1000 WHERE ' || difference_expression INTO mismatch_rows;
+
+    IF copied_rows != 3 OR mismatch_rows != 0 THEN
+        RAISE EXCEPTION 'multi-range projection is incorrect: rows %, mismatches %', copied_rows, mismatch_rows;
+    END IF;
+END
+$$;
+
+DROP TABLE wide_projection_512;
+DROP TABLE wide_update_512;
+DROP TABLE wide_update_511;

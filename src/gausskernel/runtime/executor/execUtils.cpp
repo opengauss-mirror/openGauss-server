@@ -43,6 +43,10 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
+
 #include "access/relscan.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
@@ -72,6 +76,7 @@
 #include "utils/varbit.h"
 #include "utils/json.h"
 #include "utils/jsonb.h"
+#include "utils/nullcheck.h"
 #include "utils/xml.h"
 #include "utils/rangetypes.h"
 #include "commands/sequence.h"
@@ -729,15 +734,157 @@ List* GetAccessedVarnoList(List* targetList, List* qual)
     return list_concat(tmp_pi.pi_acessedVarNumbers, tmp_pi.pi_lateAceessVarNumbers);
 }
 
+static_assert(offsetof(ExprContext, ecxt_innertuple) <= PG_UINT8_MAX,
+    "ecxt_innertuple offset does not fit in uint8");
+static_assert(offsetof(ExprContext, ecxt_outertuple) <= PG_UINT8_MAX,
+    "ecxt_outertuple offset does not fit in uint8");
+static_assert(offsetof(ExprContext, ecxt_scantuple) <= PG_UINT8_MAX,
+    "ecxt_scantuple offset does not fit in uint8");
+static_assert(offsetof(ExprContext, ecxt_innerbatch) <= PG_UINT8_MAX,
+    "ecxt_innerbatch offset does not fit in uint8");
+static_assert(offsetof(ExprContext, ecxt_outerbatch) <= PG_UINT8_MAX,
+    "ecxt_outerbatch offset does not fit in uint8");
+static_assert(offsetof(ExprContext, ecxt_scanbatch) <= PG_UINT8_MAX,
+    "ecxt_scanbatch offset does not fit in uint8");
+
+static const int MIN_PROJECTION_COPY_VAR_COUNT = 128;
+static const int PROJECTION_ATTR_NUMBER_ARRAY_COUNT = 2;
+
+#ifdef __aarch64__
+static const int SLOT_OFFSET_NEON_WIDTH = 16;
+#endif
+
+static bool var_slot_offsets_equal(int numSimpleVars, const uint8* varSlotOffsets)
+{
+    Assert(numSimpleVars > 0);
+    Assert(varSlotOffsets != NULL);
+
+    const uint8 first = varSlotOffsets[0];
+#ifdef __aarch64__
+    /* vceqq_u8() returns 0xFF for equal lanes; min == 0xFF means all 16 match. */
+    const uint8x16_t firstOffsets = vdupq_n_u8(first);
+    int i = 0;
+    for (; i + SLOT_OFFSET_NEON_WIDTH <= numSimpleVars; i += SLOT_OFFSET_NEON_WIDTH) {
+        const uint8x16_t offsets = vld1q_u8(varSlotOffsets + i);
+        const uint8x16_t equalMask = vceqq_u8(offsets, firstOffsets);
+        if (vminvq_u8(equalMask) != 0xFF) {
+            return false;
+        }
+    }
+#else
+    int i = 1;
+#endif
+    for (; i < numSimpleVars; i++) {
+        if (varSlotOffsets[i] != first) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static const int MIN_PROJECTION_COPY_RANGE_LENGTH = 16;
+
+static inline bool projection_copy_mapping_is_consecutive(
+    const AttrNumber* varNumbers, const AttrNumber* varOutputCols, int idx)
+{
+    Assert(idx > 0);
+    return varNumbers[idx] == varNumbers[idx - 1] + 1 &&
+           varOutputCols[idx] == varOutputCols[idx - 1] + 1;
+}
+
+#ifdef __aarch64__
+static const int PROJECTION_COPY_NEON_WIDTH = 8;
+
+static bool projection_copy_block_is_consecutive(
+    const AttrNumber* varNumbers, const AttrNumber* varOutputCols, int startIdx)
+{
+    Assert(startIdx > 0);
+
+    /* AttrNumber is 16 bits, so one 128-bit vector checks 8 adjacent mappings. */
+    const int16x8_t one = vdupq_n_s16(1);
+    const int16x8_t previousVarNumbers = vld1q_s16((const int16*)&varNumbers[startIdx - 1]);
+    const int16x8_t currentVarNumbers = vld1q_s16((const int16*)&varNumbers[startIdx]);
+    const int16x8_t previousOutputCols = vld1q_s16((const int16*)&varOutputCols[startIdx - 1]);
+    const int16x8_t currentOutputCols = vld1q_s16((const int16*)&varOutputCols[startIdx]);
+
+    const uint16x8_t varNumbersConsecutive = vandq_u16(
+        vceqq_s16(vsubq_s16(currentVarNumbers, previousVarNumbers), one),
+        vcgtq_s16(currentVarNumbers, previousVarNumbers));
+    const uint16x8_t outputColsConsecutive = vandq_u16(
+        vceqq_s16(vsubq_s16(currentOutputCols, previousOutputCols), one),
+        vcgtq_s16(currentOutputCols, previousOutputCols));
+    const uint16x8_t mappingsConsecutive = vandq_u16(varNumbersConsecutive, outputColsConsecutive);
+
+    return vminvq_u16(mappingsConsecutive) == 0xFFFF;
+}
+#endif
+
+/*
+ * Build all half-open simple-Var ranges eligible for bulk projection copies.
+ * Callers must ensure that len is at least MIN_PROJECTION_COPY_RANGE_LENGTH.
+ */
+static ProjectionCopyRange* find_projection_copy_ranges(
+    const AttrNumber* varNumbers, const AttrNumber* varOutputCols, int len, int* numRanges)
+{
+    Assert(len >= MIN_PROJECTION_COPY_RANGE_LENGTH);
+
+    *numRanges = 0;
+
+    int maxRanges = len / MIN_PROJECTION_COPY_RANGE_LENGTH;
+    ProjectionCopyRange* ranges =
+        (ProjectionCopyRange*)palloc(sizeof(ProjectionCopyRange) * maxRanges);
+    int runStart = 0;
+    int nextIdx = 1;
+
+    while (nextIdx < len) {
+#ifdef __aarch64__
+        int blockEnd = Min(nextIdx + PROJECTION_COPY_NEON_WIDTH, len);
+        if (blockEnd - nextIdx == PROJECTION_COPY_NEON_WIDTH &&
+            projection_copy_block_is_consecutive(varNumbers, varOutputCols, nextIdx)) {
+            nextIdx = blockEnd;
+            continue;
+        }
+#else
+        int blockEnd = len;
+#endif
+
+        for (; nextIdx < blockEnd; nextIdx++) {
+            if (projection_copy_mapping_is_consecutive(varNumbers, varOutputCols, nextIdx)) {
+                continue;
+            }
+            if (nextIdx - runStart >= MIN_PROJECTION_COPY_RANGE_LENGTH) {
+                Assert(*numRanges < maxRanges);
+                ranges[*numRanges].startIdx = runStart;
+                ranges[*numRanges].endIdx = nextIdx;
+                (*numRanges)++;
+            }
+            runStart = nextIdx;
+        }
+    }
+
+    if (len - runStart >= MIN_PROJECTION_COPY_RANGE_LENGTH) {
+        Assert(*numRanges < maxRanges);
+        ranges[*numRanges].startIdx = runStart;
+        ranges[*numRanges].endIdx = len;
+        (*numRanges)++;
+    }
+
+    if (*numRanges == 0) {
+        pfree(ranges);
+        return NULL;
+    }
+    return ranges;
+}
+
 ProjectionInfo* ExecBuildVecProjectionInfo(
     List* targetList, List* nt_qual, ExprContext* econtext, TupleTableSlot* slot, TupleDesc inputDesc)
 {
     ProjectionInfo* projInfo = makeNode(ProjectionInfo);
     int len = ExecTargetListLength(targetList);
-    int* workspace = NULL;
-    int* varSlotOffsets = NULL;
-    int* varNumbers = NULL;
-    int* varOutputCols = NULL;
+    char* workspace = NULL;
+    uint8* varSlotOffsets = NULL;
+    AttrNumber* varNumbers = NULL;
+    AttrNumber* varOutputCols = NULL;
     List* exprlist = NIL;
     int numSimpleVars;
     bool directMap = false;
@@ -750,11 +897,13 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
 
     projInfo->pi_exprContext = econtext;
     projInfo->pi_slot = slot;
-    /* since these are all int arrays, we need do just one palloc */
-    workspace = (int*)palloc(len * 3 * sizeof(int));
-    projInfo->pi_varSlotOffsets = varSlotOffsets = workspace;
-    projInfo->pi_varNumbers = varNumbers = workspace + len;
-    projInfo->pi_varOutputCols = varOutputCols = workspace + len * 2;
+    Size attrNumbersOffset = MAXALIGN((Size)len * sizeof(uint8));
+    Size attrNumbersSize = (Size)len * sizeof(AttrNumber);
+    workspace =
+        (char*)palloc(attrNumbersOffset + PROJECTION_ATTR_NUMBER_ARRAY_COUNT * attrNumbersSize);
+    projInfo->pi_varSlotOffsets = varSlotOffsets = (uint8*)workspace;
+    projInfo->pi_varNumbers = varNumbers = (AttrNumber*)(workspace + attrNumbersOffset);
+    projInfo->pi_varOutputCols = varOutputCols = (AttrNumber*)(workspace + attrNumbersOffset + attrNumbersSize);
     projInfo->pi_lastInnerVar = 0;
     projInfo->pi_lastOuterVar = 0;
     projInfo->pi_lastScanVar = 0;
@@ -831,6 +980,8 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
     projInfo->pi_targetlist = exprlist;
     projInfo->pi_numSimpleVars = numSimpleVars;
     projInfo->pi_directMap = directMap;
+    projInfo->pi_numCopyRanges = 0;
+    projInfo->pi_copyRanges = NULL;
 
     if (projInfo->pi_exprContext != NULL) {
         projInfo->pi_exprContext->vec_fun_sel = NULL;
@@ -958,10 +1109,10 @@ ProjectionInfo* ExecBuildProjectionInfoByRecursion(
 {
     ProjectionInfo* projInfo = makeNode(ProjectionInfo);
     int len = ExecTargetListLength(targetList);
-    int* workspace = NULL;
-    int* varSlotOffsets = NULL;
-    int* varNumbers = NULL;
-    int* varOutputCols = NULL;
+    char* workspace = NULL;
+    uint8* varSlotOffsets = NULL;
+    AttrNumber* varNumbers = NULL;
+    AttrNumber* varOutputCols = NULL;
     List* exprlist = NULL;
     int numSimpleVars;
     bool directMap = false;
@@ -969,11 +1120,13 @@ ProjectionInfo* ExecBuildProjectionInfoByRecursion(
 
     projInfo->pi_exprContext = econtext;
     projInfo->pi_slot = slot;
-    /* since these are all int arrays, we need do just one palloc */
-    workspace = (int*)palloc(len * 3 * sizeof(int));
-    projInfo->pi_varSlotOffsets = varSlotOffsets = workspace;
-    projInfo->pi_varNumbers = varNumbers = workspace + len;
-    projInfo->pi_varOutputCols = varOutputCols = workspace + len * 2;
+    Size attrNumbersOffset = MAXALIGN((Size)len * sizeof(uint8));
+    Size attrNumbersSize = (Size)len * sizeof(AttrNumber);
+    workspace =
+        (char*)palloc(attrNumbersOffset + PROJECTION_ATTR_NUMBER_ARRAY_COUNT * attrNumbersSize);
+    projInfo->pi_varSlotOffsets = varSlotOffsets = (uint8*)workspace;
+    projInfo->pi_varNumbers = varNumbers = (AttrNumber*)(workspace + attrNumbersOffset);
+    projInfo->pi_varOutputCols = varOutputCols = (AttrNumber*)(workspace + attrNumbersOffset + attrNumbersSize);
     projInfo->pi_lastInnerVar = 0;
     projInfo->pi_lastOuterVar = 0;
     projInfo->pi_lastScanVar = 0;
@@ -1052,6 +1205,16 @@ ProjectionInfo* ExecBuildProjectionInfoByRecursion(
     projInfo->pi_targetlist = exprlist;
     projInfo->pi_numSimpleVars = numSimpleVars;
     projInfo->pi_directMap = directMap;
+    projInfo->pi_numCopyRanges = 0;
+    projInfo->pi_copyRanges = NULL;
+    if (slot != NULL && slot->tts_tupleDescriptor != NULL &&
+        slot->tts_tupleDescriptor->natts >= MIN_NULL_SKIP_ATTRIBUTE_COUNT &&
+        !directMap && (econtext == NULL || !IS_ENABLE_RIGHT_REF(econtext->rightRefState)) &&
+        numSimpleVars >= MIN_PROJECTION_COPY_VAR_COUNT &&
+        var_slot_offsets_equal(numSimpleVars, varSlotOffsets)) {
+        projInfo->pi_copyRanges = find_projection_copy_ranges(projInfo->pi_varNumbers, projInfo->pi_varOutputCols,
+            numSimpleVars, &projInfo->pi_numCopyRanges);
+    }
 
     if (exprlist == NIL)
         projInfo->pi_itemIsDone = NULL; /* not needed */

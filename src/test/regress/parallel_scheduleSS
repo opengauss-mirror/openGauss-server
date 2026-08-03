@@ -119,6 +119,7 @@ test: single_node_random
 #test: single_node_arrays
 #test: single_node_btree_index single_node_hash_index single_node_update
 test: single_node_update
+test: wide_table_update
 #test single_node_namespace
 #test: single_node_prepared_xacts
 #test: single_node_delete

@@ -170,7 +170,7 @@ TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
     TupleConstr *constr = tupdesc->constr;
     TupleConstr *cpy = (TupleConstr *)palloc0(sizeof(TupleConstr));
 
-    cpy->has_not_null = constr->has_not_null;
+    cpy->not_null_cnt = constr->not_null_cnt;
     cpy->has_generated_stored = constr->has_generated_stored;
     cpy->has_disable_constr = constr->has_disable_constr;
 
@@ -641,8 +641,8 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
             return false;
         }
 
-        /* check whether has_not_null is equal to. */
-        if (constr1->has_not_null != constr2->has_not_null) {
+        /* check whether not_null_cnt is equal to. */
+        if (constr1->not_null_cnt != constr2->not_null_cnt) {
             return false;
         }
 
@@ -1132,7 +1132,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind,
     AttrNumber attnum = 0;
     ListCell *l = NULL;
     TupleDesc desc;
-    bool has_not_null = false;
+    uint16 not_null_cnt = 0;
     char *attname = NULL;
     Oid atttypid;
     int32 atttypmod;
@@ -1239,11 +1239,9 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind,
         /* Fill in additional stuff not handled by TupleDescInitEntry */
         desc->attrs[attnum - 1].attnotnull = entry->is_not_null;
         extra[attnum - 1].attidentity = entry->identity;
-
-        /*
-         * PG source code: has_not_null |= entry->is_not_null;
-         */
-        has_not_null = has_not_null || entry->is_not_null;
+        if (entry->is_not_null) {
+            not_null_cnt++;
+        }
         desc->attrs[attnum - 1].attislocal = entry->is_local;
         desc->attrs[attnum - 1].attinhcount = entry->inhcount;
 
@@ -1254,10 +1252,10 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind,
         BlockRowCompressRelOption(tableFormat, entry);
     }
 
-    if (has_not_null) {
+    if (not_null_cnt > 0) {
         TupleConstr *constr = (TupleConstr *)palloc0(sizeof(TupleConstr));
 
-        constr->has_not_null = true;
+        constr->not_null_cnt = not_null_cnt;
         constr->defval = NULL;
         constr->num_defval = 0;
         constr->check = NULL;

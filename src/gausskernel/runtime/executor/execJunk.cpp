@@ -19,6 +19,46 @@
 #include "access/tableam.h"
 #include "executor/executor.h"
 #include "pgxc/pgxc.h"
+#include "utils/nullcheck.h"
+
+static bool clean_map_is_consecutive(const AttrNumber* cleanMap, int cleanLength)
+{
+    if (cleanLength == 0) {
+        return false;
+    }
+    Assert(cleanMap != NULL);
+    if (cleanMap[0] == 0) {
+        return false;
+    }
+
+    for (int i = 1; i < cleanLength; i++) {
+        if (cleanMap[i] != cleanMap[i - 1] + 1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+#ifdef __aarch64__
+/*
+ * Return the leading NULL output count, capped at NULL_CHECK_NEON_WIDTH.
+ * Non-consecutive cleanMap must be checked through mapped input columns.
+ */
+static inline int count_leading_null_outputs(
+    const AttrNumber* cleanMap, const bool* oldIsNull, int startIdx, int cleanLength)
+{
+    int maxCount = Min(NULL_CHECK_NEON_WIDTH, cleanLength - startIdx);
+    int nullCount = 1;
+    while (nullCount < maxCount) {
+        AttrNumber inputColumn = cleanMap[startIdx + nullCount];
+        if (inputColumn != 0 && !oldIsNull[inputColumn - 1]) {
+            break;
+        }
+        nullCount++;
+    }
+    return nullCount;
+}
+#endif
 
 /* -------------------------------------------------------------------------
  *		XXX this stuff should be rewritten to take advantage
@@ -124,6 +164,7 @@ JunkFilter* exec_init_junk_filter_for_update(
     junkfilter->jf_targetList = targetList;
     junkfilter->jf_cleanTupType = cleanTupType;
     junkfilter->jf_cleanMap = cleanMap;
+    junkfilter->jf_cleanMapIsConsecutive = clean_map_is_consecutive(cleanMap, cleanLength);
     junkfilter->jf_resultSlot = slot;
 
     return junkfilter;
@@ -194,6 +235,7 @@ JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupTyp
     junkfilter->jf_targetList = targetList;
     junkfilter->jf_cleanTupType = cleanTupType;
     junkfilter->jf_cleanMap = cleanMap;
+    junkfilter->jf_cleanMapIsConsecutive = clean_map_is_consecutive(cleanMap, cleanLength);
     junkfilter->jf_resultSlot = slot;
 
     return junkfilter;
@@ -355,16 +397,6 @@ Datum ExecGetJunkAttribute(TupleTableSlot* slot, AttrNumber attno, bool* isNull)
  */
 TupleTableSlot* ExecFilterJunk(JunkFilter* junkfilter, TupleTableSlot* slot)
 {
-    TupleTableSlot* resultSlot = NULL;
-    AttrNumber* cleanMap = NULL;
-    TupleDesc cleanTupType;
-    int cleanLength;
-    int i;
-    Datum* values = NULL;
-    bool* isnull = NULL;
-    Datum* old_values = NULL;
-    bool* old_isnull = NULL;
-
     /*
      * Extract all the values of the old tuple.
      */
@@ -372,37 +404,58 @@ TupleTableSlot* ExecFilterJunk(JunkFilter* junkfilter, TupleTableSlot* slot)
     /* Get the Table Accessor Method*/
     Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
     tableam_tslot_getallattrs(slot);
-    old_values = slot->tts_values;
-    old_isnull = slot->tts_isnull;
+    Datum* oldValues = slot->tts_values;
+    bool* oldIsNull = slot->tts_isnull;
 
     /*
      * get info from the junk filter
      */
-    cleanTupType = junkfilter->jf_cleanTupType;
-    cleanLength = cleanTupType->natts;
-    cleanMap = junkfilter->jf_cleanMap;
-    resultSlot = junkfilter->jf_resultSlot;
+    int cleanLength = junkfilter->jf_cleanTupType->natts;
+    AttrNumber* cleanMap = junkfilter->jf_cleanMap;
+    TupleTableSlot* resultSlot = junkfilter->jf_resultSlot;
 
     /*
      * Prepare to build a virtual result tuple.
      */
     (void)ExecClearTuple(resultSlot);
-    values = resultSlot->tts_values;
-    isnull = resultSlot->tts_isnull;
+    Datum* values = resultSlot->tts_values;
+    bool* isnull = resultSlot->tts_isnull;
+    bool useWideNullFastPath = cleanLength >= MIN_NULL_SKIP_ATTRIBUTE_COUNT;
+    if (!useWideNullFastPath) {
+        for (int i = 0; i < cleanLength; i++) {
+            AttrNumber inputColumn = cleanMap[i];
+            values[i] = inputColumn == 0 ? (Datum)0 : oldValues[inputColumn - 1];
+            isnull[i] = inputColumn == 0 || oldIsNull[inputColumn - 1];
+        }
+        return ExecStoreVirtualTuple(resultSlot);
+    }
+
+    errno_t valuesRc = memset_s(values, sizeof(Datum) * cleanLength, 0, sizeof(Datum) * cleanLength);
+    securec_check(valuesRc, "\0", "\0");
+    errno_t nullsRc = memset_s(isnull, sizeof(bool) * cleanLength, true, sizeof(bool) * cleanLength);
+    securec_check(nullsRc, "\0", "\0");
 
     /*
      * Transpose data into proper fields of the new tuple.
      */
-    for (i = 0; i < cleanLength; i++) {
+    for (int i = 0; i < cleanLength; i++) {
         int j = cleanMap[i];
-
-        if (j == 0) {
-            values[i] = (Datum)0;
-            isnull[i] = true;
-        } else {
-            values[i] = old_values[j - 1];
-            isnull[i] = old_isnull[j - 1];
+        if (j == 0 || oldIsNull[j - 1]) {
+#ifdef __aarch64__
+            int nullCount;
+            if (j != 0 && junkfilter->jf_cleanMapIsConsecutive &&
+                cleanLength - i >= NULL_CHECK_NEON_WIDTH) {
+                nullCount = count_leading_nulls(&oldIsNull[j - 1]);
+            } else {
+                nullCount = count_leading_null_outputs(cleanMap, oldIsNull, i, cleanLength);
+            }
+            i += nullCount - 1;
+#endif
+            continue;
         }
+
+        values[i] = oldValues[j - 1];
+        isnull[i] = false;
     }
 
     /*

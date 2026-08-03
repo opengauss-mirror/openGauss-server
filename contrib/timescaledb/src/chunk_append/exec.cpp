@@ -855,7 +855,7 @@ ca_get_relation_constraints(Oid relationObjectId, Index varno, bool include_notn
 		}
 
 		/* Add NOT NULL constraints in expression form, if requested */
-		if (include_notnull && constr->has_not_null)
+		if (include_notnull && constr->not_null_cnt > 0)
 		{
 			int natts = relation->rd_att->natts;
 

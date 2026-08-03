@@ -783,7 +783,7 @@ bool check_attisnull_exist(ResultRelInfo* ResultRelInfo, TupleTableSlot* slot)
     Relation rel = ResultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
     TupleConstr* constr = tupdesc->constr;
-    if (constr->has_not_null) {
+    if (constr->not_null_cnt > 0) {
         int natts = tupdesc->natts;
         int attrChk;
         for (attrChk = 1; attrChk <= natts; attrChk++) {

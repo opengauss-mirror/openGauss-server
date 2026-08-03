@@ -7486,6 +7486,92 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone){
         return ExecProjectByRecursion(projInfo, isDone);
     }
 }
+
+static FORCE_INLINE void copy_projection_var(TupleTableSlot* sourceSlot, TupleTableSlot* resultSlot,
+    const AttrNumber* varNumbers, const AttrNumber* varOutputCols, int varIndex)
+{
+    int varNumber = varNumbers[varIndex] - 1;
+    int varOutputCol = varOutputCols[varIndex] - 1;
+    Assert(varNumber < sourceSlot->tts_tupleDescriptor->natts);
+    Assert(varOutputCol < resultSlot->tts_tupleDescriptor->natts);
+    resultSlot->tts_values[varOutputCol] = sourceSlot->tts_values[varNumber];
+    resultSlot->tts_isnull[varOutputCol] = sourceSlot->tts_isnull[varNumber];
+}
+
+static FORCE_INLINE void copy_projection_range(TupleTableSlot* sourceSlot, TupleTableSlot* resultSlot,
+    const AttrNumber* varNumbers, const AttrNumber* varOutputCols, const ProjectionCopyRange* range)
+{
+    int startVarNumber = varNumbers[range->startIdx] - 1;
+    int startVarOutputCol = varOutputCols[range->startIdx] - 1;
+    int rangeLength = range->endIdx - range->startIdx;
+    Assert(startVarNumber + rangeLength <= sourceSlot->tts_tupleDescriptor->natts);
+    Assert(startVarOutputCol + rangeLength <= resultSlot->tts_tupleDescriptor->natts);
+
+    Size valuesSize = sizeof(Datum) * rangeLength;
+    errno_t rc = memcpy_s(&resultSlot->tts_values[startVarOutputCol], valuesSize,
+        &sourceSlot->tts_values[startVarNumber], valuesSize);
+    securec_check(rc, "\0", "\0");
+
+    Size nullsSize = sizeof(bool) * rangeLength;
+    rc = memcpy_s(&resultSlot->tts_isnull[startVarOutputCol], nullsSize,
+        &sourceSlot->tts_isnull[startVarNumber], nullsSize);
+    securec_check(rc, "\0", "\0");
+}
+
+static FORCE_INLINE void project_vars_by_ranges(
+    ProjectionInfo* projInfo, ExprContext* econtext, TupleTableSlot* resultSlot)
+{
+    Assert(projInfo->pi_copyRanges != NULL);
+    TupleTableSlot* sourceSlot =
+        *(TupleTableSlot**)((char*)econtext + projInfo->pi_varSlotOffsets[0]);
+    int nextSimpleVar = 0;
+
+    for (int rangeIndex = 0; rangeIndex < projInfo->pi_numCopyRanges; rangeIndex++) {
+        const ProjectionCopyRange* range = &projInfo->pi_copyRanges[rangeIndex];
+        Assert(range->startIdx >= nextSimpleVar);
+        Assert(range->endIdx > range->startIdx);
+        Assert(range->endIdx <= projInfo->pi_numSimpleVars);
+
+        for (; nextSimpleVar < range->startIdx; nextSimpleVar++) {
+            copy_projection_var(sourceSlot, resultSlot, projInfo->pi_varNumbers,
+                projInfo->pi_varOutputCols, nextSimpleVar);
+        }
+        copy_projection_range(
+            sourceSlot, resultSlot, projInfo->pi_varNumbers, projInfo->pi_varOutputCols, range);
+        nextSimpleVar = range->endIdx;
+    }
+
+    for (; nextSimpleVar < projInfo->pi_numSimpleVars; nextSimpleVar++) {
+        copy_projection_var(
+            sourceSlot, resultSlot, projInfo->pi_varNumbers, projInfo->pi_varOutputCols, nextSimpleVar);
+    }
+}
+
+static FORCE_INLINE void project_mapped_vars(
+    ProjectionInfo* projInfo, ExprContext* econtext, TupleTableSlot* resultSlot)
+{
+    TupleTableSlot* sourceSlot = NULL;
+    Datum* sourceValues = NULL;
+    bool* sourceIsNull = NULL;
+    Datum* values = resultSlot->tts_values;
+    bool* isnull = resultSlot->tts_isnull;
+    int lastSlotOffset = -1;
+    for (int varIndex = 0; varIndex < projInfo->pi_numSimpleVars; varIndex++) {
+        if (projInfo->pi_varSlotOffsets[varIndex] != lastSlotOffset) {
+            lastSlotOffset = projInfo->pi_varSlotOffsets[varIndex];
+            sourceSlot = *(TupleTableSlot**)((char*)econtext + lastSlotOffset);
+            sourceValues = sourceSlot->tts_values;
+            sourceIsNull = sourceSlot->tts_isnull;
+        }
+        int varNumber = projInfo->pi_varNumbers[varIndex] - 1;
+        int varOutputCol = projInfo->pi_varOutputCols[varIndex] - 1;
+        Assert(varNumber < sourceSlot->tts_tupleDescriptor->natts);
+        Assert(varOutputCol < resultSlot->tts_tupleDescriptor->natts);
+        values[varOutputCol] = sourceValues[varNumber];
+        isnull[varOutputCol] = sourceIsNull[varNumber];
+    }
+}
+
 TupleTableSlot* ExecProjectByRecursion(ProjectionInfo* projInfo, ExprDoneCond* isDone)
 {
    /*
@@ -7527,47 +7613,26 @@ TupleTableSlot* ExecProjectByRecursion(ProjectionInfo* projInfo, ExprDoneCond* i
        tableam_tslot_getsomeattrs(econtext->ecxt_scantuple, projInfo->pi_lastScanVar);
    }
 
-   /*
-    * Assign simple Vars to result by direct extraction of fields from source
-    * slots ... a mite ugly, but fast ...
-    */
-   int numSimpleVars = projInfo->pi_numSimpleVars;
-   if (numSimpleVars > 0 && !IS_ENABLE_RIGHT_REF(projInfo->pi_exprContext->rightRefState)) {
-       Datum* values = slot->tts_values;
-       bool* isnull = slot->tts_isnull;
-       int* varSlotOffsets = projInfo->pi_varSlotOffsets;
-       int* varNumbers = projInfo->pi_varNumbers;
-       int i;
-
-       if (projInfo->pi_directMap) {
-           /* especially simple case where vars go to output in order */
-           for (i = 0; i < numSimpleVars; i++) {
-               char* slotptr = ((char*)econtext) + varSlotOffsets[i];
-               TupleTableSlot* varSlot = *((TupleTableSlot**)slotptr);
-               int varNumber = varNumbers[i] - 1;
-
-               Assert (varNumber < varSlot->tts_tupleDescriptor->natts);
-               Assert (i < slot->tts_tupleDescriptor->natts);
-               values[i] = varSlot->tts_values[varNumber];
-               isnull[i] = varSlot->tts_isnull[varNumber];
-           }
-       } else {
-           /* we have to pay attention to varOutputCols[] */
-           int* varOutputCols = projInfo->pi_varOutputCols;
-
-           for (i = 0; i < numSimpleVars; i++) {
-               char* slotptr = ((char*)econtext) + varSlotOffsets[i];
-               TupleTableSlot* varSlot = *((TupleTableSlot**)slotptr);
-               int varNumber = varNumbers[i] - 1;
-               int varOutputCol = varOutputCols[i] - 1;
-
-               Assert (varNumber < varSlot->tts_tupleDescriptor->natts);
-               Assert (varOutputCol < slot->tts_tupleDescriptor->natts);
-               values[varOutputCol] = varSlot->tts_values[varNumber];
-               isnull[varOutputCol] = varSlot->tts_isnull[varNumber];
-           }
-       }
-   }
+    int numSimpleVars = projInfo->pi_numSimpleVars;
+    if (numSimpleVars > 0 && !IS_ENABLE_RIGHT_REF(econtext->rightRefState)) {
+        if (projInfo->pi_directMap) {
+            Datum* values = slot->tts_values;
+            bool* isnull = slot->tts_isnull;
+            for (int varIndex = 0; varIndex < numSimpleVars; varIndex++) {
+                TupleTableSlot* sourceSlot =
+                    *(TupleTableSlot**)((char*)econtext + projInfo->pi_varSlotOffsets[varIndex]);
+                int varNumber = projInfo->pi_varNumbers[varIndex] - 1;
+                Assert(varNumber < sourceSlot->tts_tupleDescriptor->natts);
+                Assert(varIndex < slot->tts_tupleDescriptor->natts);
+                values[varIndex] = sourceSlot->tts_values[varNumber];
+                isnull[varIndex] = sourceSlot->tts_isnull[varNumber];
+            }
+        } else if (projInfo->pi_numCopyRanges > 0) {
+            project_vars_by_ranges(projInfo, econtext, slot);
+        } else {
+            project_mapped_vars(projInfo, econtext, slot);
+        }
+    }
 
    /*
     * If there are any generic expressions, evaluate them.  It's possible

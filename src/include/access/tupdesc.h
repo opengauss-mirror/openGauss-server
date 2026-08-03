@@ -92,7 +92,7 @@ typedef struct tupleConstr {
     uint16 clusterKeyNum;
     uint16 num_defval;
     uint16 num_check;
-    bool has_not_null;
+    uint16 not_null_cnt;     /* NOT NULL 约束列总数，用于宽表优化 */
     bool has_generated_stored;
     char* generatedCols;     /* attribute array */
     ConstrAutoInc* cons_autoinc; /* pointer*/
