@@ -71,6 +71,7 @@ test: bm25_varblock_002
 test: bm25_varblock_003
 test: bm25_parallel_build
 test: bm25_vacuum_stress
+test: bm25_global_idf
 test: drop_if_exists
 test: drop_database
 test: sanity_check

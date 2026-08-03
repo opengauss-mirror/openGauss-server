@@ -192,7 +192,6 @@ typedef struct knl_session_attr_sql {
     int max_cn_temp_file_size;
     int default_statistics_target;
     int bm25_topk;
-    int bm25_global_doc_count;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -212,7 +211,7 @@ typedef struct knl_session_attr_sql {
     double bm25_k1;
     double bm25_b;
     double max_score_ratio;
-    char* bm25_global_df;
+    char* bm25_global_stat;
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;

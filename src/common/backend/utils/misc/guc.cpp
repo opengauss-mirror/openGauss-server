@@ -65,7 +65,6 @@
 #include "commands/online_ddl_util.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
-#include "ddes/dms/ss_common_attr.h"
 #include "funcapi.h"
 #include "instruments/instr_statement.h"
 #include "job/job_scheduler.h"
@@ -185,7 +184,6 @@
 #include "utils/mem_snapshot.h"
 #include "nodes/parsenodes_common.h"
 #include "mb/pg_wchar.h"
-#include "ddes/dms/ss_common_attr.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -561,7 +559,6 @@ void logging_module_guc_assign(const char* newval, void* extra);
 /* Inplace Upgrade GUC hooks */
 static bool check_is_upgrade(bool* newval, void** extra, GucSource source);
 static void assign_is_inplace_upgrade(const bool newval, void* extra);
-static void AssignEnableUbSyncRecord(bool newval, void* extra);
 bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
 
 /* SQL DFx Options : Support different sql dfx option */
@@ -2312,19 +2309,6 @@ static void InitConfigureNamesBool()
             false,
             NULL,
             NULL,
-            NULL
-        },
-        {{"enable_ub_sync_record",
-            PGC_SIGHUP,
-            NODE_SINGLENODE,
-            STATS_COLLECTOR,
-            gettext_noop("Enable recording UB and DMS transaction sync latency."),
-            NULL
-            },
-            &u_sess->attr.attr_common.enable_ub_sync_record,
-            false,
-            NULL,
-            AssignEnableUbSyncRecord,
             NULL
         },
         {{"enable_mot_server",
@@ -9274,7 +9258,7 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
         "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",
-        "no_audit_client", "full_audit_users", "audit_system_function_exec", "audit_async_notify",
+        "no_audit_client", "full_audit_users", "audit_system_function_exec",
         "allow_create_sysobject",
         NULL
     };
@@ -14928,15 +14912,6 @@ static void assign_is_inplace_upgrade(const bool newval, void* extra)
 {
     if (newval && u_sess->attr.attr_common.XactReadOnly)
         u_sess->attr.attr_common.XactReadOnly = false;
-}
-
-static void AssignEnableUbSyncRecord(bool newval, void* extra)
-{
-    (void)extra;
-    if (t_thrd.role == MASTER_THREAD &&
-        newval != u_sess->attr.attr_common.enable_ub_sync_record) {
-        SSResetTransactionSyncStatus();
-    }
 }
 
 /*

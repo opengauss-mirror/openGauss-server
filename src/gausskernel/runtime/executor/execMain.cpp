@@ -105,6 +105,7 @@
 #include "access/htap/imcs_ctlg.h"
 #include "access/htap/imcstore_delta.h"
 #endif
+#include "access/datavec/bm25.h"
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
