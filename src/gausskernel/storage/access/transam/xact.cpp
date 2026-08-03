@@ -8581,6 +8581,9 @@ void ApplyUndoActions(bool stpRollback)
             StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
             for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
                 undo::TransactionSlot *tmp_slot = (undo::TransactionSlot *)m_undozone->undo_cxt.slots[j];
+                if (tmp_slot == NULL) {
+                    continue;
+                }
                 TransactionStateData sub_s = m_undozone->trans_mgr_ptr;
                 if (sub_s.latest_urp[j]) {
                     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
