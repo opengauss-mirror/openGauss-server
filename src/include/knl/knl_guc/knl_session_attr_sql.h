@@ -73,6 +73,7 @@ typedef struct knl_session_attr_sql {
     bool enable_imcsscan;
     #endif
     bool enable_bm25_taat;
+    bool enable_bm25_global_idf;
     bool enable_union_all_subquery_orderby;
     bool transform_to_numeric_operators;
     bool enable_parallel_ddl;
@@ -191,6 +192,7 @@ typedef struct knl_session_attr_sql {
     int max_cn_temp_file_size;
     int default_statistics_target;
     int bm25_topk;
+    int bm25_global_doc_count;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -210,6 +212,7 @@ typedef struct knl_session_attr_sql {
     double bm25_k1;
     double bm25_b;
     double max_score_ratio;
+    char* bm25_global_df;
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;

@@ -98,6 +98,8 @@ typedef struct BM25ScanOpaqueData {
     uint32 expandedTimes;
     unsigned char* docIdMask;
     uint32 docIdMaskSize;
+    HTAB *globalDfMap;       /* per-scan global DF map (not shared across scans) */
+    MemoryContext scanMcxt;  /* memory context that outlives the entire scan */
 } BM25ScanOpaqueData;
 
 typedef BM25ScanOpaqueData *BM25ScanOpaque;
