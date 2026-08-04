@@ -98,8 +98,10 @@ typedef struct BM25ScanOpaqueData {
     uint32 expandedTimes;
     unsigned char* docIdMask;
     uint32 docIdMaskSize;
-    HTAB *globalDfMap;       /* per-scan global DF map (not shared across scans) */
-    MemoryContext scanMcxt;  /* memory context that outlives the entire scan */
+    HTAB* globalDfMap;
+    MemoryContext scanMcxt;
+    uint64 globalDocumentCount;
+    uint64 globalTokenCount;
 } BM25ScanOpaqueData;
 
 typedef BM25ScanOpaqueData *BM25ScanOpaque;
@@ -436,6 +438,8 @@ Datum bm25costestimate(PG_FUNCTION_ARGS);
 Datum bm25options(PG_FUNCTION_ARGS);
 Datum bm25_scores_textarr(PG_FUNCTION_ARGS);
 Datum bm25_scores_text(PG_FUNCTION_ARGS);
+Datum bm25_shard_stat(PG_FUNCTION_ARGS);
+Datum bm25_table_stat(PG_FUNCTION_ARGS);
 
 extern IndexBuildResult* bm25build_internal(Relation heap, Relation index, IndexInfo *indexInfo);
 extern void bm25rescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);

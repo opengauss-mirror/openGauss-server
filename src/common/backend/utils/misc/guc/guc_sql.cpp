@@ -29,6 +29,7 @@
 #endif
 
 #include "access/cbmparsexlog.h"
+#include "access/datavec/bm25.h"
 #include "access/gin.h"
 #include "access/gtm.h"
 #include "pgxc/pgxc.h"
@@ -205,6 +206,7 @@ static void assign_disable_keyword_options(const char *newval, void *extra);
 static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source);
 static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
 static bool check_mmap_set(bool* newval, void** extra, GucSource source);
+static bool check_bm25_global_stat(char** newval, void** extra, GucSource source);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void set_parallel_dop(bool newval, void *extra);
@@ -768,7 +770,7 @@ static void InitSqlConfigureNamesBool()
             PGC_USERSET,
             NODE_ALL,
             QUERY_TUNING_METHOD,
-            gettext_noop("Enables global IDF for distributed BM25 scoring."),
+            gettext_noop("Auto-collect distributed BM25 global statistics and use global IDF and avgdl."),
             NULL},
             &u_sess->attr.attr_sql.enable_bm25_global_idf,
             false,
@@ -2179,19 +2181,6 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"bm25_global_doc_count",
-            PGC_USERSET,
-            NODE_ALL,
-            QUERY_TUNING_OTHER,
-            gettext_noop("Global document count for distributed BM25. 0 means use local."),
-            NULL},
-            &u_sess->attr.attr_sql.bm25_global_doc_count,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
         {{"from_collapse_limit",
             PGC_USERSET,
             NODE_ALL,
@@ -3295,7 +3284,6 @@ static void InitSqlConfigureNamesInt64()
             NULL,
             NULL,
             NULL},
-
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -3322,6 +3310,20 @@ static void InitSqlConfigureNamesInt64()
 static void InitSqlConfigureNamesString()
 {
     struct config_string localConfigureNamesString[] = {
+        {{"bm25_global_stat",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Atomic distributed BM25 statistics, format: "
+                         "N=<documents>;T=<tokens>;term1:df1,term2:df2,..."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE,
+            },
+            &u_sess->attr.attr_sql.bm25GlobalStat,
+            "",
+            check_bm25_global_stat,
+            NULL,
+            NULL},
         {{"expected_computing_nodegroup",
             PGC_USERSET,
             NODE_DISTRIBUTE,
@@ -3369,17 +3371,6 @@ static void InitSqlConfigureNamesString()
             "cost_base",
             check_inlist2joininfo,
             assign_inlist2joininfo,
-            NULL},
-        {{"bm25_global_df",
-            PGC_USERSET,
-            NODE_ALL,
-            QUERY_TUNING_OTHER,
-            gettext_noop("Per-term global df for distributed BM25, format: term1:df1,term2:df2."),
-            NULL},
-            &u_sess->attr.attr_sql.bm25_global_df,
-            "",
-            NULL,
-            NULL,
             NULL},
         {{"b_format_behavior_compat_options",
             PGC_USERSET,
@@ -3959,6 +3950,137 @@ static bool check_job_max_workers(int* newval, void** extra, GucSource source)
         return false;
     }
     return true;
+}
+
+static bool parse_bm25_global_uint64(const char* value, uint64* parsed)
+{
+    if (value == NULL || value[0] == '\0') {
+        return false;
+    }
+    for (const char* cursor = value; *cursor != '\0'; ++cursor) {
+        if (*cursor < '0' || *cursor > '9') {
+            return false;
+        }
+    }
+    errno = 0;
+    char* end = NULL;
+    unsigned long long number = strtoull(value, &end, 10);
+    if (errno == ERANGE || end == value || *end != '\0') {
+        return false;
+    }
+    *parsed = (uint64)number;
+    return true;
+}
+
+static bool Bm25GlobalStatTermIsValid(const char* term)
+{
+    if (term == NULL || term[0] == '\0' || strlen(term) >= BM25_MAX_TOKEN_LEN) {
+        return false;
+    }
+    for (const unsigned char* cursor = (const unsigned char*)term; *cursor != '\0'; ++cursor) {
+        if (*cursor == ';' || *cursor == ',' || *cursor == ':' ||
+            *cursor == ' ' || (*cursor >= '\t' && *cursor <= '\r')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool ParseBm25GlobalStatHeader(char* buffer, uint64* documentCount, char** dfPart)
+{
+    char* firstSemi = strchr(buffer, ';');
+    char* secondSemi = firstSemi == NULL ? NULL : strchr(firstSemi + 1, ';');
+    if (firstSemi == NULL || secondSemi == NULL || firstSemi == buffer ||
+        secondSemi == firstSemi + 1 || secondSemi[1] == '\0' ||
+        strchr(secondSemi + 1, ';') != NULL || strstr(buffer, ",,") != NULL ||
+        secondSemi[1] == ',' || buffer[strlen(buffer) - 1] == ',') {
+        return false;
+    }
+
+    *firstSemi = '\0';
+    *secondSemi = '\0';
+    uint64 tokenCount = 0;
+    bool valid = strncmp(buffer, "N=", 2) == 0 && strncmp(firstSemi + 1, "T=", 2) == 0 &&
+        parse_bm25_global_uint64(buffer + 2, documentCount) &&
+        parse_bm25_global_uint64(firstSemi + 3, &tokenCount) &&
+        *documentCount > 0 && *documentCount <= UINT_MAX &&
+        tokenCount >= *documentCount;
+    *dfPart = secondSemi + 1;
+    return valid;
+}
+
+static bool ValidateBm25GlobalDf(char* dfPart, uint64 documentCount)
+{
+    const long initialHashSize = 32;
+    HASHCTL ctl;
+    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = BM25_MAX_TOKEN_LEN;
+    ctl.entrysize = BM25_MAX_TOKEN_LEN;
+    ctl.hcxt = CurrentMemoryContext;
+    HTAB* terms =
+        hash_create("BM25 global stat validation", initialHashSize, &ctl, HASH_ELEM | HASH_CONTEXT);
+
+    bool valid = true;
+    int termCount = 0;
+    char* saveptr = NULL;
+    for (char* pair = strtok_r(dfPart, ",", &saveptr); pair != NULL;
+         pair = strtok_r(NULL, ",", &saveptr)) {
+        char* colon = strchr(pair, ':');
+        uint64 df = 0;
+        if (colon == NULL || colon == pair || strchr(colon + 1, ':') != NULL) {
+            valid = false;
+            break;
+        }
+        *colon = '\0';
+        if (!Bm25GlobalStatTermIsValid(pair) ||
+            !parse_bm25_global_uint64(colon + 1, &df) || df == 0 ||
+            df > documentCount || df > UINT_MAX) {
+            valid = false;
+            break;
+        }
+        char key[BM25_MAX_TOKEN_LEN] = {0};
+        rc = strncpy_s(key, sizeof(key), pair, sizeof(key) - 1);
+        securec_check(rc, "\0", "\0");
+        bool found = false;
+        if (hash_search(terms, key, HASH_ENTER, &found) == NULL || found) {
+            valid = false;
+            break;
+        }
+        termCount++;
+    }
+    hash_destroy(terms);
+    return valid && termCount > 0;
+}
+
+static bool ValidateBm25GlobalStat(const char* value)
+{
+    char* buffer = pstrdup(value);
+    uint64 documentCount = 0;
+    char* dfPart = NULL;
+    bool valid = ParseBm25GlobalStatHeader(buffer, &documentCount, &dfPart) &&
+        ValidateBm25GlobalDf(dfPart, documentCount);
+    pfree(buffer);
+    if (!valid) {
+        GUC_check_errmsg("invalid value for parameter \"bm25_global_stat\"");
+        GUC_check_errdetail("Expected N > 0, T >= N, unique terms, and 1 <= df <= N.");
+    }
+    return valid;
+}
+
+static bool check_bm25_global_stat(char** newval, void** extra, GucSource source)
+{
+    if (*newval == NULL || (*newval)[0] == '\0') {
+        return true;
+    }
+    if (source != PGC_S_DEFAULT && source != PGC_S_DYNAMIC_DEFAULT &&
+        !u_sess->attr.attr_sql.enable_bm25_global_idf) {
+        GUC_check_errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE);
+        GUC_check_errmsg("BM25 global statistics can only be set when enable_bm25_global_idf is on");
+        return false;
+    }
+
+    return ValidateBm25GlobalStat(*newval);
 }
 
 static bool check_statement_max_mem(int* newval, void** extra, GucSource source)
