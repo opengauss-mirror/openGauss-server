@@ -750,13 +750,6 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
             info->isGlobal = RelationIsGlobalIndex(indexRelation);
             info->crossbucket = RelationIsCrossBucketIndex(indexRelation);
 
-#ifndef ENABLE_MULTIPLE_NODES
-            /* IUD to global partition index do not support stream */
-            if (IS_STREAM && root->parse->commandType != CMD_SELECT && info->isGlobal) {
-                mark_stream_unsupport();
-            }
-#endif
-
             for (i = 0; i < ncolumns; i++) {
                 info->indexkeys[i] = index->indkey.values[i];
             }

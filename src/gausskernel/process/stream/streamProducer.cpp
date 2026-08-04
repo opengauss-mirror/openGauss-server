@@ -79,7 +79,8 @@ extern void init_stream_undozone_data_from(StreamUndoZoneData* dest_undozone_dat
     StreamUndoZoneData *src_undozone_data);
 
 StreamProducer::StreamProducer(
-    StreamKey key, PlannedStmt* pstmt, Stream* snode, MemoryContext context, int socketNum, StreamTransType transType)
+    StreamKey key, PlannedStmt* pstmt, Stream* snode, MemoryContext context, int socketNum, StreamTransType transType,
+    int instrument_option)
     : StreamObj(context, STREAM_PRODUCER)
 {
     errno_t rc = EOK;
@@ -170,6 +171,7 @@ StreamProducer::StreamProducer(
     m_plan = makeNode(PlannedStmt);
     rc = memcpy_s(m_plan, sizeof(PlannedStmt), pstmt, sizeof(PlannedStmt));
     securec_check(rc, "\0", "\0");
+    m_plan->instrument_option = instrument_option;
 }
 
 StreamProducer::~StreamProducer()

@@ -38,7 +38,7 @@
 class StreamProducer : public StreamObj {
 public:
     StreamProducer(StreamKey key, PlannedStmt* pstmt, Stream* streamNode, MemoryContext context, int socketNum,
-        StreamTransType type);
+        StreamTransType type, int instrument_option);
 
     ~StreamProducer();
 

@@ -1916,9 +1916,6 @@ static void PortalRunMulti(
             }
 #endif
 
-            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)
-                pstmt->instrument_option = instrument_option;
-
             if (pstmt->canSetTag) {
                 /* statement can set tag string */
 #ifdef ENABLE_MOT
