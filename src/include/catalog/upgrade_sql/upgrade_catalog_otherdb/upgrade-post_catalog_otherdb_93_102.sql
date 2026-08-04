@@ -10,7 +10,7 @@ DROP FUNCTION IF EXISTS pg_catalog.bm25_table_stat(text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8658;
 CREATE FUNCTION pg_catalog.bm25_table_stat(text, text)
 RETURNS text
-AS 'bm25_table_stat'
+AS 'bm25_table_stat_2'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
 
@@ -18,7 +18,7 @@ DROP FUNCTION IF EXISTS pg_catalog.bm25_table_stat(text, text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8659;
 CREATE FUNCTION pg_catalog.bm25_table_stat(text, text, text)
 RETURNS text
-AS 'bm25_table_stat'
+AS 'bm25_table_stat_3'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
 

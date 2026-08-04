@@ -1401,7 +1401,7 @@ Datum bm25_shard_stat(PG_FUNCTION_ARGS)
  * each table must have exactly one BM25 index on that column. Aggregates N / T /
  * per-term df internally and returns "N=<N>;T=<T>;<term:df,...>".
  */
-Datum bm25_table_stat(PG_FUNCTION_ARGS)
+static Datum Bm25TableStat(FunctionCallInfo fcinfo)
 {
     char *tablePattern = text_to_cstring(PG_GETARG_TEXT_PP(0));
     char *query = text_to_cstring(PG_GETARG_TEXT_PP(1));
@@ -1613,6 +1613,21 @@ Datum bm25_table_stat(PG_FUNCTION_ARGS)
     pfree_ext(schemaName);
 
     PG_RETURN_TEXT_P(cstring_to_text(result.data));
+}
+
+Datum bm25_table_stat(PG_FUNCTION_ARGS)
+{
+    return Bm25TableStat(fcinfo);
+}
+
+Datum bm25_table_stat_2(PG_FUNCTION_ARGS)
+{
+    return Bm25TableStat(fcinfo);
+}
+
+Datum bm25_table_stat_3(PG_FUNCTION_ARGS)
+{
+    return Bm25TableStat(fcinfo);
 }
 
 Datum bm25_scores_textarr(PG_FUNCTION_ARGS)
