@@ -5,6 +5,7 @@ RETURNS text
 AS 'bm25_shard_stat'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
+COMMENT ON FUNCTION pg_catalog.bm25_shard_stat(regclass, text) IS 'NULL';
 
 DROP FUNCTION IF EXISTS pg_catalog.bm25_table_stat(text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8658;
@@ -13,6 +14,7 @@ RETURNS text
 AS 'bm25_table_stat_2'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
+COMMENT ON FUNCTION pg_catalog.bm25_table_stat(text, text) IS 'NULL';
 
 DROP FUNCTION IF EXISTS pg_catalog.bm25_table_stat(text, text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8659;
@@ -21,6 +23,7 @@ RETURNS text
 AS 'bm25_table_stat_3'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
+COMMENT ON FUNCTION pg_catalog.bm25_table_stat(text, text, text) IS 'NULL';
 
 DROP FUNCTION IF EXISTS pg_catalog.bm25_table_stat(text, text, text, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8660;
@@ -29,3 +32,4 @@ RETURNS text
 AS 'bm25_table_stat'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
+COMMENT ON FUNCTION pg_catalog.bm25_table_stat(text, text, text, text) IS 'NULL';
