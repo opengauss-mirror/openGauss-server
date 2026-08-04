@@ -770,11 +770,14 @@ void OnUndoProcExit(int code, Datum arg)
         t_thrd.undo_cxt.zids[upersistence] = INVALID_ZONE_ID;
         UndoZoneGroup::ReleaseZone(zid, upersistence);
     }
-    if (t_thrd.xact_cxt.m_undozone_array == NULL) {
+    if (t_thrd.ustore_cxt.m_undozone_array == NULL) {
         return;
     }
     for (int i = 0; i < MAX_QUERY_DOP; i++) {
-        StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+        StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
+        if (likely(m_undozone == NULL)) {
+            continue;
+        }
         for (auto j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
             UndoPersistence upersistence = static_cast<UndoPersistence>(j);
             int zid = m_undozone->undo_cxt.zids[upersistence];

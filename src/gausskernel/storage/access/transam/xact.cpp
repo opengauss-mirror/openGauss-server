@@ -1898,7 +1898,6 @@ static void AtCommit_Memory(void)
     Assert(u_sess->top_transaction_mem_cxt != NULL);
     MemoryContextDelete(u_sess->top_transaction_mem_cxt);
     u_sess->top_transaction_mem_cxt = NULL;
-    t_thrd.xact_cxt.m_undozone_array = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
     CurrentTransactionState->curTransactionContext = NULL;
     if (ENABLE_CACHEDPLAN_MGR) {
@@ -2320,7 +2319,6 @@ static void AtCleanup_Memory(void)
     if (u_sess->top_transaction_mem_cxt != NULL)
         MemoryContextDelete(u_sess->top_transaction_mem_cxt);
     u_sess->top_transaction_mem_cxt = NULL;
-    t_thrd.xact_cxt.m_undozone_array = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
 
     /* the memory is allocated from top_transaction_mem_cxt */
@@ -8477,9 +8475,12 @@ void ApplyUndoActions(bool stpRollback)
         }
     }
 
-    if (t_thrd.xact_cxt.m_undozone_array != NULL) {
+    if (t_thrd.ustore_cxt.m_undozone_array != NULL) {
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
-            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
+            if (likely(m_undozone == NULL)) {
+                continue;
+            }
             for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
                 if (m_undozone->trans_mgr_ptr.latest_urp[j] || m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
                     needRollback = true;
@@ -8576,9 +8577,12 @@ void ApplyUndoActions(bool stpRollback)
         }
     }
 
-    if (t_thrd.xact_cxt.m_undozone_array != NULL) {
+    if (t_thrd.ustore_cxt.m_undozone_array != NULL) {
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
-            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
+            if (likely(m_undozone != NULL)) {
+                continue;
+            }
             for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
                 undo::TransactionSlot *tmp_slot = (undo::TransactionSlot *)m_undozone->undo_cxt.slots[j];
                 if (tmp_slot == NULL) {
@@ -8659,6 +8663,27 @@ extern void ResetUndoActionsInfo(void)
         t_thrd.undo_cxt.slots[i] = NULL;
         t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
     }
+
+    if (likely(!t_thrd.ustore_cxt.used_smp)) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_QUERY_DOP; i++) {
+        StreamUndoZoneData *m_undozone = ((StreamUndoZoneData * *)(t_thrd.ustore_cxt.m_undozone_array))[i];
+        if (likely(m_undozone == NULL)) {
+            continue;
+        }
+        for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+            m_undozone->trans_mgr_ptr.first_urp[j] = INVALID_UNDO_REC_PTR;
+            m_undozone->trans_mgr_ptr.latest_urp[j] = INVALID_UNDO_REC_PTR;
+            m_undozone->trans_mgr_ptr.latest_urp_xact[j] = INVALID_UNDO_REC_PTR;
+
+            m_undozone->undo_cxt.prevXid[j] = InvalidTransactionId;
+            m_undozone->undo_cxt.slots[j] = NULL;
+            m_undozone->undo_cxt.slotPtr[j] = INVALID_UNDO_REC_PTR;
+        }
+    }
+    t_thrd.ustore_cxt.used_smp = false;
 }
 
 /*

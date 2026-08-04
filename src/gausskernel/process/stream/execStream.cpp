@@ -1250,18 +1250,19 @@ void xact_allocate_undozones_memory_for_stream()
         return;
     }
 
-    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(t_thrd.xact_cxt.m_undozone_array);
-    if (m_undozone_array == NULL) {
-        MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-        m_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
-        for (int i = 0; i < MAX_QUERY_DOP; i++) {
-            m_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
-            for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
-                m_undozone_array[i]->undo_cxt.zids[j] = -1;
-            }
+    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(t_thrd.ustore_cxt.m_undozone_array);
+    Assert(m_undozone_array != NULL);
+    MemoryContext mem_cxt = t_thrd.ustore_cxt.smp_mem_cxt;
+
+    /* init producer undozone data array */
+    for (int i = 0; i < MAX_QUERY_DOP; i++) {
+        if (m_undozone_array[i] != NULL) {
+            continue;
         }
-        MemoryContextSwitchTo(old_cxt);
-        t_thrd.xact_cxt.m_undozone_array = (void **)m_undozone_array;
+        m_undozone_array[i] = (StreamUndoZoneData *)MemoryContextAllocZero(mem_cxt, sizeof(StreamUndoZoneData));
+        for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+            m_undozone_array[i]->undo_cxt.zids[j] = -1;
+        }
     }
 }
 
@@ -1325,7 +1326,7 @@ static void StartupStreamThread(StreamState* node, bool need_save_undo)
         if (need_save_undo && IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
             u_sess->stream_cxt.global_obj->set_need_copyback_undozone();
             xact_allocate_undozones_memory_for_stream();
-            StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array);
+            StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array);
             if (m_undozone_array != NULL) {
                 uint smp_id = producer->getKey().smpIdentifier;
                 producer->copy_undozone_from_main_worker(m_undozone_array[smp_id]);
