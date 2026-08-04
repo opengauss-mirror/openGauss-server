@@ -577,7 +577,6 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
     xact_cxt->ActiveLobRelid = InvalidOid;
     xact_cxt->isSelectInto = false;
     xact_cxt->callPrint = false;
-    xact_cxt->m_undozone_array = NULL;
 }
 
 static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
@@ -1315,6 +1314,18 @@ static void KnlTUstoreInit(knl_u_ustore_context *ustoreCxt)
 
     ustoreCxt->tdSlotWaitFinishTime = 0;
     ustoreCxt->tdSlotWaitActive = false;
+
+    if (unlikely(IsInitdb || !(t_thrd.role == THREADPOOL_WORKER || t_thrd.role == WORKER))) {
+        ustoreCxt->m_undozone_array = NULL;
+        return;
+    }
+
+    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(ustoreCxt->m_undozone_array);
+    m_undozone_array = (StreamUndoZoneData**) palloc0(sizeof(StreamUndoZoneData*) * MAX_QUERY_DOP);
+    ustoreCxt->smp_mem_cxt = CurrentMemoryContext;
+
+    ustoreCxt->m_undozone_array = (void**)m_undozone_array;
+    ustoreCxt->used_smp = false;
 }
 
 static void KnlTRollbackRequestsInit(knl_t_rollback_requests_context* context)

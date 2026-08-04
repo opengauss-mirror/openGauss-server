@@ -389,6 +389,9 @@ StreamNodeGroup::StreamNodeGroup()
         group_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
             group_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
+            for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+                group_undozone_array[i]->undo_cxt.zids[j] = -1;
+            }
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1081,10 +1084,15 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* Destroy the stream node group. */
     if (u_sess->stream_cxt.global_obj != NULL) {
-        if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && t_thrd.xact_cxt.m_undozone_array != NULL) {
+        if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && unlikely(t_thrd.ustore_cxt.m_undozone_array != NULL)) {
             for (int i = 0; i < MAX_QUERY_DOP; i++) {
-                StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+                StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
                 init_stream_undozone_data_from(m_undozone, u_sess->stream_cxt.global_obj->group_undozone_array[i]);
+                for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+                    if (m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_REC_PTR) {
+                        t_thrd.ustore_cxt.used_smp = true;
+                    }
+                }
             }
         }
 #ifndef ENABLE_MULTIPLE_NODES
@@ -2161,7 +2169,6 @@ void StreamNodeGroup::stream_return_undo(StreamUndoZoneData* producer_undozone_d
     StreamUndoZoneData** m_undozone_array = stream_node_group->group_undozone_array;
     Assert(m_undozone_array != NULL);
     StreamUndoZoneData* m_stream_undozone = m_undozone_array[smp_id];
-
     init_stream_undozone_data_from(m_stream_undozone, producer_undozone_data);
 }
 #endif

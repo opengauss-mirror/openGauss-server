@@ -586,7 +586,7 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
 
     TransactionId fxid = GetTopTransactionId();
 
-    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+    if (IsSubTransaction() && likely(t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
         subxid = GetCurrentSubTransactionId();
     }
 
@@ -3469,7 +3469,7 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
 
     ndone = 0;
 
-    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+    if (IsSubTransaction() && likely(t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
         subxid = GetCurrentSubTransactionId();
     }
 
