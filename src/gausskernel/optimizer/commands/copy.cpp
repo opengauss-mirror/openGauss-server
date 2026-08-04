@@ -5607,6 +5607,8 @@ void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
                 bucketId, NULL, NULL);
+            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, (HeapTuple)bufferedTuples[i],
+                recheckIndexes);
             list_free(recheckIndexes);
         }
     } else if (resultRelInfo->ri_TrigDesc != NULL && resultRelInfo->ri_TrigDesc->trig_insert_after_row) {
