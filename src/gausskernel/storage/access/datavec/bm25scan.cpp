@@ -50,6 +50,7 @@ const float BM25_DEFAULT_OFFSET = 0.5f;
 
 /* Skip the global-avgdl rescore when local and global avgdl differ by less than this ratio. */
 const float BM25_GLOBAL_AVGDL_SKIP_RATIO = 0.01f;
+#define BM25_GLOBAL_DF_INITIAL_SIZE 32
 
 /* docId mask bitmap: one bit per document, packed byte-wise */
 #define BM25_DOCID_MASK_BITS_PER_BYTE 8u
@@ -144,7 +145,8 @@ static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCoun
     ctl.keysize = BM25_MAX_TOKEN_LEN;
     ctl.entrysize = sizeof(GlobalDfEntry);
     ctl.hcxt = scanMcxt;
-    HTAB *globalDfMap = hash_create("BM25 Global DF", 32, &ctl, HASH_ELEM | HASH_CONTEXT);
+    HTAB *globalDfMap =
+        hash_create("BM25 Global DF", BM25_GLOBAL_DF_INITIAL_SIZE, &ctl, HASH_ELEM | HASH_CONTEXT);
 
     char *saveptr = NULL;
     char *pair = strtok_r(secondSemi + 1, ",", &saveptr);
@@ -1225,6 +1227,7 @@ void bm25endscan_internal(IndexScanDesc scan)
 
 static bool ExpressionContainVar(Node* node, void* context)
 {
+    (void)context;
     if (node == NULL) {
         return false;
     } else if (IsA(node, Var)) {

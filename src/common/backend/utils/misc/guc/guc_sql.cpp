@@ -3986,6 +3986,88 @@ static bool bm25_global_stat_term_is_valid(const char* term)
     return true;
 }
 
+static bool parse_bm25_global_stat_header(char* buffer, uint64* documentCount, char** dfPart)
+{
+    char* firstSemi = strchr(buffer, ';');
+    char* secondSemi = firstSemi == NULL ? NULL : strchr(firstSemi + 1, ';');
+    if (firstSemi == NULL || secondSemi == NULL || firstSemi == buffer ||
+        secondSemi == firstSemi + 1 || secondSemi[1] == '\0' ||
+        strchr(secondSemi + 1, ';') != NULL || strstr(buffer, ",,") != NULL ||
+        secondSemi[1] == ',' || buffer[strlen(buffer) - 1] == ',') {
+        return false;
+    }
+
+    *firstSemi = '\0';
+    *secondSemi = '\0';
+    uint64 tokenCount = 0;
+    bool valid = strncmp(buffer, "N=", 2) == 0 && strncmp(firstSemi + 1, "T=", 2) == 0 &&
+        parse_bm25_global_uint64(buffer + 2, documentCount) &&
+        parse_bm25_global_uint64(firstSemi + 3, &tokenCount) &&
+        *documentCount > 0 && *documentCount <= UINT_MAX &&
+        tokenCount >= *documentCount;
+    *dfPart = secondSemi + 1;
+    return valid;
+}
+
+static bool validate_bm25_global_df(char* dfPart, uint64 documentCount)
+{
+    const long initialHashSize = 32;
+    HASHCTL ctl;
+    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = BM25_MAX_TOKEN_LEN;
+    ctl.entrysize = BM25_MAX_TOKEN_LEN;
+    ctl.hcxt = CurrentMemoryContext;
+    HTAB* terms =
+        hash_create("BM25 global stat validation", initialHashSize, &ctl, HASH_ELEM | HASH_CONTEXT);
+
+    bool valid = true;
+    int termCount = 0;
+    char* saveptr = NULL;
+    for (char* pair = strtok_r(dfPart, ",", &saveptr); pair != NULL;
+         pair = strtok_r(NULL, ",", &saveptr)) {
+        char* colon = strchr(pair, ':');
+        uint64 df = 0;
+        if (colon == NULL || colon == pair || strchr(colon + 1, ':') != NULL) {
+            valid = false;
+            break;
+        }
+        *colon = '\0';
+        if (!bm25_global_stat_term_is_valid(pair) ||
+            !parse_bm25_global_uint64(colon + 1, &df) || df == 0 ||
+            df > documentCount || df > UINT_MAX) {
+            valid = false;
+            break;
+        }
+        char key[BM25_MAX_TOKEN_LEN] = {0};
+        rc = strncpy_s(key, sizeof(key), pair, sizeof(key) - 1);
+        securec_check(rc, "\0", "\0");
+        bool found = false;
+        if (hash_search(terms, key, HASH_ENTER, &found) == NULL || found) {
+            valid = false;
+            break;
+        }
+        termCount++;
+    }
+    hash_destroy(terms);
+    return valid && termCount > 0;
+}
+
+static bool validate_bm25_global_stat(const char* value)
+{
+    char* buffer = pstrdup(value);
+    uint64 documentCount = 0;
+    char* dfPart = NULL;
+    bool valid = parse_bm25_global_stat_header(buffer, &documentCount, &dfPart) &&
+        validate_bm25_global_df(dfPart, documentCount);
+    pfree(buffer);
+    if (!valid) {
+        GUC_check_errmsg("invalid value for parameter \"bm25_global_stat\"");
+        GUC_check_errdetail("Expected N > 0, T >= N, unique terms, and 1 <= df <= N.");
+    }
+    return valid;
+}
+
 static bool check_bm25_global_stat(char** newval, void** extra, GucSource source)
 {
     if (*newval == NULL || (*newval)[0] == '\0') {
@@ -3998,81 +4080,7 @@ static bool check_bm25_global_stat(char** newval, void** extra, GucSource source
         return false;
     }
 
-    char* buffer = pstrdup(*newval);
-    char* firstSemi = strchr(buffer, ';');
-    char* secondSemi = firstSemi == NULL ? NULL : strchr(firstSemi + 1, ';');
-    if (firstSemi == NULL || secondSemi == NULL || firstSemi == buffer ||
-        secondSemi == firstSemi + 1 || secondSemi[1] == '\0' ||
-        strchr(secondSemi + 1, ';') != NULL || strstr(buffer, ",,") != NULL ||
-        secondSemi[1] == ',' || (*newval)[strlen(*newval) - 1] == ',') {
-        pfree(buffer);
-        GUC_check_errmsg("invalid value for parameter \"bm25_global_stat\"");
-        GUC_check_errdetail("Expected format is N=<documents>;T=<tokens>;term1:df1,term2:df2,...");
-        return false;
-    }
-    *firstSemi = '\0';
-    *secondSemi = '\0';
-    const char* nPart = buffer;
-    const char* tPart = firstSemi + 1;
-    char* dfPart = secondSemi + 1;
-    uint64 documentCount = 0;
-    uint64 tokenCount = 0;
-    bool valid = strncmp(nPart, "N=", 2) == 0 && strncmp(tPart, "T=", 2) == 0 &&
-        parse_bm25_global_uint64(nPart + 2, &documentCount) &&
-        parse_bm25_global_uint64(tPart + 2, &tokenCount) &&
-        documentCount > 0 && documentCount <= UINT_MAX &&
-        tokenCount >= documentCount && dfPart[0] != '\0';
-
-    HTAB* terms = NULL;
-    if (valid) {
-        HASHCTL ctl;
-        errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
-        securec_check(rc, "\0", "\0");
-        ctl.keysize = BM25_MAX_TOKEN_LEN;
-        ctl.entrysize = BM25_MAX_TOKEN_LEN;
-        ctl.hcxt = CurrentMemoryContext;
-        terms = hash_create("BM25 global stat validation", 32, &ctl, HASH_ELEM | HASH_CONTEXT);
-
-        char* saveptr = NULL;
-        int termCount = 0;
-        for (char* pair = strtok_r(dfPart, ",", &saveptr); pair != NULL;
-             pair = strtok_r(NULL, ",", &saveptr)) {
-            char* colon = strchr(pair, ':');
-            uint64 df = 0;
-            if (colon == NULL || colon == pair || strchr(colon + 1, ':') != NULL) {
-                valid = false;
-                break;
-            }
-            *colon = '\0';
-            if (!bm25_global_stat_term_is_valid(pair) ||
-                !parse_bm25_global_uint64(colon + 1, &df) || df == 0 ||
-                df > documentCount || df > UINT_MAX) {
-                valid = false;
-                break;
-            }
-            char key[BM25_MAX_TOKEN_LEN] = {0};
-            rc = strncpy_s(key, sizeof(key), pair, sizeof(key) - 1);
-            securec_check(rc, "\0", "\0");
-            bool found = false;
-            if (hash_search(terms, key, HASH_ENTER, &found) == NULL || found) {
-                valid = false;
-                break;
-            }
-            termCount++;
-        }
-        valid = valid && termCount > 0;
-    }
-
-    if (terms != NULL) {
-        hash_destroy(terms);
-    }
-    pfree(buffer);
-    if (!valid) {
-        GUC_check_errmsg("invalid value for parameter \"bm25_global_stat\"");
-        GUC_check_errdetail("Expected N > 0, T >= N, unique terms, and 1 <= df <= N.");
-        return false;
-    }
-    return true;
+    return validate_bm25_global_stat(*newval);
 }
 
 static bool check_statement_max_mem(int* newval, void** extra, GucSource source)
