@@ -211,7 +211,7 @@ typedef struct knl_session_attr_sql {
     double bm25_k1;
     double bm25_b;
     double max_score_ratio;
-    char* bm25_global_stat;
+    char* bm25GlobalStat;
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;

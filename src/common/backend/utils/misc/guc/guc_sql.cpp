@@ -3319,7 +3319,7 @@ static void InitSqlConfigureNamesString()
             NULL,
             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE,
             },
-            &u_sess->attr.attr_sql.bm25_global_stat,
+            &u_sess->attr.attr_sql.bm25GlobalStat,
             "",
             check_bm25_global_stat,
             NULL,
@@ -3972,7 +3972,7 @@ static bool parse_bm25_global_uint64(const char* value, uint64* parsed)
     return true;
 }
 
-static bool bm25_global_stat_term_is_valid(const char* term)
+static bool Bm25GlobalStatTermIsValid(const char* term)
 {
     if (term == NULL || term[0] == '\0' || strlen(term) >= BM25_MAX_TOKEN_LEN) {
         return false;
@@ -3986,7 +3986,7 @@ static bool bm25_global_stat_term_is_valid(const char* term)
     return true;
 }
 
-static bool parse_bm25_global_stat_header(char* buffer, uint64* documentCount, char** dfPart)
+static bool ParseBm25GlobalStatHeader(char* buffer, uint64* documentCount, char** dfPart)
 {
     char* firstSemi = strchr(buffer, ';');
     char* secondSemi = firstSemi == NULL ? NULL : strchr(firstSemi + 1, ';');
@@ -4009,7 +4009,7 @@ static bool parse_bm25_global_stat_header(char* buffer, uint64* documentCount, c
     return valid;
 }
 
-static bool validate_bm25_global_df(char* dfPart, uint64 documentCount)
+static bool ValidateBm25GlobalDf(char* dfPart, uint64 documentCount)
 {
     const long initialHashSize = 32;
     HASHCTL ctl;
@@ -4033,7 +4033,7 @@ static bool validate_bm25_global_df(char* dfPart, uint64 documentCount)
             break;
         }
         *colon = '\0';
-        if (!bm25_global_stat_term_is_valid(pair) ||
+        if (!Bm25GlobalStatTermIsValid(pair) ||
             !parse_bm25_global_uint64(colon + 1, &df) || df == 0 ||
             df > documentCount || df > UINT_MAX) {
             valid = false;
@@ -4053,13 +4053,13 @@ static bool validate_bm25_global_df(char* dfPart, uint64 documentCount)
     return valid && termCount > 0;
 }
 
-static bool validate_bm25_global_stat(const char* value)
+static bool ValidateBm25GlobalStat(const char* value)
 {
     char* buffer = pstrdup(value);
     uint64 documentCount = 0;
     char* dfPart = NULL;
-    bool valid = parse_bm25_global_stat_header(buffer, &documentCount, &dfPart) &&
-        validate_bm25_global_df(dfPart, documentCount);
+    bool valid = ParseBm25GlobalStatHeader(buffer, &documentCount, &dfPart) &&
+        ValidateBm25GlobalDf(dfPart, documentCount);
     pfree(buffer);
     if (!valid) {
         GUC_check_errmsg("invalid value for parameter \"bm25_global_stat\"");
@@ -4080,7 +4080,7 @@ static bool check_bm25_global_stat(char** newval, void** extra, GucSource source
         return false;
     }
 
-    return validate_bm25_global_stat(*newval);
+    return ValidateBm25GlobalStat(*newval);
 }
 
 static bool check_statement_max_mem(int* newval, void** extra, GucSource source)

@@ -51,6 +51,8 @@ const float BM25_DEFAULT_OFFSET = 0.5f;
 /* Skip the global-avgdl rescore when local and global avgdl differ by less than this ratio. */
 const float BM25_GLOBAL_AVGDL_SKIP_RATIO = 0.01f;
 #define BM25_GLOBAL_DF_INITIAL_SIZE 32
+#define BM25_STAT_PREFIX_LENGTH 2
+#define BM25_TOKEN_STAT_PREFIX_LENGTH 3
 
 /* docId mask bitmap: one bit per document, packed byte-wise */
 #define BM25_DOCID_MASK_BITS_PER_BYTE 8u
@@ -110,32 +112,33 @@ static bool ParseBm25GlobalUint64(const char *value, uint64 *parsed)
 static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCount,
     uint64 *globalTokenCount)
 {
-    const char *raw = u_sess->attr.attr_sql.bm25_global_stat;
+    const char *raw = u_sess->attr.attr_sql.bm25GlobalStat;
     if (raw == NULL || raw[0] == '\0') {
         return NULL;
     }
 
     *globalDocumentCount = 0;
     *globalTokenCount = 0;
-    char *buf = pstrdup(raw);
-    char *firstSemi = strchr(buf, ';');
+    char *buffer = pstrdup(raw);
+    char *firstSemi = strchr(buffer, ';');
     char *secondSemi = firstSemi == NULL ? NULL : strchr(firstSemi + 1, ';');
-    if (firstSemi == NULL || secondSemi == NULL || firstSemi == buf ||
+    if (firstSemi == NULL || secondSemi == NULL || firstSemi == buffer ||
         secondSemi == firstSemi + 1 || secondSemi[1] == '\0' ||
         strchr(secondSemi + 1, ';') != NULL || secondSemi[1] == ',' ||
         strstr(secondSemi + 1, ",,") != NULL || raw[strlen(raw) - 1] == ',') {
-        pfree(buf);
+        pfree(buffer);
         return NULL;
     }
     *firstSemi = '\0';
     *secondSemi = '\0';
     uint64 documentCount = 0;
     uint64 tokenCount = 0;
-    if (strncmp(buf, "N=", 2) != 0 || strncmp(firstSemi + 1, "T=", 2) != 0 ||
-        !ParseBm25GlobalUint64(buf + 2, &documentCount) ||
-        !ParseBm25GlobalUint64(firstSemi + 3, &tokenCount) ||
+    if (strncmp(buffer, "N=", BM25_STAT_PREFIX_LENGTH) != 0 ||
+        strncmp(firstSemi + 1, "T=", BM25_STAT_PREFIX_LENGTH) != 0 ||
+        !ParseBm25GlobalUint64(buffer + BM25_STAT_PREFIX_LENGTH, &documentCount) ||
+        !ParseBm25GlobalUint64(firstSemi + BM25_TOKEN_STAT_PREFIX_LENGTH, &tokenCount) ||
         documentCount == 0 || documentCount > UINT_MAX || tokenCount < documentCount) {
-        pfree(buf);
+        pfree(buffer);
         return NULL;
     }
 
@@ -154,7 +157,7 @@ static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCoun
         char *colon = strchr(pair, ':');
         if (colon == NULL || colon == pair || strchr(colon + 1, ':') != NULL) {
             DestroyGlobalDfMap(globalDfMap);
-            pfree(buf);
+            pfree(buffer);
             return NULL;
         }
         *colon = '\0';
@@ -162,7 +165,7 @@ static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCoun
         if (!Bm25TermIsDfEncodable(pair) || !ParseBm25GlobalUint64(colon + 1, &df) ||
             df == 0 || df > documentCount || df > UINT_MAX) {
             DestroyGlobalDfMap(globalDfMap);
-            pfree(buf);
+            pfree(buffer);
             return NULL;
         }
         char key[BM25_MAX_TOKEN_LEN] = {0};
@@ -172,7 +175,7 @@ static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCoun
         GlobalDfEntry *entry = (GlobalDfEntry *)hash_search(globalDfMap, key, HASH_ENTER, &found);
         if (entry == NULL || found) {
             DestroyGlobalDfMap(globalDfMap);
-            pfree(buf);
+            pfree(buffer);
             return NULL;
         }
         entry->df = (uint32)df;
@@ -180,7 +183,7 @@ static HTAB *BuildGlobalDfMap(MemoryContext scanMcxt, uint64 *globalDocumentCoun
     }
     *globalDocumentCount = documentCount;
     *globalTokenCount = tokenCount;
-    pfree(buf);
+    pfree(buffer);
     return globalDfMap;
 }
 
@@ -248,14 +251,14 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
             float docN = (float)meta.documentCount;
             float docFreq = (float)tokenMeta->docCount;
             if (Bm25GlobalStatsEnabled(so)) {
-                uint32 gdf = LookupGlobalDf(so->globalDfMap, tokenMeta->token);
-                if (gdf >= 1 && gdf <= so->globalDocumentCount) {
+                uint32 globalDf = LookupGlobalDf(so->globalDfMap, tokenMeta->token);
+                if (globalDf >= 1 && globalDf <= so->globalDocumentCount) {
                     docN = (float)so->globalDocumentCount;
-                    docFreq = (float)gdf;
+                    docFreq = (float)globalDf;
                 }
             }
             queryTokens[tokenIdx].qTokenIDFVal = tokenizedQuery.tokenDatas[tokenIdx].tokenFreq *
-                std::log((1 + (docN - docFreq + BM25_DEFAULT_OFFSET) / (docFreq + BM25_DEFAULT_OFFSET)));
+                std::log(1 + (docN - docFreq + BM25_DEFAULT_OFFSET) / (docFreq + BM25_DEFAULT_OFFSET));
             queryTokens[tokenIdx].qTokenMaxScore = tokenMeta->maxScore;
             if (meta.version >= BM25_VERSION_VARBLOCK_POSTING && ItemPointerIsValid(&tokenMeta->postingChainHead)) {
                 queryTokens[tokenIdx].postingChainHead = tokenMeta->postingChainHead;
