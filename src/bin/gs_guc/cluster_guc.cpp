@@ -4838,7 +4838,7 @@ static bool IsShellCommandParam(const char* paraname)
  Return  : true  - safe
            false - contains dangerous character
  *************************************************************************************/
-static bool CheckStringValueForSecurity(const char* value)
+static bool CheckStringValueForSecurity(const char* paraname, const char* value)
 {
     typedef struct {
         const char* token;
@@ -4851,6 +4851,11 @@ static bool CheckStringValueForSecurity(const char* value)
     };
 
     for (int i = 0; dangerCharacters[i].token != NULL; i++) {
+        /* ustore_attr uses semicolons to separate internal key-value options. */
+        if (strcmp(dangerCharacters[i].token, ";") == 0 && paraname != NULL &&
+            pg_strcasecmp(paraname, "ustore_attr") == 0) {
+            continue;
+        }
         if (strstr(value, dangerCharacters[i].token) != NULL) {
             write_stderr("ERROR: Invalid character '%s' found in parameter value. "
                          "Shell metacharacters are not allowed.\n",
@@ -4871,7 +4876,7 @@ static bool CheckStringValueForSecurity(const char* value)
 int check_string_type_value(const char* paraname, const char* value)
 {
     bool result = ((int)strlen(value) > 0) ? true : false;
-    if (result && !IsShellCommandParam(paraname) && !CheckStringValueForSecurity(value)) {
+    if (result && !IsShellCommandParam(paraname) && !CheckStringValueForSecurity(paraname, value)) {
         return FAILURE;
     }
 
