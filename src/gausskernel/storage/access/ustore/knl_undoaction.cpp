@@ -339,21 +339,8 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
-bool _get_valid_blkprev_undo_record(UndoRecord* record, TransactionId xid, BlockNumber blkno, bool is_sync_rollback,
-    UndoPersistence upersistence, TransactionId next_subxid, bool *need_advance_cur_idx)
+bool _is_undo_record_need_apply(UndoRecord* record, TransactionId xid, BlockNumber blkno, bool is_sync_rollback)
 {
-    if (record->Blkprev() == INVALID_UNDO_REC_PTR) {
-        return false;
-    }
-
-    TransactionId subxid = record->sub_xid();
-    record->Reset2Blkprev();
-    UndoTraversalState rc = FetchUndoRecord(record, NULL, InvalidBlockNumber, InvalidOffsetNumber,
-        InvalidTransactionId, false, NULL);
-    if (rc != UNDO_TRAVERSAL_COMPLETE) {
-        return false;
-    }
-
     if (record->Blkno() != blkno) {
         return false;
     }
@@ -362,17 +349,11 @@ bool _get_valid_blkprev_undo_record(UndoRecord* record, TransactionId xid, Block
         return false;
     }
 
-    *need_advance_cur_idx = (record->sub_xid() == next_subxid);
-
-    if (record->ContainSubXact() && (record->sub_xid() == subxid || *need_advance_cur_idx) && is_sync_rollback) {
-        return true;
+    if (is_sync_rollback && IsSubTransaction() &&
+        (!record->ContainSubXact() || record->sub_xid() < GetCurrentTransactionId())) {
+        return false;
     }
-
-    if (!is_sync_rollback || (is_sync_rollback && !IsSubTransaction())) {
-        return true;
-    }
-
-    return false;
+    return true;
 }
 
 int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
@@ -480,8 +461,6 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
         return ROLLBACK_ERR;
     }
 
-    START_CRIT_SECTION();
-    UndoRecPtr prevUrp = slotUrecPtr;
     bool needPageInit = false;
     OffsetNumber xlogMinLPOffset = MaxOffsetNumber;
     OffsetNumber xlogMaxLPOffset = InvalidOffsetNumber;
@@ -492,70 +471,32 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
      * we start from the last record until the whole
      * xid is all rollback on this page
      */
-    UndoRecPtr lastUrp = lastUndoRecord->Urp();
     UndoRecord *undorecord = (*urecvec)[startIdx];
     undorecord->Reset(slotUrecPtr);
     UndoTraversalState rc = FetchUndoRecord(undorecord, NULL, InvalidBlockNumber, InvalidOffsetNumber,
         InvalidTransactionId, false, NULL);
-
     CommandId last_record_cid = undorecord->Cid();
-    TransactionId last_record_xid = undorecord->Xid();
-    TransactionId cur_sub_xid = InvalidSubTransactionId;
-    TransactionId next_subxid = InvalidSubTransactionId;
-    int curIdx = startIdx;
-    bool need_advance_cur_idx = true;
 
-    UndoRecord *cur_urec = (*urecvec)[curIdx];
-    if (cur_urec->ContainSubXact()) {
-        next_subxid = cur_urec->sub_xid();
+    if (!_is_undo_record_need_apply(undorecord, xid, blkno, is_sync_rollback)) {
+        ereport(LOG, (errmsg("[Rollback Skip] xid %lu, blkno %u, is_sync_rollback %d, urec_xid %lu, "
+                             "urec_subxid %lu, urec_blkno %u.", xid, blkno, (int)is_sync_rollback, undorecord->Xid(),
+                             undorecord->sub_xid(), undorecord->Blkno())));
+        UnlockReleaseBuffer(buffer);
+        UHeapUndoActionsCloseRelation(&relationData);
+        return ROLLBACK_ERR;
     }
 
+    START_CRIT_SECTION();
+
     do {
-        if (undorecord->ContainSubXact()) {
-            cur_sub_xid = undorecord->sub_xid();
-        }
-
-        while (unlikely(need_advance_cur_idx) && likely(curIdx < endIdx) && next_subxid >= cur_sub_xid) {
-            if (unlikely(next_subxid < (*urecvec)[++curIdx]->sub_xid())) {
-                ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("Sub xid not ordered, start_idx %d, end_idx %d, first_urp %lu, last_urp %lu, "
-                    "cur_idx %d, last_subxid %lu, cur_subxid %lu.",
-                    startIdx, endIdx, firstUrp, lastUrp,
-                    curIdx, next_subxid, (*urecvec)[curIdx]->sub_xid())));
-            }
-            cur_urec = (*urecvec)[curIdx];
-            if (cur_urec->ContainSubXact()) {
-                next_subxid = cur_urec->sub_xid();
-            }
-        }
-
-        need_advance_cur_idx = false;
-
         uint8 undotype = undorecord->Utype();
         if (undorecord->Blkno() != blkno) {
             ereport(PANIC, (errmodule(MOD_USTORE), errcode(ERRCODE_DATA_CORRUPTED),
                             errmsg("UHeapUndoActions error: UndoRecord's blkno %u is not same with buffer %u.",
                             undorecord->Blkno(), blkno)));
         }
-        /*
-         * If the current UndoRecPtr on the slot is less than the
-         * UndoRecPtr of the current undorecord, then it means this undorecord
-         * has been applied.
-         */
 
-        if (prevUrp == 0) {
-            slotPrevUrp = 0;
-            break;
-        }
-
-        if (prevUrp != undorecord->Urp()) {
-            slotPrevUrp = prevUrp;
-            continue;
-        }
-
-        Assert(prevUrp == undorecord->Urp());
-        prevUrp = undorecord->Blkprev();
-        slotPrevUrp = prevUrp;
+        slotPrevUrp = undorecord->Blkprev();
 
         TransactionId oldestXid PG_USED_FOR_ASSERTS_ONLY =
             pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
@@ -573,8 +514,6 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
         }
 
         last_record_cid = undorecord->Cid();
-        last_record_xid = undorecord->Xid();
-
         switch (undotype) {
             case UNDO_INSERT: {
                 ExecuteUndoForInsert(relationData.relation, buffer, undorecord->Offset(), undorecord->Xid());
@@ -651,13 +590,16 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
             default:
                 ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
         }
-        bool continue_rollback =
-            _get_valid_blkprev_undo_record(undorecord, xid, blkno, is_sync_rollback, upersistence, next_subxid,
-                &need_advance_cur_idx);
-        if (!continue_rollback) {
+        if (undorecord->Blkprev() == INVALID_UNDO_REC_PTR) {
             break;
         }
-    } while (true);
+        undorecord->Reset2Blkprev();
+        rc = FetchUndoRecord(undorecord, NULL, InvalidBlockNumber, InvalidOffsetNumber,
+            InvalidTransactionId, false, NULL);
+        if (rc != UNDO_TRAVERSAL_COMPLETE) {
+            break;
+        }
+    } while (_is_undo_record_need_apply(undorecord, xid, blkno, is_sync_rollback));
 
     /*
      * If this is the first undo record created by this top transaction xid,
