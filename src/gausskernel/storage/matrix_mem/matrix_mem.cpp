@@ -38,7 +38,7 @@ static constexpr auto BASE_NID = "";
 int MaxtrixMemLoadSymbol(char *symbol, void **symLibHandle)
 {
     const char *dlsymErr = NULL;
-    *symLibHandle = dlsym(g_instance.matrix_mem_cxt.matrix_mem_func.handle, symbol);
+    *symLibHandle = dlsym(g_matrixMemFunc.handle, symbol);
     dlsymErr = dlerror();
     if (dlsymErr != NULL) {
         ereport(WARNING, (errmsg("matrix mem load symbol: %s, error: %s", symbol, dlsymErr)));
@@ -112,7 +112,7 @@ void MatrixMemFuncInit(char* ubsMemPath)
         return;
     }
     /* succeeded to load */
-    g_instance.matrix_mem_cxt.matrix_mem_inited = true;
+    g_matrixMemFunc.matrix_mem_inited = true;
 }
 
 void MatrixMemFuncUnInit()
