@@ -40,6 +40,7 @@
 #include "commands/online_ddl_globalhash.h"
 #include "commands/online_ddl_util.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_ub_link_status.h"
 #include "funcapi.h"
 #include "gaussdb_version.h"
 #include "libpq/ip.h"
@@ -259,6 +260,7 @@ extern Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS);
 extern Datum get_local_rel_iostat(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS);
 extern Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS);
+extern Datum ss_ub_link_available(PG_FUNCTION_ARGS);
 extern Datum pv_session_stat(PG_FUNCTION_ARGS);
 extern Datum pv_session_memory(PG_FUNCTION_ARGS);
 
@@ -9571,6 +9573,14 @@ Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS)
 
     pfree_ext(statusCtx);
     SRF_RETURN_DONE(funcctx);
+}
+
+/*
+ * Whether the UB cache link is currently usable. 
+ */
+Datum ss_ub_link_available(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(SSIsUbLinkAvailable());
 }
 
 const char* SessionStatisticsTypeName[N_TOTAL_SESSION_STATISTICS_TYPES] = {"n_commit",

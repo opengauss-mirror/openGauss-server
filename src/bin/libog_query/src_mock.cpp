@@ -1701,7 +1701,7 @@ bool raw_parser_opengauss_dolphin(const char* str, const char* typelist_p, const
         "spgrescan",  "spgrestrpos",  "spg_text_choose",  "spg_text_config",  "spg_text_inner_consistent",
         "spg_text_leaf_consistent",  "spg_text_picksplit",  "spgvacuumcleanup",  "split_part",  "sqrt",
         "ss_buffer_ctrl",  "ss_transaction_sync_stat",  "ss_txnstatus_cache_stat",  "standby_statement_history",
-        "start_collect_workload",  "statement_detail_decode",  "statement_timestamp",
+        "start_collect_workload",  "ss_ub_link_available",  "statement_detail_decode",  "statement_timestamp",
         "statement_trace_decode",  "std",  "stddev",
         "stddev_pop",  "stddev_samp",  "step",  "strcmp",  "string_agg",  "string_agg_finalfn",
         "string_agg_transfn",  "string_to_array",  "strip",  "strpos",  "str_to_date",  "subdate",
