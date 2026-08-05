@@ -572,7 +572,12 @@ HashJoinTbl::HashJoinTbl(VecHashJoinState* runtime_context)
 
     SetJoinType();
 
-    if (m_joinType == HASH_JOIN_SEMI || m_joinType == HASH_JOIN_RIGHT_SEMI || m_joinType == HASH_JOIN_RIGHT_ANTI) {
+    /*
+     * RIGHT_ANTI_FULL reuses rightAntiJoinT/rightAntiJoinWithQualT in bindingFp(),
+     * so it needs the same auxiliary cellPoint array as RIGHT_ANTI/RIGHT_SEMI.
+     */
+    if (m_joinType == HASH_JOIN_SEMI || m_joinType == HASH_JOIN_RIGHT_SEMI || m_joinType == HASH_JOIN_RIGHT_ANTI ||
+        m_joinType == HASH_JOIN_RIGHT_ANTI_FULL) {
         cellPoint = (hashCell**)palloc(BatchMaxSize * sizeof(hashCell*));
     } else
         cellPoint = NULL;
@@ -3694,7 +3699,7 @@ void HashJoinTbl::ResetNecessary()
     /* For partition wise join, need to rescan right trees plan */
     if (!m_runtime->js.ps.plan->ispwj && m_strategy == MEMORY_HASH && m_runtime->js.ps.righttree->chgParam == NULL &&
         !((VecHashJoin*)m_runtime->js.ps.plan)->rebuildHashTable && m_runtime->js.jointype != JOIN_RIGHT_SEMI &&
-        m_runtime->js.jointype != JOIN_RIGHT_ANTI) {
+        m_runtime->js.jointype != JOIN_RIGHT_ANTI && m_runtime->js.jointype != JOIN_RIGHT_ANTI_FULL) {
         /* Okay to reuse the hash table; needn't rescan inner, either. */
         m_runtime->joinState = HASH_PROBE;
         m_probeStatus = PROBE_FETCH;
