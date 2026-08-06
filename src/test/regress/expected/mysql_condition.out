@@ -141,7 +141,7 @@ end;
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CONTEXT:  SQL statement "create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2)"
 PL/pgSQL function inline_code_block line 6 at SQL statement
-NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD or ZLIB algorithm.
 -- sqlexception
 declare
     a int;
@@ -185,7 +185,7 @@ end;
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CONTEXT:  SQL statement "create table t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2)"
 PL/pgSQL function inline_code_block line 11 at SQL statement
-NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD algorithm.
+NOTICE:  SQLSTATE = 02002, SQLCODE = 33554560, SQLERRM = compress_level should be used with ZSTD or ZLIB algorithm.
 declare
     a int;
 begin
