@@ -35,6 +35,7 @@
 #include "access/ub_sigbus_handler.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_ub_link_status.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/sinvaladt.h"
@@ -144,6 +145,23 @@ void SSGetTransactionSyncStatus(SsTxnSyncStatusT *status, uint32 count)
         g_instance.dms_cxt.SSDFxStats.txn_sync_status,
         sizeof(g_instance.dms_cxt.SSDFxStats.txn_sync_status));
     securec_check_c(rc, "\0", "\0");
+}
+
+/*
+ * Collect the real-time availability of the whole UB cache link.
+ */
+bool SSIsUbLinkAvailable(void)
+{
+    bool configured = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb);
+    bool memAccess = g_instance.shmem_cxt.UBMemAccessEnabled.load(std::memory_order_acquire);
+    bool inReform = SS_IN_REFORM;
+    bool shmemReady = (g_instance.shmem_cxt.UBTxnCachePtr != NULL) &&
+        (g_instance.shmem_cxt.UBClogBufPtr != NULL) &&
+        (g_instance.shmem_cxt.UBCSNLogBufPtr != NULL) &&
+        (g_instance.shmem_cxt.UBSnapshotBufPtr != NULL) &&
+        (g_instance.shmem_cxt.UBOldestXminBufPtr != NULL);
+
+    return SSUbLinkResolveAvailable(configured, memAccess, shmemReady, inReform);
 }
 
 static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
