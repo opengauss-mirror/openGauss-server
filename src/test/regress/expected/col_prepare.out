@@ -375,13 +375,13 @@ explain (costs off, verbose on) execute p6;
 
 prepare p7 as  select a from prepare_table_01 where current_date<'2013-07-20' ;
 explain (costs off, verbose on) execute p7;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  Row Adapter
    Output: a
    ->  Vector Result
          Output: a
-         One-Time Filter: false
+         One-Time Filter: (text_date('now'::text) < '07-20-2013'::date)
          ->  CStore Scan on vector_distribute_prepare.prepare_table_01
                Output: a
 (7 rows)

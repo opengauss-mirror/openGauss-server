@@ -33,3 +33,6 @@ AS 'bm25_table_stat'
 LANGUAGE INTERNAL
 VOLATILE NOT FENCED NOT SHIPPABLE;
 COMMENT ON FUNCTION pg_catalog.bm25_table_stat(text, text, text, text) IS 'NULL';
+
+-- Mark text_date(text) as stable because text_date('now') depends on statement start timestamp.
+ALTER FUNCTION pg_catalog.text_date(text) STABLE;
