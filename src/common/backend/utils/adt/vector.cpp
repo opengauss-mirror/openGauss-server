@@ -1035,6 +1035,18 @@ Datum vector_norm(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Compat function for l2_norm(unknown) type
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(l2_norm_unknown_compat);
+Datum l2_norm_unknown_compat(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("This input type is not supported for l2_norm()"),
+             errhint("Use explicit casts to vector, sparsevec, or halfvec.")));
+}
+
+/*
  * Normalize a vector with the L2 norm
  */
 PGDLLEXPORT PG_FUNCTION_INFO_V1(l2_normalize);

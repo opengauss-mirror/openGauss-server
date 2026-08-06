@@ -83,6 +83,7 @@ Datum cosine_distance(PG_FUNCTION_ARGS);
 Datum vector_spherical_distance(PG_FUNCTION_ARGS);
 Datum vector_dims(PG_FUNCTION_ARGS);
 Datum vector_norm(PG_FUNCTION_ARGS);
+Datum l2_norm_unknown_compat(PG_FUNCTION_ARGS);
 Datum vector_add(PG_FUNCTION_ARGS);
 Datum vector_sub(PG_FUNCTION_ARGS);
 Datum vector_le(PG_FUNCTION_ARGS);
