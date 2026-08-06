@@ -1290,6 +1290,7 @@ static void KnlTUndoInit (knl_t_undo_context* undoCtx)
     }
     undoCtx->transUndoSize = 0;
     undoCtx->fetchRecord = false;
+    undoCtx->curSequence = 1;
 }
 
 static void KnlTUndorecyclerInit(knl_t_undorecycler_context* undorecyclerCxt)

@@ -221,7 +221,8 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
 }
 
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
-    UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel, bool is_async_rollback, undo::TransactionSlot *slot)
+    UndoSlotPtr slotPtr, bool isTopTxn, UndoPersistence plevel, bool is_async_rollback, undo::TransactionSlot *slot,
+    bool need_check_rollback)
 {
     Assert(toUrecptr != INVALID_UNDO_REC_PTR && fromUrecptr != INVALID_UNDO_REC_PTR);
     Assert(slotPtr != INVALID_UNDO_REC_PTR);
@@ -231,7 +232,8 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
     }
 
     if (isTopTxn) {
-        if (!is_async_rollback && plevel != UNDO_PERSISTENT_BUTT && slot != NULL) {
+        if (!is_async_rollback && (likely(!t_thrd.ustore_cxt.used_smp) || unlikely(need_check_rollback))
+            && plevel != UNDO_PERSISTENT_BUTT && slot != NULL) {
             UndoRecPtr prev = undo::GetPrevUrp(slot->EndUndoPtr());
             if (prev != fromUrecptr || slot->StartUndoPtr() != toUrecptr) {
                 (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), isTopTxn, true,
@@ -349,8 +351,10 @@ bool _is_undo_record_need_apply(UndoRecord* record, TransactionId xid, BlockNumb
         return false;
     }
 
+    TransactionState s = GetCurrentTransactionState();
+    // record->sub_xid() >> 32 is to get curSequence from undo record
     if (is_sync_rollback && IsSubTransaction() &&
-        (!record->ContainSubXact() || record->sub_xid() < GetCurrentTransactionId())) {
+        (!record->ContainSubXact() || (record->sub_xid() >> SUBXID_BITS) < s->curSequence)) {
         return false;
     }
     return true;
