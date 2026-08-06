@@ -47,6 +47,18 @@ struct CfsExtentHeader {
     CfsExtentAddress cfsExtentAddress[FLEXIBLE_ARRAY_MEMBER];
 };
 
+static_assert(CFS_EXTENT_SIZE == 128, "CFS extent size must remain compatible with openGauss 6.0");
+static_assert(CFS_LOGIC_BLOCKS_PER_EXTENT == 127,
+    "CFS logical blocks per extent must remain compatible with openGauss 6.0");
+static_assert(ALLOCATE_CHUNK_USAGE_LEN == 127,
+    "CFS chunk allocation bitmap size must remain compatible with openGauss 6.0");
+static_assert(offsetof(CfsExtentHeader, n_fragment_chunks) == 12,
+    "CFS fragment chunk count offset must remain compatible with openGauss 6.0");
+static_assert(offsetof(CfsExtentHeader, allocated_chunk_usages) == 14,
+    "CFS chunk allocation bitmap offset must remain compatible with openGauss 6.0");
+static_assert(offsetof(CfsExtentHeader, cfsExtentAddress) == 144,
+    "CFS extent address offset must remain compatible with openGauss 6.0");
+
 struct CfsExtInfo {
     RelFileNode rnode;
     ForkNumber forknum;

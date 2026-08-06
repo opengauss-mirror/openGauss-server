@@ -1,0 +1,12 @@
+BEGIN;
+CREATE SCHEMA cfs_upgrade_compatibility;
+
+CREATE TABLE cfs_upgrade_compatibility.compressed_table(id INTEGER) WITH (compresstype = 2);
+
+-- Compatible compressed relations must not block either upgrade path.
+\set ECHO none
+\i @abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_maindb/upgrade_catalog_maindb_93_035.sql
+\i @abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_otherdb/upgrade_catalog_otherdb_93_035.sql
+\set ECHO all
+
+ROLLBACK;
