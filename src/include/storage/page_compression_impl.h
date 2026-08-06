@@ -35,6 +35,8 @@
 
 #include <zstd.h>
 
+#include <zlib.h>
+
 #define DEFAULT_ZSTD_COMPRESSION_LEVEL (1)
 #define MIN_ZSTD_COMPRESSION_LEVEL ZSTD_minCLevel()
 #define MAX_ZSTD_COMPRESSION_LEVEL ZSTD_maxCLevel()
@@ -1268,6 +1270,9 @@ int CompressPageBufferBound(const char* page, uint8 algorithm)
         case COMPRESS_ALGORITHM_PGZSTD:
             compressedDstBound = BLCKSZ + sizeof(uint32);
             break;
+        case COMPRESS_ALGORITHM_ZLIB:
+            compressedDstBound = compressBound(BLCKSZ - srcHeaderSize);
+            break;
         default:
             return -1;
     }
@@ -1322,6 +1327,19 @@ int DecompressPage(const char* src, char* dst)
  *		    -1 for compression fail
  *		    COMPRESS_UNSUPPORTED_ERROR for unrecognized compression algorithm
  */
+/*
+ * RecomputeZlibCompressLevel
+ *     Remap the user-specified compress_level into the zlib range [Z_BEST_SPEED, Z_BEST_COMPRESSION].
+ *     Returns Z_DEFAULT_COMPRESSION when the input level is out of range.
+ */
+static inline int RecomputeZlibCompressLevel(int level)
+{
+    if (level == 0 || level < MIN_ZSTD_COMPRESSION_LEVEL || level > MAX_ZSTD_COMPRESSION_LEVEL) {
+        return Z_DEFAULT_COMPRESSION;
+    }
+    return (level + MAX_ZSTD_COMPRESSION_LEVEL) % (Z_BEST_COMPRESSION - Z_BEST_SPEED + 1) + Z_BEST_SPEED;
+}
+
 template <uint8 pagetype>
 int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option)
 {
@@ -1396,6 +1414,19 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
             if (ZSTD_isError(compressed_size)) {
                 return -1;
             }
+            break;
+        }
+        case COMPRESS_ALGORITHM_ZLIB: {
+            level = RecomputeZlibCompressLevel(level);
+            const char *zlib_src = real_ByteConvert ? src_copy : src;
+            uLongf zlib_dest_len = (uLongf)compressd_buffer_size;
+            int zrc = compress2((Bytef *)data, &zlib_dest_len,
+                                    (const Bytef *)(zlib_src + sizeOfHeaderData),
+                                    BLCKSZ - sizeOfHeaderData, level);
+            if (zrc != Z_OK) {
+                return -1;
+            }
+            compressed_size = (int)zlib_dest_len;
             break;
         }
         default:
@@ -2236,6 +2267,15 @@ int TemplateDecompressPage(const char* src, char* dst)
             }
 #endif
             break;
+        case COMPRESS_ALGORITHM_ZLIB: {
+            uLongf zlib_dst_len = BLCKSZ - headerSize;
+            rc = uncompress((Bytef *)(dst + headerSize), &zlib_dst_len, (const Bytef *)data, size);
+            if (rc != Z_OK) {
+                return -1;
+            }
+            decompressed_size = (int)zlib_dst_len;
+            break;
+        }
         default:
             return COMPRESS_UNSUPPORTED_ERROR;
             break;

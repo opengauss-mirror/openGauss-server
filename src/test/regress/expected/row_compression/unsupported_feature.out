@@ -1,9 +1,9 @@
 create schema unsupported_feature;
--- unspport compressType: 4
-CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=4, compress_chunk_size=1024);
+-- unspport compressType: 5
+CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=5, compress_chunk_size=1024);
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
-ERROR:  value 4 out of bounds for option "compresstype"
-DETAIL:  Valid values are between "0" and "2".
+ERROR:  value 5 out of bounds for option "compresstype"
+DETAIL:  Valid values are between "0" and "4".
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
@@ -90,10 +90,10 @@ alter table unsupported_feature.t_rowcompress_0007 set (compress_byte_convert=tr
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.t_rowcompress_0007 set (compress_level=31); --failed
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
-ERROR:  compress_level should be used with ZSTD algorithm.
+ERROR:  compress_level should be used with ZSTD or ZLIB algorithm.
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2); -- failed
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
-ERROR:  compress_level should be used with ZSTD algorithm.
+ERROR:  compress_level should be used with ZSTD or ZLIB algorithm.
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 CREATE TABLE unsupported_feature.index_test(id int, c1 text);
@@ -113,7 +113,7 @@ alter table unsupported_feature.test set(Compresstype=1); -- success
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 alter table unsupported_feature.test set(Compress_level=3); -- failed
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
-ERROR:  compress_level should be used with ZSTD algorithm.
+ERROR:  compress_level should be used with ZSTD or ZLIB algorithm.
 create table lm_rcp_4 (c1 int,c2 varchar2,c3 number,c4 money,c5 CHAR(20),c6 CLOB,c7 blob,c8 DATE,c9 BOOLEAN,c10 TIMESTAMP,c11 point,columns12 cidr) with(Compresstype=2,Compress_chunk_size=512)
     partition by list(c1) subpartition by range(c3)(
     partition ts1 values(1,2,3,4,5)(subpartition ts11 values less than(500),subpartition ts12 values less than(5000),subpartition ts13 values less than(MAXVALUE)),

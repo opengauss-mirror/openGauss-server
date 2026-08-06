@@ -1063,6 +1063,7 @@ test: row_compression/pg_table_size row_compression/unsupported_feature row_comp
 test: row_compression/twophase
 test: pldebugger_shutdown
 test: row_compression/row_compression_basebackup
+test: row_compression/cfs_upgrade_guard
 test: component_view_enhancements single_node_user_mapping
 # reindex concurrently
 #test: reindex_concurrently

@@ -10,8 +10,8 @@
 #include "storage/smgr/relfilenode.h"
 #include "storage/smgr/smgr.h"
 
-/* 129 blocks per extent */
-constexpr int CFS_EXTENT_SIZE = 129;
+/* Keep the CFS on-disk extent layout aligned with openGauss 7.0. */
+constexpr int CFS_EXTENT_SIZE = 128;
 constexpr int CFS_EXTENT_COUNT_PER_FILE = RELSEG_SIZE / CFS_EXTENT_SIZE;
 constexpr int CFS_MAX_BLOCK_PER_FILE = CFS_EXTENT_COUNT_PER_FILE * CFS_EXTENT_SIZE;
 
