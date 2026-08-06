@@ -1013,6 +1013,7 @@ typedef struct knl_t_undo_context {
     uint64 slotPtr[UNDO_PERSISTENCE_LEVELS];
     uint64 transUndoSize;
     bool fetchRecord;
+    uint64 curSequence;
 } knl_t_undo_context;
 
 typedef struct knl_u_ustore_context {

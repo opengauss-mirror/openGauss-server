@@ -289,6 +289,7 @@ typedef struct {
     TransactionId* allDiffXids; /*different xids between GTM and the local */
     uint32 DiffXidsCount;       /*number of different xids between GTM and the local*/
     LocalSysDBCache *lsc_dbcache;
+    uint64 curSequence;
 } StreamTxnContext;
 
 /*
@@ -383,6 +384,7 @@ struct TransactionStateData {
                                                           * parent if any */
     bool perform_undo;
     bool  subXactLock;
+    uint64 curSequence;
 };
 
 typedef struct {

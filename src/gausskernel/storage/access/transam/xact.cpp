@@ -2457,6 +2457,7 @@ static void StartTransaction(bool begin_on_gtm)
 
     /* reinitialize within-transaction counters */
     s->subTransactionId = TopSubTransactionId;
+    s->curSequence = 1;
     t_thrd.xact_cxt.currentSubTransactionId = TopSubTransactionId;
     t_thrd.xact_cxt.currentCommandId = FirstCommandId;
     t_thrd.xact_cxt.currentCommandIdUsed = false;
@@ -3164,6 +3165,7 @@ static void CommitTransaction(bool STP_commit)
 
     s->transactionId = InvalidTransactionId;
     s->subTransactionId = InvalidSubTransactionId;
+    s->curSequence = 1;
     s->nestingLevel = 0;
     s->gucNestLevel = 0;
     s->childXids = NULL;
@@ -3638,6 +3640,7 @@ static void PrepareTransaction(bool STP_commit)
 
     s->transactionId = InvalidTransactionId;
     s->subTransactionId = InvalidSubTransactionId;
+    s->curSequence = 1;
     s->nestingLevel = 0;
     s->gucNestLevel = 0;
     s->childXids = NULL;
@@ -4144,6 +4147,7 @@ static void CleanupTransaction(void)
 
     s->transactionId = InvalidTransactionId;
     s->subTransactionId = InvalidSubTransactionId;
+    s->curSequence = 1;
     s->nestingLevel = 0;
     s->gucNestLevel = 0;
     s->childXids = NULL;
@@ -6825,6 +6829,8 @@ static void PushTransaction(void)
     s->blockState = TBLOCK_SUBBEGIN;
     GetUserIdAndSecContext(&s->prevUser, &s->prevSecContext);
     s->prevXactReadOnly = u_sess->attr.attr_common.XactReadOnly;
+    (void)pg_atomic_fetch_add_u64(&t_thrd.undo_cxt.curSequence, 1);
+    s->curSequence = pg_atomic_read_u64(&t_thrd.undo_cxt.curSequence);
 
     CurrentTransactionState = s;
 
@@ -8147,6 +8153,7 @@ void StreamTxnContextSaveXact(StreamTxnContext *stc)
 {
     STCSaveElem(stc->CurrentTransactionState, CurrentTransactionState);
     STCSaveElem(stc->subTransactionId, CurrentTransactionState->subTransactionId);
+    STCSaveElem(stc->curSequence, pg_atomic_read_u64(&t_thrd.undo_cxt.curSequence));
     STCSaveElem(stc->currentSubTransactionId, t_thrd.xact_cxt.currentSubTransactionId);
     STCSaveElem(stc->currentCommandId, t_thrd.xact_cxt.currentCommandId);
     STCSaveElem(stc->currentCommandIdUsed, t_thrd.xact_cxt.currentCommandIdUsed);
@@ -8168,6 +8175,7 @@ void StreamTxnContextRestoreXact(StreamTxnContext *stc)
     STCRestoreElem(stc->xactStopTimestamp, t_thrd.xact_cxt.xactStopTimestamp);
     STCRestoreElem(stc->GTMxactStartTimestamp, t_thrd.xact_cxt.GTMxactStartTimestamp);
     STCRestoreElem(stc->stmtSystemTimestamp, t_thrd.time_cxt.stmt_system_timestamp);
+    STCRestoreElem(stc->curSequence, CurrentTransactionState->curSequence);
 }
 
 void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
@@ -8185,6 +8193,7 @@ void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
      */
     s->subTransactionId = stc->subTransactionId;
     s->transactionId = stc->txnId;
+    s->curSequence = stc->curSequence;
 
     /*
      * initialize current transaction state fields
@@ -8382,7 +8391,7 @@ UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence)
 }
 
 void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpRollback,
-    undo::TransactionSlot *slot, UndoSlotPtr slotPtr)
+    undo::TransactionSlot *slot, UndoSlotPtr slotPtr, bool need_check_rollback)
 {
     if (!u_sess->attr.attr_storage.enable_ustore_sync_rollback &&
         !(IsSubTransaction() || pLevel == UNDO_TEMP)) {
@@ -8397,7 +8406,7 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpR
     PG_TRY();
     {
         ExecuteUndoActions(slot->XactId(), s->latest_urp[pLevel], s->first_urp[pLevel],
-            slotPtr, !IsSubTransaction(), pLevel, false, slot);
+            slotPtr, !IsSubTransaction(), pLevel, false, slot, need_check_rollback);
     }
     PG_CATCH();
     {
@@ -8450,6 +8459,7 @@ void ApplyUndoActions(bool stpRollback)
             t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
             t_thrd.undo_cxt.slots[i] = NULL;
             t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+            pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
         }
         return;
     }
@@ -8471,9 +8481,12 @@ void ApplyUndoActions(bool stpRollback)
                 t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
                 t_thrd.undo_cxt.slots[i] = NULL;
                 t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+                pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
             }
         }
     }
+
+    int last_used_stream_zone[UNDO_PERSISTENCE_LEVELS] = {-1, -1, -1};
 
     if (t_thrd.ustore_cxt.m_undozone_array != NULL) {
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
@@ -8484,6 +8497,7 @@ void ApplyUndoActions(bool stpRollback)
             for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
                 if (m_undozone->trans_mgr_ptr.latest_urp[j] || m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
                     needRollback = true;
+                    last_used_stream_zone[j] = i;
                 }
             }
         }
@@ -8545,6 +8559,7 @@ void ApplyUndoActions(bool stpRollback)
         AtEOXact_Snapshot(false); /* and release the transaction's snapshots */
         s->transactionId = InvalidTransactionId;
         s->subTransactionId = TopSubTransactionId;
+        s->curSequence = 1;
         s->blockState = TBLOCK_UNDO;
     }
 
@@ -8557,7 +8572,7 @@ void ApplyUndoActions(bool stpRollback)
         }
         if (s->latest_urp[i]) {
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
-            TryExecuteUndoActions(s, (UndoPersistence)i, stpRollback, slot, t_thrd.undo_cxt.slotPtr[i]);
+            TryExecuteUndoActions(s, (UndoPersistence)i, stpRollback, slot, t_thrd.undo_cxt.slotPtr[i], false);
             pgstat_report_waitstatus(oldStatus);
         } else if (!IsSubTransaction() && t_thrd.undo_cxt.slotPtr[i] != INVALID_UNDO_SLOT_PTR) {
             Assert(slot != NULL && topXid == slot->XactId());
@@ -8591,7 +8606,7 @@ void ApplyUndoActions(bool stpRollback)
                 TransactionStateData sub_s = m_undozone->trans_mgr_ptr;
                 if (sub_s.latest_urp[j]) {
                     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
-                    TryExecuteUndoActions(&sub_s, (UndoPersistence)j, stpRollback, tmp_slot, m_undozone->undo_cxt.slotPtr[j]);
+                    TryExecuteUndoActions(&sub_s, (UndoPersistence)j, stpRollback, tmp_slot, m_undozone->undo_cxt.slotPtr[j], (last_used_stream_zone[j] == i));
                     pgstat_report_waitstatus(oldStatus);
                 } else if (!IsSubTransaction() && m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
                     Assert(tmp_slot != NULL && topXid == tmp_slot->XactId());
@@ -8653,7 +8668,7 @@ extern void ResetUndoActionsInfo(void)
         CurrentTransactionState->latest_urp_xact[i] = INVALID_UNDO_REC_PTR;
     }
 
-    if (IsSubTransaction()) {
+    if (IsSubTransaction() || StreamThreadAmI()) {
         return;
     }
 
@@ -8662,6 +8677,7 @@ extern void ResetUndoActionsInfo(void)
         t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
         t_thrd.undo_cxt.slots[i] = NULL;
         t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+        pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
     }
 
     if (likely(!t_thrd.ustore_cxt.used_smp)) {
