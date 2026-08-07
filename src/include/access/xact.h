@@ -548,7 +548,7 @@ extern void xactApplyXLogDropRelation(XLogReaderState* record);
 
 extern void StreamTxnContextSaveXact(StreamTxnContext* stc);
 extern void StreamTxnContextRestoreXact(StreamTxnContext* stc);
-extern void StreamTxnContextSetTransactionState(StreamTxnContext* stc);
+extern void StreamTxnContextSetTransactionState(StreamTxnContext* stc, StreamProducer *m_producer_undozone);
 extern void StreamTxnContextSetSnapShot(void* snapshotPtr);
 extern void StreamTxnContextSetMyPgXactXmin(TransactionId xmin);
 

@@ -1307,7 +1307,14 @@ static void StartupStreamThread(StreamState* node, bool need_save_undo)
         }
     } else {
         if (need_save_undo) {
-            transactionCxt.txnId = GetTopTransactionId();
+            if (IsSubTransaction() && XLogLogicalInfoActive()) {
+                transactionCxt.txnId = GetCurrentTransactionId();
+            } else if (IsSubTransaction()) {
+                (void)GetTopTransactionId();
+                transactionCxt.txnId = GetCurrentTransactionIdIfAny();
+            } else {
+                transactionCxt.txnId = GetTopTransactionId();
+            }
         } else {
             transactionCxt.txnId = GetCurrentTransactionId();
         }
