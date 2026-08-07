@@ -103,6 +103,12 @@ include(build_options)
 
 include_directories(${PROJECT_SRC_DIR}/include ${PROJECT_INCLUDE_DIR})
 include_directories(${KERBEROS_INCLUDE_PATH} ${LIBOBS_INCLUDE_PATH} ${LIBCURL_INCLUDE_PATH} ${LIBOPENSSL_INCLUDE_PATH})
+
+file(WRITE ${CMAKE_SOURCE_DIR}/cmake_check.mk
+    "CMAKE_CHECK_BUILD_DIR := ${CMAKE_BINARY_DIR}\n"
+    "CMAKE_CHECK_INSTALL_PREFIX := ${CMAKE_INSTALL_PREFIX}\n"
+)
+
 add_subdirectory(${openGauss}/contrib)
 add_subdirectory(${openGauss}/src)
 

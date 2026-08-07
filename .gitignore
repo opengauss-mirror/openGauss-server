@@ -24,3 +24,4 @@ objfiles.txt
 
 /build/script/version.cfg
 /cmake_build
+/cmake_check.mk
