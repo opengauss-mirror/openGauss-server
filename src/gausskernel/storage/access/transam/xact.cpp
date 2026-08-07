@@ -8175,7 +8175,7 @@ void StreamTxnContextRestoreXact(StreamTxnContext *stc)
     STCRestoreElem(stc->curSequence, CurrentTransactionState->curSequence);
 }
 
-void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
+void StreamTxnContextSetTransactionState(StreamTxnContext *stc, StreamProducer *producer)
 {
     TransactionState srcTranState = (TransactionState)stc->CurrentTransactionState;
     TransactionState s = CurrentTransactionState;
@@ -8192,6 +8192,29 @@ void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
     s->transactionId = stc->txnId;
     s->curSequence = stc->curSequence;
 
+    /* undo zone */
+    StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+
+    int rc = 0;
+    if (stream_node_group != NULL && stream_node_group->get_need_copyback_undozone()) {
+        rc = memcpy_s(&t_thrd.undo_cxt, sizeof(knl_t_undo_context),
+            &producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context));
+        securec_check(rc, "\0", "\0");
+
+        rc = memcpy_s(&s->first_urp, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
+            &producer->m_producer_undozone->trans_mgr_ptr.first_urp,
+            sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(&s->last_urp, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
+            &producer->m_producer_undozone->trans_mgr_ptr->last_urp,
+            sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(&s->latest_upr_xact, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
+            &producer->m_producer_undozone->trans_mgr_ptr->latest_upr_xact,
+            sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
+        securec_check(rc, "\0", "\0");
+    }
+
     /*
      * initialize current transaction state fields
      */
@@ -8206,6 +8229,28 @@ void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
      */
     s->blockState = TBLOCK_INPROGRESS;
     s->name = srcTranState->name;
+
+    if (IsSubTransaction()) {
+        // palloc memory for current trans mgr, and copy values from s
+        TransactionState cur_s = (TransactionState)palloc0(sizeof(TransactionStateData));
+        rc = memcpy_s(cur_s, sizeof(TransactionStateData), s, sizeof(TransactionStateData));
+        securec_check(rc, "\0", "\0");
+
+        // look for top trans mgr
+        TransactionState top_s = s;
+        while (top_s->parent != NULL) {
+            top_s = top_s->parent;
+        }
+
+        // set current trans mgr to memory palloced above
+        TransactionState *cur_trans_mgr_ptr = &CurrentTransactionState;
+        *cur_trans_mgr_ptr = cur_s;
+
+        // copy top trans mgr from above
+        TransactionState top_xact = &TopTransactionStateData;
+        rc = memcpy_s(top_xact, sizeof(TransactionStateData), top_s, sizeof(TransactionStateData));
+        securec_check(rc, "\0", "\0");
+    }
 }
 
 /*
