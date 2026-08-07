@@ -18,7 +18,7 @@ BEGIN
     raise notice '%', cl;
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <root/>
 
 --(4)newDOMDocument(xmldoc IN xml)
@@ -33,7 +33,7 @@ BEGIN
     raise notice '%', cl;
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <PERSON>
   <NAME>ramesh</NAME>
 </PERSON>
@@ -50,7 +50,7 @@ BEGIN
     raise notice '%', cl;
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <PERSON>
   <NAME>ramesh</NAME>
 </PERSON>
@@ -151,7 +151,7 @@ NOTICE:  DOMDocument : N
 NOTICE:  DOMNode : N
 NOTICE:  DOMElement : N
 NOTICE:  DOMText : N
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <booklist type="science and engineering">
   <book category="python">
     <title>learning python</title>
@@ -227,8 +227,8 @@ END;
 /
 NOTICE:  DOMComment : N
 NOTICE:  DOMProcessingInstruction : N
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
-<?xml version="2.0"?>
+NOTICE:  
+
 <booklist type="science and engineering">
   <!--This is the introduction of books-->
   <book category="math">
@@ -301,7 +301,7 @@ BEGIN
 END;
 /
 NOTICE:  DOMCDataSection : N
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -385,7 +385,7 @@ BEGIN
     raise notice '%', wclob;
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <xml>
   <head id="headDoc"/>
   <body id="bodyDoc"/>
@@ -483,7 +483,7 @@ BEGIN
     raise notice '%', ('设置属性名后：' || cl);
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <booklist type="science and engineering">
   <book category="python">
     <book>learning python</book>
@@ -492,7 +492,7 @@ NOTICE:  <?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  设置属性名后：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  设置属性名后：
 <booklist type="science and engineering">
   <book category="python" num="">
     <book>learning python</book>
@@ -544,7 +544,7 @@ BEGIN
     raise notice '%', ('设置属性名后：' || wclob);
 END;
 /
-NOTICE:  设置属性名前：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  设置属性名前：
 <booklist type="science and engineering">
   <book>
     <title>learning math</title>
@@ -554,7 +554,7 @@ NOTICE:  设置属性名前：<?xml version="1.0" encoding="UTF8"?>
 </booklist>
 
 NOTICE:  DOMAttr : N
-NOTICE:  设置属性名后：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  设置属性名后：
 <booklist type="science and engineering">
   <book category="">
     <title>learning math</title>
@@ -598,7 +598,7 @@ BEGIN
     raise notice '%', ('设置属性名后：' || wclob);
 END;
 /
-NOTICE:  设置属性名前：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  设置属性名前：
 <booklist type="science and engineering">
   <book>
     <title>learning math</title>
@@ -607,7 +607,7 @@ NOTICE:  设置属性名前：<?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  设置属性名后：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  设置属性名后：
 <booklist type="science and engineering">
   <book category="">
     <title>learning math</title>
@@ -713,7 +713,7 @@ NOTICE:  writeToClob(DOMNode, clob):<book category="math">
 </book>
 
 NOTICE:  writeToClob(DOMNode, clob, number, number):<book category="math"><title>learning math</title><author>张三</author><pageNumber>561</pageNumber></book>
-NOTICE:  writeToClob(DOMDocument, clob, number, number):<?xml version="1.0" encoding="UTF8"?><booklist type="science and engineering"><book category="math"><title>learning math</title><author>张三</author><pageNumber>561</pageNumber></book><book category="Python"><title>learning Python</title><author>李四</author><pageNumber>600</pageNumber></book><book category="C++"><title>learning C++</title><author>王二</author><pageNumber>500</pageNumber></book></booklist>
+NOTICE:  writeToClob(DOMDocument, clob, number, number):<booklist type="science and engineering"><book category="math"><title>learning math</title><author>张三</author><pageNumber>561</pageNumber></book><book category="Python"><title>learning Python</title><author>李四</author><pageNumber>600</pageNumber></book><book category="C++"><title>learning C++</title><author>王二</author><pageNumber>500</pageNumber></book></booklist>
 NOTICE:  writeToBuffer(DOMNode, varchar2):<book category="math">
   <title>learning math</title>
   <author>张三</author>
@@ -820,7 +820,7 @@ BEGIN
 
 END;
 /
-NOTICE:  xml内容是:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  xml内容是:
 <booklist type="science and engineering">
   <!--这是第一个book节点-->
   <book category="math">
@@ -908,7 +908,7 @@ BEGIN
     raise notice '%', ('attr的LocalName:' || localName);
 END;
 /
-NOTICE:  xml内容是:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  xml内容是:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -982,7 +982,7 @@ BEGIN
     raise notice '%', ('The result is：' || case when haschild then 'Y' else 'N' end);
 END;
 /
-NOTICE:  xml内容是:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  xml内容是:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1055,7 +1055,7 @@ BEGIN
     raise notice '%', ('克隆（无子项）后:' ||wclob);
 END;
 /
-NOTICE:  克隆前:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  克隆前:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1074,7 +1074,7 @@ NOTICE:  克隆前:<?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  克隆（无子项）后:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  克隆（无子项）后:
 <booklist type="science and engineering">
   <book category="math"/>
   <book category="math">
@@ -1146,7 +1146,7 @@ BEGIN
     raise notice '%', ('克隆（有子项）后:' ||wclob);
 END;
 /
-NOTICE:  克隆前:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  克隆前:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1165,7 +1165,7 @@ NOTICE:  克隆前:<?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  克隆（有子项）后:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  克隆（有子项）后:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1285,7 +1285,7 @@ BEGIN
     raise notice '%', (wclob);
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1340,7 +1340,7 @@ BEGIN
     raise notice '%', ('The node is : ' || case when isNull then 'Y' else 'N' end);
 END;
 /
-NOTICE:  <?xml version="1.0" encoding="UTF8"?>
+NOTICE:  
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1426,7 +1426,7 @@ BEGIN
     raise notice '%', ('第一次appendchild后:' ||buf);
 END;
 /
-NOTICE:  XML内容:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  XML内容:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1441,7 +1441,7 @@ NOTICE:  book内容:<book category="math">
   <pageNumber>561</pageNumber>
 </book>
 
-NOTICE:  第一次appendchild后:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  第一次appendchild后:
 <booklist type="science and engineering">
   <test>testtext</test>
   <book category="math">
@@ -1451,7 +1451,7 @@ NOTICE:  第一次appendchild后:<?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  第一次appendchild后:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  第一次appendchild后:
 <booklist type="science and engineering">
   <test>testtext</test>
   <test>testtext</test>
@@ -1515,7 +1515,7 @@ BEGIN
     raise notice '%', ('appendchild后:' ||buf);
 END;
 /
-NOTICE:  XML内容:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  XML内容:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1525,7 +1525,7 @@ NOTICE:  XML内容:<?xml version="1.0" encoding="UTF8"?>
   </book>
 </booklist>
 
-NOTICE:  appendchild后:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  appendchild后:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1591,7 +1591,7 @@ BEGIN
     END LOOP;
 END;
 /
-NOTICE:  XML内容:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  XML内容:
 <booklist type="science and engineering">
 <![CDATA[testcdata1]]>  <book category="math">
     <title>learning math</title>
@@ -1664,7 +1664,7 @@ BEGIN
 END;
 /
 NOTICE:  无关联document的节点:
-NOTICE:  有关联document的节点:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  有关联document的节点:
 <booklist type="science and engineering">
   <!--comment-->
 <![CDATA[cdata]]>  <book category="math">
@@ -1719,7 +1719,7 @@ BEGIN
     raise notice '%', ('XML内容:' ||buf); 
 END;
 /
-NOTICE:  XML内容:<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  XML内容:
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>
@@ -1795,7 +1795,7 @@ BEGIN
     raise notice '%', ('xml内容为：' || wclob);
 END;
 /
-NOTICE:  xml内容为：<?xml version="1.0" encoding="UTF8"?>
+NOTICE:  xml内容为：
 <booklist type="science and engineering">
   <book category="math">
     <title>learning math</title>

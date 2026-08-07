@@ -143,7 +143,7 @@ generate_test_cases:
 		printf 'test: plpython3u/plpython_unicode plpython3u/plpython_quote\n'  >> "$(TEST_CASE_FILE)"; \
 		printf 'test: plpython3u/plpython_composite\n'  >> "$(TEST_CASE_FILE)"; \
 		printf 'test: plpython3u/plpython_subtransaction\n'  >> "$(TEST_CASE_FILE)"; \
-		printf 'test: plpython3u/plplpython3u/plpython_unicode plpython3u/plpython_quotepython_drop\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plplpython3u/plpython_unicode plpython3u/plpython_quote plpython3u/python_drop\n'  >> "$(TEST_CASE_FILE)"; \
 		printf 'test: plpython3u/plpython_types\n'  >> "$(TEST_CASE_FILE)"; \
 		echo "appended plpython3u support content to $(TEST_CASE_FILE)"; \
  	fi
