@@ -779,7 +779,7 @@ void InvalidateSystemCaches(void)
 
 void InvalidateSessionSystemCaches(void)
 {
-    if (!EnableLocalSysCache()) {
+    if (!EnableLocalSysCache() && u_sess->cache_cxt.cache_header != NULL) {
         ResetCatalogCaches();
         RelationCacheInvalidate();
         PartitionCacheInvalidate();
