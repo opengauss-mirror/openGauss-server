@@ -314,6 +314,18 @@ select 10 as test01, 20 as test02 from generate_series(1,0) \gset pref_
 \echo :pref_x :pref_y
 \unset FETCH_COUNT
 
+\parallel on  
+select 1 \g
+select 1 \g /tmp/out.txt
+select 1 \g | cat
+select 1 \gset
+select 1 as c \gset vv
+select 1 as from \gset   
+\parallel off
+
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_core_dump.sql
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_without_off.sql
+
 \c regression;
 drop database test_sql;
 
