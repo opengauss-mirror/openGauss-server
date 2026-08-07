@@ -22,6 +22,7 @@
 #include <float.h>
 #include <math.h>
 #include <limits.h>
+#include <sys/sysinfo.h>
 #include <string>
 #include <set>
 #include "utils/elog.h"
@@ -172,6 +173,9 @@ const int MS_PER_S = 1000;
 const int BUFSIZE = 1024;
 const int MAX_CPU_NUMS = 104;
 const int MAXLENS = 5;
+const int DECIMAL_BASE = 10;
+const int DMS_SHM_UB_CPU_BIND_EXPAND_CAP = 256;
+const int DMS_SHM_UB_CPU_BIND_INNER_MAX = 512;
 const int SS_WORK_THREAD_POOL_MAX_CNT_UPPER = 128;
 const int SS_WORK_THREAD_POOL_MAX_CNT_LOWER = 16;
 /* options for cstore_insert_mode */
@@ -6915,6 +6919,113 @@ static bool check_ss_interconnect_type(char **newval, void **extra, GucSource so
             strcmp("SHM", *newval) == 0);
 }
 
+static const char *SkipSsShmUbCpuBindSpace(const char *p)
+{
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+        p++;
+    }
+    return p;
+}
+
+static bool ParseSsShmUbCpuBindLong(const char *start, const char *end, long *out)
+{
+    char *parseEnd = NULL;
+    const char *p = SkipSsShmUbCpuBindSpace(start);
+
+    errno = 0;
+    long val = strtol(p, &parseEnd, DECIMAL_BASE);
+    if (parseEnd == p || errno == ERANGE || val < INT_MIN || val > INT_MAX) {
+        return false;
+    }
+    parseEnd = (char *)SkipSsShmUbCpuBindSpace(parseEnd);
+    if (parseEnd != end) {
+        return false;
+    }
+    *out = val;
+    return true;
+}
+
+static bool AppendSsShmUbCpuBindRange(long lo, long hi, int *count)
+{
+    int ncpus = get_nprocs_conf();
+
+    if (lo > hi) {
+        return false;
+    }
+    for (long id = lo; id <= hi; id++) {
+        if (id < 0 || id >= (long)ncpus || *count >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        (*count)++;
+    }
+    return true;
+}
+
+static bool ParseSsShmUbCpuBindToken(const char *start, const char *end, int *count)
+{
+    const char *left = SkipSsShmUbCpuBindSpace(start);
+    const char *right = end;
+    const char *tilde = NULL;
+    long lo = 0;
+    long hi = 0;
+    long val = 0;
+    int ncpus = get_nprocs_conf();
+
+    while (right > left && (*(right - 1) == ' ' || *(right - 1) == '\t' ||
+        *(right - 1) == '\n' || *(right - 1) == '\r')) {
+        right--;
+    }
+    if (left == right) {
+        return false;
+    }
+
+    tilde = (const char *)memchr(left, '~', (size_t)(right - left));
+    if (tilde == NULL) {
+        if (!ParseSsShmUbCpuBindLong(left, right, &val)) {
+            return false;
+        }
+        if (val != -1L && (val < 0 || val >= (long)ncpus)) {
+            return false;
+        }
+        if (*count >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        (*count)++;
+        return true;
+    }
+
+    if (memchr(tilde + 1, '~', (size_t)(right - tilde - 1)) != NULL ||
+        !ParseSsShmUbCpuBindLong(left, tilde, &lo) ||
+        !ParseSsShmUbCpuBindLong(tilde + 1, right, &hi)) {
+        return false;
+    }
+    return AppendSsShmUbCpuBindRange(lo, hi, count);
+}
+
+static bool ParseSsShmUbCpuBindValue(const char *start, const char *end)
+{
+    const char *tokenStart = start;
+    int count = 0;
+
+    if (start == end) {
+        return true;
+    }
+    while (tokenStart <= end) {
+        const char *tokenEnd = (const char *)memchr(tokenStart, ',', (size_t)(end - tokenStart));
+        if (tokenEnd == NULL) {
+            tokenEnd = end;
+        }
+        if (!ParseSsShmUbCpuBindToken(tokenStart, tokenEnd, &count)) {
+            return false;
+        }
+        if (tokenEnd == end) {
+            break;
+        }
+        tokenStart = tokenEnd + 1;
+    }
+    return true;
+}
+
 static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource source)
 {
     (void)extra;
@@ -6922,10 +7033,7 @@ static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource
     if (newval == NULL || *newval == NULL || **newval == '\0') {
         return true;
     }
-    const char *s = *newval;
-    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
-        s++;
-    }
+    const char *s = SkipSsShmUbCpuBindSpace(*newval);
     if (*s != '[') {
         GUC_check_errdetail("Value must start with '['.");
         return false;
@@ -6936,6 +7044,14 @@ static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource
         GUC_check_errdetail("Value must end with ']'.");
         return false;
     }
+    if ((size_t)(rb - s) >= DMS_SHM_UB_CPU_BIND_INNER_MAX) {
+        GUC_check_errdetail("Value inside brackets is too long.");
+        return false;
+    }
+    if (*SkipSsShmUbCpuBindSpace(rb + 1) != '\0') {
+        GUC_check_errdetail("Unexpected characters after ']'.");
+        return false;
+    }
     for (const char *p = s; p < rb; p++) {
         if (*p == ' ' || *p == '\t' || *p == ',' || *p == '~' || *p == '-' ||
             (*p >= '0' && *p <= '9')) {
@@ -6943,6 +7059,10 @@ static bool check_ss_shm_ub_comm_cpu_bind(char** newval, void** extra, GucSource
         }
         GUC_check_errdetail("Unexpected character '%c' inside brackets; "
             "allowed: digits, commas, tildes, minus, spaces.", *p);
+        return false;
+    }
+    if (!ParseSsShmUbCpuBindValue(s, rb)) {
+        GUC_check_errdetail("CPU bind value is invalid.");
         return false;
     }
     return true;
