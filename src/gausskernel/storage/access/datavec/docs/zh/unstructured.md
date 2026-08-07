@@ -93,7 +93,7 @@ $ uv pip install unstructured[md] openai psycopg2-binary tqdm
 
 Unstructured 能够在 `unstructured` 数据中使用分块功能，通过 `partition` 功能检测元数据和文档元素，并将元素后处理成更有用的“块”，以用于检索增强生成 (RAG) 等用例。有关支持的输入格式的完整列表，请参阅[官方文档](https://docs.unstructured.io/open-source/introduction/supported-file-types)。
 
-本文以 [Markdown](https://gitcode.com/opengauss/docs/blob/master/docs/zh/datavec/vector_functions_and_operators.md) 文件作为源文件进行操作演示。
+本文以 [Markdown](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/vector_functions_and_operators.md) 文件作为源文件进行操作演示。
 
 先将文档进行分区处理。
 

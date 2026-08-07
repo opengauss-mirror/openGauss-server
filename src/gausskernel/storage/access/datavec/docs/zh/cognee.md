@@ -199,7 +199,7 @@ await prune.prune_system(metadata=True)
 
 **（5）预处理文档**
 
-本文使用 [DataVec向量数据库](https://gitcode.com/opengauss/docs/blob/master/docs/zh/datavec/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
+本文使用 [DataVec向量数据库](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
 
 ```python
 import random
