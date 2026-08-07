@@ -296,6 +296,38 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
 }
 
 /*
+ * FreeParallelStmts
+ *
+ * Release the statement queue collected while running in parallel mode.
+ * Each buffer can hold anything the user typed (passwords included), so it is
+ * scrubbed before being freed, exactly as the flush path in MainLoop() used
+ * to do inline.  The outer array itself is freed by the FREE_PARALLEL_STMTS()
+ * macro, which also nulls the caller's variables.
+ *
+ * Safe to call with an empty or already released queue.
+ */
+static void FreeParallelStmts(char** stmts, int count)
+{
+    errno_t rc = 0;
+    int i;
+
+    if (stmts == NULL) {
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (stmts[i] != NULL) {
+            size_t tempLen = (size_t)strlen(stmts[i]);
+            rc = memset_s(stmts[i], tempLen, 0, tempLen);
+            securec_check_c(rc, "\0", "\0");
+
+            free(stmts[i]);
+            stmts[i] = NULL;
+        }
+    }
+}
+
+/*
  * Main processing loop for reading lines of input
  *	and sending them to the backend.
  *
@@ -694,7 +726,6 @@ int MainLoop(FILE* source, char* querystring)
 
                 /* execute parallel statements. */
                 if (!pset.parallel && query_count) {
-                    int i;
                     unsigned short int pager_saved = pset.popt.topt.pager;
 
                     /*
@@ -719,16 +750,7 @@ int MainLoop(FILE* source, char* querystring)
                     /* Reset the session_timeout parameter after parallel queries. */
                     SetSessionTimeout(session_timeout_oldval);
 
-                    for (i = 0; i < query_count; i++) {
-                        if (query_stmts[i] != NULL) {
-                            size_t temp_len = (size_t)strlen(query_stmts[i]);
-                            rc = memset_s(query_stmts[i], temp_len, 0, temp_len);
-                            securec_check_c(rc, "\0", "\0");
-
-                            free(query_stmts[i]);
-                            query_stmts[i] = NULL;
-                        }
-                    }
+                    FreeParallelStmts(query_stmts, query_count);
                     free(query_stmts);
                     query_stmts = NULL;
                     query_count = 0;
@@ -759,12 +781,22 @@ int MainLoop(FILE* source, char* querystring)
                 }
 
                 if (slashCmdStatus == PSQL_CMD_SEND) {
-                    success = SendQuery(query_buf->data);
-
-                    // Query fail, if need retry, invoke QueryRetryController().
-                    //
-                    if (!success && pset.retry_on) {
-                        success = QueryRetryController(query_buf->data);
+                    if (pset.parallel) {
+                        psql_error("Sending the query buffer by a meta-command is not "
+                                   "supported in parallel mode.\n");
+                        ResetGsetPrefix();
+                        if (pset.gfname != NULL) {
+                            free(pset.gfname);
+                            pset.gfname = NULL;
+                        }
+                        success = false;
+                    } else {
+                        success = SendQuery(query_buf->data);
+                        // Query fail, if need retry, invoke QueryRetryController().
+                        //
+                        if (!success && pset.retry_on) {
+                            success = QueryRetryController(query_buf->data);
+                        }
                     }
 
                     /* transfer query to previous_buf by pointer-swapping */
@@ -843,13 +875,23 @@ int MainLoop(FILE* source, char* querystring)
             pg_send_history(history_buf);
         }
 
-        /* execute query */
-        success = SendQuery(query_buf->data);
-
-        // Query fail, if need retry, invoke QueryRetryController().
-        //
-        if (!success && pset.retry_on) {
-            success = QueryRetryController(query_buf->data);
+        if (pset.parallel) {
+            psql_error("The statement at the end of input is not terminated by a semicolon "
+                       "and cannot be executed in parallel mode.\n");
+            ResetGsetPrefix();
+            if (pset.gfname != NULL) {
+                free(pset.gfname);
+                pset.gfname = NULL;
+            }
+            success = false;
+        } else {
+            /* execute query */
+            success = SendQuery(query_buf->data);
+            // Query fail, if need retry, invoke QueryRetryController().
+            //
+            if (!success && pset.retry_on) {
+                success = QueryRetryController(query_buf->data);
+            }
         }
 
         if (!success && die_on_error) {
@@ -859,6 +901,20 @@ int MainLoop(FILE* source, char* querystring)
         } else
             successResult = success ? EXIT_SUCCESS : EXIT_FAILURE;
     }
+
+    if (query_count > 0) {
+        psql_error("%d statement(s) buffered in parallel mode were discarded because "
+                   "\"\\parallel off\" was not executed before the end of input.\n",
+                   query_count);
+        /* Same convention as a failed do_parallel_execution() above. */
+        if (pset.on_error_stop && successResult == EXIT_SUCCESS) {
+            successResult = EXIT_USER;
+        }
+    }
+    FreeParallelStmts(query_stmts, query_count);
+    free(query_stmts);
+    query_stmts = NULL;
+    query_count = 0;
 
     /*
      * Let's just make real sure the SIGINT handler won't try to use

@@ -754,6 +754,10 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
     /* \g means send query */
     else if (strcmp(cmd, "g") == 0) {
         char* fname = psql_scan_slash_option(scan_state, OT_FILEPIPE, NULL, false);
+        if (pset.gfname != NULL) {
+            free(pset.gfname);
+            pset.gfname = NULL;
+        }
 
         if (NULL == fname) {
             pset.gfname = NULL;
