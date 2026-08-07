@@ -102,6 +102,7 @@ int StreamMain()
 
         gstrace_tryblock_exit(true, oldTryCounter);
         HandleStreamSigjmp();
+        InitCurrentTransactionState();
         if (IS_THREAD_POOL_STREAM) {
             t_thrd.threadpool_cxt.stream->CleanUp();
         } else {
@@ -156,6 +157,7 @@ int StreamMain()
          * Stream thread should not change clog file
          */
         ResetTransactionInfo();
+        InitCurrentTransactionState();
 
         if (IS_THREAD_POOL_STREAM) {
             t_thrd.threadpool_cxt.stream->CleanUp();
