@@ -299,6 +299,16 @@ insert into online_ddl_cluster_part select generate_series(18, 1, -1), 1, 'befor
 cluster concurrently online_ddl_cluster_part using online_ddl_cluster_part_idx;
 select count(*) as row_count, min(id) as min_id, max(id) as max_id, sum(id) as sum_id from online_ddl_cluster_part;
 drop table if exists online_ddl_cluster_part;
+
+-- case 18: online ddl for table whose name needs quoting
+create table "onlineDDL Special_Table" (id int, value1 varchar, value2 int);
+insert into "onlineDDL Special_Table" select generate_series(1, 10), 'test', 111;
+alter table concurrently "onlineDDL Special_Table" alter column value2 set not null;
+select count(*) as row_count, min(value2) as min_value2, max(value2) as max_value2 from "onlineDDL Special_Table";
+alter table concurrently "onlineDDL Special_Table" alter column value1 type varchar(20);
+vacuum full concurrently "onlineDDL Special_Table";
+select count(*) as row_count, min(value2) as min_value2, max(value2) as max_value2 from "onlineDDL Special_Table";
+drop table if exists "onlineDDL Special_Table";
 set client_min_messages = notice;
 
 DROP SCHEMA IF EXISTS test_ddl CASCADE;
