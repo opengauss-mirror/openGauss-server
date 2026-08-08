@@ -899,6 +899,8 @@ static Oid do_start_worker(void)
     bool skipit = false;
     Oid retval = InvalidOid;
     MemoryContext tmpcxt, oldcxt;
+    WorkerInfo avworker = NULL;
+    int freezeonWorkers = 0;
 
     /* return quickly when there are no free workers */
     LWLockAcquire(AutovacuumLock, LW_SHARED);
@@ -948,6 +950,20 @@ static Oid do_start_worker(void)
         multiForceLimit = FirstMultiXactId;
 #endif
 
+    LWLockAcquire(AutovacuumLock, LW_SHARED);
+    avworker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
+        &t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers, offsetof(WorkerInfoData, wi_links));
+    while (avworker != NULL) {
+        if (avworker->wi_freeze_on) {
+            freezeonWorkers++;
+        }
+        avworker = (WorkerInfo)SHMQueueNext(&t_thrd.autovacuum_cxt.AutoVacuumShmem->av_runningWorkers,
+            &avworker->wi_links,
+            offsetof(WorkerInfoData, wi_links));
+    }
+    LWLockRelease(AutovacuumLock);
+    AUTOVAC_LOG(LOG, "current freeze_on_workers: %d", freezeonWorkers);
+
     /*
      * Choose a database to connect to.  We pick the database that was least
      * recently auto-vacuumed, or one that needs vacuuming to recycle clog.
@@ -971,23 +987,27 @@ static Oid do_start_worker(void)
         avw_dbase* tmp = (avw_dbase*)lfirst(cell);
         Dlelem* elem = NULL;
 
-        /* Check to see if this one is need freeze */
-        if (TransactionIdPrecedes(tmp->adw_frozenxid, xidForceLimit)) {
-            if (avdb == NULL || TransactionIdPrecedes(tmp->adw_frozenxid, avdb->adw_frozenxid))
-                avdb = tmp;
-            for_xid_wrap = true;
-            continue;
-        } else if (for_xid_wrap)
-            continue; /* ignore not-at-risk DBs */
+        if (u_sess->attr.attr_storage.autovacuum_max_freeze_workers <=0 ||
+            (u_sess->attr.attr_storage.autovacuum_max_freeze_workers > 0 &&
+                freezeonWorkers < u_sess->attr.attr_storage.autovacuum_max_freeze_workers)) {
+            /* Check to see if this one is need freeze */
+            if (TransactionIdPrecedes(tmp->adw_frozenxid, xidForceLimit)) {
+                if (avdb == NULL || TransactionIdPrecedes(tmp->adw_frozenxid, avdb->adw_frozenxid))
+                    avdb = tmp;
+                for_xid_wrap = true;
+                continue;
+            } else if (for_xid_wrap)
+                continue; /* ignore not-at-risk DBs */
 #ifndef ENABLE_MULTIPLE_NODES
-        else if (MultiXactIdPrecedes(tmp->adw_frozenmulti, multiForceLimit)) {
-            if (avdb == NULL || MultiXactIdPrecedes(tmp->adw_frozenmulti, avdb->adw_frozenmulti))
-                avdb = tmp;
-            for_multi_wrap = true;
-            continue;
-        } else if (for_multi_wrap)
-            continue; /* ignore not-at-risk DBs */
+            else if (MultiXactIdPrecedes(tmp->adw_frozenmulti, multiForceLimit)) {
+                if (avdb == NULL || MultiXactIdPrecedes(tmp->adw_frozenmulti, avdb->adw_frozenmulti))
+                    avdb = tmp;
+                for_multi_wrap = true;
+                continue;
+            } else if (for_multi_wrap)
+                continue; /* ignore not-at-risk DBs */
 #endif
+        }
 
         /* Find pgstat entry if any */
         tmp->adw_entry = pgstat_fetch_stat_dbentry(tmp->adw_datid);
@@ -1057,6 +1077,9 @@ static Oid do_start_worker(void)
         worker->wi_dboid = avdb->adw_datid;
         worker->wi_proc = NULL;
         worker->wi_launchtime = GetCurrentTimestamp();
+        if (u_sess->attr.attr_storage.autovacuum_max_freeze_workers > 0) {
+            worker->wi_freeze_on = (freezeonWorkers < u_sess->attr.attr_storage.autovacuum_max_freeze_workers);
+        }
 
         t_thrd.autovacuum_cxt.AutoVacuumShmem->av_startingWorker = worker;
 
@@ -2626,6 +2649,11 @@ static void do_autovacuum(void)
         /* just skip all autovac actions quickly */
         if (!u_sess->attr.attr_storage.autovacuum_start_daemon && !vacObj->need_freeze)
             break;
+
+        if (u_sess->attr.attr_storage.autovacuum_max_freeze_workers > 0 &&
+                vacObj->need_freeze && !t_thrd.autovacuum_cxt.MyWorkerInfo->wi_freeze_on) {
+            continue;
+        }
 
         CHECK_FOR_INTERRUPTS();
 

@@ -216,6 +216,7 @@ static bool check_repl_uuid(char** newval, void** extra, GucSource source);
 static const char* logging_module_guc_show(void);
 static bool check_inplace_upgrade_next_oids(char** newval, void** extra, GucSource source);
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source);
+static bool check_autovacuum_max_freeze_workers(int* newval, void** extra, GucSource source);
 static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength);
 static bool check_and_assign_proc_oids(List* elemlist);
 static bool check_and_assign_type_oids(List* elemlist);
@@ -3474,6 +3475,19 @@ static void InitStorageConfigureNamesInt()
             check_autovacuum_max_workers,
             NULL,
             NULL},
+        {{"autovacuum_max_freeze_workers",
+ 	        PGC_SIGHUP,
+ 	        NODE_ALL,
+ 	        AUTOVACUUM,
+ 	        gettext_noop("Sets the maximum number of simultaneously running autovacuum freeze processes."),
+ 	        NULL},
+ 	        &u_sess->attr.attr_storage.autovacuum_max_freeze_workers,
+ 	        0,
+ 	        0,
+ 	        MAX_BACKENDS,
+ 	        check_autovacuum_max_freeze_workers,
+ 	        NULL,
+ 	        NULL},
         /* see max_connections */
         {{"max_undo_workers",
             PGC_POSTMASTER,
@@ -6699,8 +6713,25 @@ static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource so
         g_instance.attr.attr_network.maxInnerToolConnections + g_max_worker_processes > MAX_BACKENDS) {
         return false;
     }
+
+    // check autovacuum_max_freeze_workers must less than autovacuum_max_workers
+    if (u_sess->attr.attr_storage.autovacuum_max_freeze_workers > 0 &&
+            *newval <= u_sess->attr.attr_storage.autovacuum_max_freeze_workers) {
+        GUC_check_errdetail("autovacuum_max_freeze_workers must be less than autovacuum_max_workers.");
+        return false;
+    }
     return true;
 }
+
+static bool check_autovacuum_max_freeze_workers(int* newval, void** extra, GucSource source)
+{
+    if (*newval > 0 && *newval >= g_instance.attr.attr_storage.autovacuum_max_workers) {
+        GUC_check_errdetail("autovacuum_max_freeze_workers must be less than autovacuum_max_workers.");
+        return false;
+    }
+    return true;
+}
+
 
 #ifdef ENABLE_HTAP
 ReplConnInfo* GetReplConnInfo(const char* ConnInfoList, int* InfoLength)
