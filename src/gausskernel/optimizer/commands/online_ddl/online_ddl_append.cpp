@@ -280,6 +280,31 @@ static void GetRemainPages(OnlineDDLAppender* appender, int* deltaLogRemainPages
     *oldTableRemainPages = Max(oldTableBlockNum - ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx), 0);
 }
 
+/*
+ * The old table stores INSERTs generated during online DDL after the baseline
+ * end CTID.  Restrict every catch-up pass to the CTID range between the last
+ * processed tuple and the current physical end of the relation.  A regular
+ * heap scan would wrap around and visit all baseline pages before the logical
+ * CTID check in OnlineDDLAppendScanOldTable can skip their tuples.
+ *
+ * The lower bound is intentionally inclusive here.  The tuple at scanIdx is
+ * filtered by CompareItemPointer(), while keeping its block in the range is
+ * required to find tuples appended later to the same page.
+ */
+static TableScanDesc OnlineDDLBeginOldTableScan(Relation relation, ItemPointer scanIdx)
+{
+    ItemPointerData maxTid;
+    heap_get_max_tid(relation, &maxTid);
+    return tableam_beginscan_tidrange(relation, SnapshotAny, scanIdx, &maxTid);
+}
+
+static void OnlineDDLRescanOldTable(TableScanDesc scan, Relation relation, ItemPointer scanIdx)
+{
+    ItemPointerData maxTid;
+    heap_get_max_tid(relation, &maxTid);
+    tableam_rescan_tidrange(scan, scanIdx, &maxTid);
+}
+
 /* Check if deltal log tuple committed, if not, wait until it end */
 static bool CheckTupleVisibile(HeapTuple tuple, Buffer buffer)
 {
@@ -1782,7 +1807,7 @@ bool OnlineDDLAppendForNormalTable(OnlineDDLAppender* appender)
     TableScanDesc deltaLogScan;
     deltaLogScan = tableam_scan_begin(appender->deltaRelation, SnapshotAny, 0, NULL);
     TableScanDesc oldTableScan;
-    oldTableScan = tableam_scan_begin(oldRelation, SnapshotAny, 0, NULL);
+    oldTableScan = OnlineDDLBeginOldTableScan(oldRelation, &appender->oldTableScanIdx);
 
     bool firstScan = true;
     bool deltaLogScanFinished = true;
@@ -1819,14 +1844,7 @@ bool OnlineDDLAppendForNormalTable(OnlineDDLAppender* appender)
             heapScan->rs_base.rs_inited = true;
         }
         if (appender->oldTableScanTimes > 0 && oldTableScanFinished) {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldRelation);
-            if (heapScan->rs_base.rs_nblocks != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_inited = true;
+            OnlineDDLRescanOldTable(oldTableScan, oldRelation, &appender->oldTableScanIdx);
         }
         CHECK_FOR_INTERRUPTS();
         deltaLogScanFinished = OnlineDDLAppendScanDeltaLog(appender, deltaLogScan, ONLINE_DDL_REWRITE_ROW_TABLE);
@@ -1875,16 +1893,7 @@ bool OnlineDDLAppendForNormalTable(OnlineDDLAppender* appender)
         }
         heapScan->rs_base.rs_inited = true;
     }
-    {
-        HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-        Assert(!heapScan->rs_base.rs_inited);
-        heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-        heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldRelation);
-        if (heapScan->rs_base.rs_nblocks != 0) {
-            heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-        }
-        heapScan->rs_base.rs_inited = true;
-    }
+    OnlineDDLRescanOldTable(oldTableScan, oldRelation, &appender->oldTableScanIdx);
 
     /* Append for the last time. */
     OnlineDDLAppendScanDeltaLog(appender, deltaLogScan, ONLINE_DDL_REWRITE_ROW_TABLE);
@@ -1945,10 +1954,14 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
         AddPartitionOidMapping(appender, RelationGetRelid(oldPartRelation), newPartOid);
     }
 
+    index = 0;
     foreach (cell, oldPartRelationList) {
         Relation oldPartRelation = (Relation)lfirst(cell);
-        TableScanDesc oldTableScan = tableam_scan_begin(oldPartRelation, SnapshotAny, 0, NULL);
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        partitionScanIndexes[index] = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        TableScanDesc oldTableScan = OnlineDDLBeginOldTableScan(oldPartRelation, &partitionScanIndexes[index]);
         oldTableScanList = lappend(oldTableScanList, oldTableScan);
+        index++;
     }
 
     bool deltaLogScanFinished = true;
@@ -2031,13 +2044,7 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-            ItemPointerData partitionScanIdx = {{0, 0}, 0};
-            if (firstScan) {
-                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-            } else {
-                partitionScanIdx = partitionScanIndexes[index];
-            }
+            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2053,12 +2060,7 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
             bool oldTableScanFinished = true;
 
             if (*oldTableScanTimes > 0 && oldTableScanFinished) {
-                HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-                Assert(!heapScan->rs_base.rs_inited);
-                heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumber(&appender->oldTableScanIdx);
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-                heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-                heapScan->rs_base.rs_inited = true;
+                OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
             }
 
             oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
@@ -2114,13 +2116,7 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-        ItemPointerData partitionScanIdx = {{0, 0}, 0};
-        if (firstScan) {
-            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-        } else {
-            partitionScanIdx = partitionScanIndexes[index];
-        }
+        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
@@ -2135,16 +2131,7 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
         }
 
         // Reinit scanDesc for final scan
-        {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-            if (heapScan->rs_base.rs_nblocks != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_inited = true;
-        }
+        OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
 
         // Append for the last time for this partition
         OnlineDDLAppendScanOldTable(appender, oldTableScan);
@@ -2202,13 +2189,12 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
 bool OnlineDDLAppendForSplitPartition(OnlineDDLAppender* appender)
 {
     Relation oldRelation = appender->oldRelation;
-    Relation newRelation = appender->newRelation;
 
     /* init scan desc */
     TableScanDesc deltaLogScan;
     deltaLogScan = tableam_scan_begin(appender->deltaRelation, SnapshotAny, 0, NULL);
     TableScanDesc oldTableScan;
-    oldTableScan = tableam_scan_begin(oldRelation, SnapshotAny, 0, NULL);
+    oldTableScan = OnlineDDLBeginOldTableScan(oldRelation, &appender->oldTableScanIdx);
 
     bool firstScan = true;
     bool deltaLogScanFinished = true;
@@ -2245,14 +2231,7 @@ bool OnlineDDLAppendForSplitPartition(OnlineDDLAppender* appender)
             heapScan->rs_base.rs_inited = true;
         }
         if (appender->oldTableScanTimes > 0 && oldTableScanFinished) {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldRelation);
-            if (heapScan->rs_base.rs_nblocks != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_inited = true;
+            OnlineDDLRescanOldTable(oldTableScan, oldRelation, &appender->oldTableScanIdx);
         }
         CHECK_FOR_INTERRUPTS();
         deltaLogScanFinished = OnlineDDLAppendScanDeltaLog(appender, deltaLogScan, ONLINE_DDL_SPLIT_PARTITION);
@@ -2272,11 +2251,8 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
     // For partitioned tables during merge operation, process delta log and all source partitions together
     TableScanDesc deltaLogScan = tableam_scan_begin(appender->deltaRelation, SnapshotAny, 0, NULL);
     List* oldTableScanList = NIL;
-    ListCell* oldCell = NULL;
-    ListCell* newCell = NULL;
     ListCell* cell = NULL;
     List* oldPartRelationList = appender->oldPartitionList;
-    List* newPartRelationList = NIL;
     ItemPointerData* partitionScanIndexes;
     int partitionNum = list_length(appender->oldPartitionList);
     partitionScanIndexes = (ItemPointerData*)palloc0(sizeof(ItemPointerData) * partitionNum);
@@ -2284,8 +2260,11 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
 
     foreach (cell, oldPartRelationList) {
         Relation oldPartRelation = (Relation)lfirst(cell);
-        TableScanDesc oldTableScan = tableam_scan_begin(oldPartRelation, SnapshotAny, 0, NULL);
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        partitionScanIndexes[index] = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        TableScanDesc oldTableScan = OnlineDDLBeginOldTableScan(oldPartRelation, &partitionScanIndexes[index]);
         oldTableScanList = lappend(oldTableScanList, oldTableScan);
+        index++;
     }
 
     bool deltaLogScanFinished = true;
@@ -2364,13 +2343,7 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-            ItemPointerData partitionScanIdx = {{0, 0}, 0};
-            if (firstScan) {
-                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-            } else {
-                partitionScanIdx = partitionScanIndexes[index];
-            }
+            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2382,12 +2355,7 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
             bool oldTableScanFinished = true;
 
             if (*oldTableScanTimes > 0 && oldTableScanFinished) {
-                HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-                Assert(!heapScan->rs_base.rs_inited);
-                heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-                heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-                heapScan->rs_base.rs_inited = true;
+                OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
             }
 
             oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
@@ -2428,24 +2396,15 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
     // Append for the last time for each partition - using same structure as main loop
     ListCell* oldPartRelCell = NULL;
     ListCell* oldPartScanCell = NULL;
-    ListCell* oldPartScanTimesCell = NULL;
     index = 0;
-    forthree(oldPartRelCell, oldPartRelationList,          // old partition relation
-             oldPartScanCell, oldTableScanList,            // old table scan
-             oldPartScanTimesCell, oldTableScanTimesList)  // scan times for each partition
+    forboth(oldPartRelCell, oldPartRelationList,  // old partition relation
+            oldPartScanCell, oldTableScanList)    // old table scan
     {
         Relation oldPartRelation = (Relation)lfirst(oldPartRelCell);
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
-        int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-        ItemPointerData partitionScanIdx = {{0, 0}, 0};
-        if (firstScan) {
-            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-        } else {
-            partitionScanIdx = partitionScanIndexes[index];
-        }
+        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
@@ -2454,21 +2413,9 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
         appender->oldRelation = oldPartRelation;
         appender->oldTableScanIdx = partitionScanIdx;
 
-        bool oldTableScanFinished = true;
+        OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
 
-        if (*oldTableScanTimes > 0 && oldTableScanFinished) {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            if (heapScan->rs_base.rs_cblock != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-            heapScan->rs_base.rs_inited = true;
-        }
-
-        oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
-        *oldTableScanTimes += (oldTableScanFinished ? 1 : 0);
+        OnlineDDLAppendScanOldTable(appender, oldTableScan);
 
         // Restore the relation and scan index in appender
         partitionScanIndexes[index] = appender->oldTableScanIdx;
@@ -2532,7 +2479,7 @@ bool OnlineDDLOnlyCheckForNormalTable(OnlineDDLAppender* appender)
 
     /* init scan desc */
     TableScanDesc oldTableScan;
-    oldTableScan = tableam_scan_begin(oldRelation, SnapshotAny, 0, NULL);
+    oldTableScan = OnlineDDLBeginOldTableScan(oldRelation, &appender->oldTableScanIdx);
 
     bool firstScan = true;
     bool oldTableScanFinished = true;
@@ -2559,14 +2506,7 @@ bool OnlineDDLOnlyCheckForNormalTable(OnlineDDLAppender* appender)
 
         /* reinit scanDesc */
         if (appender->oldTableScanTimes > 0 && oldTableScanFinished) {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldRelation);
-            if (heapScan->rs_base.rs_nblocks != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_inited = true;
+            OnlineDDLRescanOldTable(oldTableScan, oldRelation, &appender->oldTableScanIdx);
         }
         oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
         appender->oldTableScanTimes += (oldTableScanFinished ? 1 : 0);
@@ -2584,16 +2524,7 @@ bool OnlineDDLOnlyCheckForNormalTable(OnlineDDLAppender* appender)
     UnlockRelation(oldRelation, ShareUpdateExclusiveLock);
 
     /* reinit scanDesc */
-    {
-        HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-        Assert(!heapScan->rs_base.rs_inited);
-        heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-        heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldRelation);
-        if (heapScan->rs_base.rs_nblocks != 0) {
-            heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-        }
-        heapScan->rs_base.rs_inited = true;
-    }
+    OnlineDDLRescanOldTable(oldTableScan, oldRelation, &appender->oldTableScanIdx);
 
     /* Append for the last time. */
     OnlineDDLAppendScanOldTable(appender, oldTableScan);
@@ -2623,8 +2554,11 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
 
     foreach (cell, oldPartRelationList) {
         Relation oldPartRelation = (Relation)lfirst(cell);
-        TableScanDesc oldTableScan = tableam_scan_begin(oldPartRelation, SnapshotAny, 0, NULL);
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        partitionScanIndexes[index] = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        TableScanDesc oldTableScan = OnlineDDLBeginOldTableScan(oldPartRelation, &partitionScanIndexes[index]);
         oldTableScanList = lappend(oldTableScanList, oldTableScan);
+        index++;
     }
 
     bool firstScan = true;
@@ -2688,13 +2622,7 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-            ItemPointerData partitionScanIdx = {{0, 0}, 0};
-            if (firstScan) {
-                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-            } else {
-                partitionScanIdx = partitionScanIndexes[index];
-            }
+            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2706,14 +2634,7 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
             bool oldTableScanFinished = true;
 
             if (*oldTableScanTimes > 0 && oldTableScanFinished) {
-                HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-                Assert(!heapScan->rs_base.rs_inited);
-                heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-                heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-                if (heapScan->rs_base.rs_nblocks != 0) {
-                    heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-                }
-                heapScan->rs_base.rs_inited = true;
+                OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
             }
 
             oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
@@ -2750,13 +2671,7 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
-        ItemPointerData partitionScanIdx = {{0, 0}, 0};
-        if (firstScan) {
-            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
-        } else {
-            partitionScanIdx = partitionScanIndexes[index];
-        }
+        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
@@ -2766,16 +2681,7 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
         appender->oldTableScanIdx = partitionScanIdx;
 
         // Reinit scanDesc for final scan
-        {
-            HeapScanDesc heapScan = (HeapScanDesc)oldTableScan;
-            Assert(!heapScan->rs_base.rs_inited);
-            heapScan->rs_base.rs_cblock = ItemPointerGetBlockNumberNoCheck(&appender->oldTableScanIdx);
-            heapScan->rs_base.rs_nblocks = RelationGetNumberOfBlocks(oldPartRelation);
-            if (heapScan->rs_base.rs_nblocks != 0) {
-                heapgetpage((TableScanDesc)heapScan, heapScan->rs_base.rs_cblock);
-            }
-            heapScan->rs_base.rs_inited = true;
-        }
+        OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
 
         // Append for the last time for this partition
         OnlineDDLAppendScanOldTable(appender, oldTableScan);
