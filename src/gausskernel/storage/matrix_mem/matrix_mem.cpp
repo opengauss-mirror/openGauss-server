@@ -51,7 +51,7 @@ int MaxtrixMemOpenDl(void **libHandle, char *symbol)
 {
     *libHandle = dlopen(symbol, RTLD_LAZY);
     if (*libHandle == NULL) {
-        int ret = ENABLE_UB ? ERROR : WARNING;
+        int ret = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb) ? ERROR : WARNING;
         ereport(ret, (errmsg("load matrix mem dynamic lib: %s, error: %s", symbol, dlerror())));
         return MATRIX_MEM_ERROR;
     }
