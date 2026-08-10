@@ -29,7 +29,7 @@
 #include "storage/ubs_mem.h"
 
 #ifdef __aarch64__
-#define ENABLE_RACK_MEM (g_instance.matrix_mem_cxt.matrix_mem_inited)
+#define ENABLE_RACK_MEM (g_matrixMemFunc.matrix_mem_inited)
 #else
 #define ENABLE_RACK_MEM false
 #endif

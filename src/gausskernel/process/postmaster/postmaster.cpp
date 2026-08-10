@@ -2895,6 +2895,9 @@ int PostmasterMain(int argc, char* argv[])
 
 #ifdef __aarch64__
     MatrixMemFuncInit(g_instance.attr.attr_storage.ubs_mem_path);
+    if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb && !ENABLE_RACK_MEM) {
+        ereport(FATAL, (errmsg("UB is enabled, but UB memory library initialization failed")));
+    }
 #endif
 
 #ifdef ENABLE_BBOX
