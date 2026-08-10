@@ -2044,7 +2044,13 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+            ItemPointerData partitionScanIdx = {{0, 0}, 0};
+            if (firstScan) {
+                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+            } else {
+                partitionScanIdx = partitionScanIndexes[index];
+            }
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2116,7 +2122,13 @@ bool OnlineDDLAppendForPartitionedTable(OnlineDDLAppender* appender)
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        ItemPointerData partitionScanIdx = {{0, 0}, 0};
+        if (firstScan) {
+            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        } else {
+            partitionScanIdx = partitionScanIndexes[index];
+        }
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
@@ -2343,7 +2355,13 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+            ItemPointerData partitionScanIdx = {{0, 0}, 0};
+            if (firstScan) {
+                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+            } else {
+                partitionScanIdx = partitionScanIndexes[index];
+            }
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2396,15 +2414,24 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
     // Append for the last time for each partition - using same structure as main loop
     ListCell* oldPartRelCell = NULL;
     ListCell* oldPartScanCell = NULL;
+    ListCell* oldPartScanTimesCell = NULL;
     index = 0;
-    forboth(oldPartRelCell, oldPartRelationList,  // old partition relation
-            oldPartScanCell, oldTableScanList)    // old table scan
+    forthree(oldPartRelCell, oldPartRelationList,          // old partition relation
+             oldPartScanCell, oldTableScanList,            // old table scan
+             oldPartScanTimesCell, oldTableScanTimesList)  // scan times for each partition
     {
         Relation oldPartRelation = (Relation)lfirst(oldPartRelCell);
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
+        int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        ItemPointerData partitionScanIdx = {{0, 0}, 0};
+        if (firstScan) {
+            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        } else {
+            partitionScanIdx = partitionScanIndexes[index];
+        }
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
@@ -2413,9 +2440,14 @@ bool OnlineDDLAppendForMergePartition(OnlineDDLAppender* appender)
         appender->oldRelation = oldPartRelation;
         appender->oldTableScanIdx = partitionScanIdx;
 
-        OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
+        bool oldTableScanFinished = true;
 
-        OnlineDDLAppendScanOldTable(appender, oldTableScan);
+        if (*oldTableScanTimes > 0 && oldTableScanFinished) {
+            OnlineDDLRescanOldTable(oldTableScan, oldPartRelation, &appender->oldTableScanIdx);
+        }
+
+        oldTableScanFinished = OnlineDDLAppendScanOldTable(appender, oldTableScan);
+        *oldTableScanTimes += (oldTableScanFinished ? 1 : 0);
 
         // Restore the relation and scan index in appender
         partitionScanIndexes[index] = appender->oldTableScanIdx;
@@ -2622,7 +2654,13 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
             int* oldTableScanTimes = (int*)lfirst(oldPartScanTimesCell);
 
             // Get the starting scan position for this partition from partitionAppendMap
-            ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+            OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+            ItemPointerData partitionScanIdx = {{0, 0}, 0};
+            if (firstScan) {
+                partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+            } else {
+                partitionScanIdx = partitionScanIndexes[index];
+            }
 
             // Temporarily save and replace the relation and scan index in appender
             Relation savedOldRelation = appender->oldRelation;
@@ -2671,7 +2709,13 @@ bool OnlineDDLOnlyCheckForPartitionedTable(OnlineDDLAppender* appender)
         TableScanDesc oldTableScan = (TableScanDesc)lfirst(oldPartScanCell);
 
         // Get the starting scan position for this partition from partitionAppendMap
-        ItemPointerData partitionScanIdx = partitionScanIndexes[index];
+        OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
+        ItemPointerData partitionScanIdx = {{0, 0}, 0};
+        if (firstScan) {
+            partitionScanIdx = operators->getEndCtidForPartition(oldPartRelation->rd_id);
+        } else {
+            partitionScanIdx = partitionScanIndexes[index];
+        }
 
         // Temporarily save and replace the relation and scan index in appender
         Relation savedOldRelation = appender->oldRelation;
