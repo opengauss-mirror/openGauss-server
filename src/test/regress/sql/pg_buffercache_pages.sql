@@ -7,7 +7,9 @@ INSERT INTO buffercache_test VALUES(generate_series(1, 10000), 'To make a prairi
 
 checkpoint;
 
-SELECT storage_type, reldatabase, relforknumber, relblocknumber, isdirty, isvalid, usage_count, pinning_backends
+SELECT storage_type,
+	reldatabase = (SELECT oid FROM pg_database WHERE datname = current_database()) AS reldatabase_match,
+	relforknumber, relblocknumber, isdirty, isvalid, usage_count, pinning_backends
 FROM
 	(SELECT relfilenode, 
 		bucketid, 
