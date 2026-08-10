@@ -1463,6 +1463,23 @@ restore_non_data_file_internal(FILE *in, FILE *out, pgFile *file,
     }
 }
 
+static bool
+ForceRestoreUndometaFile(const pgFile *file)
+{
+    const char *undometaPath = "undo/undometa";
+
+    /*
+     * undo/undometa is organized as 512-byte meta pages, each storing
+     * CRC32C(data) inside the page.  Calculating CRC32C over the whole file
+     * can therefore produce a stable residue even when meta contents change,
+     * so incremental restore must not use that CRC to decide whether the file
+     * can be reused.
+     */
+    return file->external_dir_num == 0 &&
+        file->rel_path != NULL &&
+        strcmp(file->rel_path, undometaPath) == 0;
+}
+
 size_t
 restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
                                         pgFile *dest_file, FILE *out, const char *to_fullpath,
@@ -1545,14 +1562,17 @@ restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
     /* incremental restore */
     if (already_exists)
     {
-        /* compare checksums of already existing file and backup file */
-        pg_crc32 file_crc = fio_get_crc32(to_fullpath, FIO_DB_HOST, false);
-
-        if (file_crc == tmp_file->crc)
-        {
-            elog(VERBOSE, "Already existing nonedata file \"%s\" has the same checksum, skip restore",
+        if (!ForceRestoreUndometaFile(dest_file)) {
+            /* compare checksums of already existing file and backup file */
+            pg_crc32 file_crc = fio_get_crc32(to_fullpath, FIO_DB_HOST, false);
+            if (file_crc == tmp_file->crc) {
+                elog(VERBOSE, "Already existing nonedata file \"%s\" has the same checksum, skip restore",
+                    to_fullpath);
+                return 0;
+            }
+        } else {
+            elog(VERBOSE, "Force restore undometa file \"%s\" during incremental restore",
                 to_fullpath);
-            return 0;
         }
 
         /* Checksum mismatch, truncate file and overwrite it */
