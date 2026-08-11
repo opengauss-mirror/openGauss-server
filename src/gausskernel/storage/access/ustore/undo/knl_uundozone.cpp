@@ -876,9 +876,6 @@ void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
             ereport(PANIC, (errmodule(MOD_UNDO),
                 errmsg(UNDOFORMAT("used zone %d detached."), zid)));
         }
-        if (StreamThreadAmI()) {
-            uzone->ReleaseSlotBuffer();
-        }
         uzone->Detach();
         uzone->NotKeepBuffer();
         uzone->InitSlotBuffer();
