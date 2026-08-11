@@ -1087,6 +1087,9 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
         if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && unlikely(t_thrd.ustore_cxt.m_undozone_array != NULL)) {
             for (int i = 0; i < MAX_QUERY_DOP; i++) {
                 StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
+                if (m_undozone == NULL) {
+                    continue;
+                }
                 init_stream_undozone_data_from(m_undozone, u_sess->stream_cxt.global_obj->group_undozone_array[i]);
                 for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
                     if (m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_REC_PTR) {
