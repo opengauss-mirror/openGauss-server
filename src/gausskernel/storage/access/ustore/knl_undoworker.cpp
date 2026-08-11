@@ -220,7 +220,8 @@ static bool AsyncRollbackWorkerGetWorkFromHashTable(UndoWorkInfo work)
     }
 
     for (int i = 0; i < actualUndoWorkers; i++) {
-        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid) {
+        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid &&
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr == entry->startUndoPtr) {
             return false;
         }
     }
