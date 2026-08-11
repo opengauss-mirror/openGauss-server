@@ -1,0 +1,41 @@
+# pre-commit Configuration (openGauss Server, C++ Core)
+#
+# Strategy: Adopt .clang-format and .clang-tidy, with line width aligned to team standards.
+# First-time setup: Run bash setup-pre-commit.sh
+
+# Exclude third-party libraries, build directories, documentation, and non-source files
+exclude: '^(docs/|build/|third_party/|.*\.min\.js$|.*\.o$|.*\.so$)'
+
+repos:
+  # 1. Basic hygiene checks
+  - repo: https://gitcode.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # 2. Spell-checking
+  - repo: https://gitcode.com/gh_mirrors/co/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args: ["--skip=*.o,*.so,*.a,*.exe,*.dll"]
+
+  # 3. C++ Core Toolchain (Formatting + Static Analysis)
+  - repo: https://github.com/cpp-linter/cpp-linter-hooks
+    rev: v1.4.1
+    hooks:
+    # Code formatting: read .clang-format
+      - id: clang-format
+        args: [--style=file, --version=21]
+        files: ^(src|include)/.*\.(cpp|cc|cxx|h|hpp)$
+
+      - id: clang-tidy
+        args: [--checks=.clang-tidy, --version=21]
+        files: ^(src|include)/.*\.(cpp|cc|cxx|h|hpp)$

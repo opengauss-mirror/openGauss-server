@@ -1,6 +1,7 @@
 /.gitee/
 /.vscode/
 /.idea/
+/.pre-commit-venv/
 /cmake-build-debug/
 *.a
 *.o
