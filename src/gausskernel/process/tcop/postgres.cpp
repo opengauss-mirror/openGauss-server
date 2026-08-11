@@ -4934,6 +4934,11 @@ void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, Par
         (*params)->uParamInfo = DEFUALT_INFO;
         (*params)->numParams = numParams;
         (*params)->params_lazy_bind = false;
+        for (int i = 0; i < numParams; i++) {
+            (*params)->params[i].m_cached_finfo = NULL;
+            (*params)->params[i].m_cached_typinput = InvalidOid;
+            (*params)->params[i].m_cached_typioparam = InvalidOid;
+        }
     }
 
     MemoryContextSwitchTo(valueCtx);
@@ -5018,15 +5023,53 @@ void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, Par
                 pstring = pg_client_to_server(pbuf.data, plength);
             }
 
+            Datum pval_out = 0;
+            ParamExternData* prm = &((*params)->params[paramno]);
 #ifndef ENABLE_MULTIPLE_NODES
             if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
-                pval = bind_text_input_call(ptype, pstring);
+                if (pstring == NULL) {
+                    pval_out = (Datum)0;
+                } else if (fast_bind_text_input(ptype, pstring, &pval_out)) {
+                    /* fast path, nothing to do */
+                } else {
+                    Oid typinput;
+                    Oid typioparam;
+                    if (prm->ptype == ptype && prm->m_cached_typinput != InvalidOid &&
+                        prm->m_cached_typioparam != InvalidOid) {
+                        /* ptype unchanged and cache available: reuse cached values */
+                        typinput = prm->m_cached_typinput;
+                        typioparam = prm->m_cached_typioparam;
+                    } else {
+                        getTypeInputInfo(ptype, &typinput, &typioparam);
+                        prm->m_cached_typinput = typinput;
+                        prm->m_cached_typioparam = typioparam;
+                    }
+                    pval_out = OidInputFunctionCallCache(typinput, pstring, typioparam, -1, prm->m_cached_finfo);
+                }
             } else {
-                pval = (Datum)0;
+                pval_out = (Datum)0;
             }
 #else
-            pval = bind_text_input_call(ptype, pstring);
+            if (pstring == NULL) {
+                pval_out = (Datum)0;
+            } else if (fast_bind_text_input(ptype, pstring, &pval_out)) {
+                /* fast path, nothing to do */
+            } else {
+                Oid typinput;
+                Oid typioparam;
+                if (prm->ptype == ptype && prm->m_cached_finfo != NULL) {
+                    /* ptype unchanged and cache available: reuse cached values */
+                    typinput = prm->m_cached_typinput;
+                    typioparam = prm->m_cached_typioparam;
+                } else {
+                    getTypeInputInfo(ptype, &typinput, &typioparam);
+                    prm->m_cached_typinput = typinput;
+                    prm->m_cached_typioparam = typioparam;
+                }
+                pval_out = OidInputFunctionCallCache(typinput, pstring, typioparam, -1, prm->m_cached_finfo);
+            }
 #endif
+            pval = pval_out;
             /* Free result of encoding conversion, if any */
             if (pstring != NULL && pstring != pbuf.data) {
                 pfree(pstring);

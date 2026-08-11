@@ -870,16 +870,15 @@ Datum OpFusion::EvalSimpleArg(Node *arg, bool *is_null, Datum *values, bool *isN
     return 0;
 }
 
-Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum *values, bool *isNulls)
+Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum *values, bool *isNulls, FmgrInfo *finfo)
 {
     if (*is_null) {
         return 0;
     }
 
     Node *first_arg_node = (Node *)linitial(args);
-    Datum *arg;
-    bool *is_nulls = (bool *)palloc0(4 * sizeof(bool));
-    arg = (Datum *)palloc0(4 * sizeof(Datum));
+    Datum arg[4] = {0};
+    bool is_nulls[4] = {false};
 
     /* for now, we assuming FuncExpr and OpExpr only appear in the first arg */
     if (IsA(first_arg_node, FuncExpr)) {
@@ -893,7 +892,7 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
     }
 
     int length = list_length(args);
-    if (length < 1 || length > 4) {
+    if (unlikely(length < 1 || length > 4)) {
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
             errmsg("unexpected arg length : %d when processing bypass expression.", length)));
     }
@@ -916,10 +915,10 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
                 case NUMTOFLOAT8FUNCOID:
                     return DirectFunctionCall1(numeric_float8, arg[0]);
                 default:
-                    return OidFunctionCall1(functionId, arg[0]);
+                    return finfo != NULL ? FunctionCall1(finfo, arg[0]) : OidFunctionCall1(functionId, arg[0]);
             }
         case 2:
-            return OidFunctionCall2(functionId, arg[0], arg[1]);
+            return finfo != NULL ? FunctionCall2(finfo, arg[0], arg[1]) : OidFunctionCall2(functionId, arg[0], arg[1]);
         case 3:{
             switch (functionId) {
                 case F_BPCHAR:
@@ -929,11 +928,13 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
                     return opfusion_varchar(arg[0], arg[1], arg[2]);
                     break;
                 default:
-                    return OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
+                    return finfo != NULL ? FunctionCall3(finfo, arg[0], arg[1], arg[2]) :
+                        OidFunctionCall3(functionId, arg[0], arg[1], arg[2]);
             }
         }
         case 4:
-            return OidFunctionCall4(functionId, arg[0], arg[1], arg[2], arg[3]);
+            return finfo != NULL ? FunctionCall4(finfo, arg[0], arg[1], arg[2], arg[3]) :
+                OidFunctionCall4(functionId, arg[0], arg[1], arg[2], arg[3]);
         default: {
             Assert(0);
             ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
@@ -1033,6 +1034,9 @@ void OpFusion::initParams(ParamListInfo params)
         m_local.m_params->uParamInfo = DEFUALT_INFO;
         m_local.m_params->params_lazy_bind = false;
         m_local.m_params->numParams = m_global->m_paramNum;
+        for (int i = 0; i < m_local.m_params->numParams; i++) {
+            m_local.m_params->params[i].m_cached_finfo = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
+        }
     }
 }
 

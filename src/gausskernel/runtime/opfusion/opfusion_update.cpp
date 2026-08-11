@@ -151,6 +151,9 @@ void UpdateFusion::InitBaseParam(List* targetList)
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = opexpr->opfuncid;
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = opexpr->args;
+            if (opexpr->opfuncid != InvalidOid) {
+                fmgr_info(opexpr->opfuncid, &m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].m_finfo);
+            }
             ++m_c_global->m_targetFuncNum;
         } else if (IsA(expr, FuncExpr)) {
             func = (FuncExpr*)expr;
@@ -158,6 +161,9 @@ void UpdateFusion::InitBaseParam(List* targetList)
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = func->funcid;
             m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = func->args;
+            if (func->funcid != InvalidOid) {
+                fmgr_info(func->funcid, &m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].m_finfo);
+            }
             ++m_c_global->m_targetFuncNum;
         }
         i++;
@@ -247,9 +253,13 @@ void UpdateFusion::refreshTargetParameterIfNecessary()
 {
     ParamListInfo parms = m_local.m_outParams != NULL ? m_local.m_outParams : m_local.m_params;
     /* save cur var value */
-    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
-        m_c_local.m_curVarValue[i] = m_local.m_values[i];
-        m_c_local.m_curVarIsnull[i] = m_local.m_isnull[i];
+    if (likely(m_global->m_tupDesc->natts > 0)) {
+        int rc = memcpy_s(m_c_local.m_curVarValue, m_global->m_tupDesc->natts * sizeof(Datum),
+            m_local.m_values, m_global->m_tupDesc->natts * sizeof(Datum));
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(m_c_local.m_curVarIsnull, m_global->m_tupDesc->natts * sizeof(bool),
+            m_local.m_isnull, m_global->m_tupDesc->natts * sizeof(bool));
+        securec_check(rc, "\0", "\0");
     }
     if (m_c_global->m_varNum > 0) {
         for (int i = 0; i < m_c_global->m_varNum; i++) {
@@ -287,7 +297,9 @@ void UpdateFusion::refreshTargetParameterIfNecessary()
                                m_c_global->m_targetFuncNodes[i].args,
                                &func_isnull,
                                m_c_local.m_curVarValue,
-                               m_c_local.m_curVarIsnull);
+                               m_c_local.m_curVarIsnull,
+                               OidIsValid(m_c_global->m_targetFuncNodes[i].m_finfo.fn_oid) ?
+                                   &m_c_global->m_targetFuncNodes[i].m_finfo : NULL);
             m_local.m_isnull[m_c_global->m_targetFuncNodes[i].resno - 1] = func_isnull;
         }
         ELOG_FIELD_NAME_END;
