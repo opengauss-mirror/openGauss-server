@@ -1081,5 +1081,6 @@ void InitUndoCxt()
     }
     t_thrd.undo_cxt.transUndoSize = 0;
     t_thrd.undo_cxt.fetchRecord = false;
+    t_thrd.undo_cxt.curSequence = 1;
 }
 } // namespace undo
