@@ -145,7 +145,7 @@ struct Neighbor {
     float distance;
     bool expanded;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
-    uint8 heaptidsLength;
+    uint8 heaptidsLength = 0;
 
     Neighbor() = default;
 
@@ -697,4 +697,3 @@ void LoadPQInfo(Relation index, dataT *&data, BlockNumber startBlkno, uint16 nbl
 }
 
 #endif
-
