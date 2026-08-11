@@ -10145,7 +10145,7 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         /* ubtree pcr index not support smp insert */
         (rte->is_ustore && has_pcr_idx_in_relation(rel)) ||
         /* ustore's sub xact id for smp only supported after upgrade committed. */
-        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM && IsSubTransaction()) ||
+        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM) ||
         /* for ledger table, we cannot accumulate total hash from producer threads */
         rel->rd_isblockchain) {
         unsupport_tabletype = true;
