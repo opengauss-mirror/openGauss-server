@@ -134,6 +134,7 @@ void gs_message_by_memory(StringInfo buf, StreamSharedContext* sharedContext, in
         (void)entry->_timewait(SINGLE_WAITQUOTA);
     }
     appendBinaryStringInfo(buf_dst, buf->data, buf->len);
+    pg_memory_barrier();
     buf_dst->cursor = buf->cursor;
 
     /* Send signal to dest consumer. */
