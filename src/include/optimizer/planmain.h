@@ -123,6 +123,11 @@ extern Node* find_qualify_equal_class(PlannerInfo* root, Node* expr, List* targe
 extern List* confirm_distribute_key(PlannerInfo* root, Plan* plan, List* distribute_keys);
 extern bool check_dsitribute_key_in_targetlist(PlannerInfo* root, List* distribute_keys, List* targetlist);
 extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type, int newcol = 0);
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern void check_support_smp_dml_scenario(PlannerInfo* root);
+#endif
+
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,

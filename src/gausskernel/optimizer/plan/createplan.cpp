@@ -35,6 +35,7 @@
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
+#include "../../../include/nodes/relation.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
@@ -10136,7 +10137,7 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         return false;
     }
     bool unsupport_tabletype = false;
-    Index reidx = (Index)linitial_int((List*)linitial(resultRelations));
+    Index reidx = (Index)linitial_int(resultRelations);
     RangeTblEntry *rte = root->simple_rte_array[reidx];
     Relation rel = relation_open(rte->relid, NoLock);
     if (RELATION_IS_GLOBAL_TEMP(rel) || rte->orientation == REL_COL_ORIENTED ||
@@ -10152,6 +10153,28 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
     }
     relation_close(rel, NoLock);
     return unsupport_tabletype;
+}
+
+void check_support_smp_dml_scenario(PlannerInfo *root)
+{
+    Query* parse = root->parse;
+    List *resultRelations = parse->resultRelations;
+    List *returningLists = parse->returningList;
+    UpsertExpr *upsertClause = parse->upsertClause;
+    bool is_replace = parse->isReplace;
+
+    bool unuse_vec_engine = false;
+    bool unsupport_tabletype = false;
+
+    if (resultRelations != NULL) {
+        unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
+    }
+
+    unuse_vec_engine = !u_sess->attr.attr_sql.enable_force_vector_engine &&
+                        u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE;
+
+    root->support_smp_dml_scenario =
+        upsertClause == NULL && returningLists == NIL && unuse_vec_engine && !unsupport_tabletype && !is_replace;
 }
 #endif
 /*
@@ -10188,11 +10211,6 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     bool is_dml_smp = false;
     int dml_dop = OPTPLAN_DEFAULT_DOP;
 #endif
-#ifndef ENABLE_MULTIPLE_NODES
-    bool enable_smp = false;
-
-    bool unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
-#endif
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -10209,7 +10227,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     total_size = 0;
 
 #ifndef ENABLE_MULTIPLE_NODES
-    enable_smp = u_sess->attr.attr_sql.enable_force_smp;
+    bool enable_smp = u_sess->attr.attr_sql.enable_force_smp;
 
     /*
      * Modify table only support parallel iud operation.
@@ -10218,7 +10236,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
      */
     if (u_sess->attr.attr_sql.enable_smp_dml &&
         (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) &&
-        upsertClause == NULL && returningLists == NIL && !unsupport_tabletype) {
+        upsertClause == NULL && returningLists == NIL && root->support_smp_dml_scenario) {
         if (u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP || enable_smp) {
             if (list_length(subplans) == 1) {
                 Plan* subplan = (Plan*)linitial(subplans);

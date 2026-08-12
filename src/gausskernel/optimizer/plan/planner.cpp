@@ -3850,10 +3850,13 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                                     root, cheapest_path, sorted_path);
 
 #ifndef ENABLE_MULTIPLE_NODES
+        /* Check if smp dml scenario is currently supported and mark it in PlannerInfo. */
+        check_support_smp_dml_scenario(root);
+
         if (u_sess->attr.attr_sql.enable_smp_dml && parse->targetList != NULL &&
             u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP && best_path->dop > OPTPLAN_DEFAULT_DOP &&
             (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE ||
-            root->parse->commandType == CMD_MERGE)) {
+            root->parse->commandType == CMD_MERGE) && root->support_smp_dml_scenario) {
             Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
             if (new_best_path != NULL) {
                 best_path = new_best_path;
