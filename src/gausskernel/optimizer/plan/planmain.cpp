@@ -101,6 +101,9 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
     root->lateral_info_list = NIL;
     root->placeholder_list = NIL;
     root->initial_rels = NIL;
+#ifndef ENABLE_MULTIPLE_NODES
+    root->support_smp_dml_scenario = false;
+#endif
 
     /*
      * Make a flattened version of the rangetable for faster access (this is

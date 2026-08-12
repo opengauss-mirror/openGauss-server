@@ -522,6 +522,10 @@ typedef struct PlannerInfo {
     List *origin_tlist;
     struct PlannerTargets *planner_targets;
     bool ru_is_under_start_with;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    bool support_smp_dml_scenario;
+#endif
 } PlannerInfo;
 
 /*
