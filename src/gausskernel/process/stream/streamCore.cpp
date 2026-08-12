@@ -395,6 +395,7 @@ StreamNodeGroup::StreamNodeGroup()
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
+    m_producer_dop = 1;
     m_proc_array = NULL;
     m_proc_cnt = (uint32)0;
     PthreadRwLockInit(&combid_lock, NULL);
@@ -1085,7 +1086,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
     /* Destroy the stream node group. */
     if (u_sess->stream_cxt.global_obj != NULL) {
         if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && unlikely(t_thrd.ustore_cxt.m_undozone_array != NULL)) {
-            for (int i = 0; i < MAX_QUERY_DOP; i++) {
+            for (int i = 0; i < u_sess->stream_cxt.global_obj->m_producer_dop; i++) {
                 StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
                 if (m_undozone == NULL) {
                     continue;
