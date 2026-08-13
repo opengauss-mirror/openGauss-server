@@ -1137,6 +1137,24 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
  */
 void StreamNodeGroup::syncQuit(StreamObjStatus status)
 {
+    if (!IsInitdb && status == STREAM_ERROR) {
+        StreamProducer* producer = u_sess->stream_cxt.producer_obj;
+        StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+        if (stream_node_group != NULL && producer != NULL && stream_node_group->get_need_copyback_undozone() && (
+            t_thrd.undo_cxt.zids[UNDO_PERMANENT] != INVALID_ZONE_ID ||
+            t_thrd.undo_cxt.zids[UNDO_UNLOGGED] != INVALID_ZONE_ID ||
+            t_thrd.undo_cxt.zids[UNDO_TEMP] != INVALID_ZONE_ID)) {
+            TransactionState s = GetCurrentTransactionState();
+            /* producer copy undozone data to streamnodegroup */
+            int rc = memcpy_s(&producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context),
+                &t_thrd.undo_cxt, sizeof(knl_t_undo_context));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&producer->m_producer_undozone->trans_mgr_ptr, sizeof(TransactionStateData),
+                s, sizeof(TransactionStateData));
+            securec_check(rc, "\0", "\0");
+            stream_node_group->stream_return_undo(producer->m_producer_undozone, u_sess->stream_cxt.smp_id);
+        }
+    }
     /* Only stream thread or top consumer need sync quit */
     if (IS_PGXC_COORDINATOR || (StreamTopConsumerAmI() == false && StreamThreadAmI() == false) ||
         u_sess->stream_cxt.enter_sync_point == true)
