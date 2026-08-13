@@ -35,7 +35,6 @@
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
-#include "../../../include/nodes/relation.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
@@ -10125,6 +10124,24 @@ static bool has_pcr_idx_in_relation(Relation rel)
     return ans;
 }
 
+bool check_ctid_redis_stream(Plan* plan)
+{
+    if (!IsA(plan, Stream)) {
+        return false;
+    }
+
+    ListCell* tlist = NULL;
+    Var *distri_var = NULL;
+    List* distribute_keys = ((Stream*)plan)->distribute_keys;
+    foreach(tlist, distribute_keys) {
+        distri_var = (Var *)lfirst(tlist);
+        if (distri_var->varattno == SelfItemPointerAttributeNumber) {
+            return true;
+        }
+    }
+
+    return false;
+}
 #ifndef ENABLE_MULTIPLE_NODES
 static bool is_partition_autoextend_table(Relation rel)
 {
@@ -10155,7 +10172,7 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
     return unsupport_tabletype;
 }
 
-void check_support_smp_dml_scenario(PlannerInfo *root)
+void check_support_smp_dml_scenario(PlannerInfo *root, Path* path, RedistributeContext *redis_ctx)
 {
     Query* parse = root->parse;
     List *resultRelations = parse->resultRelations;
@@ -10169,6 +10186,11 @@ void check_support_smp_dml_scenario(PlannerInfo *root)
     if (resultRelations != NULL) {
         unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
     }
+
+    /* Check if smp dml is supported and if stream redistribute path need to be added. */
+    Index reidx = (Index)linitial_int(root->parse->resultRelations);
+    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
+    optplan_join_path_walker(path, dml_rel, redis_ctx);
 
     unuse_vec_engine = !u_sess->attr.attr_sql.enable_force_vector_engine &&
                         u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE;
@@ -10234,9 +10256,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
      * If the subplan already parallelize, add local gather on modifytable node.
 
      */
-    if (u_sess->attr.attr_sql.enable_smp_dml &&
-        (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) &&
-        upsertClause == NULL && returningLists == NIL && root->support_smp_dml_scenario) {
+    if (u_sess->attr.attr_sql.enable_smp_dml && IS_CMDTYPE_DML(operation) && root->support_smp_dml_scenario) {
         if (u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP || enable_smp) {
             if (list_length(subplans) == 1) {
                 Plan* subplan = (Plan*)linitial(subplans);
