@@ -1153,6 +1153,15 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
                 s, sizeof(TransactionStateData));
             securec_check(rc, "\0", "\0");
             stream_node_group->stream_return_undo(producer->m_producer_undozone, u_sess->stream_cxt.smp_id);
+            for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+                t_thrd.undo_cxt.zids[i] = INVALID_ZONE_ID;
+                t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
+                t_thrd.undo_cxt.slots[i] = NULL;
+                t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+            }
+            t_thrd.undo_cxt.transUndoSize = 0;
+            t_thrd.undo_cxt.fetchRecord = false;
+            pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
         }
     }
     /* Only stream thread or top consumer need sync quit */

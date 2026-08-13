@@ -4548,6 +4548,12 @@ void CommitTransactionCommand(bool STP_commit)
 
 void AbortCurrentTransaction(bool STP_rollback)
 {
+    if (StreamThreadAmI() && CurrentTransactionState != &TopTransactionStateData) {
+        int rc = memcpy_s(&TopTransactionStateData, sizeof(TransactionStateData),
+                          CurrentTransactionState, sizeof(TransactionStateData));
+        securec_check(rc, "\0", "\0");
+        InitCurrentTransactionState();
+    }
     TransactionState s = CurrentTransactionState;
     bool PerfectRollback = false;
 
@@ -6070,6 +6076,12 @@ void FreeSavepointList()
  */
 void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
 {
+    if (StreamThreadAmI() && CurrentTransactionState != &TopTransactionStateData) {
+        int rc = memcpy_s(&TopTransactionStateData, sizeof(TransactionStateData),
+                          CurrentTransactionState, sizeof(TransactionStateData));
+        securec_check(rc, "\0", "\0");
+        InitCurrentTransactionState();
+    }
     TransactionState s = CurrentTransactionState;
     /*
      * Get out of any transaction or nested transaction
@@ -8496,13 +8508,6 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpR
 void ApplyUndoActions(bool stpRollback)
 {
     if (StreamThreadAmI()) {
-        for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
-            t_thrd.undo_cxt.transUndoSize = 0;
-            t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
-            t_thrd.undo_cxt.slots[i] = NULL;
-            t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
-            pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
-        }
         return;
     }
 
