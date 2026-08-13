@@ -245,9 +245,6 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     appendStringInfo(&str,
         "delete from DBE_PLDEVELOPER.gs_source where nspid=%u and name=\'%s\' and type = \'%s\';\n",
         nspid, tmp, type);
-    appendStringInfo(&str,
-        "delete from DBE_PLDEVELOPER.gs_source where nspid=%u and name=\'%s\' and type = \'%s\';\n",
-        nspid, tmp, type);
     if (!u_sess->attr.attr_common.plsql_show_all_error || status)  {
         appendStringInfo(&str,
             "delete from DBE_PLDEVELOPER.gs_errors where " 
@@ -272,30 +269,39 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     appendStringInfoString(&str,
         "EXCEPTION WHEN OTHERS THEN NULL; \n");
     appendStringInfoString(&str, "end;");
-    List* rawParseList = raw_parser(str.data);
-    pfree_ext(tmp);
-    pfree_ext(str.data);
-    DoStmt* stmt = (DoStmt *)linitial(rawParseList);
     int save_compile_status = getCompileStatus();
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
-    MemoryContext temp = NULL;
-    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
-        temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
-    }
+    List* rawParseList = NULL;
     PG_TRY();
     {
         (void)CompileStatusSwtichTo(NONE_STATUS);
         u_sess->plsql_cxt.curr_compile_context = NULL;
+        rawParseList = raw_parser(str.data);
+    }
+    PG_CATCH();
+    {
+        (void)CompileStatusSwtichTo(save_compile_status);
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        clearCompileContextList(save_compile_list_length);
+        pfree_ext(tmp);
+        pfree_ext(str.data);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    pfree_ext(tmp);
+    pfree_ext(str.data);
+    DoStmt* stmt = (DoStmt *)linitial(rawParseList);
+    MemoryContext oldContext = CurrentMemoryContext;
+    PG_TRY();
+    {
         u_sess->plsql_cxt.is_insert_gs_source = true;
         ExecuteDoStmt(stmt, true);
         u_sess->plsql_cxt.is_insert_gs_source = false;
     }
     PG_CATCH();
     {
-        if (temp != NULL) {
-            MemoryContextSwitchTo(temp);
-        }
+        (void)MemoryContextSwitchTo(oldContext);
         (void)CompileStatusSwtichTo(save_compile_status);
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
         u_sess->plsql_cxt.is_insert_gs_source = false;
@@ -305,9 +311,7 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     PG_END_TRY();
     u_sess->plsql_cxt.curr_compile_context = save_compile_context;
     (void)CompileStatusSwtichTo(save_compile_status);
-    if (temp != NULL) {
-        MemoryContextSwitchTo(temp);
-    }
+    (void)MemoryContextSwitchTo(oldContext);
 }
 static void PkgInsertGsSource(Oid pkgOid, bool isSpec, bool status)
 {
@@ -316,11 +320,22 @@ static void PkgInsertGsSource(Oid pkgOid, bool isSpec, bool status)
         ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for package %u, while collecting gs_source log", pkgOid)));
     }
-    Form_gs_package pkgStruct = (Form_gs_package)GETSTRUCT(pkgTup);
-    char* name = NameStr(pkgStruct->pkgname);
-    Oid nspid = pkgStruct->pkgnamespace;
-    const char* type = (isSpec) ? ("package") : ("package body");
-    InsertGsSource(pkgOid, nspid, name, type, status);
+
+    PG_TRY();
+    {
+        Form_gs_package pkgStruct = (Form_gs_package)GETSTRUCT(pkgTup);
+        char* name = NameStr(pkgStruct->pkgname);
+        Oid nspid = pkgStruct->pkgnamespace;
+        const char* type = (isSpec) ? ("package") : ("package body");
+        InsertGsSource(pkgOid, nspid, name, type, status);
+    }
+    PG_CATCH();
+    {
+        ReleaseSysCache(pkgTup);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     ReleaseSysCache(pkgTup);
 }
 
@@ -332,50 +347,53 @@ static void ProcInsertGsSource(Oid funcOid, bool status)
         ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for function %u, while collecting gs_source log", funcOid)));
     }
-    Form_pg_proc procStruct = (Form_pg_proc)GETSTRUCT(procTup);
-    bool isnull = false;
 
-    /* Skip nested create function stmt within package body */
-    bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isnull);
-    Datum packageIdDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isnull);
-    if (isnull) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The prokind of the function is null"),
-                errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
+    PG_TRY();
+    {
+        Form_pg_proc procStruct = (Form_pg_proc)GETSTRUCT(procTup);
+        bool isnull = false;
+        bool needInsert = true;
+        char prokind = '\0';
+
+        /* Skip nested create function stmt within package body */
+        bool ispackage = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_package, &isnull);
+        Datum packageIdDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isnull);
+        if (isnull) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("The prokind of the function is null"),
+                    errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
+        }
+        Oid packageOid = ispackage ? DatumGetObjectId(packageIdDatum) : InvalidOid;
+        if (OidIsValid(packageOid) || procStruct->prorettype == TRIGGEROID) {
+            needInsert = false;
+        }
+        if (needInsert) {
+            Datum prokindDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prokind, &isnull);
+            if (isnull) {
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("The prokind of the function is null"),
+                        errhint("Check whether the definition of the function is complete "
+                                "in the pg_proc system table.")));
+            }
+            prokind = CharGetDatum(prokindDatum);
+            if (PROC_IS_AGG(prokind) || PROC_IS_WIN(prokind) ||
+                strcasecmp(get_language_name((Oid)procStruct->prolang), "plpgsql") != 0) {
+                needInsert = false;
+            }
+        }
+        if (needInsert) {
+            char* name = NameStr(procStruct->proname);
+            Oid nspid = procStruct->pronamespace;
+            const char* type = PROC_IS_PRO(prokind) ? ("procedure") : ("function");
+            InsertGsSource(funcOid, nspid, name, type, status);
+        }
     }
-    Oid packageOid = ispackage ? DatumGetObjectId(packageIdDatum) : InvalidOid;
-    if (OidIsValid(packageOid)) {
+    PG_CATCH();
+    {
         ReleaseSysCache(procTup);
-        return;
+        PG_RE_THROW();
     }
-
-    /* Skip trigger function for now */
-    if (procStruct->prorettype == TRIGGEROID) {
-        ReleaseSysCache(procTup);
-        return;
-    }
-
-    Datum prokindDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prokind, &isnull);
-    if (isnull) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The prokind of the function is null"),
-                errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
-    }
-    char prokind = CharGetDatum(prokindDatum);
-
-    if (PROC_IS_AGG(prokind) || PROC_IS_WIN(prokind)) {
-        ReleaseSysCache(procTup);
-        return;
-    }
-
-    char* name = NameStr(procStruct->proname);
-    Oid nspid = procStruct->pronamespace;
-    const char* type = PROC_IS_PRO(prokind) ? ("procedure") : ("function");
-    if (strcasecmp(get_language_name((Oid)procStruct->prolang), "plpgsql") != 0) {
-        ReleaseSysCache(procTup);
-        return;
-    }
-    InsertGsSource(funcOid, nspid, name, type, status);
+    PG_END_TRY();
 
     ReleaseSysCache(procTup);
 
@@ -1630,6 +1648,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     bool is_event_trigger = false;
     Oid saveCallerOid = InvalidOid;
     Oid savaCallerParentOid = InvalidOid;
+    Oid saveRunningFuncOid = u_sess->plsql_cxt.running_func_oid;
     bool is_pkg_func = false;
     
     int i;
@@ -1723,6 +1742,8 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
         int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
         int save_compile_status = u_sess->plsql_cxt.compile_status;
+        MemoryContext oldContext = CurrentMemoryContext;
+        ErrorContextCallback* save_error_context_stack = t_thrd.log_cxt.error_context_stack;
         /* Test-compile the function */
         PG_TRY();
         {
@@ -1744,6 +1765,10 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         }
         PG_CATCH();
         {
+            (void)MemoryContextSwitchTo(oldContext);
+            t_thrd.log_cxt.error_context_stack = save_error_context_stack;
+            ErrorData* edata = CopyErrorData();
+            FlushErrorState();
             LockErrorCleanup();
             SetCurrCompilePgObjStatus(save_curr_status);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1751,9 +1776,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             bool insertError = (u_sess->attr.attr_common.plsql_show_all_error ||
                                     !u_sess->attr.attr_sql.check_function_bodies) &&
                                     u_sess->plsql_cxt.isCreateFunction;
-            if (!SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
-                ProcInsertGsSource(funcoid, false);
-            }
+            bool needInsertGsSource = !SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction;
             if (insertError) {
                 if (!IsInitdb) {
                     int rc = CompileWhich();
@@ -1791,7 +1814,23 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             clearCompileContextList(save_compile_list_length);
 #endif
             u_sess->parser_cxt.isCreateFuncOrProc = false;
-            PG_RE_THROW();
+            u_sess->parser_cxt.eaten_declare = false;
+            u_sess->parser_cxt.eaten_begin = false;
+#ifndef ENABLE_MULTIPLE_NODES
+            if (needInsertGsSource) {
+                PG_TRY();
+                {
+                    ProcInsertGsSource(funcoid, false);
+                }
+                PG_CATCH();
+                {
+                    FlushErrorState();
+                }
+                PG_END_TRY();
+            }
+#endif
+            saveCallFromFuncOid(saveRunningFuncOid);
+            ReThrowError(edata);
         }
         PG_END_TRY();
         bool isNotComipilePkg = u_sess->plsql_cxt.curr_compile_context == NULL ||
@@ -1816,7 +1855,15 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     }
 #ifndef ENABLE_MULTIPLE_NODES
     if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction && !u_sess->plsql_cxt.running_func_oid) {
-        ProcInsertGsSource(funcoid, true);
+        PG_TRY();
+        {
+            ProcInsertGsSource(funcoid, true);
+        }
+        PG_CATCH();
+        {
+            FlushErrorState();
+        }
+        PG_END_TRY();
     }
 #endif
     if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid == saveCallerOid) {
@@ -2012,12 +2059,14 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCo
                 if (!funcStmt->isExecuted) {
                     (void)CompileStatusSwtichTo(COMPILIE_PKG_FUNC);
                     char* funcStr = funcStmt->queryStr;
+                    MemoryContext funcCxt = CurrentMemoryContext;
                     PG_TRY();
                     {
                         CreateFunction(funcStmt, funcStr, pkg->pkg_oid);
                     }
                     PG_CATCH();
                     {
+                        (void)MemoryContextSwitchTo(funcCxt);
                         LockErrorCleanup();
                         set_create_plsql_type_end();
                         if (u_sess->plsql_cxt.create_func_error) {
@@ -2888,7 +2937,6 @@ void ProcessSubprograms(List* func_proc_list, Oid parentFuncOid)
                     {
                         Oid packageOid = (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) ?
                                 InvalidOid : u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
-                        u_sess->attr.attr_sql.check_function_bodies = true;
                         CreateFunction(funcStmt, funcStr, packageOid, InvalidOid,
                             u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid);
                         u_sess->attr.attr_sql.check_function_bodies = check_states;
@@ -2896,6 +2944,7 @@ void ProcessSubprograms(List* func_proc_list, Oid parentFuncOid)
                     PG_CATCH();
                     {
                         u_sess->attr.attr_sql.check_function_bodies = check_states;
+                        (void)CompileStatusSwtichTo(oldCompileStatus);
                         if (u_sess->plsql_cxt.create_func_error) {
                             u_sess->plsql_cxt.create_func_error = false;
                             exception_num += 1;
