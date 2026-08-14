@@ -8207,11 +8207,8 @@ void StreamTxnContextSetTransactionState(StreamTxnContext *stc, StreamProducer *
     s->transactionId = stc->txnId;
     s->curSequence = stc->curSequence;
 
-    /* undo zone */
-    StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
-
     int rc = 0;
-    if (stream_node_group != NULL && stream_node_group->get_need_copyback_undozone()) {
+    if (producer != NULL && producer->get_need_copyback_undozone()) {
         rc = memcpy_s(&t_thrd.undo_cxt, sizeof(knl_t_undo_context),
             &producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context));
         securec_check(rc, "\0", "\0");
@@ -8220,12 +8217,12 @@ void StreamTxnContextSetTransactionState(StreamTxnContext *stc, StreamProducer *
             &producer->m_producer_undozone->trans_mgr_ptr.first_urp,
             sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s(&s->last_urp, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
-            &producer->m_producer_undozone->trans_mgr_ptr->last_urp,
+        rc = memcpy_s(&s->latest_urp, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
+            &producer->m_producer_undozone->trans_mgr_ptr.latest_urp,
             sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s(&s->latest_upr_xact, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
-            &producer->m_producer_undozone->trans_mgr_ptr->latest_upr_xact,
+        rc = memcpy_s(&s->latest_urp_xact, sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS,
+            &producer->m_producer_undozone->trans_mgr_ptr.latest_urp_xact,
             sizeof(UndoRecPtr) * UNDO_PERSISTENCE_LEVELS);
         securec_check(rc, "\0", "\0");
     }

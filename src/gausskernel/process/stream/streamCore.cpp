@@ -1095,7 +1095,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
                 knl_t_undo_context *undo_cxt = &(nodegroup_undozone->undo_cxt);
                 if (undo_cxt->zids[UNDO_PERMANENT] != INVALID_ZONE_ID) {
                     Assert(undo_cxt->zids[UNDO_UNLOGGED] != INVALID_ZONE_ID);
-                    Assert(undo_cxt->zids[UNDOD_TEMP] != INVALID_ZONE_ID);
+                    Assert(undo_cxt->zids[UNDO_TEMP] != INVALID_ZONE_ID);
                     init_stream_undozone_data_from(m_undozone, nodegroup_undozone);
                 }
                 for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
@@ -1140,7 +1140,7 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     if (!IsInitdb && status == STREAM_ERROR) {
         StreamProducer* producer = u_sess->stream_cxt.producer_obj;
         StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
-        if (stream_node_group != NULL && producer != NULL && stream_node_group->get_need_copyback_undozone() && (
+        if (stream_node_group != NULL && producer != NULL && producer->get_need_copyback_undozone() && (
             t_thrd.undo_cxt.zids[UNDO_PERMANENT] != INVALID_ZONE_ID ||
             t_thrd.undo_cxt.zids[UNDO_UNLOGGED] != INVALID_ZONE_ID ||
             t_thrd.undo_cxt.zids[UNDO_TEMP] != INVALID_ZONE_ID)) {
