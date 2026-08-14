@@ -150,6 +150,7 @@ StreamProducer::StreamProducer(
     initStringInfo(&m_tupleBuffer);
     initStringInfo(&m_tupleBufferWithCheck);
     m_producer_undozone = NULL;
+    m_need_copyback_undozone = false;
 
     /* use the origianl exec_nodes to setup bucketmap for redistribution case */
     if (EXEC_IN_RECURSIVE_MODE(snode) && snode->origin_consumer_nodes != NULL) {

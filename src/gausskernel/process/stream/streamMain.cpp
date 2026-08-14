@@ -597,7 +597,7 @@ static void execute_stream_end(StreamProducer* producer)
         }
         StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
         Assert(stream_node_group);
-        if (stream_node_group->get_need_copyback_undozone()) {
+        if (producer->get_need_copyback_undozone()) {
             /* producer copy undozone data to streamnodegroup */
             int rc = memcpy_s(&producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context),
                 &t_thrd.undo_cxt, sizeof(knl_t_undo_context));
