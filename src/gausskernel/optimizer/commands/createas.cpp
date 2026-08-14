@@ -186,6 +186,8 @@ ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString
 
     recover_set_hint(nest_level);
 
+    MemoryContext callerContext = CurrentMemoryContext;
+
     /*
      * Use a snapshot with an updated command ID to ensure this query sees
      * results of any previously executed queries.	(This could only matter if
@@ -268,6 +270,7 @@ ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(callerContext);
         intorel_cleanup(dest, false);
         cleanup_querydesc(&queryDesc, executorStarted);
         if (snapshotPushed) {
