@@ -46,8 +46,6 @@ COMMENT ON FUNCTION pg_catalog.gs_catalog_attribute_records(
 -- CREATE OR REPLACE VIEW is enough and avoids cascading the dependent views.
 SET search_path TO information_schema;
 
-SET skip_new_column_for_ruledef = true;
-
 CREATE OR REPLACE VIEW columns AS
     SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
            CAST(nc.nspname AS sql_identifier) AS table_schema,
@@ -272,7 +270,5 @@ BEGIN
 END $$;
 
 GRANT SELECT ON sequences TO PUBLIC;
-
-RESET skip_new_column_for_ruledef;
 
 RESET search_path;

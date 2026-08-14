@@ -60,6 +60,8 @@ RETURNS NVARCHAR2
 AS $$ select CAST(pg_catalog.float8out($1) AS NVARCHAR2) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
+SET skip_new_column_for_ruledef = true;
+
 -- 1. 回滚 pg_sequence_parameters 至原始 6 参数版本
 -- CASCADE 自动删除依赖此函数的 information_schema.sequences 视图
 DROP FUNCTION IF EXISTS pg_catalog.pg_sequence_parameters(
@@ -552,6 +554,8 @@ CREATE OR REPLACE VIEW information_schema.usage_privileges AS
                OR grantee.rolname = 'PUBLIC');
 GRANT SELECT ON information_schema.usage_privileges TO PUBLIC;
 RESET search_path;
+
+RESET skip_new_column_for_ruledef;
 
 -- 11. 升级 db4ai.snapshot_sequence：将旧版 relkind='S' 的序列 DROP 后重建为 'z'
 DO $$
