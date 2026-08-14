@@ -1,4 +1,4 @@
-# pre-commit 提交前检查（openGauss-GaussMaster）
+# pre-commit 提交前检查
 
 本仓库在 `git commit` 前自动对**本次改动**做基础检查与格式化，减少低级错误进入版本库。
 
