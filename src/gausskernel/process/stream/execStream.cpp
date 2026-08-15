@@ -383,6 +383,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     TupleVector*** sharedTuples = NULL;
     DataStatus** dataStatus = NULL;
     bool** is_connect_end = NULL;
+    bool* isProducerComplete = NULL;
     StringInfo** messages = NULL;
     int* scanLoc = NULL;
     char context_name[NODENAMELEN];
@@ -416,6 +417,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     /* Init data status. */
     dataStatus = (DataStatus**)palloc(sizeof(DataStatus*) * consumerNum);
     is_connect_end = (bool**)palloc(sizeof(bool*) * consumerNum);
+    isProducerComplete = (bool*)palloc0(sizeof(bool) * producerNum);
     messages = (StringInfo**)palloc(sizeof(StringInfo*) * consumerNum);
     for (int i = 0; i < consumerNum; i++) {
         dataStatus[i] = (DataStatus*)palloc(sizeof(DataStatus) * producerNum);
@@ -448,6 +450,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     sharedContext->sharedTuples = sharedTuples;
     sharedContext->dataStatus = dataStatus;
     sharedContext->is_connect_end = is_connect_end;
+    sharedContext->is_producer_complete = isProducerComplete;
     sharedContext->messages = messages;
     sharedContext->scanLoc = scanLoc;
 
@@ -477,6 +480,7 @@ static void resetLocalStreamContext(StreamSharedContext* context)
     context->scanLoc[0] = 0;
     context->dataStatus[0][0] = DATA_EMPTY;
     context->is_connect_end[0][0] = false;
+    context->is_producer_complete[0] = false;
     resetStringInfo(context->messages[0][0]);
 
     context->sharedTuples[0][0]->tuplePointer = 0;
