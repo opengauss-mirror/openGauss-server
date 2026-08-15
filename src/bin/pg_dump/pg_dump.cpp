@@ -4787,7 +4787,7 @@ static void DumpBehaviorCompat(Archive* archive)
     destroyPQExpBuffer(qry);
 }
 
-static void DumpDFormatBehaviorCompat(Archive* archive) 
+static void DumpDFormatBehaviorCompat(Archive* archive)
 {
     if (!hasSpecificExtension(archive, "shark")) {
         return;
@@ -4797,7 +4797,17 @@ static void DumpDFormatBehaviorCompat(Archive* archive)
     PGresult* res = NULL;
     PQExpBuffer qry = createPQExpBuffer();
 
-    if (g_sharkDumpSavedCompatOptions != NULL) {
+    if (findDBCompatibility(archive, PQdb(conn), "D")) {
+        /*
+         * The dumped DDL is always generated in the legacy form: plain
+         * identifiers instead of bracketed ones, and explicit COLLATE clauses
+         * instead of relying on default_collation. Replaying it with the
+         * d_format_behavior_compat_options default ('enable_sbr_identifier,
+         * default_collation') would re-interpret that DDL, so pin the restore
+         * session to the empty value regardless of the source setting.
+         */
+        appendPQExpBuffer(qry, "SET d_format_behavior_compat_options = '';\n");
+    } else if (g_sharkDumpSavedCompatOptions != NULL) {
         appendPQExpBufferStr(qry, "SET d_format_behavior_compat_options = ");
         appendStringLiteralAH(qry, g_sharkDumpSavedCompatOptions, archive);
         appendPQExpBufferStr(qry, ";\n");

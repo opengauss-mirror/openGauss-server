@@ -50,7 +50,7 @@ bool is_support_b_format_collation(Oid collation)
     if (is_b_format_collation(collation) && !DB_IS_CMPT_BD) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
-                errdetail("this collation only support in B-format database")));
+                errdetail("this collation only support in B and D format database")));
     }
     return true;
 }
@@ -58,15 +58,15 @@ bool is_support_b_format_collation(Oid collation)
 /* binary collation only support binary string types, such as : blob. */
 void check_binary_collation(Oid collation, Oid type_oid)
 {
-    if (collation == BINARY_COLLATION_OID && !DB_IS_CMPT(B_FORMAT)) {
+    if (collation == BINARY_COLLATION_OID && !DB_IS_CMPT_BD) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
-                errdetail("this collation only support in B-format database")));
+                errdetail("this collation only support in B and D format database")));
     }
 
     if (IsBinaryType(type_oid) && collation != BINARY_COLLATION_OID) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("binary collation only support binary type in B format")));
+                errmsg("binary collation only support binary type in B and D format")));
     }
 }
 
