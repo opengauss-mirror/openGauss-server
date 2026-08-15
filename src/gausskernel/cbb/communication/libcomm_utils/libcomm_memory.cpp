@@ -533,10 +533,13 @@ void gs_memory_send_finish(StreamSharedContext* sharedContext, int connNum)
 {
     struct hash_entry* entry = NULL;
 
-    for (int i = 0; i < connNum; i++) {
+    /* Only a producer may publish its own execution completion. */
+    sharedContext->is_producer_complete[u_sess->stream_cxt.smp_id] = true;
 #ifdef __aarch64__
     pg_memory_barrier();
 #endif
+
+    for (int i = 0; i < connNum; i++) {
         /* Set flags. */
         sharedContext->is_connect_end[i][u_sess->stream_cxt.smp_id] = true;
 
@@ -573,4 +576,3 @@ void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int c
         entry->_signal();
     }
 }
-

@@ -866,6 +866,7 @@ void InitProcess(void)
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
+    t_thrd.proc->sessMemorySessionid = 0;
     t_thrd.proc->pid = t_thrd.proc_cxt.MyProcPid;
     /* if enable thread pool, session id will be overwritten at coupling session */
     t_thrd.proc->sessionid = (ENABLE_THREAD_POOL ? t_thrd.fake_session->session_id : t_thrd.proc_cxt.MyProcPid);
@@ -875,6 +876,7 @@ void InitProcess(void)
     t_thrd.proc->backendSlot = -1;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
+    t_thrd.proc->role = t_thrd.role;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     /* For backends, upgrade status is either passed down from remote backends or inherit from PM */
     t_thrd.proc->workingVersionNum = (u_sess->proc_cxt.MyProcPort ? u_sess->proc_cxt.MyProcPort->SessionVersionNum :
@@ -1137,6 +1139,7 @@ void InitAuxiliaryProcess(void)
     t_thrd.proc->backendId = InvalidBackendId;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
+    t_thrd.proc->role = t_thrd.role;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     t_thrd.pgxact->delayChkpt = false;
     t_thrd.pgxact->vacuumFlags = 0;
@@ -1386,6 +1389,8 @@ static void RemoveProcFromArray(int code, Datum arg)
 
 static void ProcPutBackToFreeList()
 {
+    t_thrd.proc->sessMemorySessionid = 0;
+
     /* Return PGPROC structure (and semaphore) to appropriate freelist */
     if (IsAnyAutoVacuumProcess()) {
         t_thrd.proc->links.next = (SHM_QUEUE*)g_instance.proc_base->autovacFreeProcs;

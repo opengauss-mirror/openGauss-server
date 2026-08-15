@@ -196,6 +196,7 @@ static void ResetStreamStatus()
         pfree_ext(t_thrd.log_cxt.msgbuf->data);
     }
 
+    t_thrd.proc->sessMemorySessionid = 0;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
 
@@ -228,4 +229,3 @@ static void ResetStreamStatus()
         beentry->st_smpid = 0;
     }
 }
-
