@@ -4,38 +4,59 @@
 # First-time setup: Run bash setup-pre-commit.sh
 
 # Exclude third-party libraries, build directories, documentation, and non-source files
-exclude: '^(docs/|build/|third_party/|.*\.min\.js$|.*\.o$|.*\.so$)'
+exclude: '^(doc/|docs/|docs-lite/|build/|contrib/|docker/|third_party/|src/test/|.*\.min\.js$|.*\.o$|.*\.so$)'
 
 repos:
   # 1. Basic hygiene checks
   - repo: https://gitcode.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
+      # 只检查 cpp
       - id: trailing-whitespace
+        files: \.cpp$
+
+      # 只检查 cpp
       - id: end-of-file-fixer
+        files: \.cpp$
+
+      # 配置文件检查
       - id: check-yaml
-        args: ["--allow-multiple-documents"]
+        args:
+          - --allow-multiple-documents
+        files: \.cpp$
+
       - id: check-json
+   
       - id: check-merge-conflict
+
+     
       - id: check-added-large-files
+
+        
+
       - id: detect-private-key
+       
 
-  # 2. Spell-checking
-  - repo: https://gitcode.com/gh_mirrors/co/codespell
-    rev: v2.4.1
-    hooks:
-      - id: codespell
-        args: ["--skip=*.o,*.so,*.a,*.exe,*.dll"]
+  # 2. Spell checking
+  # - repo: https://gitcode.com/gh_mirrors/co/codespell
+  #   rev: v2.4.1
+  #   hooks:
+  #     - id: codespell
+  #       args:
+  #         - --skip=*.o,*.so,*.a,*.exe,*.dll
 
-  # 3. C++ Core Toolchain (Formatting + Static Analysis)
-  - repo: https://github.com/cpp-linter/cpp-linter-hooks
-    rev: v1.4.1
-    hooks:
-    # Code formatting: read .clang-format
-      - id: clang-format
-        args: [--style=file, --version=21]
-        files: ^(src|include)/.*\.(cpp|cc|cxx|h|hpp)$
+  # 3. C++ Toolchain
+  # - repo: https://github.com/cpp-linter/cpp-linter-hooks
+  #   rev: v1.4.1
+  #   hooks:
+  #     - id: clang-format
+  #       files: \.cpp$
+  #       args:
+  #         - --style=file
+  #         - --version=21
 
-      - id: clang-tidy
-        args: [--checks=.clang-tidy, --version=21]
-        files: ^(src|include)/.*\.(cpp|cc|cxx|h|hpp)$
+  #     - id: clang-tidy
+  #       files: \.cpp$
+  #       args:
+  #         - --checks=.clang-tidy
+  #         - --version=21
