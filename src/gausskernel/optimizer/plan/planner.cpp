@@ -786,6 +786,13 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     if (u_sess->opt_cxt.query_dop > 1) {
         List* subplan_list = NIL;
         (void)has_subplan(top_plan, NULL, NULL, true, &subplan_list, true);
+        /* Delete useless top-level local stream node. */
+        if (top_plan != NULL && (IsA(top_plan, Stream) || IsA(top_plan, VecStream))) {
+            Stream* stream = (Stream*)top_plan;
+            if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1 && !stream->is_recursive_local) {
+                remove_local_plan(top_plan, NULL, NULL, true);
+            }
+        }
     }
     confirm_parallel_info(top_plan, 1);
 
