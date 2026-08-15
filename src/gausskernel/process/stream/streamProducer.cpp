@@ -309,7 +309,7 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
     m_nodeGroup = u_sess->stream_cxt.global_obj;
     registerGroup();
     m_sync_guc_variables = KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, sync_guc_variables);
-    m_producer_undozone = (StreamUndoZoneData *)palloc(sizeof(StreamUndoZoneData));
+    m_producer_undozone = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
 
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);

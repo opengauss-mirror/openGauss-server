@@ -1328,7 +1328,8 @@ static void StartupStreamThread(StreamState* node, bool need_save_undo)
                        transactionCxt,
                        node->ss.ps.state->es_param_list_info,
                        u_sess->stream_cxt.producer_obj ? u_sess->stream_cxt.producer_obj->getKey().planNodeId : 0);
-        if (need_save_undo && IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
+        if (need_save_undo && ((Stream*)node->ss.ps.plan)->smpDesc.consumerDop == 1 &&
+            IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
             int producer_dop = ((Stream*)node->ss.ps.plan)->smpDesc.producerDop;
             u_sess->stream_cxt.global_obj->m_producer_dop = producer_dop;
             producer->set_need_copyback_undozone();
