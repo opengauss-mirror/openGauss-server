@@ -5655,7 +5655,7 @@ DATA(insert OID = 4162 ( varchar_date                  PGNSP PGUID 12 1 0 0 0 f 
 DESCR("convert varchar to date");
 DATA(insert OID = 4163 ( bpchar_date                   PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 1082 "1042" _null_ _null_ _null_ _null_ bpchar_date  _null_ _null_ _null_ "" f));
 DESCR("convert bpchar to date");
-DATA(insert OID = 4164 ( text_date                     PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 1082 "25" _null_ _null_ _null_ _null_ text_date  _null_ _null_ _null_ "" f));
+DATA(insert OID = 4164 ( text_date                     PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 1082 "25" _null_ _null_ _null_ _null_ text_date  _null_ _null_ _null_ "" f));
 DESCR("convert text to date");
 
 DATA(insert OID = 4165 ( int1_text                     PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 25 "5545" _null_ _null_ _null_ _null_ int1_text _null_ _null_ _null_ "" f));

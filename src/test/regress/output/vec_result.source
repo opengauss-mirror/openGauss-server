@@ -116,8 +116,8 @@ analyze vector_result_table_04;
 --- case 1: Basic Case
 ----
 explain (verbose on, costs off) select col_serial from vector_result_table_01 where current_date>'2015-02-14' order by  1 limit 10;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
  Row Adapter
    Output: col_serial
    ->  Vector Limit
@@ -125,9 +125,12 @@ explain (verbose on, costs off) select col_serial from vector_result_table_01 wh
          ->  Vector Sort
                Output: col_serial
                Sort Key: vector_result_table_01.col_serial
-               ->  CStore Scan on vector_result_engine.vector_result_table_01
+               ->  Vector Result
                      Output: col_serial
-(9 rows)
+                     One-Time Filter: (text_date('now'::text) > '02-14-2015'::date)
+                     ->  CStore Scan on vector_result_engine.vector_result_table_01
+                           Output: col_serial
+(12 rows)
 
 select col_serial from vector_result_table_01 where current_date>'2015-02-14' order by  1 limit 10;
  col_serial 
