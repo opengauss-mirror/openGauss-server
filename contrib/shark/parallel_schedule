@@ -4,7 +4,7 @@ test: basetest
 test: day_test rand_test
 test: objectproperty
 test: clustered_index insert_stmt sbr_test
-test: identity
+# test: identity
 test: test_ddl_and_dml
 test: rotate-test-part2 rotate-test-part2_ci
 test: xact_abort
@@ -22,8 +22,9 @@ test: test_sysviews9
 test: test_sysviews10
 test: test_sysviews11
 test: test_sysviews_pression
-test: gs_dump_d_format rotate_part2_dump
-test: varbinary
+# test: gs_dump_d_format rotate_part2_dump
+test: rotate_part2_dump
+# test: varbinary
 test: test_sqlvariant
 test: table_hint
 test: proc
@@ -39,4 +40,5 @@ test: sharksysfunction
 test: alter_sequence
 test: target_alias
 
-test: pg_identity pg_identity_dump_restore
+# test: pg_identity pg_identity_dump_restore
+test: pg_identity

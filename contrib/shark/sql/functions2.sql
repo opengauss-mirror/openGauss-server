@@ -1,5 +1,6 @@
 create schema functions_test2;
 set search_path = 'functions_test2';
+set d_format_behavior_compat_options = '';
 
 select datediff(year, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
 select datediff(yy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
@@ -266,5 +267,6 @@ select 0+cast(' -      ' as bigint);
 select 0+cast('       +' as bigint);
 select 0+cast('-       ' as bigint);
 
+reset d_format_behavior_compat_options;
 reset search_path;
 drop schema functions_test2 cascade;

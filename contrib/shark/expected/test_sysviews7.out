@@ -13,14 +13,18 @@
  is_dynamic       | bit(1)         | 
  is_advanced      | bit(1)         | 
 
-select name, value, minimum, maximum, value_in_use, description from sys.configurations order by name limit 2;
+select name, value, minimum, maximum, value_in_use, description from sys.configurations
+  where name in ('acceleration_with_compute_pool', 'acce_min_datasize_per_thread')
+  order by case name when 'acceleration_with_compute_pool' then 1 when 'acce_min_datasize_per_thread' then 2 end;
               name              | value  | minimum |  maximum   | value_in_use |                           description                           
 --------------------------------+--------+---------+------------+--------------+-----------------------------------------------------------------
  acceleration_with_compute_pool | off    |         |            | off          | If true, agg/scan may run in compute pool.
  acce_min_datasize_per_thread   | 500000 | 0       | 2147483647 | 500000       | Used to estimate whether pushdown the plan to the compute pool.
 (2 rows)
 
-select name, setting, min_val, max_val, setting, short_desc from pg_settings order by name limit 2;
+select name, setting, min_val, max_val, setting, short_desc from pg_settings
+  where name in ('acceleration_with_compute_pool', 'acce_min_datasize_per_thread')
+  order by case name when 'acceleration_with_compute_pool' then 1 when 'acce_min_datasize_per_thread' then 2 end;
               name              | setting | min_val |  max_val   | setting |                           short_desc                            
 --------------------------------+---------+---------+------------+---------+-----------------------------------------------------------------
  acceleration_with_compute_pool | off     |         |            | off     | If true, agg/scan may run in compute pool.
@@ -78,14 +82,18 @@ select name, is_dynamic from sys.configurations where name in ('acce_min_datasiz
  comment | nvarchar2(255) | 
  status  | smallint       | 
 
-select value, comment from sys.syscurconfigs limit 2;
+select value, comment from sys.syscurconfigs con inner join pg_settings ps on con.comment = ps.short_desc
+  where ps.name in ('acce_min_datasize_per_thread', 'acceleration_with_compute_pool')
+  order by case ps.name when 'acce_min_datasize_per_thread' then 1 when 'acceleration_with_compute_pool' then 2 end;
  value  |                             comment                             
 --------+-----------------------------------------------------------------
  500000 | Used to estimate whether pushdown the plan to the compute pool.
  off    | If true, agg/scan may run in compute pool.
 (2 rows)
 
-select setting, short_desc from pg_settings limit 2;
+select setting, short_desc from pg_settings
+  where name in ('acce_min_datasize_per_thread', 'acceleration_with_compute_pool')
+  order by case name when 'acce_min_datasize_per_thread' then 1 when 'acceleration_with_compute_pool' then 2 end;
  setting |                           short_desc                            
 ---------+-----------------------------------------------------------------
  500000  | Used to estimate whether pushdown the plan to the compute pool.
@@ -127,14 +135,18 @@ select status from sys.syscurconfigs con inner join pg_settings ps on con.commen
  comment | nvarchar2(255) | 
  status  | smallint       | 
 
-select value, comment from sys.syscurconfigs limit 2;
+select value, comment from sys.syscurconfigs con inner join pg_settings ps on con.comment = ps.short_desc
+  where ps.name in ('acce_min_datasize_per_thread', 'acceleration_with_compute_pool')
+  order by case ps.name when 'acce_min_datasize_per_thread' then 1 when 'acceleration_with_compute_pool' then 2 end;
  value  |                             comment                             
 --------+-----------------------------------------------------------------
  500000 | Used to estimate whether pushdown the plan to the compute pool.
  off    | If true, agg/scan may run in compute pool.
 (2 rows)
 
-select setting, short_desc from pg_settings limit 2;
+select setting, short_desc from pg_settings
+  where name in ('acce_min_datasize_per_thread', 'acceleration_with_compute_pool')
+  order by case name when 'acce_min_datasize_per_thread' then 1 when 'acceleration_with_compute_pool' then 2 end;
  setting |                           short_desc                            
 ---------+-----------------------------------------------------------------
  500000  | Used to estimate whether pushdown the plan to the compute pool.
