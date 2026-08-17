@@ -1,5 +1,6 @@
 create schema functions_test;
 set search_path = 'functions_test';
+set xact_abort off;
 -- test @@rowcount
 create table t1 (c1 int);
 select @@rowcount;
@@ -2456,3 +2457,4 @@ select len('aa'::varbinary);
    2
 (1 row)
 
+reset xact_abort;

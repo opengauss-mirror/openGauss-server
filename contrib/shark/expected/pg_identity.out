@@ -1105,10 +1105,8 @@ SELECT * FROM truncate_b;
  47
 (2 rows)
 
--- not supported 
+-- restart identity
 TRUNCATE truncate_b RESTART IDENTITY;
-ERROR:  PGXC does not support RESTART IDENTITY yet
-DETAIL:  The feature is not supported currently
 --## create table like
 CREATE TABLE test_like_id_1 (a int GENERATED ALWAYS AS IDENTITY, b text);
 NOTICE:  CREATE TABLE will create implicit sequence "test_like_id_1_a_seq" for serial column "test_like_id_1.a"
@@ -1537,7 +1535,9 @@ alter table test_t2 alter column c set generated always set start with 10;
  b      | integer       |                                       | plain   |              | 
  c      | numeric(20,0) | not null generated always as identity | main    |              | 
 Has OIDs: no
-Options: orientation=row, compression=no
+Options: orientation=row, compression=no, collate=1537
+Character Set: UTF8
+Collate: utf8mb4_general_ci
 
 DROP sequence test_t1_a_seq; -- error
 ERROR:  cannot drop sequence test_t1_a_seq because table test_t1 column a requires it
