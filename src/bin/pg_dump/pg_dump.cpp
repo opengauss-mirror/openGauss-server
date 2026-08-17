@@ -23255,11 +23255,11 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
         } else {
             appendPQExpBuffer(query, "    NO MAXVALUE\n");
         }
-    }
 
-    appendPQExpBuffer(query, "    CACHE %s%s", cache, (cycled ? "\n    CYCLE" : ""));
-    if (isNewVer) {
-        appendPQExpBuffer(query, "\n    %s", isGlobal ? "GLOBAL" : "SESSION");
+        appendPQExpBuffer(query, "    CACHE %s%s", cache, (cycled ? "\n    CYCLE" : ""));
+        if (isNewVer) {
+            appendPQExpBuffer(query, "\n    %s", isGlobal ? "GLOBAL" : "SESSION");
+        }
     }
 
     if (tbinfo->isIdentitySequence || seqofDIdentity) {
