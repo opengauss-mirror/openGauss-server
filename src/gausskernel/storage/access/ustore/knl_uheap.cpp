@@ -5497,6 +5497,22 @@ UndoRecPtr UHeapPrepareUndoUpdate(Oid relOid, Oid partitionOid, Oid relfilenode,
         urecNew->SetUtype(UNDO_INSERT);
         urecNew->SetOldXactId(xid);
 
+        /*
+         * A non-inplace update creates an UPDATE record for the old tuple and
+         * an INSERT record for the tuple at its new location.  Subtransaction
+         * rollback follows the block undo chain only while records belong to
+         * the same subtransaction, so both records must carry the subxid once
+         * the SMP rollback semantics are enabled.
+         */
+        if (subxid != InvalidSubTransactionId && t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM) {
+            urecNew->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+            urecNew->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+            MemoryContext oldContext = MemoryContextSwitchTo(urecNew->mem_context());
+            initStringInfo(urecNew->Rawdata());
+            MemoryContextSwitchTo(oldContext);
+            appendBinaryStringInfo(urecNew->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+        }
+
         /* Non-inplace updates contains the ctid after the tuple data */
         payloadLen += sizeof(ItemPointerData);
     }
