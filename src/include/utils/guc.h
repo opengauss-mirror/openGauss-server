@@ -419,7 +419,7 @@ typedef enum {
     SEL_EXPR_INSTR = (1 << 1), /* use pattern sel to calibrate instr() related base rel selectivity */
     PARAM_PATH_GEN = (1 << 2), /* Parametrized Path Generation */
     RAND_COST_OPT = (1 << 3),  /* Optimizing sc_random_page_cost */
-    PARAM_PATH_OPT = (1 << 4), /* Parametrized Path Optimization. */
+    PARAM_PATH_OPT = (1 << 4), /* Parametrized Path Optimization */
     PAGE_EST_OPT = (1 << 5),   /* More accurate (rowstored) index pages estimation */
     NO_UNIQUE_INDEX_FIRST = (1 << 6), /* use unique index first rule in path generation */
     JOIN_SEL_WITH_CAST_FUNC = (1 << 7), /* support cast function while calculating join selectivity */
@@ -431,7 +431,8 @@ typedef enum {
     PREDPUSH_SAME_LEVEL = (1 << 13), /* predpush same level */
     PARTITION_FDW_ON = (1 << 14), /* support create foreign table on partitioned table */
     DISABLE_BITMAP_COST_WITH_LOSSY_PAGES = (1 << 15), /* stop computing bitmap path cost with lossy pages */
-    EXTRACT_PUSHDOWN_OR_CLAUSE = (1 << 16)  /* Extract restriction OR clauses. */
+    EXTRACT_PUSHDOWN_OR_CLAUSE = (1 << 16),  /* Extract restriction OR clauses */
+    WINDOWAGG_PUSHDOWN = (1 << 17)  /* Enable windowagg's tlist push down */
 } sql_beta_param;
 
 typedef enum {

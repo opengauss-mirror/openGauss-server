@@ -38,6 +38,11 @@ SELECT generate_series(1,id), sum(salary) OVER w, avg(salary) OVER w
   FROM empsalary
   WINDOW w AS (PARTITION BY depname ORDER BY salary DESC);
 
+set sql_beta_feature='windowagg_pushdown';
+explain (costs off, verbose)
+SELECT generate_series(1, id), depname, abs(empno), salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC), now() FROM empsalary;
+SELECT generate_series(1, id), depname, abs(empno), salary, rank() OVER (PARTITION BY depname ORDER BY salary DESC), now() FROM empsalary;
+reset sql_beta_feature;
 
 -- window + sort
 explain (costs off, verbose)

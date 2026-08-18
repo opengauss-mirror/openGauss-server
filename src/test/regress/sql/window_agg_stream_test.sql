@@ -20,4 +20,6 @@ group by tb1.c2,cube(tb1.c1,tb1.c1)
 window window1 as (order by 3)
 order by 1;
 
+set sql_beta_feature='windowagg_pushdown';
+select abs(i_id), sum(i_im_id) over(), now() from bmsql_item;
 drop table bmsql_item;
