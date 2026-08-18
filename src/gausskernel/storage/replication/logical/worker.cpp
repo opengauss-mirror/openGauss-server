@@ -796,7 +796,8 @@ static void apply_handle_insert(StringInfo s)
     /* Get fake relation and partition for patitioned table */
     GetFakeRelAndPart(estate, rel->localrel, remoteslot, &fakeRelInfo);
 
-    if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
+    if ((t_thrd.applyworker_cxt.curWorker->needCheckConflict ||
+        u_sess->attr.attr_storage.subscription_conflict_resolution != RESOLVE_ERROR) &&
         (conflictIndexOid = find_conflict_tuple(estate, remoteslot, localslot)) != InvalidOid) {
         StringInfoData localtup, remotetup;
         initStringInfo(&localtup);
@@ -1045,7 +1046,8 @@ static void apply_handle_update(StringInfo s)
         slot_modify_data(remoteslot, localslot, rel, &newtup);
         MemoryContextSwitchTo(oldctx);
 
-        if (t_thrd.applyworker_cxt.curWorker->needCheckConflict &&
+        if ((t_thrd.applyworker_cxt.curWorker->needCheckConflict ||
+            u_sess->attr.attr_storage.subscription_conflict_resolution != RESOLVE_ERROR) &&
             (conflictIndexOid = find_conflict_tuple(estate, remoteslot, conflictLocalSlot, localslot)) != InvalidOid) {
             StringInfoData localtup, remotetup;
             initStringInfo(&localtup);
