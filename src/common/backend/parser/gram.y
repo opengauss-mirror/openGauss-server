@@ -35788,7 +35788,7 @@ static void CheckPartitionExprInner(Node* expr, int* colCount, bool checkTypeCas
 		if (checkTypeCast) {
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be a Type Cast")));
 		} else {
-			return;
+			CheckPartitionExprInner(((TypeCast*)expr)->arg, colCount, false);
 		}
 	} else {
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));
