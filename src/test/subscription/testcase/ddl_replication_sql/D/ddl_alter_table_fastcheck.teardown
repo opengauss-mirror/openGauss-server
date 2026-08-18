@@ -1,0 +1,19 @@
+#!/bin/sh
+
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;alter table t1_repl_index drop column myc; alter table tkey1 drop column myc"
+
+exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;delete from t1_repl_index where a in (101,102); delete from tkey1 where a in (101,102);"
+
+exec_sql_with_user $case_use_db $pub_node1_port "set search_path=fastcheck;select utl_raw.cast_to_varchar2(a) as blob_col, utl_raw.cast_to_varchar2(b) as raw_col, cast(c as varchar) as clob_col, encode(d, 'escape') as bytea_col into blobtbl_pub_1 from blobtbl;"
+
+exec_sql_with_user $case_use_db $pub_node1_port "set search_path=fastcheck;create table blobtbl_pub_2 as (select utl_raw.cast_to_varchar2(a) as blob_col, utl_raw.cast_to_varchar2(b) as raw_col, cast(c as varchar) as clob_col, encode(d, 'escape') as bytea_col from blobtbl);"
+
+exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;drop table blobtbl_pub_1, blobtbl_pub_2"
+
+exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;select utl_raw.cast_to_varchar2(a) as blob_col, utl_raw.cast_to_varchar2(b) as raw_col, cast(c as varchar) as clob_col, encode(d, 'escape') as bytea_col into blobtbl_pub_1 from blobtbl;"
+
+exec_sql_with_user $case_use_db $sub_node1_port "set search_path=fastcheck;create table blobtbl_pub_2 as (select utl_raw.cast_to_varchar2(a) as blob_col, utl_raw.cast_to_varchar2(b) as raw_col, cast(c as varchar) as clob_col, encode(d, 'escape') as bytea_col from blobtbl);"
