@@ -1,6 +1,7 @@
 #!/bin/sh
 
 count=0
+error_count=0
 source $1/env_utils.sh $1 $2 $3
 
 #clean temporary files generated after last check 
@@ -30,16 +31,16 @@ do
 	printf "%-50s" $line
 	starttime=`date +"%Y-%m-%d %H:%M:%S"` 
 	sh $1/testcase/$line.sh $1 $2 $3 > $1/results/$line.log 2>&1
-	count=`expr $count + 1`
 	endtime=`date +"%Y-%m-%d %H:%M:%S"` 
 	starttime1=`date -d "$starttime" +%s`
 	endtime1=`date -d "$endtime" +%s`
 	interval=`expr $endtime1 - $starttime1`
 	if [ $( grep "$failed_keyword" $1/results/$line.log | wc -l ) -eq 0 ]; then
 		printf "%-10s%-10s\n" ".... ok" $interval
+		count=`expr $count + 1`
 	else
 		printf "%-10s%-10s\n" ".... FAILED" $interval
-		break
+		error_count=`expr $error_count + 1`
 	fi
 done
 
@@ -48,5 +49,6 @@ python2 $scripts_dir/pubsub.py -o -d $node_num > $1/results/stop_cluster.log 2>&
 
 total_endtime=`date +"%Y-%m-%d %H:%M:%S"`
 total_endvalue=`date -d "$total_endtime" +%s`
-printf "all %d tests passed.\n" $count
+total_count=`expr $count + $error_count`
+printf "total testcase %d: %d passed, %d failed\n" "$total_count" "$count" "$error_count"
 printf "total time: %ss\n" $(($total_endvalue - $total_startvalue))
