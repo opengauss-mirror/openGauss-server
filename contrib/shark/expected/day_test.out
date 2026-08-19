@@ -130,7 +130,9 @@ CONTEXT:  referenced column: daypart
 -- 异常测试
 SELECT DAY(CURRENT_TIME) AS DayPart;
 --?.*
-CONTEXT:  referenced column: daypart
+CONTEXT:  referenced column: datepart
+SQL function "day" statement 1
+referenced column: daypart
 SELECT DAY('20:12:12') AS DayPart;
 ERROR:  invalid input syntax for type date: "20:12:12"
 CONTEXT:  referenced column: datepart
