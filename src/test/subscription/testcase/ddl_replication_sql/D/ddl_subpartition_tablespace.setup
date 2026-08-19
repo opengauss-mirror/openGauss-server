@@ -1,0 +1,20 @@
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+tblspace="$subscription_dir/tmp_tblspace"
+rm -rf $tblspace
+mkdir -p $tblspace
+
+
+tblspace_sub="$subscription_dir/tmp_tblspace_sub"
+rm -rf $tblspace_sub
+mkdir -p $tblspace_sub
+
+exec_sql $case_use_db $pub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts1 LOCATION '$tblspace/hw_subpartition_tablespace_ts1';"
+exec_sql $case_use_db $pub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts2 LOCATION '$tblspace/hw_subpartition_tablespace_ts2';"
+exec_sql $case_use_db $pub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts3 LOCATION '$tblspace/hw_subpartition_tablespace_ts3';"
+
+exec_sql $case_use_db $sub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts1 LOCATION '$tblspace_sub/hw_subpartition_tablespace_ts1';"
+exec_sql $case_use_db $sub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts2 LOCATION '$tblspace_sub/hw_subpartition_tablespace_ts2';"
+exec_sql $case_use_db $sub_node1_port "CREATE TABLESPACE hw_subpartition_tablespace_ts3 LOCATION '$tblspace_sub/hw_subpartition_tablespace_ts3';"

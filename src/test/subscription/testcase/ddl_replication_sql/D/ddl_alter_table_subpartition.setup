@@ -1,0 +1,24 @@
+#!/bin/sh
+
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+exec_sql $case_use_db $pub_node1_port "create tablespace ts_subpart_hash_1 relative location 'test/ts_subpart_hash_1'";
+
+exec_sql $case_use_db $pub_node1_port "create tablespace ts_subpart_hash_2 relative location 'test/ts_subpart_hash_2'";
+exec_sql $case_use_db $pub_node1_port "create tablespace ts_subpart_hash_test_user relative location 'test/ts_subpart_hash_test_user';"
+exec_sql $case_use_db $pub_node1_port "create user user_subpart_hash password 'Test@123';"
+
+exec_sql $case_use_db $pub_node1_port "grant CREATE, USAGE on schema schema_vastbase_subpartition_hash to user_subpart_hash";
+exec_sql $case_use_db $pub_node1_port "grant CREATE on tablespace ts_subpart_hash_test_user to user_subpart_hash;"
+
+exec_sql $case_use_db $sub_node1_port "create tablespace ts_subpart_hash_1 relative location 'test/ts_subpart_hash_1'";
+
+exec_sql $case_use_db $sub_node1_port "create tablespace ts_subpart_hash_2 relative location 'test/ts_subpart_hash_2'";
+exec_sql $case_use_db $sub_node1_port "create tablespace ts_subpart_hash_test_user relative location 'test/ts_subpart_hash_test_user';"
+exec_sql $case_use_db $sub_node1_port "create user user_subpart_hash password 'Test@123';"
+
+exec_sql $case_use_db $sub_node1_port "grant CREATE, USAGE on schema schema_vastbase_subpartition_hash to user_subpart_hash";
+exec_sql $case_use_db $sub_node1_port "grant CREATE on tablespace ts_subpart_hash_test_user to user_subpart_hash;"
+
