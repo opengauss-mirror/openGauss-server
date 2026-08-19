@@ -27,6 +27,7 @@
 #include "dlfcn.h"
 #include "securectype.h"
 #include "knl/knl_instance.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "storage/matrix_mem.h"
 #include <functional>
 #include <fstream>
@@ -51,7 +52,7 @@ int MaxtrixMemOpenDl(void **libHandle, char *symbol)
 {
     *libHandle = dlopen(symbol, RTLD_LAZY);
     if (*libHandle == NULL) {
-        int ret = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb) ? ERROR : WARNING;
+        int ret = ENABLE_UB ? ERROR : WARNING;
         ereport(ret, (errmsg("load matrix mem dynamic lib: %s, error: %s", symbol, dlerror())));
         return MATRIX_MEM_ERROR;
     }
@@ -84,7 +85,7 @@ void MatrixMemFuncInit(char* ubsMemPath)
 #ifdef FRONTEND
         fprintf(stderr, _("load matrix mem dynamic lib error: %s, lib not exists"), ubsMemPath);
 #else
-        int ret = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb) ? ERROR : WARNING;
+        int ret = ENABLE_UB ? ERROR : WARNING;
         ereport(ret, (errmsg("load matrix mem dynamic lib error: %s, lib not exists", ubsMemPath)));
 #endif
         return;

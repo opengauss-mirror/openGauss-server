@@ -3115,8 +3115,9 @@ int PostmasterMain(int argc, char* argv[])
     /*
      * Register SIGBUS handler before any UB memory access.
      */
+    g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
 #if defined(__aarch64__)
-    if (g_instance.attr.attr_storage.dms_attr.enable_ub) {
+    if (ENABLE_UB) {
         if (register_sigbus_handler() != 0) {
             ereport(FATAL, (errmsg("[postmaster] register_sigbus_handler() failed!!!")));
         }
@@ -3127,7 +3128,6 @@ int PostmasterMain(int argc, char* argv[])
     /*
     * Initialize UB shared memory.
     */
-    g_instance.shmem_cxt.UBMemAccessEnabled.store(true, std::memory_order_release);
     if (ENABLE_UB) {
         if (!UBMemRegionInit()) {
             ereport(FATAL, (errmsg("Failed to initialize UB memory region")));

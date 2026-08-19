@@ -22,7 +22,7 @@
  *  headers) so it can be unit-tested standalone.
  *
  *  The UB link is usable only when all of the following hold:
- *    - the feature is configured (enable_ub on and not in initdb)
+ *    - the feature is configured (enable_ub and enable_ub_ha on and not in initdb)
  *    - no SIGBUS fault has disabled UB memory access (UBMemAccessEnabled)
  *    - the shared memory region and all component buffers are ready
  *    - the cluster is not in reform (UB reads are bypassed during reform)

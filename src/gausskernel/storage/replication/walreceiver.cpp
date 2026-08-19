@@ -192,7 +192,8 @@ const char *g_reserve_param[] = {
     "ss_scrlock_server_port",
     "ss_enable_ondemand_recovery",
     "ss_enable_ondemand_realtime_build",
-    "ss_disaster_mode"
+    "ss_disaster_mode",
+    "enable_ub_ha"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);

@@ -536,7 +536,7 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
     pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Starting to promote standby.")));
 
-    if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+    if (ENABLE_UB &&
         !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
         bool synced = UBReformMemSync();
         if (!synced) {
@@ -1927,7 +1927,7 @@ static void SSFailoverPromoteNotify()
                       "set restart_failover_flag to %s when DB restart.",
                       g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag ? "true" : "false")));
     } else {
-        if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+        if (ENABLE_UB &&
             !g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
             bool synced = UBReformMemSync();
             if (!synced) {
@@ -2312,7 +2312,7 @@ static int CBReformDoneNotify(void *db_handle)
      * Standby only remaps and refreshes local pointers, without touching the
      * actual shared memory contents.
      */
-    if (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb &&
+    if (ENABLE_UB &&
         SS_STANDBY_MODE && (SS_PERFORMING_SWITCHOVER || SS_PERFORMING_FAILOVER)) {
         if (!UBTxnCacheAttachPrimary()) {
             return DMS_ERROR;
