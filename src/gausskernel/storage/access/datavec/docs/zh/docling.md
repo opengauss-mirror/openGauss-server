@@ -1,4 +1,4 @@
-# 使用 openGuass 和 Docling 构建 RAG
+# 使用 openGauss 和 Docling 构建 RAG
 
 [Docling](https://github.com/docling-project/docling) 是由 IBM 研究院主导开发的开源文档智能处理框架，它摒弃了传统的线性文本提取方式，转而采用统一的文档表示模型，并通过集成 DocLayNet 布局分析与 TableFormer 表格识别等先进算法，实现了对 PDF、Office 及图像等多模态文档在转换过程中的语义保真与布局还原，且能与 LangChain、LlamaIndex 等主流 AI 开发框架无缝集成，从而成为构建企业级检索增强生成（RAG）系统及高质量大模型训练数据集的关键基础设施。
 
