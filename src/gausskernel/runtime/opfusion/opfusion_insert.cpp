@@ -721,15 +721,7 @@ static List* ExecInsertIndexTuplesOpfusion(TupleTableSlot* slot, ItemPointer tup
          * possible non-uniqueness, and we add the index OID to the result
          * list if further checking is needed.
          */
-        if (!indexRelation->rd_index->indisunique) {
-            checkUnique = UNIQUE_CHECK_NO;
-        } else if (conflict != NULL) {
-            checkUnique = UNIQUE_CHECK_PARTIAL;
-        } else if (indexRelation->rd_index->indimmediate) {
-            checkUnique = UNIQUE_CHECK_YES;
-        } else {
-            checkUnique = UNIQUE_CHECK_PARTIAL;
-        }
+        checkUnique = ExecGetIndexUniqueCheck(actualheap, indexRelation, conflict != NULL);
         satisfiesConstraint = index_insert(actualindex, /* index relation */
             values,                                     /* array of index Datums */
             isnull,                                     /* null flags */

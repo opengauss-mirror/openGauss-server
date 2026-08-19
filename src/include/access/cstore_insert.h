@@ -205,6 +205,7 @@ private:
 
     // Insert delta table
     void InsertDeltaTable(bulkload_rows *batchRowPtr, int options);
+    void InsertDeltaIndex(int idxNum, Datum *values, bool *isnull, ItemPointer tupleid);
 
     // Insert index table
     // 

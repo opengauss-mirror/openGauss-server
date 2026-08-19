@@ -2357,8 +2357,8 @@ static void InitConfigureNamesBool()
             PGC_USERSET,
             NODE_ALL,
             QUERY_TUNING,
-            gettext_noop("Enable unique check,"
-            "only applicable to b-format db."
+            gettext_noop("Enable unique checks for non-primary-key unique constraints, "
+            "only applicable to B-format databases."
             ),
             NULL},
             &u_sess->attr.attr_common.unique_checks,
