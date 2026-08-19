@@ -249,7 +249,6 @@ void EndCommand(const char* commandTag, CommandDest dest)
         case DestTupleBroadCast:
         case DestTupleRedistribute:
         case DestBatchBroadCast:
-        case DestBatchLocalBroadCast:
         case DestBatchRedistribute: {
             Port *MyPort = u_sess->proc_cxt.MyProcPort; 
             if (MyPort && MyPort->protocol_config && MyPort->protocol_config->fn_end_command) {
@@ -266,6 +265,7 @@ void EndCommand(const char* commandTag, CommandDest dest)
         }
 #ifndef ENABLE_MULTIPLE_NODES
         case DestTupleLocalRoundRobin:
+        case DestBatchLocalBroadCast:
             /* send complete msg  */
             if (u_sess->stream_cxt.producer_obj) {
                 u_sess->stream_cxt.producer_obj->end_command(commandTag);
@@ -338,7 +338,6 @@ void NullCommand(CommandDest dest)
         case DestTupleBroadCast:
         case DestTupleRedistribute:
         case DestBatchBroadCast:
-        case DestBatchLocalBroadCast:
         case DestBatchRedistribute:
 
             /*
@@ -385,7 +384,6 @@ void ReadyForQuery(CommandDest dest)
         case DestTupleBroadCast:
         case DestTupleRedistribute:
         case DestBatchBroadCast:
-        case DestBatchLocalBroadCast:
         case DestBatchRedistribute:
             if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3) {
                 StringInfoData buf;
