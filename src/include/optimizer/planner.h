@@ -54,6 +54,7 @@ typedef struct {
 
 extern ExecNodes* getExecNodesByGroupName(const char* gname);
 extern PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
+extern bool check_distinct_redundant_by_unique(PlannerInfo* root);
 extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 

@@ -155,6 +155,7 @@ test: hw_es_multi_column_stats_end
 test: limit1 setop setop_1 setop_2
 #test: checksum
 test: distinct prepare1
+test: distinct_opt
 test: unsupported_features statistic statistic_2
 
 test: hw_setop_writefile
