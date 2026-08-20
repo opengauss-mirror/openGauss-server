@@ -29,8 +29,12 @@ sections:
         href: ./optimizing_os_parameters.md
       - label: Optimizing Database Parameters
         href: ./optimizing_database_parameters.md
-      - label: Configuring Vectorization
-        href: ./configuring_vectorization.md
+      - label: Vectorized Engine
+        sections:        
+          - label: Vectorized Engine
+            href: ./vectorized_engine.md
+          - label: Configuring Vectorization
+            href: ./configuring_vectorization.md
       - label: Configuring SMP
         sections:
           - label: Overview

@@ -17,7 +17,7 @@ Take TPCH Q1 as an example. When the row executor is used, the execution time of
 
 Execution plan of the TPCH Q1 row executor:
 
-```
+```sql
                                                                 QUERY PLAN                                                                 
 -------------------------------------------------------------------------------------------------------------------------------------------
  Sort  (cost=43539570.49..43539570.50 rows=6 width=260) (actual time=3024174.439..3024174.439 rows=4 loops=1)
