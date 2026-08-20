@@ -438,6 +438,13 @@ Interval GetDateSpan(char* args, const int inter)
 
 Datum dateaddtimestamp(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+    }
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
     Timestamp timestampVal = PG_GETARG_TIMESTAMP(2);
     char* argdataNum = PG_GETARG_CSTRING(0);
     int interval = PG_GETARG_INT32(1);
@@ -451,6 +458,13 @@ Datum dateaddtimestamp(PG_FUNCTION_ARGS)
 
 Datum dateaddtimestamptz(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+    }
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
     TimestampTz timestampVal = PG_GETARG_TIMESTAMPTZ(2);
     char* argdataNum = PG_GETARG_CSTRING(0);
     int interval = PG_GETARG_INT32(1);
@@ -465,6 +479,13 @@ Datum dateaddtimestamptz(PG_FUNCTION_ARGS)
 
 Datum dateadddate(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+    }
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
     DateADT dateVal = PG_GETARG_DATEADT(2);
     char* argdataNum = PG_GETARG_CSTRING(0);
     int interval = PG_GETARG_INT32(1);
@@ -491,6 +512,13 @@ void dateaddtime_internal(char* args, const int inter, pg_tm *tm, fsec_t *fsec)
 
 Datum dateaddtime(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+    }
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
     Timestamp timestampVal;
     TimeADT time = PG_GETARG_TIMEADT(2);
     struct pg_tm tt;
@@ -512,6 +540,13 @@ Datum dateaddtime(PG_FUNCTION_ARGS)
 
 Datum dateaddtimetz(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+    }
+    if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
+        PG_RETURN_NULL();
+    }
     TimestampTz timestampVal;
     TimeTzADT* time = PG_GETARG_TIMETZADT_P(2);
     struct pg_tm tt;

@@ -2420,3 +2420,34 @@ CREATE OR REPLACE FUNCTION sys.quotename(IN input_string varbinary, IN delimiter
 
 -- sys.trim
 CREATE OR REPLACE FUNCTION pg_catalog.btrim(IN input_string varbinary) RETURNS varchar LANGUAGE SQL STABLE as 'select pg_catalog.btrim($1::varchar::text)';
+-- dateadd: remove STRICT so that a null datepart raises an error,
+-- while a null number/date still returns null (handled in datefuncs.cpp).
+CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,date)
+RETURNS timestamp without time zone
+language c
+immutable NOT FENCED NOT SHIPPABLE
+AS '$libdir/shark', $function$dateadddate$function$;
+
+CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,timestamp without time zone)
+RETURNS timestamp without time zone
+language c
+immutable NOT FENCED NOT SHIPPABLE
+AS '$libdir/shark', $function$dateaddtimestamp$function$;
+
+CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,timestamp with time zone)
+RETURNS timestamp with time zone
+language c
+immutable NOT FENCED NOT SHIPPABLE
+AS '$libdir/shark', $function$dateaddtimestamptz$function$;
+
+CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,time without time zone)
+RETURNS timestamp without time zone
+language c
+immutable NOT FENCED NOT SHIPPABLE
+AS '$libdir/shark', $function$dateaddtime$function$;
+
+CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,time with time zone)
+RETURNS timestamp with time zone
+language c
+immutable NOT FENCED NOT SHIPPABLE
+AS '$libdir/shark', $function$dateaddtimetz$function$;
