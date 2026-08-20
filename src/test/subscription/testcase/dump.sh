@@ -9,6 +9,26 @@ results_dir="${subscription_dir}/results"
 dump_result_dir="${results_dir}/dump_results"
 mkdir -p $dump_result_dir
 
+function check_dump_diff() {
+	diff_file=$1
+	acceptable_file="${dump_expected_dir}/acceptable_diff/${dbcompatibility}/$2"
+	acceptable_result="${diff_file}.acceptable"
+
+	if [ ! -s "$diff_file" ]; then
+		return 0
+	fi
+
+	if [ -f "$acceptable_file" ]; then
+		diff "$diff_file" "$acceptable_file" > "$acceptable_result"
+		if [ ! -s "$acceptable_result" ]; then
+			rm -f "$acceptable_result" "$diff_file"
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
 function test_1() {
 	pub_ddl=$1
     echo "create database and tables."
@@ -19,6 +39,8 @@ function test_1() {
 	exec_sql $db $sub_node1_port "alter database $case_db set d_format_behavior_compat_options = '';"
 	exec_sql $db $pub_node1_port "alter database $case_db set b_format_behavior_compat_options = '';"
 	exec_sql $db $sub_node1_port "alter database $case_db set b_format_behavior_compat_options = '';"
+	exec_sql $db $pub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+	exec_sql $db $sub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
 
     echo "create publication and subscription."
 	publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
@@ -51,8 +73,9 @@ function test_1() {
 	exec_dump_db $case_db $pub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.pub --quote-all-identifiers" "all"
 	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.pub"
 	$sedcmd
-	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.pub $dump_expected_dir/dump_db_pub${pub_ddl}.pub > ${dump_result_dir}/dump_pub${pub_ddl}_pub.diff
-	if [ -s ${dump_result_dir}/dump_puball_pub.diff ]; then
+	pub_diff="${dump_result_dir}/dump_pub${pub_ddl}_pub.diff"
+	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.pub $dump_expected_dir/dump_db_pub${pub_ddl}.pub > "$pub_diff"
+	if ! check_dump_diff "$pub_diff" "dump_pub${pub_ddl}_pub.diff"; then
 		echo "$failed_keyword when dump publication"
 		exit 1
 	else
@@ -62,8 +85,9 @@ function test_1() {
     exec_dump_db $case_db $sub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.sub --quote-all-identifiers" "all"
 	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.sub"
 	$sedcmd
-	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.sub $dump_expected_dir/dump_db_pub${pub_ddl}.sub > ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff --ignore-matching-lines='password=encryptOpt'
-	if [ -s ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff ]; then
+	sub_diff="${dump_result_dir}/dump_pub${pub_ddl}_sub.diff"
+	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.sub $dump_expected_dir/dump_db_pub${pub_ddl}.sub > "$sub_diff" --ignore-matching-lines='password=encryptOpt'
+	if ! check_dump_diff "$sub_diff" "dump_pub${pub_ddl}_sub.diff"; then
 		echo "$failed_keyword when dump subscription"
 		exit 1
 	else

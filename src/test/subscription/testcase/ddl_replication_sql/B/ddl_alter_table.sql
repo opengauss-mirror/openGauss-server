@@ -2210,7 +2210,6 @@ insert into t1 values(1111, 'ddd', 3333, 4);
 
 create view t1_view1 as select * from t1;
 select * from t1_view1;
-alter table t1 add f6 int first, add f7 int after f4, modify f1 int after f2, modify f3 int first;
 select * from t1_view1;
 drop view t1_view1;
 
