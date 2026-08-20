@@ -1,3 +1,3 @@
-< SELECT pg_catalog.setval('aaaaa_b_seq', 3, true);
+<     CONSTRAINT "at4acc_test1" CHECK ((("test" OPERATOR("dolphin_catalog".+) ("test2")::bigint) < ("test3" OPERATOR("dolphin_catalog".*) 4)))
 ---
-> SELECT pg_catalog.setval('aaaaa_b_seq', 1, false);
+>     CONSTRAINT "at4acc_test1" CHECK (((("test")::bigint + ("test2")::bigint) < (("test3")::bigint * (4)::bigint)))

@@ -8,7 +8,11 @@ case_db="conflict_db"
 function test_1() {
     echo "create database and tables."
     exec_sql $db $pub_node1_port "CREATE DATABASE $case_db"
-	exec_sql $db $sub_node1_port "CREATE DATABASE $case_db"
+    exec_sql $db $sub_node1_port "CREATE DATABASE $case_db"
+
+    exec_sql $db $pub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+    exec_sql $db $sub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+
     # Create some preexisting content on publisher
     # => keep_local
     exec_sql $case_db $sub_node1_port "ALTER SYSTEM SET subscription_conflict_resolution = keep_local"
