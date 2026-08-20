@@ -1,4 +1,4 @@
-# 使用 openGuass 和 Cognee 构建 RAG
+# 使用 openGauss 和 Cognee 构建 RAG
 
 [Cognee](https://docs.cognee.ai/) 是一个开源认知数据处理框架，支持将非结构化文档通过 LLM 提取实体与关系、构建知识图谱，并提供基于图谱增强和文档块检索两种工作模式，适用于 RAG 和语义搜索等场景。
 
