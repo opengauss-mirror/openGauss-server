@@ -1,0 +1,73 @@
+SET
+DROP TABLE
+CREATE TABLE
+INSERT 0 500
+CREATE INDEX
+CREATE INDEX
+ANALYZE
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.602..3.515 rows=25 loops=1)
+   Output: id, (round(((content <&> 'database'::text))::numeric, 4)), ((content <&> 'database'::text))
+   ->  Index Scan using hrd_bm25_idx on public.hybrid_recall_docs (actual time=0.598..3.495 rows=25 loops=1)
+         Output: id, round(((content <&> 'database'::text))::numeric, 4), (content <&> 'database'::text)
+         Order By: (hybrid_recall_docs.content <&> 'database'::text)
+         Filter: (hybrid_recall_docs.tenant_id = 1)
+         Rows Removed by Filter: 75
+ Total runtime: 3.772 ms
+(8 rows)
+
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.996..1.027 rows=100 loops=1)
+   Output: id, (round(((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))::numeric, 4)), ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))
+   ->  Sort (actual time=0.993..1.006 rows=100 loops=1)
+         Output: id, (round(((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))::numeric, 4)), ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))
+         Sort Key: ((hybrid_recall_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))
+         Sort Method: quicksort  Memory: 37kB
+         ->  Seq Scan on public.hybrid_recall_docs (actual time=0.134..0.742 rows=125 loops=1)
+               Output: id, round(((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))::numeric, 4), (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+               Filter: (hybrid_recall_docs.tenant_id = 1)
+               Rows Removed by Filter: 375
+ Total runtime: 1.286 ms
+(11 rows)
+
+SET
+                                                                            QUERY PLAN                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.873..1.267 rows=10 loops=1)
+   Output: id, (round(((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))::numeric, 4)), ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))
+   ->  Ann Index Scan using hrd_hnsw_idx on public.hybrid_recall_docs (actual time=0.869..1.257 rows=10 loops=1)
+         Output: id, round(((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector))::numeric, 4), (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+         Order By: (hybrid_recall_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+         Filter Mode: Post-Filter
+         Filter: (hybrid_recall_docs.tenant_id = 1)
+         Rows Removed by Filter: 37
+ Total runtime: 1.615 ms
+(9 rows)
+
+RESET
+===GOLDEN_START===
+SET
+ id  | source_mask | text_rank | vector_rank | text_score | vector_distance | hybrid_score 
+-----+-------------+-----------+-------------+------------+-----------------+--------------
+   1 |           2 |         0 |           1 |            |           .0022 |    .01653005
+   5 |           1 |         1 |           0 |     1.7867 |                 |    .01653005
+  13 |           2 |         0 |           2 |            |           .0625 |    .01639785
+ 321 |           2 |         0 |           3 |            |           .0694 |    .01626984
+ 121 |           2 |         0 |           4 |            |           .0735 |    .01614583
+  85 |           1 |         5 |           0 |     1.6035 |                 |    .01602564
+ 189 |           2 |         0 |           7 |            |           .0797 |    .01579602
+ 221 |           2 |         0 |           8 |            |           .0932 |    .01568627
+ 397 |           2 |         0 |           9 |            |           .1000 |    .01557971
+ 137 |           2 |         0 |          10 |            |           .1005 |    .01547619
+(10 rows)
+
+ text_rows | vector_rows | both_rows | overlap 
+-----------+-------------+-----------+---------
+        25 |         100 |        21 |      21
+(1 row)
+
+RESET
+===GOLDEN_END===
+total time: 1037  ms

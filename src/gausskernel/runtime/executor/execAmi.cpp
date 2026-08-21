@@ -35,6 +35,7 @@
 #include "executor/node/nodeIndexonlyscan.h"
 #include "executor/node/nodeIndexscan.h"
 #include "executor/node/nodeLimit.h"
+#include "executor/node/nodeHybridRecall.h"
 #include "executor/node/nodeLockRows.h"
 #include "executor/node/nodeMaterial.h"
 #include "executor/node/nodeMemoize.h"
@@ -303,6 +304,10 @@ void ExecReScanByType(PlanState* node)
 
         case T_LimitState:
             ExecReScanLimit((LimitState*)node);
+            break;
+
+        case T_HybridRecallState:
+            ExecReScanHybridRecall((HybridRecallState*)node);
             break;
 
         case T_VecToRowState:

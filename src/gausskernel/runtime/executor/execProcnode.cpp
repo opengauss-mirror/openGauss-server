@@ -92,6 +92,7 @@
 #include "executor/node/nodeIndexonlyscan.h"
 #include "executor/node/nodeIndexscan.h"
 #include "executor/node/nodeLimit.h"
+#include "executor/node/nodeHybridRecall.h"
 #include "executor/node/nodeLockRows.h"
 #include "executor/node/nodeMaterial.h"
 #include "executor/node/nodeMemoize.h"
@@ -399,6 +400,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitLockRows((LockRows*)node, estate, eflags);
         case T_Limit:
             return (PlanState*)ExecInitLimit((Limit*)node, estate, eflags);
+        case T_HybridRecall:
+            return (PlanState*)ExecInitHybridRecall((HybridRecall*)node, estate, eflags);
         case T_PartIterator:
             return (PlanState*)ExecInitPartIterator((PartIterator*)node, estate, eflags);
         case T_Stream:
@@ -1324,6 +1327,10 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_LimitState:
             ExecEndLimit((LimitState*)node);
+            break;
+
+        case T_HybridRecallState:
+            ExecEndHybridRecall((HybridRecallState*)node);
             break;
 
 #ifdef PGXC
