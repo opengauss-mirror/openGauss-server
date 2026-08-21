@@ -3829,6 +3829,36 @@ static Limit* _readLimit(Limit* local_node)
     READ_DONE();
 }
 
+/*
+ * [P0-2] HybridRecall read-back. All fields are co-born with the node
+ * type, so plain READs suffice (no IF_EXIST gating: no older plan can
+ * contain a HYBRIDRECALL section).
+ */
+static HybridRecall* _readHybridRecall(HybridRecall* local_node)
+{
+    READ_LOCALS_NULL(HybridRecall);
+    READ_TEMP_LOCALS();
+
+    // Read Plan
+    _readPlan(&local_node->plan);
+
+    READ_INT_FIELD(id_resno);
+    READ_INT_FIELD(text_score_resno);
+    READ_INT_FIELD(vector_distance_resno);
+    READ_NODE_FIELD(final_topk);
+    READ_NODE_FIELD(text_candidates);
+    READ_NODE_FIELD(vector_candidates);
+    READ_ENUM_FIELD(fusion, HybridFusionKind);
+    READ_FLOAT_FIELD(rrf_k);
+    READ_FLOAT_FIELD(text_weight);
+    READ_FLOAT_FIELD(vector_weight);
+    READ_BOOL_FIELD(parallel_branches);
+    READ_BOOL_FIELD(require_parallel);
+    READ_NODE_FIELD(recheck_quals);
+
+    READ_DONE();
+}
+
 static Agg* _readAgg(Agg* local_node)
 {
     READ_LOCALS_NULL(Agg);
@@ -7274,6 +7304,8 @@ Node* parseNodeString(void)
         return_value = _readStream(NULL);
     } else if (MATCH("LIMIT", 5)) {
         return_value = _readLimit(NULL);
+    } else if (MATCH("HYBRIDRECALL", 12)) {
+        return_value = _readHybridRecall(NULL);
     } else if (MATCH("AGG", 3)) {
         return_value = _readAgg(NULL);
     } else if (MATCH("SCAN", 4)) {

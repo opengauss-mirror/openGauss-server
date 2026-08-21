@@ -2396,6 +2396,31 @@ static void _outLimit(StringInfo str, Limit* node)
     }
 }
 
+/*
+ * [P0-2] HybridRecall fusion parent (hybrid recall design doc §6.2).
+ * Doubles use %.17g so nodeToString/stringToNode round-trips exactly.
+ */
+static void _outHybridRecall(StringInfo str, HybridRecall* node)
+{
+    WRITE_NODE_TYPE("HYBRIDRECALL");
+
+    _outPlanInfo(str, (Plan*)node);
+
+    WRITE_INT_FIELD(id_resno);
+    WRITE_INT_FIELD(text_score_resno);
+    WRITE_INT_FIELD(vector_distance_resno);
+    WRITE_NODE_FIELD(final_topk);
+    WRITE_NODE_FIELD(text_candidates);
+    WRITE_NODE_FIELD(vector_candidates);
+    WRITE_ENUM_FIELD(fusion, HybridFusionKind);
+    WRITE_FLOAT_FIELD(rrf_k, "%.17g");
+    WRITE_FLOAT_FIELD(text_weight, "%.17g");
+    WRITE_FLOAT_FIELD(vector_weight, "%.17g");
+    WRITE_BOOL_FIELD(parallel_branches);
+    WRITE_BOOL_FIELD(require_parallel);
+    WRITE_NODE_FIELD(recheck_quals);
+}
+
 static void _outNestLoopParam(StringInfo str, NestLoopParam* node)
 {
     WRITE_NODE_TYPE("NESTLOOPPARAM");
@@ -7059,6 +7084,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Limit:
                 _outLimit(str, (Limit*)obj);
+                break;
+            case T_HybridRecall:
+                _outHybridRecall(str, (HybridRecall*)obj);
                 break;
             case T_NestLoopParam:
                 _outNestLoopParam(str, (NestLoopParam*)obj);
