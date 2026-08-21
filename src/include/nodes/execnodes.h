@@ -2189,6 +2189,59 @@ typedef struct AnnIndexScanState {
 } AnnIndexScanState;
 
 /* ----------------
+ * [P0-1] HybridRecallState - executor state for the two-branch fusion
+ * parent (hybrid recall design doc §6.3). BUILD drains both branches into
+ * the dedup hash, then RRF + Top-K fill the output array; OUTPUT returns
+ * one fused row per call. Forward-declared HTAB/binaryheap keep this mega
+ * header free of new includes; the real types come from hsearch.h and
+ * lib/binaryheap.h at the implementation site. HybridCandidate copies the
+ * doc key via datumCopy into candidate_cxt - never pins worker slots or
+ * toast pointers. Nothing constructs this state yet (P0-3+).
+ * ----------------
+ */
+typedef enum HybridRecallPhase {
+    HYBRID_PHASE_BUILD = 0,
+    HYBRID_PHASE_OUTPUT,
+    HYBRID_PHASE_DONE
+} HybridRecallPhase;
+
+typedef struct HybridCandidate {
+    Datum id;
+    bool id_isnull;
+    uint8 source_mask;      /* TEXT=1 VECTOR=2 BOTH=3 */
+    uint32 text_rank;       /* 0 = not hit on text branch */
+    uint32 vector_rank;     /* 0 = not hit on vector branch */
+    double text_score;
+    double vector_distance;
+    double hybrid_score;
+    MinimalTuple tuple;     /* payload copy owned by candidate_cxt */
+} HybridCandidate;
+
+typedef struct HybridRecallState {
+    PlanState ps;
+    PlanState* text_state;
+    PlanState* vector_state;
+    HybridRecallPhase phase;
+    MemoryContext candidate_cxt;
+    struct HTAB* by_doc_id;             /* forward decl, see hsearch.h */
+    struct binaryheap* final_heap;      /* forward decl, see lib/binaryheap.h */
+    HybridCandidate** output;
+    uint32 output_count;
+    uint32 output_pos;
+    uint64 text_rows;
+    uint64 vector_rows;
+    uint64 dedup_rows;
+    uint64 final_rows;
+    instr_time text_first_tuple;
+    instr_time text_end;
+    instr_time vector_first_tuple;
+    instr_time vector_end;
+    instr_time fusion_time;
+    bool actual_parallel;
+    bool serial_fallback;
+} HybridRecallState;
+
+/* ----------------
  *	 TidScanState information
  *
  *		isCurrentOf    scan has a CurrentOfExpr qual
