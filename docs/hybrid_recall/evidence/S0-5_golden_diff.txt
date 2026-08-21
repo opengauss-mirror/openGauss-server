@@ -1,0 +1,32 @@
+10c10
+<  Limit (actual time=0.640..3.060 rows=25 loops=1)
+---
+>  Limit (actual time=0.628..3.083 rows=25 loops=1)
+12c12
+<    ->  Index Scan using hrd_bm25_idx on public.hybrid_recall_docs (actual time=0.636..3.045 rows=25 loops=1)
+---
+>    ->  Index Scan using hrd_bm25_idx on public.hybrid_recall_docs (actual time=0.624..3.068 rows=25 loops=1)
+17c17
+<  Total runtime: 3.260 ms
+---
+>  Total runtime: 3.297 ms
+22c22
+<  Limit (actual time=0.850..0.877 rows=100 loops=1)
+---
+>  Limit (actual time=0.837..0.870 rows=100 loops=1)
+24c24
+<    ->  Sort (actual time=0.848..0.859 rows=100 loops=1)
+---
+>    ->  Sort (actual time=0.835..0.849 rows=100 loops=1)
+28c28
+<          ->  Seq Scan on public.hybrid_recall_docs (actual time=0.052..0.651 rows=125 loops=1)
+---
+>          ->  Seq Scan on public.hybrid_recall_docs (actual time=0.053..0.666 rows=125 loops=1)
+32c32
+<  Total runtime: 1.065 ms
+---
+>  Total runtime: 1.072 ms
+38c38
+< total time: 1075  ms
+---
+> total time: 1081  ms
