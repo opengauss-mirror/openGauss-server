@@ -112,8 +112,14 @@ static int hybrid_cand_better(HybridRecallState* node, const HybridCandidate* a,
     if (a->source_mask != b->source_mask)
         return a->source_mask > b->source_mask ? 1 : -1;
 
-    uint32 ra = a->text_rank != 0 ? a->text_rank : a->vector_rank;
-    uint32 rb = b->text_rank != 0 ? b->text_rank : b->vector_rank;
+    /* best_branch_rank = the better (smaller) of the ranks actually hit
+     * (design doc §3.4); 0 ranks mean the branch missed and never count. */
+    uint32 ra = (a->text_rank != 0 && a->vector_rank != 0)
+                    ? Min(a->text_rank, a->vector_rank)
+                    : (a->text_rank != 0 ? a->text_rank : a->vector_rank);
+    uint32 rb = (b->text_rank != 0 && b->vector_rank != 0)
+                    ? Min(b->text_rank, b->vector_rank)
+                    : (b->text_rank != 0 ? b->text_rank : b->vector_rank);
     if (ra != rb)
         return ra < rb ? 1 : -1;
 
