@@ -135,6 +135,40 @@ static inline bool relation_has_indexes(ResultRelInfo* rel)
     return (rel && rel->ri_NumIndices > 0);
 }
 
+/*
+ * Use the parent table and index relations to decide whether uniqueness must
+ * be checked.  For partitioned column-store tables, m_relation and
+ * m_idxRelation[] can be fake partition relations whose OIDs are not suitable
+ * for the owner and primary-index checks performed by ExecGetIndexUniqueCheck.
+ */
+static inline IndexUniqueCheck get_cstore_index_unique_check(ResultRelInfo* resultRelInfo, int index)
+{
+    Assert(resultRelInfo != NULL);
+    Assert(index >= 0 && index < resultRelInfo->ri_NumIndices);
+
+    return ExecGetIndexUniqueCheck(
+        resultRelInfo->ri_RelationDesc, resultRelInfo->ri_IndexRelationDescs[index], false);
+}
+
+void CStoreInsert::InsertDeltaIndex(int idxNum, Datum* values, bool* isnull, ItemPointer tupleid)
+{
+    IndexUniqueCheck checkUnique = get_cstore_index_unique_check(m_resultRelInfo, idxNum);
+    if (checkUnique != UNIQUE_CHECK_NO) {
+        /* Firstly check unique constraint on the CU index. */
+        CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, values, isnull);
+    }
+
+    /*
+     * If pass the check above, insert the index item into the delta index.
+     * The delta index insertion checks its own uniqueness implicitly.
+     */
+    (void)index_insert(m_deltaIdxRelation[idxNum], values, isnull, tupleid, m_delta_relation, checkUnique);
+
+    if (checkUnique != UNIQUE_CHECK_NO) {
+        CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, values, isnull);
+    }
+}
+
 CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _in_ bool is_update_cu, _in_ Plan* plan,
                            _in_ MemInfoArg* ArgmemInfo)
     : m_fullCUSize(RelationGetMaxBatchRows(relation)), m_delta_rows_threshold(RelationGetDeltaRowsThreshold(relation))
@@ -835,21 +869,7 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
                 int idxNum = list_nth_int(idxNums, i);
                 IndexInfo* indexInfo = (IndexInfo*)list_nth(allIndexInfos, i);
                 FormIndexDatum(indexInfo, slot, NULL, idxValues, idxIsNull);
-
-                /* Firstly check unique constraint on the CU index. */
-                CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, idxValues, idxIsNull);
-
-                /*
-                 * If pass the check above, we actually insert new index item to delta index.
-                 * It will check unique constraint in delta index insertion implicitly.
-                 */
-                (void)index_insert(m_deltaIdxRelation[idxNum],
-                    idxValues,
-                    idxIsNull,
-                    &(tuple->t_self),
-                    m_delta_relation,
-                    UNIQUE_CHECK_YES);
-                CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, idxValues, idxIsNull);
+                InsertDeltaIndex(idxNum, idxValues, idxIsNull, &(tuple->t_self));
             }
         }
     }
@@ -889,20 +909,21 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
         ItemPointer tupleid = (ItemPointer) & values[m_idxBatchRow->m_attr_num - 1];
 
         if (!hasIndexExpr) {
-            if (indexRel->rd_index->indisunique) {
+            IndexUniqueCheck checkUnique = get_cstore_index_unique_check(m_resultRelInfo, indice);
+            if (checkUnique != UNIQUE_CHECK_NO) {
                 Relation deltaIdxRel = m_deltaIdxRelation[indice];
 
                 /* Firstly check unique constraint on the delta index. */
                 CheckUniqueOnOtherIdx(deltaIdxRel, m_delta_relation, values, isnull);
+            }
 
-                /*
-                 * If pass the check above, insert the index item to CU index.
-                 * It will check unique constraint in CU index insertion implicitly.
-                 */
-                (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_YES);
-                CheckUniqueOnOtherIdx(deltaIdxRel, m_delta_relation, values, isnull);
-            } else {
-                (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO);
+            /*
+             * If pass the check above, insert the index item to CU index.
+             * It will check unique constraint in CU index insertion implicitly.
+             */
+            (void)index_insert(indexRel, values, isnull, tupleid, m_relation, checkUnique);
+            if (checkUnique != UNIQUE_CHECK_NO) {
+                CheckUniqueOnOtherIdx(m_deltaIdxRelation[indice], m_delta_relation, values, isnull);
             }
         } else {
             for (int i = 0; i < m_idxKeyNum[indice]; i++) {
