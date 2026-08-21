@@ -1,0 +1,203 @@
+/*
+ * hybrid_recall_test.cpp - P0-4 verification vehicle (test only, never shipped)
+ *
+ * Loads into a debug backend via LOAD and exposes
+ *   hybrid_recall_debug_execute(text_branch_sql, vector_branch_sql,
+ *       id_resno, text_score_resno, vector_distance_resno,
+ *       final_topk, text_candidates, vector_candidates,
+ *       rrf_k, text_weight, vector_weight)
+ * which plans each branch SQL with the real planner, wraps them under a
+ * hand-built HybridRecall parent and runs the executor, returning the
+ * fused (doc_id, source_mask, text_rank, vector_rank, hybrid_score) rows.
+ *
+ * Constraints (asserted): each branch SQL is a single-table SELECT over
+ * the same relation - V1's same-base-table rule (design doc D-006) means
+ * both branch plans' varno 1 legitimately share one parent range table.
+ *
+ * This module exists because the executor lands before the planner
+ * (P2); the handwritten S0 golden SQL defines the semantics to match.
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+
+#include "executor/exec/execdesc.h"
+#include "executor/executor.h"
+#include "fmgr.h"
+#include "funcapi.h"
+#include "nodes/makefuncs.h"
+#include "nodes/plannodes.h"
+#include "parser/analyze.h"
+#include "parser/parser.h"
+#include "tcop/dest.h"
+#include "tcop/tcopprot.h"
+#include "utils/builtins.h"
+#include "utils/snapmgr.h"
+#include "utils/tuplestore.h"
+
+PG_MODULE_MAGIC;
+
+typedef struct CaptureState {
+    DestReceiver pub;
+    Tuplestorestate* store;
+} CaptureState;
+
+static void capture_receiveSlot(TupleTableSlot* slot, DestReceiver* self)
+{
+    CaptureState* cap = (CaptureState*)self;
+
+    tuplestore_puttupleslot(cap->store, slot);
+}
+
+static void capture_noop(DestReceiver* self)
+{
+}
+
+static void capture_startup(DestReceiver* self, int operation, TupleDesc typeinfo)
+{
+}
+
+static Plan* plan_branch_sql(const char* sql, const char* branch_name)
+{
+    List* raw_list = NIL;
+    Node* parsetree = NULL;
+    Query* query = NULL;
+    PlannedStmt* planned = NULL;
+
+    raw_list = raw_parser(sql, NULL);
+    if (list_length(raw_list) != 1)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("%s branch SQL must be exactly one statement", branch_name)));
+
+    parsetree = (Node*)linitial(raw_list);
+    if (!IsA(parsetree, SelectStmt))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("%s branch SQL must be a SELECT", branch_name)));
+
+    query = parse_analyze(parsetree, sql, NULL, 0);
+    if (query->commandType != CMD_SELECT || list_length(query->rtable) != 1)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("%s branch SQL must be a single-table SELECT (no joins/CTEs)", branch_name)));
+
+    planned = pg_plan_query(query, 0, NULL);
+    return planned->planTree;
+}
+
+static Expr* make_int8_const(int64 value)
+{
+    return (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(value), false, true);
+}
+
+/* fmgr.h 的宏只对 pg_finfo_* 自动加 extern "C"；SQL 可调用主符号需要
+ * 单独的 C 链接声明（与 contrib/pg_stat_statements.cpp 的写法一致）。 */
+extern "C" Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS);
+
+PG_FUNCTION_INFO_V1(hybrid_recall_debug_execute);
+
+Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
+{
+    char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
+    char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
+    int32 arg_id_resno = PG_GETARG_INT32(2);
+    int32 arg_text_resno = PG_GETARG_INT32(3);
+    int32 arg_vector_resno = PG_GETARG_INT32(4);
+    int64 final_topk = PG_GETARG_INT64(5);
+    int64 text_candidates = PG_GETARG_INT64(6);
+    int64 vector_candidates = PG_GETARG_INT64(7);
+    float8 rrf_k = PG_GETARG_FLOAT8(8);
+    float8 text_weight = PG_GETARG_FLOAT8(9);
+    float8 vector_weight = PG_GETARG_FLOAT8(10);
+
+    FuncCallContext* funcctx = NULL;
+    MemoryContext old_cxt = NULL;
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        old_cxt = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        Plan* text_plan = plan_branch_sql(text_sql, "text");
+        Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+
+        /* Attach the branch Limit plans DIRECTLY: Limit is not a scan node,
+         * so tlist_matches_tupdesc never asserts on its setrefs varnos, and
+         * the SubqueryScan wrapper layer (init quirks) is eliminated.
+         * Both subplans reference the relation as varno 1; the parent range
+         * table below carries that same relation once. */
+        HybridRecall* hybrid = makeNode(HybridRecall);
+        hybrid->plan.lefttree = text_plan;
+        hybrid->plan.righttree = vector_plan;
+        hybrid->plan.targetlist = NIL;
+        hybrid->plan.qual = NIL;
+        hybrid->id_resno = (AttrNumber)arg_id_resno;
+        hybrid->text_score_resno = (AttrNumber)arg_text_resno;
+        hybrid->vector_distance_resno = (AttrNumber)arg_vector_resno;
+        hybrid->final_topk = make_int8_const(final_topk);
+        hybrid->text_candidates = make_int8_const(text_candidates);
+        hybrid->vector_candidates = make_int8_const(vector_candidates);
+        hybrid->fusion = HYBRID_FUSION_RRF;
+        hybrid->rrf_k = rrf_k;
+        hybrid->text_weight = text_weight;
+        hybrid->vector_weight = vector_weight;
+        hybrid->parallel_branches = false;
+        hybrid->require_parallel = false;
+        hybrid->recheck_quals = NIL;
+
+        PlannedStmt* stmt = makeNode(PlannedStmt);
+        stmt->commandType = CMD_SELECT;
+        stmt->canSetTag = true;
+        stmt->planTree = (Plan*)hybrid;
+        /* one relation RTE: the single shared base table, whose Var
+         * numbering both sub-plans use */
+        {
+            List* raw_list = raw_parser(text_sql, NULL);
+            Node* parsetree = (Node*)linitial(raw_list);
+            Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
+            stmt->rtable = query->rtable;
+        }
+
+        CaptureState* cap = (CaptureState*)palloc0(sizeof(CaptureState));
+        cap->pub.receiveSlot = capture_receiveSlot;
+        cap->pub.rStartup = capture_startup;
+        cap->pub.rShutdown = capture_noop;
+        cap->pub.rDestroy = capture_noop;
+        cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
+
+        QueryDesc* qd = CreateQueryDesc(stmt,
+                                        "hybrid_recall_debug",
+                                        GetActiveSnapshot(),
+                                        InvalidSnapshot,
+                                        &cap->pub,
+                                        NULL,
+                                        0);
+        ExecutorStart(qd, 0);
+    if (qd->tupDesc != NULL) {
+            funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
+            /* hand-built descs carry no registered composite type until
+             * blessed; ExecFetchSlotTupleDatum requires one */
+            BlessTupleDesc(funcctx->tuple_desc);
+        }
+        ExecutorRun(qd, ForwardScanDirection, 0L);
+        ExecutorFinish(qd);
+        ExecutorEnd(qd);
+        FreeQueryDesc(qd);
+
+        funcctx->user_fctx = cap->store;
+
+        (void)MemoryContextSwitchTo(old_cxt);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    Tuplestorestate* store = (Tuplestorestate*)funcctx->user_fctx;
+
+    {
+        TupleTableSlot* slot = funcctx->slot;
+        if (slot == NULL) {
+            slot = MakeSingleTupleTableSlot(funcctx->tuple_desc);
+            funcctx->slot = slot;
+        }
+        /* natural termination: the store runs dry */
+        if (tuplestore_gettupleslot(store, true, false, slot))
+            SRF_RETURN_NEXT(funcctx, ExecFetchSlotTupleDatum(slot));
+    }
+
+    SRF_RETURN_DONE(funcctx);
+}

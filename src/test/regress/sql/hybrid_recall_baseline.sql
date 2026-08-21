@@ -121,8 +121,13 @@ fused AS (
            coalesce(v.vector_rank, 0) AS vector_rank,
            t.text_score,
            v.vector_distance,
-           round( 0.5 / (60 + coalesce(t.text_rank, 0))
-                + 0.5 / (60 + coalesce(v.vector_rank, 0)), 8) AS hybrid_score
+           /* 设计文档 §3.4 标准语义：未命中的支路不贡献分数。
+            * 初版 golden 曾用 coalesce(rank,0)，等价于给未命中支路
+            * 加 weight/rrf_k 常量偏置，会改变单路与双路候选间的排序，
+            * 与内核实现（P0-4）对照时暴露，此处修正为 hit-only。 */
+           round( CASE WHEN t.id IS NOT NULL THEN 0.5 / (60 + t.text_rank) ELSE 0 END
+                + CASE WHEN v.id IS NOT NULL THEN 0.5 / (60 + v.vector_rank) ELSE 0 END
+                , 8) AS hybrid_score
     FROM text_path t
     FULL JOIN vector_path v ON v.id = t.id
 )

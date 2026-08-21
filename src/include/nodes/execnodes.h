@@ -2239,6 +2239,20 @@ typedef struct HybridRecallState {
     instr_time fusion_time;
     bool actual_parallel;
     bool serial_fallback;
+    /*
+     * [P0-4] Runtime-only fields (not serialized, execnodes.h is not part
+     * of the Plan): doc-key type cache drives hash/eq/datumCopy and the
+     * tie-break comparator (never byte-order or pointer compares, design
+     * doc §3.4/§6.3); candidate limits are Exprs in the Plan and are
+     * re-evaluated per execution (§7.5).
+     */
+    struct TypeCacheEntry* id_tcache;
+    ExprState* final_topk_state;
+    ExprState* text_candidates_state;
+    ExprState* vector_candidates_state;
+    int64 final_topk;
+    int64 text_limit;
+    int64 vector_limit;
 } HybridRecallState;
 
 /* ----------------
