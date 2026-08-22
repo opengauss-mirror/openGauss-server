@@ -8639,7 +8639,7 @@ void ApplyUndoActions(bool stpRollback)
     if (t_thrd.ustore_cxt.m_undozone_array != NULL) {
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
             StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
-            if (likely(m_undozone != NULL)) {
+            if (likely(m_undozone == NULL)) {
                 continue;
             }
             for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
