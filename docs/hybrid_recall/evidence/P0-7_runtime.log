@@ -1,0 +1,16 @@
+=== EarlyFree：上层 LIMIT 3 截断（End 处理未消费完状态）===
+SET
+ doc_id 
+--------
+    245
+    165
+     25
+(3 rows)
+
+
+=== 100 次完整执行循环（C05 稳定性：无崩溃/无挂起/行数守恒）===
+SET
+NOTICE:  TOTAL_ROWS=1000
+ANONYMOUS BLOCK EXECUTE
+
+=== End 路径说明：每次调用均完整走 ExecutorFinish/ExecutorEnd（载具内），全部用例无崩溃 ===
