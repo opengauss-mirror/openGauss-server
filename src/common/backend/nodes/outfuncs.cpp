@@ -1297,6 +1297,13 @@ static void _outStream(StringInfo str, Stream* node)
     WRITE_INT_FIELD(stream_level);
     WRITE_NODE_FIELD(origin_consumer_nodes);
     WRITE_BOOL_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers (design doc §5.3);
+     * version-gated so older binaries never meet unknown tokens. */
+    if (t_thrd.proc->workingVersionNum >= HYBRID_RECALL_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_task_parallel);
+        WRITE_INT_FIELD(task_group_id);
+        WRITE_INT_FIELD(task_branch_id);
+    }
 #ifdef USE_SPQ
     if (t_thrd.proc->workingVersionNum >= SPQ_VERSION_NUM) {
         WRITE_INT_FIELD(streamID);
@@ -6498,6 +6505,12 @@ static void _outVecStream(StringInfo str, VecStream* node)
     WRITE_INT_FIELD(stream_level);
     WRITE_NODE_FIELD(origin_consumer_nodes);
     WRITE_BOOL_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers - see _outStream */
+    if (t_thrd.proc->workingVersionNum >= HYBRID_RECALL_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_task_parallel);
+        WRITE_INT_FIELD(task_group_id);
+        WRITE_INT_FIELD(task_branch_id);
+    }
 #ifdef USE_SPQ
     WRITE_INT_FIELD(streamID);
 #endif

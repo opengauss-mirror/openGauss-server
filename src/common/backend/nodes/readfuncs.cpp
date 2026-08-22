@@ -776,6 +776,24 @@ static inline void CheckStrNotNull(const char *token, char *errMsg)
 #else
 #define READ_STREAM_ID() {}
 #endif
+
+/* [P1-1] HybridRecall task-parallel markers (design doc §5.3): read back
+ * when present; older plans read back the makeNode-zeroed defaults. */
+#define READ_HYBRID_TASK_FIELDS()                           \
+    do {                                                    \
+        IF_EXIST(is_task_parallel)                          \
+        {                                                   \
+            READ_BOOL_FIELD(is_task_parallel);              \
+        }                                                   \
+        IF_EXIST(task_group_id)                             \
+        {                                                   \
+            READ_INT_FIELD(task_group_id);                  \
+        }                                                   \
+        IF_EXIST(task_branch_id)                            \
+        {                                                   \
+            READ_INT_FIELD(task_branch_id);                 \
+        }                                                   \
+    } while (0)
 /*
  * function for _readStream and _readVecStream.
  */
@@ -802,6 +820,7 @@ static inline void CheckStrNotNull(const char *token, char *errMsg)
         READ_NODE_FIELD(origin_consumer_nodes);             \
         READ_BOOL_FIELD(is_recursive_local);                \
         READ_STREAM_ID();                                   \
+        READ_HYBRID_TASK_FIELDS();                          \
                                                             \
         READ_DONE();                                        \
     } while (0)

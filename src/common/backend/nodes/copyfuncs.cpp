@@ -2360,6 +2360,10 @@ static VecStream* _copyVecStream(const VecStream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers (design doc §5.3) */
+    COPY_SCALAR_FIELD(is_task_parallel);
+    COPY_SCALAR_FIELD(task_group_id);
+    COPY_SCALAR_FIELD(task_branch_id);
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif
@@ -2487,6 +2491,10 @@ static Stream* _copyStream(const Stream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers (design doc §5.3) */
+    COPY_SCALAR_FIELD(is_task_parallel);
+    COPY_SCALAR_FIELD(task_group_id);
+    COPY_SCALAR_FIELD(task_branch_id);
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif

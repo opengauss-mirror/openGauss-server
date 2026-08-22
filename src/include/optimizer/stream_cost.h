@@ -86,6 +86,17 @@ typedef struct Stream {
                                 * used for recursive sql execution that under recursive-union operator. */
     ExecNodes* origin_consumer_nodes;
     bool is_recursive_local;   /* LOCAL GATHER for recursive */
+    /*
+     * [P1-1] HybridRecall task-parallel markers (hybrid recall design doc
+     * §5.3): a 1:1 local stream flagged is_task_parallel must survive the
+     * useless-local-stream eliminations, because two such streams are what
+     * makes the two recall branches run concurrently in their own stream
+     * workers. task_group_id/task_branch_id carry observability only
+     * (0=text branch, 1=vector branch).
+     */
+    bool is_task_parallel;
+    int task_group_id;
+    int task_branch_id;
 #ifdef USE_SPQ
     int streamID;
 #endif
