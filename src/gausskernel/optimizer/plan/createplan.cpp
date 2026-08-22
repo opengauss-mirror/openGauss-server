@@ -826,8 +826,11 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    /* if number of producer and consumer is 1, means stream node is not needed */
-    if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1) {
+    /* if number of producer and consumer is 1, means stream node is not needed.
+     * [P1-2] Task-parallel 1:1 streams are the concurrency primitive of
+     * HybridRecall's two recall branches (design doc §5.4) - never fold. */
+    if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1 &&
+        !stream->is_task_parallel) {
         pfree(stream);
         return subplan;
     }

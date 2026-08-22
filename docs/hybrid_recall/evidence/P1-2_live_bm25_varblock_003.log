@@ -1,0 +1,43 @@
+SET
+SET
+gsql:src/test/regress/sql/bm25_varblock_003.sql:11: NOTICE:  table "bm25_varblock_003" does not exist, skipping
+DROP TABLE
+gsql:src/test/regress/sql/bm25_varblock_003.sql:16: NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "bm25_varblock_003_pkey" for table "bm25_varblock_003"
+CREATE TABLE
+INSERT 0 5000
+INSERT 0 10000
+INSERT 0 5000
+CREATE INDEX
+DELETE 5000
+ sleep1 
+--------
+ 
+(1 row)
+
+INSERT 0 1
+ sleep2 
+--------
+ 
+(1 row)
+
+INSERT 0 1
+5001
+5002
+5003
+15001
+15002
+15003
+VACUUM
+ total_rows 
+------------
+      15002
+(1 row)
+
+5001
+5002
+5003
+15001
+15002
+15003
+DROP TABLE
+total time: 16131  ms
