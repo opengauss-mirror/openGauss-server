@@ -121,3 +121,21 @@ debug+cassert 构建。增量循环实测 ~8 min/轮。
 
 **G0 关闭，允许进入 P0（新增 NodeTag/Path/Plan/State 空结构与串行 HybridRecall）。**
 2026-08-21
+
+## 9. P0 阶段完成与 G1 判定（2026-08-22）
+
+| 任务 | commit | 判据 |
+| --- | --- | --- |
+| P0-1 节点脚手架 | 35e92059ce | 5 头文件纯增量，full 链验证 + golden 一致 |
+| P0-2 序列化闭环 | 0c1ac63aaf | copy/out/read + equalfuncs 无需改动结论 |
+| P0-3 executor 分发 | ce7578434b | init/end/rescan 分支 + 空生命周期 |
+| P0-4/5 串行融合主体 | bb12d40eee | 内核输出与修正版 golden 逐行一致；边界套件全绿；golden 语义缺陷修正（coalesce→hit-only） |
+| P0-6 tie-break/边界 | 7981645455 | min-rank 修复 + T1-T5 全绿（含 text 主键、NULL 拒绝、NaN） |
+| P0-7 End/EarlyFree/memcheck | a3771b94dc | ASAN 全套件零报告 + 100 次循环守恒 |
+
+**G1 关闭**：串行 HybridRecall 正确性（golden 一致、边界、内存）全部满足。
+验证载具：docs/hybrid_recall/p04_test_module（真实规划器组计划 + 手工 HybridRecall
+父节点 + ExecutorRun，openGauss C 函数五层适配已固化在 build.sh 与注释中）。
+
+下一阶段：P1 Task Stream 并行（is_task_parallel 标记、1:1 本地 Stream 保留、
+producer 启动、快照共享、错误联动、overlap 证明）。
