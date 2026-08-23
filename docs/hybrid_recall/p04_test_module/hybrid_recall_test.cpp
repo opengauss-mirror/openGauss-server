@@ -181,13 +181,9 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
          * the SubqueryScan wrapper layer (init quirks) is eliminated.
          * Both subplans reference the relation as varno 1; the parent range
          * table below carries that same relation once. */
-        /* [P1-3] wrap both branches in 1:1 local task streams */
-        Plan* text_stream = make_task_stream(text_plan, 0);
-        Plan* vector_stream = make_task_stream(vector_plan, 1);
-
         HybridRecall* hybrid = makeNode(HybridRecall);
-        hybrid->plan.lefttree = text_stream;
-        hybrid->plan.righttree = vector_stream;
+        hybrid->plan.lefttree = text_plan;
+        hybrid->plan.righttree = vector_plan;
         hybrid->plan.targetlist = NIL;
         hybrid->plan.qual = NIL;
         hybrid->id_resno = (AttrNumber)arg_id_resno;
@@ -207,10 +203,10 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
         PlannedStmt* stmt = makeNode(PlannedStmt);
         stmt->commandType = CMD_SELECT;
         stmt->canSetTag = true;
-        hybrid->parallel_branches = true;
+        hybrid->parallel_branches = false;
         (void)renumber_plan_node_ids((Plan*)hybrid, 1);
         stmt->planTree = (Plan*)hybrid;
-        stmt->num_streams = 2;
+        stmt->num_streams = 0;
         /* one relation RTE: the single shared base table, whose Var
          * numbering both sub-plans use */
         {
@@ -385,4 +381,63 @@ Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS)
     DestReceiver* none_dest = None_Receiver;
     ExplainOnePlan(stmt, NULL, es, "hybrid_recall_explain", none_dest, NULL);
     PG_RETURN_TEXT_P(cstring_to_text(es->str->data));
+}
+
+
+extern "C" Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(hybrid_recall_debug_parallel);
+
+/* [P1-3] PARALLEL variant: branches wrapped in 1:1 task streams.
+ * Currently under debugging - ExecutorStart hangs in stream setup. */
+Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
+{
+    char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
+    char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
+    Plan* text_plan = plan_branch_sql(text_sql, "text");
+    Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+    Plan* text_stream = make_task_stream(text_plan, 0);
+    Plan* vector_stream = make_task_stream(vector_plan, 1);
+    HybridRecall* hybrid = makeNode(HybridRecall);
+    hybrid->plan.lefttree = text_stream;
+    hybrid->plan.righttree = vector_stream;
+    hybrid->id_resno = 1;
+    hybrid->text_score_resno = 2;
+    hybrid->vector_distance_resno = 2;
+    hybrid->final_topk = make_int8_const(PG_GETARG_INT64(5));
+    hybrid->text_candidates = make_int8_const(PG_GETARG_INT64(6));
+    hybrid->vector_candidates = make_int8_const(PG_GETARG_INT64(7));
+    hybrid->fusion = HYBRID_FUSION_RRF;
+    hybrid->rrf_k = PG_GETARG_FLOAT8(8);
+    hybrid->text_weight = PG_GETARG_FLOAT8(9);
+    hybrid->vector_weight = PG_GETARG_FLOAT8(10);
+    hybrid->parallel_branches = true;
+    hybrid->require_parallel = false;
+    hybrid->recheck_quals = NIL;
+    PlannedStmt* stmt = makeNode(PlannedStmt);
+    stmt->commandType = CMD_SELECT;
+    stmt->canSetTag = true;
+    (void)renumber_plan_node_ids((Plan*)hybrid, 1);
+    stmt->planTree = (Plan*)hybrid;
+    stmt->num_streams = 2;
+    {
+        List* raw_list = raw_parser(text_sql, NULL);
+        Node* parsetree = (Node*)linitial(raw_list);
+        Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
+        stmt->rtable = query->rtable;
+    }
+    CaptureState* cap = (CaptureState*)palloc0(sizeof(CaptureState));
+    cap->pub.receiveSlot = capture_receiveSlot;
+    cap->pub.rStartup = capture_startup;
+    cap->pub.rShutdown = capture_noop;
+    cap->pub.rDestroy = capture_noop;
+    cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
+    QueryDesc* qd = CreateQueryDesc(stmt, "hybrid_recall_parallel", GetActiveSnapshot(),
+                                    InvalidSnapshot, &cap->pub, NULL, 0);
+    ExecutorStart(qd, 0);
+    ExecutorRun(qd, ForwardScanDirection, 0L);
+    ExecutorFinish(qd);
+    ExecutorEnd(qd);
+    FreeQueryDesc(qd);
+    tuplestore_end(cap->store);
+    PG_RETURN_INT32(0);
 }
