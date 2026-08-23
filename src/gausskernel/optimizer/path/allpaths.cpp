@@ -34,6 +34,7 @@
 #include "optimizer/cost.h"
 #include "optimizer/dataskew.h"
 #include "optimizer/geqo.h"
+#include "optimizer/hybrid_recall_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "optimizer/plancat.h"
@@ -953,6 +954,8 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
         switch (rel->rtekind) {
             case RTE_RELATION:
                 SetRelationPath(root, rel, rte);
+                /* [P2-1] hybrid recall marker recognition (design doc §7.1) */
+                TryAddHybridRecallPath(root, rel, rte);
                 break;
             case RTE_SUBQUERY:
                 /* Subquery --- fully handled during set_rel_size */

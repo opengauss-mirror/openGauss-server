@@ -18,11 +18,11 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 
 ifeq ($(enable_multiple_nodes), yes)
-OBJS = allpaths.o clausesel.o costsize.o equivclass.o indxpath.o \
+OBJS = allpaths.o clausesel.o costsize.o equivclass.o hybridRecallPath.o indxpath.o \
        joinpath.o joinrels.o pathkeys.o tidpath.o streampath_base.o \
        es_selectivity.o
 else
-OBJS = allpaths.o clausesel.o costsize.o equivclass.o indxpath.o \
+OBJS = allpaths.o clausesel.o costsize.o equivclass.o hybridRecallPath.o indxpath.o \
        joinpath.o joinrels.o pathkeys.o tidpath.o \
        pgxcpath_single.o streampath_single.o streampath_base.o es_selectivity.o
 endif
