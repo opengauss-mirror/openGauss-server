@@ -307,12 +307,19 @@ static void hybrid_validate_options(HybridRecallState* node)
 static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slot, bool is_text, uint32 rank)
 {
     HybridRecall* plan = (HybridRecall*)node->ps.plan;
-    bool id_isnull = slot->tts_isnull[plan->id_resno - 1];
+    /* Stream-delivered slots are lazily deformed (tts_nvalid==0); the
+     * canonical accessor deforms on demand - direct tts_values reads
+     * are only valid for materialized slots. */
+    bool id_isnull = false;
+    Datum id = heap_slot_getattr(slot, plan->id_resno, &id_isnull);
     if (id_isnull)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                        errmsg("HybridRecall doc key must not be NULL (V1 requires a stable non-null key)")));
+                        errmsg("HybridRecall doc key must not be NULL (V1 requires a stable non-null key)"),
+                        errdetail("branch=%s natts=%d nvalid=%d id_resno=%d",
+                                  is_text ? "text" : "vector",
+                                  slot->tts_tupleDescriptor ? slot->tts_tupleDescriptor->natts : -1,
+                                  slot->tts_nvalid, plan->id_resno)));
 
-    Datum id = slot->tts_values[plan->id_resno - 1];
     bool found = false;
 
     g_hybrid_id_tcache = node->id_tcache;
@@ -344,11 +351,17 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
     if (is_text) {
         entry->cand.text_rank = rank;
         entry->cand.source_mask |= 1;
-        entry->cand.text_score = DatumGetFloat8(slot->tts_values[plan->text_score_resno - 1]);
+        bool score_null = false;
+        entry->cand.text_score = DatumGetFloat8(heap_slot_getattr(slot, plan->text_score_resno, &score_null));
+        if (score_null)
+            entry->cand.text_score = 0.0;
     } else {
         entry->cand.vector_rank = rank;
         entry->cand.source_mask |= 2;
-        entry->cand.vector_distance = DatumGetFloat8(slot->tts_values[plan->vector_distance_resno - 1]);
+        bool dist_null = false;
+        entry->cand.vector_distance = DatumGetFloat8(heap_slot_getattr(slot, plan->vector_distance_resno, &dist_null));
+        if (dist_null)
+            entry->cand.vector_distance = 0.0;
     }
 }
 

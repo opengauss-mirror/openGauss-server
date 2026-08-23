@@ -223,7 +223,6 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
         cap->pub.rDestroy = capture_noop;
         cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
 
-        ereport(LOG, (errmsg("HRP1: before CreateQueryDesc num_streams=%d", stmt->num_streams)));
         QueryDesc* qd = CreateQueryDesc(stmt,
                                         "hybrid_recall_debug",
                                         GetActiveSnapshot(),
@@ -232,7 +231,6 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
                                         NULL,
                                         0);
         ExecutorStart(qd, 0);
-        ereport(LOG, (errmsg("HRP1: after ExecutorStart topc=%d gobj=%d", (int)StreamTopConsumerAmI(), (int)(u_sess->stream_cxt.global_obj != NULL))));
     if (qd->tupDesc != NULL) {
             funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
             /* hand-built descs carry no registered composite type until
@@ -240,7 +238,6 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
             BlessTupleDesc(funcctx->tuple_desc);
         }
         ExecutorRun(qd, ForwardScanDirection, 0L);
-        ereport(LOG, (errmsg("HRP1: ExecutorRun returned")));
         ExecutorFinish(qd);
         ExecutorEnd(qd);
         FreeQueryDesc(qd);
@@ -391,6 +388,13 @@ PG_FUNCTION_INFO_V1(hybrid_recall_debug_parallel);
  * Currently under debugging - ExecutorStart hangs in stream setup. */
 Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
 {
+    FuncCallContext* funcctx = NULL;
+    MemoryContext old_cxt = NULL;
+
+    if (SRF_IS_FIRSTCALL()) {
+    funcctx = SRF_FIRSTCALL_INIT();
+    old_cxt = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
     char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
     char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
     Plan* text_plan = plan_branch_sql(text_sql, "text");
@@ -413,6 +417,10 @@ Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
     hybrid->parallel_branches = true;
     hybrid->require_parallel = false;
     hybrid->recheck_quals = NIL;
+    /* SetCheckInfo (execStream.h) dereferences planTree->exec_nodes->nodeList
+     * during BuildStreamFlow - NULL here crashes the backend inside
+     * HOLD_INTERRUPTS and wedges the pool worker (the "hang"). */
+    hybrid->plan.exec_nodes = (ExecNodes*)copyObject(text_plan->exec_nodes);
     PlannedStmt* stmt = makeNode(PlannedStmt);
     stmt->commandType = CMD_SELECT;
     stmt->canSetTag = true;
@@ -434,10 +442,29 @@ Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
     QueryDesc* qd = CreateQueryDesc(stmt, "hybrid_recall_parallel", GetActiveSnapshot(),
                                     InvalidSnapshot, &cap->pub, NULL, 0);
     ExecutorStart(qd, 0);
+    if (qd->tupDesc != NULL) {
+        funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
+        BlessTupleDesc(funcctx->tuple_desc);
+    }
     ExecutorRun(qd, ForwardScanDirection, 0L);
     ExecutorFinish(qd);
     ExecutorEnd(qd);
     FreeQueryDesc(qd);
-    tuplestore_end(cap->store);
-    PG_RETURN_INT32(0);
+
+    funcctx->user_fctx = cap->store;
+    (void)MemoryContextSwitchTo(old_cxt);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    Tuplestorestate* store = (Tuplestorestate*)funcctx->user_fctx;
+    {
+        TupleTableSlot* slot = funcctx->slot;
+        if (slot == NULL) {
+            slot = MakeSingleTupleTableSlot(funcctx->tuple_desc);
+            funcctx->slot = slot;
+        }
+        if (tuplestore_gettupleslot(store, true, false, slot))
+            SRF_RETURN_NEXT(funcctx, ExecFetchSlotTupleDatum(slot));
+    }
+    SRF_RETURN_DONE(funcctx);
 }
