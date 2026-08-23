@@ -911,6 +911,65 @@ void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int 
     return;
 }
 
+void CfsZeroExtend(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                   BlockNumber logicBlockNumber, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
+{
+    BlockNumber currentBlock = logicBlockNumber;
+    BlockNumber remainingBlocks = nblocks;
+
+    Assert(type == COMMON_STORAGE);
+    Assert(nblocks > 0);
+    Assert(logicBlockNumber / CFS_LOGIC_BLOCKS_PER_FILE ==
+           (logicBlockNumber + nblocks - 1) / CFS_LOGIC_BLOCKS_PER_FILE);
+
+    while (remainingBlocks > 0) {
+        ExtentLocation location =
+            g_location_convert[type](reln, relNode, fd, extent_size, forknum, currentBlock);
+        BlockNumber blocksInExtent = Min(remainingBlocks,
+            (BlockNumber)CFS_LOGIC_BLOCKS_PER_EXTENT - location.extentOffset);
+
+        Assert(location.fd >= 0);
+        Assert(!location.is_segment_page && location.is_compress_allowed);
+
+        /*
+         * A CFS extent stores 127 logical pages followed by one PCA page.
+         * Zero pages need no data chunks: an address with nchunks == 0 is
+         * read as an all-zero page.  Initialize each new extent once and
+         * reserve its data area as a sparse range.
+         */
+        if (location.extentOffset == 0) {
+            InitExtentHeader(location);
+            FileAllocate(location.fd, location.extentStart * BLCKSZ,
+                         CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        }
+
+        pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
+        if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
+            pca_buf_free_page(ctrl, location, false);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Failed to CfsZeroExtend %s, headerNum: %u.",
+                       FilePathName(location.fd), location.headerNum)));
+        }
+
+        CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
+        uint32 requiredBlocks = location.extentOffset + blocksInExtent;
+        uint32 actualBlocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+        bool changed = false;
+
+        while (requiredBlocks > actualBlocks) {
+            if (pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &actualBlocks, requiredBlocks)) {
+                changed = true;
+                break;
+            }
+        }
+        Assert(pg_atomic_read_u32(&cfsExtentHeader->nblocks) >= requiredBlocks);
+        pca_buf_free_page(ctrl, location, changed);
+
+        currentBlock += blocksInExtent;
+        remainingBlocks -= blocksInExtent;
+    }
+}
+
 BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo, off_t len)
 {
     RelFileCompressOption option;

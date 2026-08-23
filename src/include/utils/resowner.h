@@ -76,6 +76,13 @@ extern void ResourceOwnerEnlargeBuffers(ResourceOwner owner);
 extern void ResourceOwnerRememberBuffer(ResourceOwner owner, Buffer buffer);
 extern void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer);
 
+/* support for IO-in-progress management */
+extern void ResourceOwnerEnlargeBufferIOs(ResourceOwner owner);
+extern void ResourceOwnerRememberBufferIO(ResourceOwner owner, Buffer buffer);
+extern void ResourceOwnerForgetBufferIO(ResourceOwner owner, Buffer buffer);
+extern bool ResourceOwnerForgetBufferIOIfOwned(ResourceOwner owner, Buffer buffer);
+extern void ResourceOwnerAbortBufferIOs(ResourceOwner owner);
+
 /* support for segment head buffer refcount management */
 extern void ResourceOwnerEnlargeSegmentBuffers(ResourceOwner owner);
 extern void ResourceOwnerRememberSegmentBuffer(ResourceOwner owner, Buffer buffer, SegmentDesc *seg_desc);

@@ -59,7 +59,7 @@ static Size fsm_space_cat_to_avail(uint8 cat);
 static int fsm_set_and_search(Relation rel, const FSMAddress &addr, uint16 slot, uint8 newValue, uint8 minValue,
     bool search = true);
 static BlockNumber fsm_search(Relation rel, uint8 min_cat);
-static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof);
+static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, BlockNumber start, BlockNumber end, bool* eof);
 static BlockNumber fsm_get_lastblckno(Relation rel, const FSMAddress& addr);
 static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new_cat, bool search = true);
 
@@ -371,8 +371,27 @@ void FreeSpaceMapVacuum(Relation rel)
      * Traverse the tree in depth-first order. The tree is stored physically
      * in depth-first order, so this should be pretty I/O efficient.
      */
-    fsm_vacuum_page(rel, g_fsm_root_address, &dummy);
+    fsm_vacuum_page(rel, g_fsm_root_address, 0, InvalidBlockNumber, &dummy);
 }
+
+/*
+ * FreeSpaceMapVacuumRange - update upper-level pages in the rel's FSM
+ *
+ * As above, but assume that only heap pages between start and end-1 inclusive
+ * have new free-space information, so update only the upper-level slots
+ * covering that block range.  end == InvalidBlockNumber is equivalent to
+ * "all the rest of the relation".
+ */
+void FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end)
+{
+    bool dummy = false;
+
+    /* Recursively scan the tree, starting at the root */
+    if (end > start) {
+        fsm_vacuum_page(rel, g_fsm_root_address, start, end, &dummy);
+    }
+}
+
 
 /* ******* Internal routines ******* */
 /*
@@ -817,7 +836,7 @@ static BlockNumber fsm_search(Relation rel, uint8 min_cat)
 /*
  * Recursive guts of FreeSpaceMapVacuum
  */
-static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof_p)
+static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, BlockNumber start, BlockNumber end, bool* eof_p)
 {
     Buffer buf;
     Page page;
@@ -842,23 +861,62 @@ static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof_p)
      */
     if (addr.level > FSM_BOTTOM_LEVEL) {
         int slot;
+        FSMAddress fsm_start;
+        FSMAddress fsm_end;
+        uint16 fsm_start_slot;
+        uint16 fsm_end_slot;
+        int startSlot;
+        int endSlot;
         bool eof = false;
 
-        for (slot = 0; (unsigned int)(slot) < SlotsPerFSMPage; slot++) {
-            int child_avail;
+        /*
+         * Compute the range of slots we need to update on this page, given
+         * the requested range of heap blocks to consider.  The first slot to
+         * update is the one covering the "start" block, and the last slot is
+         * the one covering "end - 1".  (Some of this work will be duplicated
+         * in each recursive call, but it's cheap enough to not worry about.)
+         */
+        fsm_start = fsm_get_location(start, &fsm_start_slot);
+        fsm_end = fsm_get_location(end - 1, &fsm_end_slot);
+
+        while (fsm_start.level < addr.level) {
+            fsm_start = fsm_get_parent(fsm_start, &fsm_start_slot);
+            fsm_end = fsm_get_parent(fsm_end, &fsm_end_slot);
+        }
+        Assert(fsm_start.level == addr.level);
+
+        if (fsm_start.logpageno == addr.logpageno) {
+            startSlot = fsm_start_slot;
+        } else if (fsm_start.logpageno > addr.logpageno) {
+            startSlot = SlotsPerFSMPage; /* shouldn't get here... */
+        } else {
+            startSlot = 0;
+        }
+
+        if (fsm_end.logpageno == addr.logpageno) {
+            endSlot = fsm_end_slot;
+        } else if (fsm_end.logpageno > addr.logpageno) {
+            endSlot = SlotsPerFSMPage - 1;
+        } else {
+            endSlot = -1; /* shouldn't get here... */
+        }
+
+        for (slot = startSlot; slot <= endSlot; slot++) {
+            int childAvail;
 
             CHECK_FOR_INTERRUPTS();
 
             /* After we hit end-of-file, just clear the rest of the slots */
-            if (!eof)
-                child_avail = fsm_vacuum_page(rel, fsm_get_child(addr, (uint16)slot), &eof);
-            else
-                child_avail = 0;
+            if (!eof) {
+                childAvail = fsm_vacuum_page(rel, fsm_get_child(addr, (uint16)slot), start, end, &eof);
+            } else {
+                childAvail = 0;
+            }
 
             /* Update information about the child */
-            if (fsm_get_avail(page, slot) != child_avail) {
+            if (fsm_get_avail(page, slot) != childAvail) {
                 LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-                if (fsm_set_avail(page, slot, (uint8)child_avail)) {
+                if (fsm_set_avail(page, slot, (uint8)childAvail)) {
                     if (IsSegmentFileNode(rel->rd_node)) {
                         PageSetLSN(page, GetXLogInsertEndRecPtr());
                         MarkBufferDirty(buf);

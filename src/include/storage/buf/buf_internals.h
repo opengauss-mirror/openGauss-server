@@ -381,6 +381,8 @@ extern int BufTableInsert(BufferTag* tagPtr, uint32 hashcode, int buf_id);
 extern void BufTableDelete(BufferTag* tagPtr, uint32 hashcode);
 
 /* localbuf.c */
+extern bool PinLocalBuffer(BufferDesc *buf_hdr);
+extern void UnpinLocalBuffer(Buffer buffer);
 extern void LocalPrefetchBuffer(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum);
 extern BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum, bool* foundPtr);
 extern void MarkLocalBufferDirty(Buffer buffer);
@@ -391,4 +393,6 @@ extern void update_wait_lockid(LWLock* lock);
 extern char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf = false);
 extern void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE, bool skipFsync = false);
 extern void LocalBufferFlushAllBuffer();
+extern BlockNumber ExtendBufferedRelLocal(BufferManagerRelation bmr, ForkNumber fork, uint32 flags, uint32 extend_by,
+                                          Buffer* buffers, uint32* extended_by);
 #endif /* BUFMGR_INTERNALS_H */

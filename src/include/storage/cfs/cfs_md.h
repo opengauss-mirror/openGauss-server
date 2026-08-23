@@ -46,6 +46,18 @@ extern size_t CfsWritePage(SMgrRelation reln, const RelFileNode& relNode, int fd
 void CfsExtendExtent(SMgrRelation reln, const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
                      BlockNumber logicBlockNumber, const char *buffer, EXTEND_STORAGE_TYPE type);
 
+/** extend a compressed relation with zero pages, not used under segment storage.
+ @param[in]     reln             SMgrRelation.
+ @param[in]     relNode          RelFileNode.
+ @param[in]     fd               file descriptor.
+ @param[in]     extent_size      extent size.
+ @param[in]     forknum          fork number.
+ @param[in]     logicBlockNumber first logical block to extend.
+ @param[in]     nblocks          number of zero pages to extend.
+ @param[in]     type             storage type, heap or segment */
+void CfsZeroExtend(SMgrRelation reln, const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
+                   BlockNumber logicBlockNumber, BlockNumber nblocks, EXTEND_STORAGE_TYPE type);
+
 /** extend one extent, under segment storage.
  @param[in]     relNode          RelFileNode.
  @param[in]     fd               file discriptor.

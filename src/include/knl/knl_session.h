@@ -2067,6 +2067,7 @@ typedef struct knl_u_storage_context {
     int32* LocalRefCount;
     int nextFreeLocalBuf;
     struct HTAB* LocalBufHash;
+    int NLocalPinnedBuffers; /* number of local buffers pinned at least once */
     char* cur_block;
     int next_buf_in_block;
     int num_bufs_in_block;

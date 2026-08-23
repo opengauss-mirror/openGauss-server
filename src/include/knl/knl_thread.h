@@ -2607,6 +2607,8 @@ typedef struct knl_t_storage_context {
     /* local state for StartBufferIO and related functions */
     volatile bool IsForInput;
     volatile bool ParentIsForInput;
+    /* Multiple synchronous I/Os are allowed only while extending a relation in batches. */
+    bool BatchBufferIOInProgress;
     /* local state for LockBufferForCleanup */
     struct BufferDesc* PinCountWaitBuf;
     /* local state for aio clean up resource  */

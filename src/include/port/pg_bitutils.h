@@ -79,7 +79,7 @@ static inline int pg_leftmost_one_pos64(uint64 word)
  *		Returns the position of the least significant set bit in "word",
  *		measured from the least significant bit.  word must not be 0.
  */
-static inline int pg_rightmost_one_pos32(uint32 word)
+static inline FORCE_INLINE int pg_rightmost_one_pos32(uint32 word)
 {
 #ifdef HAVE__BUILTIN_CTZ
     Assert(word != 0);

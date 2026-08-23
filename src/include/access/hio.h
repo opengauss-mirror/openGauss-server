@@ -32,11 +32,28 @@
 typedef struct BulkInsertStateData {
     BufferAccessStrategy strategy; /* our BULKWRITE strategy object */
     Buffer current_buf;            /* current insertion target page */
+    /*
+     * State for bulk extensions.
+     *
+     * last_free..next_free are further pages that were unused at the time of
+     * the last extension. They might be in use by the time we use them
+     * though, so rechecks are needed.
+     *
+     * XXX: Eventually these should probably live in RelationData instead,
+     * alongside targetblock.
+     *
+     * already_extended_by remembers the size of the most recent contended
+     * extension. It may guide another contended extension, but must not make
+     * later uncontended extensions allocate speculative pages.
+     */
+    BlockNumber next_free;
+    BlockNumber last_free;
+    uint32 already_extended_by;
 } BulkInsertStateData;
 
 extern void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tuple, TransactionId xid);
 extern Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer otherBuffer, int options,
-    BulkInsertState bistate, Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block);
+    BulkInsertState bistate, Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block, int num_pages = 0);
 extern Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dictSize, BulkInsertState bistate);
 extern Buffer ReadBufferBI(Relation relation, BlockNumber targetBlock, ReadBufferMode mode, BulkInsertState bistate);
 extern void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate);

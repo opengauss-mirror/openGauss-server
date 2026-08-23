@@ -756,6 +756,116 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber)RELSEG_SIZE));
 }
 
+/*
+ * mdzeroextend() -- Add new zeroed out blocks to the specified relation.
+ *
+ * Similar to mdextend(), except the relation can be extended by multiple
+ * blocks at once and the added blocks will be filled with zeroes.
+ */
+void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int nblocks, bool skipFsync)
+{
+    const int zeroExtendBlocksPerWrite = 64;
+    MdfdVec* v;
+    BlockNumber curblocknum = blocknum;
+    int remblocks = nblocks;
+    bool isCompressed = IS_COMPRESSED_MAINFORK(reln, forknum);
+    bool useFallocate = u_sess->attr.attr_sql.enable_fast_allocate;
+    BlockNumber relSegSize = isCompressed ? CFS_LOGIC_BLOCKS_PER_FILE : RELSEG_SIZE;
+    char* unalignedZeroBuffer = NULL;
+    char* zeroBuffer = NULL;
+
+    Assert(nblocks > 0);
+
+    /* This assert is too expensive to have on normally ... */
+#ifdef CHECK_WRITE_VS_EXTEND
+    Assert(blocknum >= mdnblocks(reln, forknum));
+#endif
+
+    /*
+     * If a relation manages to grow to 2^32-1 blocks, refuse to extend it any
+     * more --- we mustn't create a block whose number actually is
+     * InvalidBlockNumber or larger.
+     */
+    if ((uint64)blocknum + nblocks >= (uint64)InvalidBlockNumber) {
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("cannot extend file \"%s\" beyond %u blocks", relpath(reln->smgr_rnode, forknum),
+                               InvalidBlockNumber)));
+    }
+
+    if (!isCompressed && !useFallocate) {
+        unalignedZeroBuffer = (char*)palloc0(BLCKSZ * zeroExtendBlocksPerWrite + ALIGNOF_BUFFER);
+        zeroBuffer = (char*)BUFFERALIGN(unalignedZeroBuffer);
+    }
+
+    while (remblocks > 0) {
+        BlockNumber segstartblock = curblocknum % relSegSize;
+        off_t seekpos = (off_t)BLCKSZ * segstartblock;
+        int numblocks;
+
+        if (segstartblock + remblocks > relSegSize) {
+            numblocks = relSegSize - segstartblock;
+        } else {
+            numblocks = remblocks;
+        }
+
+        v = _mdfd_getseg(reln, forknum, curblocknum, skipFsync, EXTENSION_CREATE);
+        if (v == NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_IO_ERROR),
+                    errmsg("could not extend file \"%s\": storage segment is unavailable",
+                        relpath(reln->smgr_rnode, forknum))));
+        }
+
+        Assert(segstartblock < relSegSize);
+        Assert(segstartblock + numblocks <= relSegSize);
+
+        if (unlikely(isCompressed)) {
+            CfsZeroExtend(reln, reln->smgr_rnode.node, v->mdfd_vfd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum,
+                          curblocknum, numblocks, COMMON_STORAGE);
+        } else {
+            int writtenBlocks = 0;
+
+            while (writtenBlocks < numblocks) {
+                int writeBlocks = Min(numblocks - writtenBlocks, zeroExtendBlocksPerWrite);
+                int expectedBytes = BLCKSZ * writeBlocks;
+                off_t writeOffset = seekpos + (off_t)BLCKSZ * writtenBlocks;
+                int nbytes = FilePWrite(v->mdfd_vfd, useFallocate ? NULL : zeroBuffer, expectedBytes, writeOffset,
+                                        (uint32)WAIT_EVENT_DATA_FILE_EXTEND);
+                if (nbytes != expectedBytes) {
+                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                        ereport(DEBUG1,
+                                (errmsg("could not extend file \"%s\": %m, this relation has been removed",
+                                FilePathName(v->mdfd_vfd))));
+                    } else {
+                        if (nbytes < 0) {
+                            ereport(ERROR, (errcode_for_file_access(),
+                                    errmsg("could not extend file \"%s\": %m", FilePathName(v->mdfd_vfd)),
+                                    errhint("Check free disk space.")));
+                        }
+                        /* short write: complain appropriately */
+                        ereport(ERROR, (errcode(ERRCODE_DISK_FULL),
+                                errmsg("could not extend file \"%s\": wrote only %d of %d bytes at block %u",
+                                    FilePathName(v->mdfd_vfd), nbytes, expectedBytes,
+                                    curblocknum + writtenBlocks),
+                                errhint("Check free disk space.")));
+                    }
+                }
+                writtenBlocks += writeBlocks;
+            }
+        }
+        if (!skipFsync && !SmgrIsTemp(reln)) {
+            register_dirty_segment(reln, forknum, v);
+        }
+
+        Assert(_mdnblocks(reln, forknum, v) <= relSegSize);
+
+        remblocks -= numblocks;
+        curblocknum += numblocks;
+    }
+
+    pfree_ext(unalignedZeroBuffer);
+}
+
 static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior behavior, char *path)
 {
     uint32 flags = O_RDWR | PG_BINARY;

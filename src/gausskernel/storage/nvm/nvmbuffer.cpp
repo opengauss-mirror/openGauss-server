@@ -876,4 +876,3 @@ static BufferDesc *NvmStrategyGetBuffer(uint64* buf_state)
     /* not reached */
     return NULL;
 }
-
