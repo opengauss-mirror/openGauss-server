@@ -284,6 +284,10 @@ LDFLAGS += -L$(LIBOBS_LIB_PATH)
 endif
 
 ifeq ($(enable_lite_mode), no)
+# [build-fix] The system /lib64 gained a full LLVM install (ABI=0, no
+# EnableABIBreakingChecks) whose gcc-default search position shadows the
+# binarylibs archives for -lLLVM*. Prepend our path so it wins.
+LDFLAGS := -L$(LIBLLVM_LIB_PATH) $(LDFLAGS)
 LDFLAGS += -L$(LIBLLVM_LIB_PATH) -L$(LIBXML_LIB_PATH) \
     -L$(KERBEROS_LIB_PATH) -L$(LIBSTD_LIB_PATH)
 endif

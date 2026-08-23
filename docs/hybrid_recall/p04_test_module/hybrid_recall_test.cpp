@@ -78,9 +78,19 @@ static Plan* plan_branch_sql(const char* sql, const char* branch_name)
                         errmsg("%s branch SQL must be a SELECT", branch_name)));
 
     query = parse_analyze(parsetree, sql, NULL, 0);
-    if (query->commandType != CMD_SELECT || list_length(query->rtable) != 1)
+    /* exactly one RTE_RELATION required; CTE entries are fine alongside
+     * (e.g. WITH d AS (SELECT pg_sleep(n)) used as a one-shot branch delay
+     * for overlap wall-clock tests - the CTE materializes once inside the
+     * stream worker). */
+    int rel_count = 0;
+    ListCell* lc = NULL;
+    foreach (lc, query->rtable) {
+        if (((RangeTblEntry*)lfirst(lc))->rtekind == RTE_RELATION)
+            rel_count++;
+    }
+    if (query->commandType != CMD_SELECT || rel_count != 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("%s branch SQL must be a single-table SELECT (no joins/CTEs)", branch_name)));
+                        errmsg("%s branch SQL must reference exactly one base relation", branch_name)));
 
     planned = pg_plan_query(query, 0, NULL);
     return planned->planTree;
@@ -336,10 +346,12 @@ Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS)
 
     Plan* text_plan = plan_branch_sql(text_sql, "text");
     Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+    Plan* text_stream = make_task_stream(text_plan, 0);
+    Plan* vector_stream = make_task_stream(vector_plan, 1);
 
     HybridRecall* hybrid = makeNode(HybridRecall);
-    hybrid->plan.lefttree = text_plan;
-    hybrid->plan.righttree = vector_plan;
+    hybrid->plan.lefttree = text_stream;
+    hybrid->plan.righttree = vector_stream;
     hybrid->plan.targetlist = NIL;
     hybrid->plan.qual = NIL;
     hybrid->id_resno = 1;
@@ -352,16 +364,17 @@ Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS)
     hybrid->rrf_k = PG_GETARG_FLOAT8(8);
     hybrid->text_weight = PG_GETARG_FLOAT8(9);
     hybrid->vector_weight = PG_GETARG_FLOAT8(10);
-    hybrid->parallel_branches = false;
+    hybrid->parallel_branches = true;
     hybrid->require_parallel = false;
     hybrid->recheck_quals = NIL;
+    hybrid->plan.exec_nodes = (ExecNodes*)copyObject(text_plan->exec_nodes);
 
     PlannedStmt* stmt = makeNode(PlannedStmt);
     stmt->commandType = CMD_SELECT;
     stmt->canSetTag = true;
     (void)renumber_plan_node_ids((Plan*)hybrid, 1);
     stmt->planTree = (Plan*)hybrid;
-    stmt->num_streams = 0;
+    stmt->num_streams = 2;
     {
         List* raw_list = raw_parser(text_sql, NULL);
         Node* parsetree = (Node*)linitial(raw_list);
@@ -380,6 +393,8 @@ Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(es->str->data));
 }
 
+
+extern "C" int g_hybrid_test_producer_delay_ms;
 
 extern "C" Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(hybrid_recall_debug_parallel);
@@ -439,6 +454,9 @@ Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
     cap->pub.rShutdown = capture_noop;
     cap->pub.rDestroy = capture_noop;
     cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
+    /* 12th arg semantics: producer delay ms for the overlap wall-clock
+     * proof (design doc 12.3); passed through the same-process global. */
+    g_hybrid_test_producer_delay_ms = (int)PG_GETARG_INT32(11);
     QueryDesc* qd = CreateQueryDesc(stmt, "hybrid_recall_parallel", GetActiveSnapshot(),
                                     InvalidSnapshot, &cap->pub, NULL, 0);
     ExecutorStart(qd, 0);
@@ -450,6 +468,7 @@ Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
     ExecutorFinish(qd);
     ExecutorEnd(qd);
     FreeQueryDesc(qd);
+    g_hybrid_test_producer_delay_ms = 0;
 
     funcctx->user_fctx = cap->store;
     (void)MemoryContextSwitchTo(old_cxt);
