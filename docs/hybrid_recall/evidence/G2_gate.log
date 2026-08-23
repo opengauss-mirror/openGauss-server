@@ -1,0 +1,27 @@
+G2 闸门判定证据汇总 — 2026-08-23
+
+判据 1：真实 overlap（P1-8，evidence/P1-8_overlap.log）
+  双 producer 各睡 2s（不同线程、起跑差 4ms），总墙钟 2.196s vs 热基线 0.152s；
+  串行下限 4.1s。overlap ratio = 1.0 >= 0.50。✅
+
+判据 2：两路共享同一语句快照（P1-4，2026-08-23 本文件同日执行）
+  会话 A：BEGIN REPEATABLE READ → A_before=26（含先前行 901）
+  会话 B：INSERT 902 + COMMIT → B_committed=27
+  会话 A：A_after=26（两支路均不可见 902）；
+         并行融合首行 = 245（与 golden 一致，未混入新版本数据）✅
+  → producer 通过 StreamTxnContext/snapshot 机制继承语句快照。
+
+判据 3：取消无泄漏（E03/E04）
+  并行查询带 8s producer 延迟运行中，pg_cancel_backend →
+  "ERROR: canceling statement due to user request"（干净取消，无挂起）；
+  随后立即复跑并行查询正常返回 10 行 → 无残留 worker/锁/内存。✅
+
+另：P1-5 有界 drain（支路上限 ERROR 路径在并行模式下实测）、P1-6 错误联动
+（超限 ERROR 后无 worker 残留）均已验证（P1-8 commit 期间的测试）。
+
+P1-7（worker 不足自动降级）不在 G2 判据内；其实现位置在 P2 的并行/串行
+模式决策处（planner 生成计划时决定 parallel_branches），随 P2 落地——
+串行执行路径本身已存在且与 golden 逐行一致（P0-4 即其验证）。
+
+结论：G2 关闭。下一阶段 P2 Planner（marker 识别 → HybridRecallPath →
+串行/并行双候选 → 代价模型 → prepared plan），闸门 G3。
