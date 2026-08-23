@@ -8931,9 +8931,10 @@ void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compress_
         bool success = false;
         uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
         if (!success) {
-            ereport(ERROR, (errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d for %s",
-                                   compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
-                                   relationName)));
+            ereport(ERROR, (errmsg("invalid compress_chunk_size %u, must be a power-of-two page fraction between "
+                                   "%u and %u for %s",
+                                   compress_options->compressChunkSize, MIN_COMPRESS_CHUNK_SIZE,
+                                   MAX_COMPRESS_CHUNK_SIZE, relationName)));
         }
 
         uint1 preallocChunks = 0;

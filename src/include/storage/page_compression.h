@@ -110,11 +110,20 @@ typedef struct HeapPageCompressData {
     char data[FLEXIBLE_ARRAY_MEMBER];       /* compressed page, except for the page header */
 } HeapPageCompressData;
 
-const uint4 CHUNK_SIZE_LIST[4] = {BLCKSZ / 2, BLCKSZ / 4, BLCKSZ / 8, BLCKSZ / 16};
+constexpr uint4 MIN_COMPRESS_CHUNK_SIZE = BLCKSZ / 16 > 512 ? BLCKSZ / 16 : 512;
+
+/* Keep four option indexes so existing 8K compressed relations retain their metadata meaning. */
+constexpr uint4 CHUNK_SIZE_LIST[4] = {
+    BLCKSZ / 2,
+    BLCKSZ / 4,
+    BLCKSZ / 8,
+    BLCKSZ / 16
+};
 constexpr uint4 INDEX_OF_HALF_BLCKSZ = 0; 
 constexpr uint4 INDEX_OF_QUARTER_BLCKSZ = 1; 
 constexpr uint4 INDEX_OF_EIGHTH_BRICK_BLCKSZ = 2; 
 constexpr uint4 INDEX_OF_SIXTEENTHS_BLCKSZ = 3; 
+constexpr uint4 MAX_COMPRESS_CHUNK_SIZE = CHUNK_SIZE_LIST[INDEX_OF_HALF_BLCKSZ];
 #define MAX_PREALLOC_CHUNKS 7
 #define COMPRESS_STR "_compress"
 #define COMPRESS_SUFFIX "%s" COMPRESS_STR
@@ -280,7 +289,7 @@ int64 CalculateFilePhyRealSize(char* pathName, bool suppressedENOENT = false);
 
 /**
  * convert chunk size to the index of CHUNK_SIZE_LIST
- * @param compressedChunkSize {BLCKSZ / 2, BLCKSZ / 4, BLCKSZ / 8, BLCKSZ / 16}
+ * @param compressedChunkSize one of the values in CHUNK_SIZE_LIST
  * @param success success or not
  * @return index of CHUNK_SIZE_LIST
  */
