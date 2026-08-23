@@ -12,5 +12,6 @@ CMD=$(make -n nodeTidscan.o 2>/dev/null | grep "nodeTidscan" | head -1 | sed 's/
 [[ -n "$CMD" ]] || { echo "捕获编译命令失败"; exit 1; }
 eval "$CMD -fPIC -shared $MOD/hybrid_recall_test.cpp -o $MOD/hybrid_recall_test.so"
 nm -D "$MOD/hybrid_recall_test.so" | grep -q " T hybrid_recall_debug_execute$" || { echo "符号未导出为 C 链接"; exit 1; }
+rm -f /home/qiumc/data/code/cpp/openGauss-server/mppdb_temp_install/lib/postgresql/proc_srclib/hybrid_recall_test.so
 cp "$MOD/hybrid_recall_test.so" /home/qiumc/data/code/cpp/openGauss-server/mppdb_temp_install/lib/postgresql/proc_srclib/
 echo "构建并部署完成"

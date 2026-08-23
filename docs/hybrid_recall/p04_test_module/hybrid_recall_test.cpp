@@ -19,12 +19,16 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "commands/explain.h"
 
 #include "executor/exec/execdesc.h"
 #include "executor/executor.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
+#include "optimizer/planmain.h"
+#include "optimizer/stream_cost.h"
+#include "optimizer/streamplan.h"
 #include "nodes/plannodes.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
@@ -87,6 +91,61 @@ static Expr* make_int8_const(int64 value)
     return (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(value), false, true);
 }
 
+static List* passthrough_tlist(void)
+{
+    List* tlist = NIL;
+    Var* id_var = makeVar(1, 1, INT4OID, -1, InvalidOid, 0);
+    Var* score_var = makeVar(1, 2, FLOAT8OID, -1, InvalidOid, 0);
+    tlist = lappend(tlist, makeTargetEntry((Expr*)id_var, 1, NULL, false));
+    tlist = lappend(tlist, makeTargetEntry((Expr*)score_var, 2, NULL, false));
+    return tlist;
+}
+
+/*
+ * [P1-3] Wrap a branch plan in a 1:1 local task Stream, mirroring the
+ * recursive LOCAL GATHER construction (createplan.cpp make_recursive_local
+ * precedent): STREAM_REDISTRIBUTE + LOCAL_ROUNDROBIN + dop 1/1. The producer
+ * executes copyObject(stream->scan.plan.lefttree) in its own stream worker;
+ * consumer_nodes come from the branch plan's exec_nodes.
+ */
+static Plan* make_task_stream(Plan* branch, int branch_id)
+{
+    Stream* stream = makeNode(Stream);
+    stream->type = STREAM_REDISTRIBUTE;
+    stream->is_sorted = false;
+    stream->sort = NULL;
+    stream->smpDesc.consumerDop = 1;
+    stream->smpDesc.producerDop = 1;
+    stream->smpDesc.distriType = LOCAL_ROUNDROBIN;
+    stream->origin_consumer_nodes = NULL;
+    stream->distribute_keys = NIL;
+    stream->consumer_nodes = (ExecNodes*)copyObject(branch->exec_nodes);
+    stream->is_task_parallel = true;
+    stream->task_group_id = 1;
+    stream->task_branch_id = branch_id;
+
+    Plan* plan = &stream->scan.plan;
+    plan->dop = 1;
+    plan->targetlist = passthrough_tlist();
+    plan->lefttree = branch;
+    plan->righttree = NULL;
+    inherit_plan_locator_info(plan, branch);
+    copy_plan_costsize(plan, branch);
+    return plan;
+}
+
+/* assign unique plan_node_ids over the whole handmade tree (StreamKey
+ * uniqueness, design doc 7.8) */
+static int renumber_plan_node_ids(Plan* plan, int next_id)
+{
+    if (plan == NULL)
+        return next_id;
+    plan->plan_node_id = next_id++;
+    next_id = renumber_plan_node_ids(plan->lefttree, next_id);
+    next_id = renumber_plan_node_ids(plan->righttree, next_id);
+    return next_id;
+}
+
 /* fmgr.h 的宏只对 pg_finfo_* 自动加 extern "C"；SQL 可调用主符号需要
  * 单独的 C 链接声明（与 contrib/pg_stat_statements.cpp 的写法一致）。 */
 extern "C" Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS);
@@ -122,9 +181,13 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
          * the SubqueryScan wrapper layer (init quirks) is eliminated.
          * Both subplans reference the relation as varno 1; the parent range
          * table below carries that same relation once. */
+        /* [P1-3] wrap both branches in 1:1 local task streams */
+        Plan* text_stream = make_task_stream(text_plan, 0);
+        Plan* vector_stream = make_task_stream(vector_plan, 1);
+
         HybridRecall* hybrid = makeNode(HybridRecall);
-        hybrid->plan.lefttree = text_plan;
-        hybrid->plan.righttree = vector_plan;
+        hybrid->plan.lefttree = text_stream;
+        hybrid->plan.righttree = vector_stream;
         hybrid->plan.targetlist = NIL;
         hybrid->plan.qual = NIL;
         hybrid->id_resno = (AttrNumber)arg_id_resno;
@@ -144,7 +207,10 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
         PlannedStmt* stmt = makeNode(PlannedStmt);
         stmt->commandType = CMD_SELECT;
         stmt->canSetTag = true;
+        hybrid->parallel_branches = true;
+        (void)renumber_plan_node_ids((Plan*)hybrid, 1);
         stmt->planTree = (Plan*)hybrid;
+        stmt->num_streams = 2;
         /* one relation RTE: the single shared base table, whose Var
          * numbering both sub-plans use */
         {
@@ -161,6 +227,7 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
         cap->pub.rDestroy = capture_noop;
         cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
 
+        ereport(LOG, (errmsg("HRP1: before CreateQueryDesc num_streams=%d", stmt->num_streams)));
         QueryDesc* qd = CreateQueryDesc(stmt,
                                         "hybrid_recall_debug",
                                         GetActiveSnapshot(),
@@ -169,6 +236,7 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
                                         NULL,
                                         0);
         ExecutorStart(qd, 0);
+        ereport(LOG, (errmsg("HRP1: after ExecutorStart topc=%d gobj=%d", (int)StreamTopConsumerAmI(), (int)(u_sess->stream_cxt.global_obj != NULL))));
     if (qd->tupDesc != NULL) {
             funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
             /* hand-built descs carry no registered composite type until
@@ -176,6 +244,7 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
             BlessTupleDesc(funcctx->tuple_desc);
         }
         ExecutorRun(qd, ForwardScanDirection, 0L);
+        ereport(LOG, (errmsg("HRP1: ExecutorRun returned")));
         ExecutorFinish(qd);
         ExecutorEnd(qd);
         FreeQueryDesc(qd);
@@ -200,4 +269,120 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
     }
 
     SRF_RETURN_DONE(funcctx);
+}
+
+
+extern "C" Datum hybrid_recall_debug_plan(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(hybrid_recall_debug_plan);
+
+/*
+ * [P1-3] EXPLAIN-only mode: build the same parallel HybridRecall plan but
+ * never execute it - prints nodeToString(planTree). Decouples plan-shape
+ * verification from the stream-startup debugging (which hangs in
+ * ExecutorStart and is tracked separately).
+ */
+Datum hybrid_recall_debug_plan(PG_FUNCTION_ARGS)
+{
+    char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
+    char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
+
+    Plan* text_plan = plan_branch_sql(text_sql, "text");
+    Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+    Plan* text_stream = make_task_stream(text_plan, 0);
+    Plan* vector_stream = make_task_stream(vector_plan, 1);
+
+    HybridRecall* hybrid = makeNode(HybridRecall);
+    hybrid->plan.lefttree = text_stream;
+    hybrid->plan.righttree = vector_stream;
+    hybrid->plan.targetlist = NIL;
+    hybrid->plan.qual = NIL;
+    hybrid->id_resno = 1;
+    hybrid->text_score_resno = 2;
+    hybrid->vector_distance_resno = 2;
+    hybrid->final_topk = make_int8_const(PG_GETARG_INT64(5));
+    hybrid->text_candidates = make_int8_const(PG_GETARG_INT64(6));
+    hybrid->vector_candidates = make_int8_const(PG_GETARG_INT64(7));
+    hybrid->fusion = HYBRID_FUSION_RRF;
+    hybrid->rrf_k = PG_GETARG_FLOAT8(8);
+    hybrid->text_weight = PG_GETARG_FLOAT8(9);
+    hybrid->vector_weight = PG_GETARG_FLOAT8(10);
+    hybrid->parallel_branches = true;
+    hybrid->require_parallel = false;
+    hybrid->recheck_quals = NIL;
+
+    PlannedStmt* stmt = makeNode(PlannedStmt);
+    stmt->commandType = CMD_SELECT;
+    stmt->canSetTag = true;
+    (void)renumber_plan_node_ids((Plan*)hybrid, 1);
+    stmt->planTree = (Plan*)hybrid;
+    stmt->num_streams = 2;
+    {
+        List* raw_list = raw_parser(text_sql, NULL);
+        Node* parsetree = (Node*)linitial(raw_list);
+        Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
+        stmt->rtable = query->rtable;
+    }
+
+    PG_RETURN_TEXT_P(cstring_to_text(nodeToString(stmt->planTree)));
+}
+
+
+extern "C" Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(hybrid_recall_debug_explain);
+
+/*
+ * [P1-3] EXPLAIN ANALYZE of the REAL executed serial plan (the proven P0
+ * path: branch Limit plans attached directly, no streams). Runs through
+ * openGauss's own explain machinery so the output is the genuine format
+ * with actual rows/timings.
+ */
+Datum hybrid_recall_debug_explain(PG_FUNCTION_ARGS)
+{
+    char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
+    char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
+
+    Plan* text_plan = plan_branch_sql(text_sql, "text");
+    Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+
+    HybridRecall* hybrid = makeNode(HybridRecall);
+    hybrid->plan.lefttree = text_plan;
+    hybrid->plan.righttree = vector_plan;
+    hybrid->plan.targetlist = NIL;
+    hybrid->plan.qual = NIL;
+    hybrid->id_resno = 1;
+    hybrid->text_score_resno = 2;
+    hybrid->vector_distance_resno = 2;
+    hybrid->final_topk = make_int8_const(PG_GETARG_INT64(5));
+    hybrid->text_candidates = make_int8_const(PG_GETARG_INT64(6));
+    hybrid->vector_candidates = make_int8_const(PG_GETARG_INT64(7));
+    hybrid->fusion = HYBRID_FUSION_RRF;
+    hybrid->rrf_k = PG_GETARG_FLOAT8(8);
+    hybrid->text_weight = PG_GETARG_FLOAT8(9);
+    hybrid->vector_weight = PG_GETARG_FLOAT8(10);
+    hybrid->parallel_branches = false;
+    hybrid->require_parallel = false;
+    hybrid->recheck_quals = NIL;
+
+    PlannedStmt* stmt = makeNode(PlannedStmt);
+    stmt->commandType = CMD_SELECT;
+    stmt->canSetTag = true;
+    (void)renumber_plan_node_ids((Plan*)hybrid, 1);
+    stmt->planTree = (Plan*)hybrid;
+    stmt->num_streams = 0;
+    {
+        List* raw_list = raw_parser(text_sql, NULL);
+        Node* parsetree = (Node*)linitial(raw_list);
+        Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
+        stmt->rtable = query->rtable;
+    }
+
+    ExplainState* es = (ExplainState*)palloc0(sizeof(ExplainState));
+    es->str = makeStringInfo();
+    es->analyze = false;
+    es->timing = false;
+    es->costs = false;
+    es->format = EXPLAIN_FORMAT_TEXT;
+    DestReceiver* none_dest = None_Receiver;
+    ExplainOnePlan(stmt, NULL, es, "hybrid_recall_explain", none_dest, NULL);
+    PG_RETURN_TEXT_P(cstring_to_text(es->str->data));
 }

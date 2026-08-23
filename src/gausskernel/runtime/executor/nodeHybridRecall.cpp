@@ -161,6 +161,10 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     /* lefttree = text branch, righttree = vector branch (design doc §6.2) */
     state->text_state = ExecInitNode(node->plan.lefttree, estate, eflags);
     state->vector_state = ExecInitNode(node->plan.righttree, estate, eflags);
+    /* standard PlanState child pointers so explain/planstate walkers
+     * (outerPlanState/innerPlanState) see both branches */
+    state->ps.lefttree = state->text_state;
+    state->ps.righttree = state->vector_state;
 
     ExecAssignExprContext(estate, &state->ps);
 
