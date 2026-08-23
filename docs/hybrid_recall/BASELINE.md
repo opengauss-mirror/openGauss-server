@@ -139,3 +139,19 @@ debug+cassert 构建。增量循环实测 ~8 min/轮。
 
 下一阶段：P1 Task Stream 并行（is_task_parallel 标记、1:1 本地 Stream 保留、
 producer 启动、快照共享、错误联动、overlap 证明）。
+
+## 10. P1 阶段完成与 G2 判定（2026-08-23）
+
+| 任务 | commit | 判据 |
+| --- | --- | --- |
+| P1-1 Stream 标记+序列化 | 43e18fae27 | copy/out/read 闭环 |
+| P1-2 折叠守卫×3 | b8689263ed | is_task_parallel 1:1 流不被删 |
+| explain 改进 | adef03ca87 | 节点名注册+标准子指针（真实 EXPLAIN 可打印完整树） |
+| 载具语义修复 | cf1b9b1cf5 | serial/parallel 入口分离 |
+| P1-3 并行执行 | 929a17d9b8 | 双 worker 并行输出与 golden 逐行一致 |
+| P1-8 overlap + 构建修复 | 495f1e0a8c | overlap ratio 1.0；/lib64 系统 LLVM 遮蔽修复 |
+| P1-4 MVCC + cancel | 本 commit | 双会话快照一致 + 取消无泄漏 |
+
+**G2 关闭**（evidence/G2_gate.log）：真实 overlap ✅ 同快照 ✅ 取消无泄漏 ✅。
+P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
+下一阶段：P2 Planner → G3。
