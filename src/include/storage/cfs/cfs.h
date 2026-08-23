@@ -9,18 +9,24 @@
 
 #include "utils/atomic.h"
 #include "storage/buf/block.h"
+#include "storage/cfs/cfs_converter.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 #include "datatype/timestamp.h"
-#include "storage/cfs/cfs_converter.h"
-
-/* 1024 means the smallest chunk size.
- * therefore, one block can be divided into up to 8 chunks (Maximum case)
- * >> 3 used for CFS_BITMAP_BYTE_IX to generate bitmap
- */
-static constexpr size_t ALLOCATE_CHUNK_USAGE_LEN = CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / 1024) >> 3;
 
 #define CFS_SEGMENT_PCA_MAGIC_SZ 8
 #define CFS_SEGMENT_PCA_MAGIC "seg_comp"
+
+/* The fragment bitmap keeps the existing 1 KB allocation granularity. */
+constexpr uint16 CFS_FRAGMENT_BITMAP_CHUNK_SIZE = 1024;
+constexpr size_t CFS_FRAGMENT_BITMAP_MAX_CHUNK_NUMBER =
+    CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / CFS_FRAGMENT_BITMAP_CHUNK_SIZE);
+constexpr size_t CFS_FRAGMENT_BITMAP_LENGTH = (CFS_FRAGMENT_BITMAP_MAX_CHUNK_NUMBER >> 3) + 1;
+
+inline bool CfsCanUseFragmentChunks(uint16 chunkSize)
+{
+    return chunkSize >= CFS_FRAGMENT_BITMAP_CHUNK_SIZE;
+}
 
 struct CfsExtentAddress {
     uint32 checksum;
@@ -43,14 +49,23 @@ struct CfsExtentHeader {
     uint8 recycleInOrder : 1;                      /* show if pca is recycled */
     uint8 recv;                                    /* for aligin */
     uint16 n_fragment_chunks;                      /* unused chunk count */
-    uint8 allocated_chunk_usages[ALLOCATE_CHUNK_USAGE_LEN];    /* bitmap that recoreds chunk allocation usage */
+    /* Used only by fragment reuse for relations with chunk_size >= 1 KB. */
+    uint8 allocated_chunk_usages[CFS_FRAGMENT_BITMAP_LENGTH];
     CfsExtentAddress cfsExtentAddress[FLEXIBLE_ARRAY_MEMBER];
 };
 
+static_assert(offsetof(CfsExtentHeader, cfsExtentAddress) +
+                  CFS_LOGIC_BLOCKS_PER_EXTENT *
+                      (offsetof(CfsExtentAddress, chunknos) +
+                       sizeof(uint16) * BLCKSZ / MIN_COMPRESS_CHUNK_SIZE) <=
+              BLCKSZ,
+    "CFS extent addresses for the minimum chunk size must fit in one PCA page");
+
+#if BLCKSZ == 8192
 static_assert(CFS_EXTENT_SIZE == 128, "CFS extent size must remain compatible with openGauss 6.0");
 static_assert(CFS_LOGIC_BLOCKS_PER_EXTENT == 127,
     "CFS logical blocks per extent must remain compatible with openGauss 6.0");
-static_assert(ALLOCATE_CHUNK_USAGE_LEN == 127,
+static_assert(CFS_FRAGMENT_BITMAP_LENGTH == 128,
     "CFS chunk allocation bitmap size must remain compatible with openGauss 6.0");
 static_assert(offsetof(CfsExtentHeader, n_fragment_chunks) == 12,
     "CFS fragment chunk count offset must remain compatible with openGauss 6.0");
@@ -58,6 +73,7 @@ static_assert(offsetof(CfsExtentHeader, allocated_chunk_usages) == 14,
     "CFS chunk allocation bitmap offset must remain compatible with openGauss 6.0");
 static_assert(offsetof(CfsExtentHeader, cfsExtentAddress) == 144,
     "CFS extent address offset must remain compatible with openGauss 6.0");
+#endif
 
 struct CfsExtInfo {
     RelFileNode rnode;

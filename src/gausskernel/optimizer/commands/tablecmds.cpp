@@ -20593,8 +20593,9 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
     ConvertChunkSize(newCompressOpt->compressChunkSize, &success);
     if (!success) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d",
-                                newCompressOpt->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2)));
+                        errmsg("invalid compress_chunk_size %u, must be a power-of-two page fraction between %u and %u",
+                               newCompressOpt->compressChunkSize, MIN_COMPRESS_CHUNK_SIZE,
+                               MAX_COMPRESS_CHUNK_SIZE)));
     }
     if (newCompressOpt->compressPreallocChunks >= BLCKSZ / newCompressOpt->compressChunkSize) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
