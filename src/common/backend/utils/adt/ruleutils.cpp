@@ -9312,19 +9312,23 @@ static const char* get_name_for_var_field(Var* var, int fieldno, int levelsup, d
                     /*
                      * We're deparsing a Plan tree so we don't have complete
                      * RTE entries (in particular, rte->subquery is NULL). But
-                     * the only place we'd see a Var directly referencing a
-                     * SUBQUERY RTE is in a SubqueryScan plan node, and we can
-                     * look into the child plan's tlist instead.
+                     * the only place we'd normally see a Var directly
+                     * referencing a SUBQUERY RTE is in a SubqueryScan plan
+                     * node, and we can look into the child plan's tlist
+                     * instead. An exception occurs if the subquery was proven
+                     * empty and optimized away: then we'd find such a Var in
+                     * a childless Result node, and there's nothing in the plan
+                     * tree that would let us figure out what it had originally
+                     * referenced. In that case, fall back on printing "fN",
+                     * analogously to the default column names for RowExprs.
                      */
                     TargetEntry* tle = NULL;
                     deparse_namespace save_dpns;
                     const char* result = NULL;
 
-                    if (dpns->inner_planstate == NULL)
-                        ereport(ERROR,
-                            (errmodule(MOD_OPT),
-                                (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
-                                    errmsg("failed to find plan for subquery %s", rte->eref->aliasname))));
+                    if (dpns->inner_planstate == NULL) {
+                        return psprintf("f%d", fieldno);
+                    }
                     tle = get_tle_by_resno(dpns->inner_tlist, attnum);
                     if (tle == NULL)
                         ereport(ERROR,
@@ -9427,19 +9431,19 @@ static const char* get_name_for_var_field(Var* var, int fieldno, int levelsup, d
                 } else {
                     /*
                      * We're deparsing a Plan tree so we don't have a CTE
-                     * list.  But the only place we'd see a Var directly
-                     * referencing a CTE RTE is in a CteScan plan node, and we
-                     * can look into the subplan's tlist instead.
+                     * list. But the only place we'd normally see a Var
+                     * directly referencing a CTE RTE is in a CteScan plan
+                     * node, and we can look into the subplan's tlist instead.
+                     * As above, this can fail if the CTE has been proven
+                     * empty, in which case fall back to "fN".
                      */
                     TargetEntry* tle = NULL;
                     deparse_namespace save_dpns;
                     const char* result = NULL;
 
-                    if (dpns->inner_planstate == NULL)
-                        ereport(ERROR,
-                            (errmodule(MOD_OPT),
-                                (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
-                                    errmsg("failed to find plan for CTE %s", rte->eref->aliasname))));
+                    if (dpns->inner_planstate == NULL) {
+                        return psprintf("f%d", fieldno);
+                    }
                     tle = get_tle_by_resno(dpns->inner_tlist, attnum);
                     if (tle == NULL)
                         ereport(ERROR,
