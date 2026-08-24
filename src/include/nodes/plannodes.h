@@ -1268,6 +1268,7 @@ typedef struct VecMaterial : public Material {
 typedef struct Sort {
     Plan plan;
     int numCols;            /* number of sort-key columns */
+    int nPresortedCols;     /* leading sort columns already ordered by input */
     AttrNumber* sortColIdx; /* their indexes in the target list */
     Oid* sortOperators;     /* OIDs of operators to sort them by */
     Oid* collations;        /* OIDs of collations */

@@ -1,0 +1,306 @@
+-- A-mode regression: DESC defaults to NULLS FIRST.
+-- Use an index-ordering prefix to bound an ordinary sort.
+CREATE TEMP TABLE prefix_sort_test(id int, name text);
+INSERT INTO prefix_sort_test VALUES
+    (1, 'b'), (1, NULL), (1, 'a'),
+    (2, 'c'), (2, NULL), (2, 'a');
+INSERT INTO prefix_sort_test
+SELECT id, lpad(id::text, 3, '0') FROM generate_series(3, 65) AS g(id);
+INSERT INTO prefix_sort_test VALUES (28, NULL);
+CREATE INDEX prefix_sort_test_idx ON prefix_sort_test(id, name DESC NULLS LAST);
+ANALYZE prefix_sort_test;
+SET enable_sort = true;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+\pset format unaligned
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC LIMIT 5;
+QUERY PLAN
+Limit
+  ->  Result
+        ->  Sort
+              Sort Key: id, name DESC
+              Presorted Key: id
+              ->  Index Only Scan using prefix_sort_test_idx on prefix_sort_test
+(6 rows)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC LIMIT 5;
+id|name
+1|
+1|b
+1|a
+2|
+2|c
+(5 rows)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC OFFSET 2 LIMIT 3;
+id|name
+1|a
+2|
+2|c
+(3 rows)
+-- The LIMIT boundary must include the complete group, even with OFFSET.
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC OFFSET 30 LIMIT 5;
+QUERY PLAN
+Limit
+  ->  Result
+        ->  Sort
+              Sort Key: id, name DESC
+              Presorted Key: id
+              ->  Index Only Scan using prefix_sort_test_idx on prefix_sort_test
+(6 rows)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC OFFSET 30 LIMIT 5;
+id|name
+27|027
+28|
+28|028
+29|029
+30|030
+(5 rows)
+-- Volatile sort keys require the final projection and must use ordinary sort.
+EXPLAIN (COSTS OFF)
+SELECT id FROM prefix_sort_test ORDER BY id, random() LIMIT 3;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: id, (random())
+        ->  Index Only Scan using prefix_sort_test_idx on prefix_sort_test
+(4 rows)
+-- Row locks and set-returning projections prevent a runtime sort bound.
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC LIMIT 5 FOR UPDATE;
+QUERY PLAN
+Limit
+  ->  LockRows
+        ->  Sort
+              Sort Key: id, name DESC
+              ->  Seq Scan on prefix_sort_test
+(5 rows)
+EXPLAIN (COSTS OFF)
+SELECT id, name, generate_series(1, 2) FROM prefix_sort_test ORDER BY id, name DESC LIMIT 5;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: id, name DESC
+        ->  Index Only Scan using prefix_sort_test_idx on prefix_sort_test
+(4 rows)
+-- Separate volatile expressions must retain independent evaluations.
+CREATE SEQUENCE prefix_sort_volatile_seq;
+SELECT id, nextval('prefix_sort_volatile_seq') AS r,
+    nextval('prefix_sort_volatile_seq') AS s
+FROM prefix_sort_test ORDER BY id, r LIMIT 3;
+id|r|s
+1|1|2
+1|3|4
+1|5|6
+(3 rows)
+SELECT last_value FROM prefix_sort_volatile_seq;
+last_value
+140
+(1 row)
+SELECT count(*) AS rows_seen,
+    bool_and(r >= 0 AND r < 1 AND s >= 0 AND s < 1) AS valid_values
+FROM (
+    SELECT random() + 0.0 * nextval('prefix_sort_volatile_seq') AS r,
+        random() + 0.0 * nextval('prefix_sort_volatile_seq') AS s
+    FROM prefix_sort_test ORDER BY id, r
+) AS q;
+rows_seen|valid_values
+70|t
+(1 row)
+SELECT last_value FROM prefix_sort_volatile_seq;
+last_value
+280
+(1 row)
+DROP SEQUENCE prefix_sort_volatile_seq;
+-- OFFSET without LIMIT must use ordinary sorting through input EOF.
+INSERT INTO prefix_sort_test
+SELECT id, lpad(id::text, 5, '0') FROM generate_series(66, 10000) AS g(id);
+ANALYZE prefix_sort_test;
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC OFFSET 10000;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: id, name DESC
+        ->  Index Only Scan using prefix_sort_test_idx on prefix_sort_test
+(4 rows)
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC OFFSET 10000;
+id|name
+9996|09996
+9997|09997
+9998|09998
+9999|09999
+10000|10000
+(5 rows)
+-- A held cursor without LIMIT must materialize the complete result.
+BEGIN;
+DECLARE prefix_sort_hold CURSOR WITH HOLD FOR
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC;
+MOVE FORWARD ALL FROM prefix_sort_hold;
+COMMIT;
+MOVE ABSOLUTE 0 FROM prefix_sort_hold;
+FETCH 3 FROM prefix_sort_hold;
+id|name
+1|
+1|b
+1|a
+(3 rows)
+CLOSE prefix_sort_hold;
+-- A bounded sort retains ordinary backward scan and rewind support.
+BEGIN;
+DECLARE prefix_sort_scroll CURSOR WITH HOLD FOR
+SELECT * FROM prefix_sort_test ORDER BY id, name DESC LIMIT 5;
+MOVE FORWARD ALL FROM prefix_sort_scroll;
+COMMIT;
+MOVE ABSOLUTE 0 FROM prefix_sort_scroll;
+FETCH FORWARD 5 FROM prefix_sort_scroll;
+id|name
+1|
+1|b
+1|a
+2|
+2|c
+(5 rows)
+FETCH BACKWARD 2 FROM prefix_sort_scroll;
+id|name
+2|
+1|a
+(2 rows)
+CLOSE prefix_sort_scroll;
+\pset format aligned
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+RESET enable_sort;
+DROP TABLE prefix_sort_test;
+-- Issue #8331: default costing must use the useful index prefix without
+-- disabling sequential or bitmap scans, and LIMIT 20 must stop after the
+-- one-row lookahead instead of consuming the whole 100,000-row table.
+CREATE TEMP TABLE prefix_sort_issue8331(id int, name varchar);
+CREATE INDEX prefix_sort_issue8331_idx
+    ON prefix_sort_issue8331(id, name DESC NULLS LAST);
+INSERT INTO prefix_sort_issue8331
+SELECT id, 'name' || id FROM generate_series(1, 100000) AS g(id);
+ANALYZE prefix_sort_issue8331;
+\pset format unaligned
+EXPLAIN (ANALYZE ON, COSTS OFF, TIMING OFF)
+SELECT * FROM prefix_sort_issue8331 ORDER BY id, name DESC LIMIT 20;
+QUERY PLAN
+Limit (actual rows=20 loops=1)
+  ->  Result (actual rows=20 loops=1)
+        ->  Sort (actual rows=20 loops=1)
+              Sort Key: id, name DESC
+              Presorted Key: id
+              Sort Method: quicksort  Memory: 27kB
+              ->  Index Only Scan using prefix_sort_issue8331_idx on prefix_sort_issue8331 (actual rows=21 loops=1)
+                    Heap Fetches: 21
+--?Total runtime: .* ms
+(9 rows)
+SELECT * FROM prefix_sort_issue8331 ORDER BY id, name DESC LIMIT 20;
+id|name
+1|name1
+2|name2
+3|name3
+4|name4
+5|name5
+6|name6
+7|name7
+8|name8
+9|name9
+10|name10
+11|name11
+12|name12
+13|name13
+14|name14
+15|name15
+16|name16
+17|name17
+18|name18
+19|name19
+20|name20
+(20 rows)
+\pset format aligned
+DROP TABLE prefix_sort_issue8331;
+-- Default costing must not assume qualifying rows are uniform in index order.
+-- The filtering index competes with an ordering-prefix index; matches are last.
+CREATE TEMP TABLE prefix_sort_filter(a int, b int, c int);
+INSERT INTO prefix_sort_filter
+SELECT g, CASE WHEN g > 19000 THEN 1 ELSE 0 END, -g
+FROM generate_series(1, 20000) g;
+CREATE INDEX prefix_sort_filter_a ON prefix_sort_filter(a);
+CREATE INDEX prefix_sort_filter_b ON prefix_sort_filter(b);
+ANALYZE prefix_sort_filter;
+\pset format unaligned
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_filter WHERE b = 1 ORDER BY a, c LIMIT 10;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: a, c
+        ->  Index Scan using prefix_sort_filter_b on prefix_sort_filter
+              Index Cond: (b = 1)
+(5 rows)
+SELECT * FROM prefix_sort_filter WHERE b = 1 ORDER BY a, c LIMIT 10;
+a|b|c
+19001|1|-19001
+19002|1|-19002
+19003|1|-19003
+19004|1|-19004
+19005|1|-19005
+19006|1|-19006
+19007|1|-19007
+19008|1|-19008
+19009|1|-19009
+19010|1|-19010
+(10 rows)
+-- A non-leading index qual does not bound the number of index entries scanned.
+DROP INDEX prefix_sort_filter_a;
+CREATE INDEX prefix_sort_filter_abc ON prefix_sort_filter(a, b, c);
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_filter WHERE b = 1 ORDER BY a, c DESC LIMIT 10;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: a, c DESC
+        ->  Index Scan using prefix_sort_filter_b on prefix_sort_filter
+              Index Cond: (b = 1)
+(5 rows)
+-- Index-only scans with residual filters need the same conservative costing.
+CREATE INDEX prefix_sort_filter_abs_b ON prefix_sort_filter(abs(b));
+ANALYZE prefix_sort_filter;
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_filter WHERE abs(b) = 1 ORDER BY a, c DESC LIMIT 10;
+QUERY PLAN
+Limit
+  ->  Sort
+        Sort Key: a, c DESC
+        ->  Index Scan using prefix_sort_filter_abs_b on prefix_sort_filter
+              Index Cond: (abs(b) = 1)
+(5 rows)
+-- A leading range qual can still benefit from sorting only the bounded prefix.
+CREATE INDEX prefix_sort_filter_a ON prefix_sort_filter(a);
+EXPLAIN (COSTS OFF)
+SELECT * FROM prefix_sort_filter WHERE a > 19000 ORDER BY a, c DESC LIMIT 10;
+QUERY PLAN
+Limit
+  ->  Result
+        ->  Sort
+              Sort Key: a, c DESC
+              Presorted Key: a
+              ->  Index Scan using prefix_sort_filter_a on prefix_sort_filter
+                    Index Cond: (a > 19000)
+(7 rows)
+SELECT * FROM prefix_sort_filter WHERE a > 19000 ORDER BY a, c DESC LIMIT 10;
+a|b|c
+19001|1|-19001
+19002|1|-19002
+19003|1|-19003
+19004|1|-19004
+19005|1|-19005
+19006|1|-19006
+19007|1|-19007
+19008|1|-19008
+19009|1|-19009
+19010|1|-19010
+(10 rows)
+\pset format aligned
+DROP TABLE prefix_sort_filter;

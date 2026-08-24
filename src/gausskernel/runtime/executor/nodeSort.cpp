@@ -23,6 +23,7 @@
 #include "pgstat.h"
 #include "instruments/instr_unique_sql.h"
 #include "utils/tuplesort.h"
+#include "utils/sortsupport.h"
 #include "workload/workload.h"
 
 #include "optimizer/var.h"
@@ -33,6 +34,45 @@
 #endif
 
 static TupleTableSlot* ExecSort(PlanState* state);
+
+static bool same_sort_prefix(SortState* node, TupleTableSlot* slot)
+{
+    Sort* plan = (Sort*)node->ss.ps.plan;
+    TupleTableSlot* pivot = node->ss.ss_ScanTupleSlot;
+
+    for (int i = 0; i < plan->nPresortedCols; i++) {
+        SortSupport key = &node->presortedKeys[i];
+        bool slotIsNull = false;
+        bool pivotIsNull = false;
+        Datum slotValue = tableam_tslot_getattr(slot, key->ssup_attno, &slotIsNull);
+        Datum pivotValue = tableam_tslot_getattr(pivot, key->ssup_attno, &pivotIsNull);
+        if (ApplySortComparator(slotValue, slotIsNull, pivotValue, pivotIsNull, key) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Read through the entire prefix group containing the runtime LIMIT + OFFSET. */
+static void load_prefix_sort_tuples(SortState* node, Tuplesortstate* sortstate)
+{
+    int64 inputTuples = 0;
+    TupleTableSlot* pivot = node->ss.ss_ScanTupleSlot;
+    TupleTableSlot* slot = ExecProcNode(outerPlanState(node));
+    while (!TupIsNull(slot)) {
+        if (inputTuples == node->bound) {
+            if (!same_sort_prefix(node, slot)) {
+                break;
+            }
+        } else if (++inputTuples == node->bound) {
+            ExecCopySlot(pivot, slot);
+        }
+        tuplesort_puttupleslot(sortstate, slot);
+        slot = ExecProcNode(outerPlanState(node));
+    }
+    (void)ExecClearTuple(pivot);
+}
+
 /* ----------------------------------------------------------------
  *		ExecSort
  *
@@ -278,8 +318,34 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
 
     sortstate->ss.ps.ps_ProjInfo = NULL;
 
+    if (node->nPresortedCols > 0) {
+        sortstate->presortedKeys = (SortSupport)palloc0(node->nPresortedCols * sizeof(SortSupportData));
+        for (int i = 0; i < node->nPresortedCols; i++) {
+            SortSupport key = &sortstate->presortedKeys[i];
+            key->ssup_cxt = CurrentMemoryContext;
+            key->ssup_collation = node->collations[i];
+            key->ssup_nulls_first = node->nullsFirst[i];
+            key->ssup_attno = node->sortColIdx[i];
+            key->abbreviate = false;
+            PrepareSortSupportFromOrderingOp(node->sortOperators[i], key);
+        }
+    }
+
     Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
+<<<<<<< HEAD
+=======
+    outerDesc = ExecGetResultType(outerPlanState(sortstate));
+    /*
+     * We perform a Datum sort when we're sorting just a single column,
+     * otherwise we perform a tuple sort.
+     */
+    if (node->nPresortedCols == 0 && outerDesc->natts == 1 && TupleDescAttr(outerDesc, 0)->attbyval)
+        sortstate->datumSort = true;
+    else
+        sortstate->datumSort = false;
+
+>>>>>>> 8f52bb0e8... 利用联合索引前缀优化有界排序
     SO1_printf("ExecInitSort: %s\n", "sort node initialized");
 
     return sortstate;
@@ -314,6 +380,7 @@ void ExecEndSort(SortState* node)
      * shut down the subplan
      */
     ExecEndNode(outerPlanState(node));
+    pfree_ext(node->presortedKeys);
 
     SO1_printf("ExecEndSort: %s\n", "sort node shutdown");
 }

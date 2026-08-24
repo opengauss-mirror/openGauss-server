@@ -2077,6 +2077,9 @@ static void _outSort(StringInfo str, Sort* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_INT_FIELD(numCols);
+    if (t_thrd.proc->workingVersionNum >= PREFIX_SORT_VERSION_NUM) {
+        WRITE_INT_FIELD(nPresortedCols);
+    }
 
     appendStringInfo(str, " :sortColIdx");
     for (i = 0; i < node->numCols; i++) {
@@ -3500,6 +3503,17 @@ static void _outMaterialPath(StringInfo str, MaterialPath* node)
 
     WRITE_NODE_FIELD(subpath);
     WRITE_BOOL_FIELD(materialize_all);
+}
+
+static void _outPrefixSortPath(StringInfo str, PrefixSortPath* node)
+{
+    WRITE_NODE_TYPE("PREFIXSORTPATH");
+
+    _outPathInfo(str, (Path*)node);
+
+    WRITE_NODE_FIELD(subpath);
+    WRITE_INT_FIELD(nPresortedCols);
+    WRITE_FLOAT_FIELD(limitTuples, "%.0f");
 }
 
 static void _outProjectionPath(StringInfo str, const ProjectionPath *node)
@@ -6915,6 +6929,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_ProjectSetPath:
                 _outProjectSetPath(str, (ProjectSetPath*) obj);
+                break;
+            case T_PREFIX_SORT_PATH:
+                _outPrefixSortPath(str, (PrefixSortPath*)obj);
                 break;
             case T_MaterialPath:
                 _outMaterialPath(str, (MaterialPath*)obj);
