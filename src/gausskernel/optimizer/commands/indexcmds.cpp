@@ -28,6 +28,7 @@
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_constraint.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_partition.h"
@@ -120,6 +121,8 @@ static void AddIndexColumnForCbi(IndexStmt* stmt);
 static void CheckIndexParamsNumber(IndexStmt* stmt);
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams);
 static bool CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexParams);
+static bool IsExpressionIndex(const List* indexParams);
+static bool IsSeparatedSysadminOnAdminTable(Oid createUserId, Oid ownerId);
 static void CheckColumnTypeSupportsIndex(Oid relId, List* indexParams);
 
 struct ReindexIndexCallbackState {
@@ -1070,6 +1073,41 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     if (check_rights && !IsBootstrapProcessingMode()) {
         (void)CheckCreatePrivilegeInNamespace(namespaceId, root_save_userid, CREATE_ANY_INDEX);
+
+        /*
+         * Do not allow a non-initial user to create a partial index on a
+         * table owned by the initial user.  In separation-of-duty mode, also
+         * reject a system administrator creating one on a security
+         * administrator's or audit administrator's table.  The predicate is
+         * evaluated when the table is modified, so allowing this would let
+         * another user install executable code on the protected table.
+         */
+        if (stmt->whereClause != NULL &&
+            ((root_save_userid != BOOTSTRAP_SUPERUSERID &&
+              rel->rd_rel->relowner == BOOTSTRAP_SUPERUSERID) ||
+              IsSeparatedSysadminOnAdminTable(root_save_userid, rel->rd_rel->relowner))) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmodule(MOD_INDEX),
+                    errmsg("Create PREDICATE index failed."),
+                    errcause("Current user has no permission to create PREDICATE index on the table."),
+                    erraction("Switch to the right user to create PREDICATE index on the table.")));
+        }
+
+        /*
+         * In separation-of-duty mode, a system administrator other than the
+         * initial user must not install an expression index on a security
+         * administrator's or audit administrator's table.
+         */
+        if (IsExpressionIndex(stmt->indexParams) &&
+            IsSeparatedSysadminOnAdminTable(root_save_userid, rel->rd_rel->relowner)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmodule(MOD_INDEX),
+                    errmsg("Create EXPRESSION index failed."),
+                    errcause("System administrator has no permission to create EXPRESSION index on the table."),
+                    erraction("Switch to the right user to create EXPRESSION index on the table.")));
+        }
     }
 
     /*
@@ -5658,6 +5696,27 @@ CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexP
     }
 
     return false;
+}
+
+static bool IsExpressionIndex(const List* indexParams)
+{
+    ListCell* cell = NULL;
+
+    foreach (cell, indexParams) {
+        IndexElem* elem = (IndexElem*)lfirst(cell);
+        if (elem != NULL && elem->expr != NULL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsSeparatedSysadminOnAdminTable(Oid createUserId, Oid ownerId)
+{
+    return g_instance.attr.attr_security.enablePrivilegesSeparate &&
+        systemDBA_arg(createUserId) && createUserId != BOOTSTRAP_SUPERUSERID &&
+        (isSecurityadmin(ownerId) || isAuditadmin(ownerId));
 }
 
 static void CheckColumnTypeSupportsIndex(Oid relId, List* indexParams)

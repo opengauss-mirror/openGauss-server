@@ -19689,7 +19689,9 @@ static void CheckAuthForChangeTableOwner(Oid newOwnerId)
             errmsg("Non-initial user is not allowed to change the table owner to initial owner.")));
     }
 
-    if (g_instance.attr.attr_security.enablePrivilegesSeparate && superuser() &&
+    if (!u_sess->attr.attr_sql.enable_cluster_resize &&
+        g_instance.attr.attr_security.enablePrivilegesSeparate && superuser() &&
+        GetUserId() != BOOTSTRAP_SUPERUSERID &&
         (isSecurityadmin(newOwnerId) || isAuditadmin(newOwnerId))) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
             errmsg("if enablePrivilegesSeparate is enabled, system admin is"
@@ -34474,6 +34476,7 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     HeapTuple tup = NULL;
     ListCell* pwd_obj = NULL;
     bool is_null = false;
+    errno_t rc = EOK;
 
     if (!has_createrole_privilege(GetUserId())) {
         ereport(ERROR,
@@ -34486,8 +34489,16 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
         bool nulls[Natts_gs_global_config] = {false};
-        const char* pwd = (const char *)(((Value*)lfirst(pwd_obj))->val.str);
+        char* pwd = ((Value*)lfirst(pwd_obj))->val.str;
         if (password_contain_space(pwd)) {
+            if (pwd != NULL) {
+                rc = memset_s(pwd, strlen(pwd), 0, strlen(pwd));
+                securec_check(rc, "\0", "\0");
+                if (rc != EOK) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Failed to clear weak password.")));
+                }
+            }
             continue;
         }
         const char* name = "weak_password";
@@ -34514,6 +34525,12 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
             tup = (HeapTuple) heap_form_tuple(RelationGetDescr(rel), values, nulls);
             simple_heap_insert(rel, tup);
             heap_freetuple_ext(tup);
+        }
+        rc = memset_s(pwd, strlen(pwd), 0, strlen(pwd));
+        securec_check(rc, "\0", "\0");
+        if (rc != EOK) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Failed to clear weak password.")));
         }
     }
     heap_close(rel, RowExclusiveLock);
