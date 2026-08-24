@@ -219,6 +219,10 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
     PG_TRY();
     {
         nprocessed = PortalRunFetch(portal, stmt->direction, stmt->howMany, dest);
+        if (portal->atEnd && portal->streamInfo.streamGroup != NULL &&
+            portal->streamInfo.streamGroup->allTopConsumersComplete()) {
+            portal->streamInfo.streamGroup->waitProducerReadyForQuit();
+        }
     }
     PG_CATCH();
     {

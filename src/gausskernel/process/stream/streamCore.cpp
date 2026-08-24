@@ -722,9 +722,9 @@ void StreamNodeGroup::quitSyncPoint()
                 u_sess->stream_cxt.smp_id, m_streamEnter, m_streamEnterCount,
                 (u_sess->stream_cxt.producer_obj)->getThreadId(), m_createThreadNum, m_size)));
         }
-        if (m_quitWaitCond <= 0)
+        if (m_streamEnterCount >= m_createThreadNum || m_quitWaitCond <= 0)
             pthread_cond_broadcast(&m_cond);
-        else {
+        if (m_quitWaitCond > 0) {
             struct timespec ts;
             while (m_quitWaitCond > 0) {
                 clock_gettime(CLOCK_REALTIME, &ts);
@@ -802,6 +802,47 @@ void StreamNodeGroup::quitSyncPoint()
         }
     } else
         return;
+}
+
+/*
+ * Wait until every producer reaches quitSyncPoint. Producers unregister
+ * their physical thread ids before entering that point, so a cursor at EOF
+ * can use this as a deterministic post-unregister synchronization point.
+ */
+void StreamNodeGroup::waitProducerReadyForQuit()
+{
+    AutoMutexLock streamLock(&m_mutex);
+
+    streamLock.lock();
+    while (m_streamEnterCount < m_createThreadNum) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;
+        ts.tv_nsec = 0;
+        (void)pthread_cond_timedwait(&m_cond, &m_mutex, &ts);
+
+        streamLock.unLock();
+        CHECK_FOR_INTERRUPTS();
+        streamLock.lock();
+    }
+    streamLock.unLock();
+}
+
+bool StreamNodeGroup::allTopConsumersComplete()
+{
+    /* Recursive streams can reset and reuse their local completion flags. */
+    if (m_syncControllers != NIL || m_streamArray == NULL || m_streamArray[0].consumerList == NIL) {
+        return false;
+    }
+
+    ListCell* cell = NULL;
+    foreach (cell, m_streamArray[0].consumerList) {
+        StreamConsumer* consumer = (StreamConsumer*)lfirst(cell);
+        if (consumer == NULL || !consumer->allProducersComplete()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*
