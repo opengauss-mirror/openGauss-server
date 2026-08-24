@@ -17,6 +17,7 @@
 
 #include "access/skey.h"
 #include "catalog/pg_opfamily.h"
+#include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
@@ -436,6 +437,42 @@ bool pathkeys_contained_in(List* keys1, List* keys2)
             break;
     }
     return false;
+}
+
+/*
+ * pathkeys_count_contained_in
+ *
+ * Check whether keys2 satisfies keys1 and report the number of matching
+ * leading pathkeys.  A non-zero common prefix can be completed by an
+ * bounded sort even when the full requested ordering is not present.
+ */
+bool pathkeys_count_contained_in(List* keys1, List* keys2, int* nCommon)
+{
+    ListCell* key1 = NULL;
+    ListCell* key2 = NULL;
+    int commonKeys = 0;
+
+    if (keys1 == keys2) {
+        *nCommon = list_length(keys1);
+        return true;
+    }
+
+    forboth(key1, keys1, key2, keys2) {
+        PathKey* pathkey1 = (PathKey*)lfirst(key1);
+        PathKey* pathkey2 = (PathKey*)lfirst(key2);
+
+        if (pathkey1 != pathkey2 &&
+            (pathkey1 == NULL || pathkey2 == NULL || pathkey1->type != pathkey2->type ||
+            !OpFamilyEquals(pathkey1->pk_opfamily, pathkey2->pk_opfamily) ||
+            pathkey1->pk_eclass != pathkey2->pk_eclass || pathkey1->pk_strategy != pathkey2->pk_strategy ||
+            pathkey1->pk_nulls_first != pathkey2->pk_nulls_first)) {
+            break;
+        }
+        commonKeys++;
+    }
+
+    *nCommon = commonKeys;
+    return commonKeys == list_length(keys1);
 }
 
 /*
@@ -1523,16 +1560,31 @@ static bool right_merge_direction(PlannerInfo* root, PathKey* pathkey)
     return (pathkey->pk_strategy == BTLessStrategyNumber);
 }
 
+bool prefix_sort_supported(PlannerInfo* root, RelOptInfo* rel)
+{
+    Query* query = root->parse;
+
+    return t_thrd.proc->workingVersionNum >= PREFIX_SORT_VERSION_NUM && root->limit_tuples > 0 &&
+        u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE &&
+        list_length(root->query_pathkeys) >= MIN_PREFIX_SORT_KEYS && !root->glob->vectorized && !IS_STREAM_PLAN &&
+        bms_membership(root->all_baserels) == BMS_SINGLETON && rel->reloptkind == RELOPT_BASEREL &&
+        rel->rtekind == RTE_RELATION && !rel->isPartitionedTable && !IS_PGXC_COORDINATOR &&
+        query->groupClause == NIL && query->groupingSets == NIL && query->distinctClause == NIL &&
+        query->rowMarks == NIL &&
+        !query->hasAggs && !query->hasWindowFuncs && !root->hasHavingQual && !query->hasTargetSRFs &&
+        !expression_returns_set((Node*)query->targetList);
+}
+
 /*
  * pathkeys_useful_for_ordering
  *		Count the number of pathkeys that are useful for meeting the
  *		query's requested output ordering.
  *
- * Unlike merge pathkeys, this is an all-or-nothing affair: it does us
- * no good to order by just the first key(s) of the requested ordering.
- * So the result is always either 0 or list_length(root->query_pathkeys).
+ * A leading prefix is useful for the single-relation queries currently
+ * supported by prefix sort.  Keep the previous all-or-nothing behavior
+ * outside that scope.
  */
-static int pathkeys_useful_for_ordering(PlannerInfo* root, List* pathkeys)
+static int pathkeys_useful_for_ordering(PlannerInfo* root, RelOptInfo* rel, List* pathkeys)
 {
     if (root->query_pathkeys == NIL)
         return 0; /* no special ordering requested */
@@ -1540,12 +1592,13 @@ static int pathkeys_useful_for_ordering(PlannerInfo* root, List* pathkeys)
     if (pathkeys == NIL)
         return 0; /* unordered path */
 
-    if (pathkeys_contained_in(root->query_pathkeys, pathkeys)) {
-        /* It's useful ... or at least the first N keys are */
-        return list_length(root->query_pathkeys);
+    if (!prefix_sort_supported(root, rel)) {
+        return pathkeys_contained_in(root->query_pathkeys, pathkeys) ? list_length(root->query_pathkeys) : 0;
     }
 
-    return 0; /* path ordering not useful */
+    int nCommon = 0;
+    (void)pathkeys_count_contained_in(root->query_pathkeys, pathkeys, &nCommon);
+    return nCommon;
 }
 
 /*
@@ -1558,7 +1611,7 @@ List* truncate_useless_pathkeys(PlannerInfo* root, RelOptInfo* rel, List* pathke
     int nuseful2;
 
     nuseful = pathkeys_useful_for_merging(root, rel, pathkeys);
-    nuseful2 = pathkeys_useful_for_ordering(root, pathkeys);
+    nuseful2 = pathkeys_useful_for_ordering(root, rel, pathkeys);
     if (nuseful2 > nuseful) {
         nuseful = nuseful2;
     }

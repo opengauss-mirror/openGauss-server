@@ -86,7 +86,7 @@ test: vec_prepare_003
 test: function_pg_prepared_statement1 function_pg_prepared_statement2
 
 #test sort optimize
-test: sort_optimize_row sort_optimize_column sort_optimize_001 simplesort
+test: sort_optimize_row sort_optimize_column sort_optimize_001 simplesort prefix_sort
 #test early free
 test: early_free
 #test sublink enhanced, including pullup-non-correlated-sublink and winmagic

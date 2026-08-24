@@ -549,7 +549,7 @@ test: vec_prepare_001 vec_prepare_002
 test: vec_prepare_003
 
 #test sort optimize
-test: sort_optimize_row sort_optimize_column sort_optimize_001
+test: sort_optimize_row sort_optimize_column sort_optimize_001 prefix_sort
 #test early free
 test: early_free
 #test sublink enhanced, including pullup-non-correlated-sublink and winmagic
