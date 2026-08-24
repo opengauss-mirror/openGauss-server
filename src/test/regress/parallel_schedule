@@ -829,3 +829,6 @@ test: wlm_memory_trace
 
 # test remotetype=coordinator trust bypass security
 test: remotetype_trust_security
+
+# test replication=standbywrite non-internal trust bypass security
+test: replication_standbywrite_security
