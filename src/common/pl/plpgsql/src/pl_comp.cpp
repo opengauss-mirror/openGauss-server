@@ -1572,8 +1572,17 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         plpgsql_scanner_finish();
         pfree_ext(proc_source);
         PopOverrideSearchPath();
+        u_sess->misc_cxt.Pseudo_CurrentUserId = saved_pseudo_current_userId;
+        t_thrd.log_cxt.error_context_stack = pl_err_context.previous;
+        curr_compile->plpgsql_error_funcname = NULL;
+        curr_compile->plpgsql_curr_compile = NULL;
+        curr_compile->plpgsql_check_syntax = false;
         u_sess->plsql_cxt.curr_compile_context = popCompileContext();
         clearCompileContext(curr_compile);
+        CompileStatusSwtichTo(save_compile_status);
+        if (temp != NULL) {
+            MemoryContextSwitchTo(temp);
+        }
         return NULL;
     }
 #ifndef ENABLE_MULTIPLE_NODES
