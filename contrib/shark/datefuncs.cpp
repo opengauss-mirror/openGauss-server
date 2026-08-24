@@ -440,7 +440,7 @@ Datum dateaddtimestamp(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+            errmsg("Invalid parameter 1 specified for dateadd.")));
     }
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
         PG_RETURN_NULL();
@@ -460,7 +460,7 @@ Datum dateaddtimestamptz(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+            errmsg("Invalid parameter 1 specified for dateadd.")));
     }
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
         PG_RETURN_NULL();
@@ -481,7 +481,7 @@ Datum dateadddate(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+            errmsg("Invalid parameter 1 specified for dateadd.")));
     }
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
         PG_RETURN_NULL();
@@ -514,7 +514,7 @@ Datum dateaddtime(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+            errmsg("Invalid parameter 1 specified for dateadd.")));
     }
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
         PG_RETURN_NULL();
@@ -542,7 +542,7 @@ Datum dateaddtimetz(PG_FUNCTION_ARGS)
 {
     if (PG_ARGISNULL(0)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-            errmsg("Argument data type NULL is invalid for argument 1 of dateadd function.")));
+            errmsg("Invalid parameter 1 specified for dateadd.")));
     }
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2)) {
         PG_RETURN_NULL();

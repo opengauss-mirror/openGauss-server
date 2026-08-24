@@ -1879,7 +1879,7 @@ select dateadd(mm,2,time'23:20:20');
 (1 row)
 
 select dateadd(null,1,'2023/3/31');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(qq,null,'2023/3/31');
  dateadd 
@@ -1894,19 +1894,19 @@ select dateadd(qq,1,null);
 (1 row)
 
 select dateadd(null,1,date'1998-01-30');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(null,1,timestamp'1997-12-31 23:59:59');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(null,1,timestamptz'1997-12-31 23:59:59');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(null,1,time'23:20:20');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(null,1,timetz '23:20:20');
-ERROR:  Argument data type NULL is invalid for argument 1 of dateadd function.
+ERROR:  Invalid parameter 1 specified for dateadd.
 CONTEXT:  referenced column: dateadd
 select dateadd(qq,null,date'1998-01-30');
  dateadd 
