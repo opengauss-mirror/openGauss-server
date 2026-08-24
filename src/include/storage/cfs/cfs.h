@@ -10,11 +10,13 @@
 #include "utils/atomic.h"
 #include "storage/buf/block.h"
 #include "storage/cfs/cfs_converter.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 #include "datatype/timestamp.h"
 
 /* Keep the PCA header layout aligned with openGauss 7.0. */
-constexpr size_t ALLOCATE_CHUNK_USAGE_LEN = (CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / 1024)) >> 3;
+constexpr size_t MAX_CHUNK_NUMBER_IN_EXTENT = CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / 1024);
+constexpr size_t ALLOCATE_CHUNK_USAGE_LEN = (MAX_CHUNK_NUMBER_IN_EXTENT >> 3) + 1;
 
 struct CfsExtentAddress {
     uint32 checksum;
@@ -41,10 +43,18 @@ struct CfsExtentHeader {
     CfsExtentAddress cfsExtentAddress[FLEXIBLE_ARRAY_MEMBER];
 };
 
+static_assert(offsetof(CfsExtentHeader, cfsExtentAddress) +
+                  CFS_LOGIC_BLOCKS_PER_EXTENT *
+                      (offsetof(CfsExtentAddress, chunknos) +
+                       sizeof(uint16) * BLCKSZ / MIN_COMPRESS_CHUNK_SIZE) <=
+              BLCKSZ,
+    "CFS extent addresses for the minimum chunk size must fit in one PCA page");
+
+#if BLCKSZ == 8192
 static_assert(CFS_EXTENT_SIZE == 128, "CFS extent size must remain compatible with openGauss 7.0");
 static_assert(CFS_LOGIC_BLOCKS_PER_EXTENT == 127,
     "CFS logical blocks per extent must remain compatible with openGauss 7.0");
-static_assert(ALLOCATE_CHUNK_USAGE_LEN == 127,
+static_assert(ALLOCATE_CHUNK_USAGE_LEN == 128,
     "CFS chunk allocation bitmap size must remain compatible with openGauss 7.0");
 static_assert(offsetof(CfsExtentHeader, n_fragment_chunks) == 12,
     "CFS fragment chunk count offset must remain compatible with openGauss 7.0");
@@ -52,6 +62,7 @@ static_assert(offsetof(CfsExtentHeader, allocated_chunk_usages) == 14,
     "CFS chunk allocation bitmap offset must remain compatible with openGauss 7.0");
 static_assert(offsetof(CfsExtentHeader, cfsExtentAddress) == 144,
     "CFS extent address offset must remain compatible with openGauss 7.0");
+#endif
 
 struct CfsExtInfo {
     RelFileNode rnode;

@@ -89,6 +89,11 @@ int64 CalculateFilePhyRealSize(char* pathName, bool suppressedENOENT)
 uint1 ConvertChunkSize(uint32 compressedChunkSize, bool *success)
 {
     uint1 chunkSize = INDEX_OF_HALF_BLCKSZ;
+    if (compressedChunkSize < MIN_COMPRESS_CHUNK_SIZE) {
+        *success = false;
+        return chunkSize;
+    }
+
     switch (compressedChunkSize) {
         case BLCKSZ / 2:
             chunkSize = INDEX_OF_HALF_BLCKSZ;
@@ -106,6 +111,7 @@ uint1 ConvertChunkSize(uint32 compressedChunkSize, bool *success)
             *success = false;
             return chunkSize;
     }
+
     *success = true;
     return chunkSize;
 }

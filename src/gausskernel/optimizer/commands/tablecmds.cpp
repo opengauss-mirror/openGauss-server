@@ -19695,8 +19695,9 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
     ConvertChunkSize(newCompressOpt->compressChunkSize, &success);
     if (!success) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d",
-                                newCompressOpt->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2)));
+                        errmsg("invalid compress_chunk_size %u, must be a power-of-two page fraction between %u and %u",
+                               newCompressOpt->compressChunkSize, MIN_COMPRESS_CHUNK_SIZE,
+                               MAX_COMPRESS_CHUNK_SIZE)));
     }
     if (newCompressOpt->compressPreallocChunks >= BLCKSZ / newCompressOpt->compressChunkSize) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), 
@@ -33084,10 +33085,11 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
         bool nulls[Natts_gs_global_config] = {false};
-        const char* pwd = (const char *)(((Value*)lfirst(pwd_obj))->val.str);
-        if (password_contain_space(pwd)) {
+        if (password_contain_space(((Value*)lfirst(pwd_obj))->val.str)) {
             continue;
         }
+        char* password = pstrdup(((Value*)lfirst(pwd_obj))->val.str);
+        size_t passwordBufferSize = strlen(password) + 1;
         const char* name = "weak_password";
         TableScanDesc scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         TupleDesc tupdesc = RelationGetDescr(rel);
@@ -33098,8 +33100,13 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
             if (is_null) {
                 continue;
             }
-            char *ex_pwd = text_to_cstring(DatumGetTextP(ex_datum));
-            if (strcmp(ex_pwd, pwd) == 0) {
+            char* existingPassword = text_to_cstring(DatumGetTextP(ex_datum));
+            bool passwordExists = strcmp(existingPassword, password) == 0;
+            size_t existingPasswordBufferSize = strlen(existingPassword) + 1;
+            errno_t rc = memset_s(existingPassword, existingPasswordBufferSize, 0, existingPasswordBufferSize);
+            securec_check(rc, "\0", "\0");
+            pfree_ext(existingPassword);
+            if (passwordExists) {
                 flag = true;
                 break;
             }
@@ -33108,11 +33115,14 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
         tableam_scan_end(scan);
         if (flag == false) {
             values[Anum_gs_global_config_name - 1] = DirectFunctionCall1(namein, CStringGetDatum(name));
-            values[Anum_gs_global_config_value - 1] = CStringGetTextDatum(pwd);
+            values[Anum_gs_global_config_value - 1] = CStringGetTextDatum(password);
             tup = (HeapTuple) heap_form_tuple(RelationGetDescr(rel), values, nulls);
             simple_heap_insert(rel, tup);
             heap_freetuple_ext(tup); 
         }
+        errno_t rc = memset_s(password, passwordBufferSize, 0, passwordBufferSize);
+        securec_check(rc, "\0", "\0");
+        pfree_ext(password);
     }
     heap_close(rel, RowExclusiveLock);
 }

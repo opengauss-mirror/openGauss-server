@@ -44,6 +44,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "storage/page_compression.h"
 #include "tde_key_management/tde_key_manager.h"
 #include "tde_key_management/tde_key_storage.h"
 
@@ -273,7 +274,7 @@ static relopt_int intRelOpts[] = {
         RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 4},
     {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      BLCKSZ / 2,
-     BLCKSZ / 16,
+     MIN_COMPRESS_CHUNK_SIZE,
      BLCKSZ / 2},
     {{ "compress_prealloc_chunks", "Number of prealloced chunks for each block.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      0,
