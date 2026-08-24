@@ -3188,6 +3188,40 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
 
     return pathnode;
 }
+
+/*
+ * create_prefix_sort_path
+ *      Creates a bounded sort using the leading keys provided by subpath.
+ */
+PrefixSortPath* create_prefix_sort_path(PlannerInfo* root, Path* subpath, List* pathkeys,
+    int nPresortedCols, double limitTuples)
+{
+    PrefixSortPath* pathnode =
+        (PrefixSortPath*)newNode(sizeof(PrefixSortPath), T_PREFIX_SORT_PATH);
+    Assert(nPresortedCols > 0 && nPresortedCols < list_length(pathkeys));
+    Assert(limitTuples > 0);
+
+    pathnode->path.pathtype = T_Sort;
+    pathnode->path.parent = subpath->parent;
+    pathnode->path.pathtarget = subpath->pathtarget;
+    pathnode->path.param_info = NULL;
+    pathnode->path.pathkeys = pathkeys;
+    pathnode->path.dop = subpath->dop;
+    pathnode->path.exec_type = subpath->exec_type;
+    pathnode->path.hint_value = subpath->hint_value;
+#ifdef USE_SPQ
+    inherit_path_locator_info((Path*)pathnode, subpath);
+#endif
+    pathnode->subpath = subpath;
+    pathnode->nPresortedCols = nPresortedCols;
+    pathnode->limitTuples = limitTuples;
+
+    set_path_rows(&pathnode->path, subpath->rows, subpath->multiple);
+    cost_prefix_sort(root, pathnode);
+
+    return pathnode;
+}
+
 /*
  * create_memoize_path
  *      Creates a path corresponding to a Memoize plan, returning the pathnode.
