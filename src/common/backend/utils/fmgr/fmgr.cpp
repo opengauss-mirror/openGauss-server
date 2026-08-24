@@ -2422,6 +2422,23 @@ Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typm
     return InputFunctionCall(&flinfo, str, typioparam, typmod, can_ignore);
 }
 
+/*
+ * If finfo is NULL, it falls through to OidInputFunctionCall(), which creates a local FmgrInfo per call.
+ * If finfo->fn_oid does not match functionId, we should re-initialize it.
+ * otherwise the cached FmgrInfo is reused directly.
+ */
+Datum OidInputFunctionCallCache(
+    Oid functionId, char* str, Oid typioparam, int32 typmod, FmgrInfo* finfo, bool can_ignore)
+{
+    if (finfo == NULL) {
+        return OidInputFunctionCall(functionId, str, typioparam, typmod, can_ignore);
+    }
+    if (finfo->fn_oid != functionId) {
+        fmgr_info(functionId, finfo);
+    }
+    return InputFunctionCall(finfo, str, typioparam, typmod, can_ignore);
+}
+
 char* OidOutputFunctionCall(Oid functionId, Datum val)
 {
     FmgrInfo flinfo;

@@ -26,6 +26,7 @@
 #define SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_
 
 #include "commands/prepare.h"
+#include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 #include "opfusion/opfusion_scan.h"
@@ -139,6 +140,7 @@ typedef struct FuncExprInfo {
     Oid funcid;
     List *args;
     char *resname;
+    FmgrInfo m_finfo;        /* cached fmgr info to avoid repeated syscache lookup */
 } FuncExprInfo;
 
 const int OPFUSION_FUNCTION_ID_MAX_HASH_SIZE = 203;

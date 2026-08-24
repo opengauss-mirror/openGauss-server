@@ -62,6 +62,9 @@ typedef struct Cursor_Data {
 
 typedef struct HTAB HTAB;
 
+/* To avoid including a pile of fmgr headers, reference FmgrInfo thus: */
+typedef struct FmgrInfo FmgrInfo;
+
 typedef struct TableOfInfo {
     bool isnestedtable = false;
     int tableOfLayers = 0;
@@ -74,6 +77,9 @@ typedef struct ParamExternData {
     bool isnull;   /* is it NULL? */
     uint16 pflags; /* flag bits, see above */
     Oid ptype;     /* parameter's datatype, or 0 */
+    Oid m_cached_typinput;     /* cached typeinput OID */
+    Oid m_cached_typioparam;   /* cached type I/O param OID */
+    FmgrInfo* m_cached_finfo;  /* cached FmgrInfo pointer, memory allocated in OpFusion::initParams, NULL initially */
     Cursor_Data cursor_data;
     TableOfInfo* tabInfo = NULL;
 } ParamExternData;
