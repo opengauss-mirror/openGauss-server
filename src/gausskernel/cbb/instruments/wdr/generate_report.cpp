@@ -4374,6 +4374,93 @@ static void get_summary_memory_stat(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+static void AppendSummarySharedMemoryStatQuery(StringInfoData& query, report_params* params)
+{
+    /*
+     * Candidate shared-memory components for WDR (fixed Shmem blocks + key
+     * shared MemoryContexts). Report shows (Total) plus Top 10 by size.
+     * Percentages use max_shared_memory from memory_node_detail as denominator.
+     */
+    appendStringInfo(&query,
+        "SELECT \"Shared Memory\", \"Size\", \"Pct(%%)\" FROM ("
+        "SELECT 0 AS ord, '(Total)' AS \"Shared Memory\","
+        " CASE WHEN max_total.max_bytes >= 1073741824"
+        "  THEN pg_catalog.round(max_total.max_bytes::numeric / 1073741824, 0)::text || ' GB'"
+        "  ELSE pg_catalog.round(max_total.max_bytes::numeric / 1048576, 0)::text || ' MB' END AS \"Size\","
+        " pg_catalog.round(100.0, 2)::text AS \"Pct(%%)\","
+        " max_total.max_bytes AS sort_size"
+        " FROM (SELECT CASE WHEN snap_memorymbytes IS NULL THEN 0::int8"
+        "  ELSE snap_memorymbytes::int8 END * 1048576 AS max_bytes"
+        "  FROM snapshot.snap_global_memory_node_detail"
+        "  WHERE snapshot_id = %ld AND snap_nodename = '%s'"
+        "  AND snap_memorytype = 'max_shared_memory') max_total"
+        " UNION ALL"
+        " SELECT 1 AS ord, comp.comp_name AS \"Shared Memory\","
+        " CASE WHEN comp.size_bytes >= 1073741824"
+        "  THEN pg_catalog.round(comp.size_bytes::numeric / 1073741824, 0)::text || ' GB'"
+        "  ELSE pg_catalog.round(comp.size_bytes::numeric / 1048576, 0)::text || ' MB' END AS \"Size\","
+        " pg_catalog.round(comp.size_bytes * 100.0 /"
+        " CASE WHEN max_total.max_bytes > 0 THEN max_total.max_bytes ELSE 1::int8 END, 2)::text"
+        " AS \"Pct(%%)\","
+        " comp.size_bytes AS sort_size"
+        " FROM (SELECT k.comp_name,"
+        "  CASE WHEN e.snap_totalsize IS NULL THEN 0::int8 ELSE e.snap_totalsize END AS size_bytes"
+        "  FROM (SELECT unnest(ARRAY['Buffer Blocks', 'Buffer Descriptors', 'Buffer Descriptors Extra',"
+        "   'Checkpoint BufferIds', 'clog', 'XLOG Ctl', 'CSNLOG Ctl',"
+        "   'PgStat', 'AshContext', 'IncreCheckPointContext', 'Undo',"
+        "   'imcstore context', 'DoubleWriteContext']::text[]) AS comp_name) k"
+        "  LEFT JOIN (SELECT snap_contextname, snap_totalsize"
+        "   FROM snapshot.snap_global_shared_memory_detail"
+        "   WHERE snapshot_id = %ld AND snap_node_name = '%s') e"
+        "  ON k.comp_name = e.snap_contextname) comp,"
+        " (SELECT CASE WHEN snap_memorymbytes IS NULL THEN 0::int8"
+        "  ELSE snap_memorymbytes::int8 END * 1048576 AS max_bytes"
+        "  FROM snapshot.snap_global_memory_node_detail"
+        "  WHERE snapshot_id = %ld AND snap_nodename = '%s'"
+        "  AND snap_memorytype = 'max_shared_memory') max_total"
+        " WHERE comp.size_bytes > 0"
+        " ) data ORDER BY ord, sort_size DESC LIMIT 11;",
+        params->end_snap_id,
+        get_report_node(params),
+        params->end_snap_id,
+        get_report_node(params),
+        params->end_snap_id,
+        get_report_node(params));
+}
+
+static void get_summary_shared_memory_stat(report_params* params)
+{
+    /* supported report type: summary/all */
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+    const char* desc1 = "show reserved shared memory size and percentage";
+    const char* desc2 = "Top 10 shared memory components by size";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Shared Memory Statistics";
+    dash->desc = lappend(dash->desc, (void*)desc1);
+    dash->desc = lappend(dash->desc, (void*)desc2);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    AppendSummarySharedMemoryStatQuery(query, params);
+
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
 /*
  * some cases aren't allowed to generate the awr report:
  * 1. database statistics has been reset between start and end
@@ -4563,6 +4650,9 @@ void GenReport::get_report_data(report_params* params)
 
     /* summary - Memory Statistics */
     get_summary_memory_stat(params);
+
+    /* summary - Shared Memory Statistics (key Shmem components) */
+    get_summary_shared_memory_stat(params);
 
     /* --------------- DETAIL REPORT AREA--------------------- */
     /* detail - Time Model */
