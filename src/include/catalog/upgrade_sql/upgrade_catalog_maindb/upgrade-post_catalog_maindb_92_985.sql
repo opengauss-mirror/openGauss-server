@@ -1,3 +1,176 @@
+DROP FUNCTION IF EXISTS pg_catalog.diskannbuild(internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8538;
+CREATE FUNCTION pg_catalog.diskannbuild(internal, internal, internal)
+    RETURNS internal
+AS 'diskannbuild'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannbuildempty(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8539;
+CREATE FUNCTION pg_catalog.diskannbuildempty(internal)
+    RETURNS void
+AS 'diskannbuildempty'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskanninsert(internal, internal, internal, internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8533;
+CREATE FUNCTION pg_catalog.diskanninsert(internal, internal, internal, internal, internal, internal)
+    RETURNS boolean
+AS 'diskanninsert'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannbulkdelete(internal, internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8540;
+CREATE FUNCTION pg_catalog.diskannbulkdelete(internal, internal, internal, internal)
+    RETURNS internal
+AS 'diskannbulkdelete'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannvacuumcleanup(internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8541;
+CREATE FUNCTION pg_catalog.diskannvacuumcleanup(internal, internal)
+    RETURNS internal
+AS 'diskannvacuumcleanup'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskanncostestimate(internal, internal, internal, internal, internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8542;
+CREATE FUNCTION pg_catalog.diskanncostestimate(internal, internal, internal, internal, internal, internal, internal)
+    RETURNS void
+AS 'diskanncostestimate'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannoptions(internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8543;
+CREATE FUNCTION pg_catalog.diskannoptions(internal, internal)
+    RETURNS internal
+AS 'diskannoptions'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannvalidate(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8531;
+CREATE FUNCTION pg_catalog.diskannvalidate(internal)
+    RETURNS boolean
+AS 'diskannvalidate'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannbeginscan(internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8534;
+CREATE FUNCTION pg_catalog.diskannbeginscan(internal, internal, internal)
+    RETURNS internal
+AS 'diskannbeginscan'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannrescan(internal, internal, internal, internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8536;
+CREATE FUNCTION pg_catalog.diskannrescan(internal, internal, internal, internal, internal)
+    RETURNS void
+AS 'diskannrescan'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskanngettuple(internal, internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8535;
+CREATE FUNCTION pg_catalog.diskanngettuple(internal, internal)
+    RETURNS boolean
+AS 'diskanngettuple'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannendscan(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8537;
+CREATE FUNCTION pg_catalog.diskannendscan(internal)
+    RETURNS void
+AS 'diskannendscan'
+LANGUAGE INTERNAL
+STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.diskannhandler(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8532;
+CREATE FUNCTION pg_catalog.diskannhandler(internal)
+    RETURNS internal
+AS 'diskannhandler'
+LANGUAGE INTERNAL
+STRICT;
+
+COMMENT ON FUNCTION pg_catalog.diskannbuild(internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannbuildempty(internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskanninsert(internal, internal, internal, internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannbulkdelete(internal, internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannvacuumcleanup(internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskanncostestimate(internal, internal, internal, internal, internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannoptions(internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannvalidate(internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannbeginscan(internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannrescan(internal, internal, internal, internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskanngettuple(internal, internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannendscan(internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.diskannhandler(internal) IS 'NULL';
+
+DROP ACCESS METHOD IF EXISTS diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8303;
+CREATE ACCESS METHOD diskann TYPE INDEX HANDLER diskannhandler;
+
+SET search_path = 'pg_catalog';
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8400;
+CREATE OPERATOR FAMILY pg_catalog.vector_l2_ops USING diskann;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8917;
+CREATE OPERATOR CLASS pg_catalog.vector_l2_ops
+	FOR TYPE vector USING diskann AS
+	OPERATOR 1 pg_catalog.<->(vector, vector) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.vector_l2_squared_distance(vector, vector);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8401;
+CREATE OPERATOR FAMILY pg_catalog.vector_ip_ops USING diskann;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8918;
+CREATE OPERATOR CLASS pg_catalog.vector_ip_ops
+	FOR TYPE vector USING diskann AS
+	OPERATOR 1 pg_catalog.<#>(vector, vector) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
+	FUNCTION 4 pg_catalog.vector_norm(vector);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8402;
+CREATE OPERATOR FAMILY pg_catalog.vector_cosine_ops USING diskann;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_cosine_ops USING diskann CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8919;
+CREATE OPERATOR CLASS pg_catalog.vector_cosine_ops
+	FOR TYPE vector USING diskann AS
+	OPERATOR 1 pg_catalog.<=>(vector, vector) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
+	FUNCTION 2 pg_catalog.vector_norm(vector),
+	FUNCTION 4 pg_catalog.vector_norm(vector);
+
+CREATE OR REPLACE FUNCTION Update_pg_amproc_temp()
+RETURNS void AS $$
+DECLARE
+query_str text;
+BEGIN
+query_str := 'update pg_catalog.pg_am set amhandler = 8532 where amname = ''diskann'' and amhandler = 0';
+EXECUTE(query_str);
+return;
+END; $$ LANGUAGE 'plpgsql';
+
+SELECT Update_pg_amproc_temp();
+DROP FUNCTION Update_pg_amproc_temp();
+
 DROP TYPE IF EXISTS pg_catalog.halfvec CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8306, 8309, b;
 CREATE TYPE pg_catalog.halfvec;
@@ -644,3 +817,148 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_cosine_ops
 	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
 	FUNCTION 2 pg_catalog.l2_norm(halfvec),
 	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal, internal);
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
+RETURNS NVARCHAR2
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.timestamp_out($1), 0::Oid, -1)  $$
+LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INTERVAL)
+RETURNS NVARCHAR2
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.interval_out($1), 0::Oid, -1)  $$
+LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(NUMERIC)
+RETURNS NVARCHAR2
+AS $$ SELECT pg_catalog.nvarchar2in(pg_catalog.numeric_out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT2)
+RETURNS NVARCHAR2
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.int2out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT4)
+RETURNS NVARCHAR2
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.int4out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT8)
+RETURNS NVARCHAR2
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.int8out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT4)
+RETURNS NVARCHAR2
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.float4out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT8)
+RETURNS NVARCHAR2
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.float8out($1), 0::Oid, -1) $$
+LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+do $$
+DECLARE
+ans boolean;
+BEGIN
+    for ans in select case when count(*)=1 then true else false end as ans from (select extname from pg_extension where extname='dolphin')
+    LOOP
+        if ans = true then
+            ALTER EXTENSION dolphin UPDATE TO '4.5';
+        end if;
+        exit;
+    END LOOP;
+END$$;
+
+DROP FUNCTION IF EXISTS pg_catalog.gs_get_preparse_location() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2874;
+CREATE OR REPLACE FUNCTION pg_catalog.gs_get_preparse_location(
+    OUT preparse_start_location text,
+    OUT preparse_end_location text,
+    OUT last_valid_record text
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE NOT FENCED NOT SHIPPABLE ROWS 10
+AS $function$gs_get_preparse_location$function$;
+
+comment on function pg_catalog.gs_get_preparse_location() is 'statistics: information about WAL locations';
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement() CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pg_prepared_statement(bigint) CASCADE;
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 2510;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    OUT name text,
+    OUT statement text,
+    OUT prepare_time timestamp with time zone,
+    OUT parameter_types regtype[],
+    OUT from_sql boolean
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$pg_prepared_statement$function$;
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3702;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_prepared_statement(
+    in_sessionid bigint,
+    OUT sessionid bigint,
+    OUT username text, OUT name text,
+    OUT statement text,
+    OUT prepare_time timestamp with time zone,
+    OUT parameter_types regtype[],
+    OUT from_sql boolean
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$pg_prepared_statement_global$function$;
+
+comment on function pg_catalog.pg_prepared_statement() is 'get the prepared statements for this session';
+comment on function pg_catalog.pg_prepared_statement(bigint) is 'get the prepared statements for specified session';
+
+DROP VIEW IF EXISTS pg_catalog.ss_transaction_sync_status CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.ss_transaction_sync_stat() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6225;
+CREATE OR REPLACE FUNCTION pg_catalog.ss_transaction_sync_stat(
+    OUT message_type text,
+    OUT transfer_type text,
+    OUT times bigint,
+    OUT total_cost bigint,
+    OUT average_cost bigint
+) RETURNS SETOF record
+ LANGUAGE internal
+ STABLE NOT FENCED NOT SHIPPABLE ROWS 8
+AS $function$ss_transaction_sync_stat$function$;
+
+COMMENT ON FUNCTION pg_catalog.ss_transaction_sync_stat() IS 'statistics: UB and DMS transaction sync latency in nanoseconds';
+
+CREATE OR REPLACE VIEW pg_catalog.ss_transaction_sync_status AS
+    SELECT * FROM pg_catalog.ss_transaction_sync_stat();
+
+DROP FUNCTION IF EXISTS pg_catalog.l2_norm(vector) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 9085;
+CREATE FUNCTION pg_catalog.l2_norm (
+    vector
+) RETURNS float8 LANGUAGE INTERNAL IMMUTABLE STRICT as 'vector_norm';
+COMMENT ON FUNCTION pg_catalog.l2_norm(vector) IS 'NULL';
+
+DROP FUNCTION IF EXISTS pg_catalog.l2_norm(unknown) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 9086;
+CREATE FUNCTION pg_catalog.l2_norm (
+    unknown
+) RETURNS float8 LANGUAGE INTERNAL IMMUTABLE STRICT as 'l2_norm_unknown_compat';
+COMMENT ON FUNCTION pg_catalog.l2_norm(unknown) IS 'NULL';
+
+DROP FUNCTION IF EXISTS pg_catalog.ss_ub_link_available() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6226;
+CREATE OR REPLACE FUNCTION pg_catalog.ss_ub_link_available()
+RETURNS boolean
+LANGUAGE internal
+STABLE STRICT NOT FENCED NOT SHIPPABLE
+AS $function$ss_ub_link_available$function$;
+
+COMMENT ON FUNCTION pg_catalog.ss_ub_link_available() IS 'whether the UB cache link is currently available';
+
+-- Drop pg_description rows whose pg_conversion target no longer exists.
+delete from pg_catalog.pg_description where classoid = 2607 and objsubid = 0
+    and objoid not in (select oid from pg_catalog.pg_conversion);

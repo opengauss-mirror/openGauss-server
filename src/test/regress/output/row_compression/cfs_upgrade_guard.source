@@ -5,10 +5,10 @@ CREATE TABLE cfs_upgrade_guard.compressed_table(id INTEGER) WITH (compresstype =
 WARNING:  The compressed relation you are using is an unofficial supported extended feature.
 SAVEPOINT maindb_guard;
 \set ECHO none
-gsql:@abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_maindb/upgrade_catalog_maindb_92_990.sql:26: ERROR:  Upgrade check failed: compressed relation(s) use an incompatible CFS on-disk format. Remove or rebuild them as uncompressed relations before upgrading.
+gsql:@abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_maindb/upgrade_catalog_maindb_92_985.sql:26: ERROR:  Upgrade check failed: compressed relation(s) use an incompatible CFS on-disk format. Remove or rebuild them as uncompressed relations before upgrading.
 ROLLBACK TO SAVEPOINT maindb_guard;
 SAVEPOINT otherdb_guard;
 \set ECHO none
-gsql:@abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_otherdb/upgrade_catalog_otherdb_92_990.sql:26: ERROR:  Upgrade check failed: compressed relation(s) use an incompatible CFS on-disk format. Remove or rebuild them as uncompressed relations before upgrading.
+gsql:@abs_srcdir@/../../include/catalog/upgrade_sql/upgrade_catalog_otherdb/upgrade_catalog_otherdb_92_985.sql:26: ERROR:  Upgrade check failed: compressed relation(s) use an incompatible CFS on-disk format. Remove or rebuild them as uncompressed relations before upgrading.
 ROLLBACK TO SAVEPOINT otherdb_guard;
 ROLLBACK;
