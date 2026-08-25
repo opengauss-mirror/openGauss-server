@@ -8,7 +8,7 @@ ERROR:  value 5 out of bounds for option "compresstype"
 DETAIL:  Valid values are between "0" and "4".
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
-ERROR:  invalid compress_chunk_size 2000, must be one of 512, 1024, 2048 or 4096 for compressed_table_1024
+ERROR:  invalid compress_chunk_size 2000, must be a power-of-two page fraction between 512 and 4096 for compressed_table_1024
 -- unspport compress_prealloc_chunks: -1
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=-1);
 ERROR:  value -1 out of bounds for option "compress_prealloc_chunks"

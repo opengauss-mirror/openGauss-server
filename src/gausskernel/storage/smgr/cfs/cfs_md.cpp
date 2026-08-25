@@ -539,7 +539,8 @@ static bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader,
                                     uint8 needChunks, uint8 actualUse, LWLock *freeChunkLock)
 {
     bool res = false;
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(cfsExtentHeader->chunk_size)) {
         if (freeChunkLock != NULL) {
             (void)LWLockAcquire(freeChunkLock, LW_EXCLUSIVE);
         }
@@ -796,7 +797,8 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     pca_buf_free_page(ctrl, location, changed || isExtend);
 
     /* try recyle extent */
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(cfsExtentHeader->chunk_size)) {
         if (cfsExtentHeader->n_fragment_chunks > RecycleChunkThreshold(cfsExtentHeader) ||
             (cfsExtentHeader->allocated_chunks >= MaxChunkNumForRecycle(cfsExtentHeader) &&
             cfsExtentHeader->n_fragment_chunks >= SingleBlockChunkNumForRecycle(cfsExtentHeader))) {
@@ -1682,13 +1684,14 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     CfsExtentHeader *assistPca = (CfsExtentHeader *)(void *)(assistBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ);
     CfsPunchHole(location, assistPca);
 
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(ctrl->pca_page->chunk_size)) {
         /* lock free chunk bitmap */
         (void)LWLockAcquire(ctrl->allocated_chunk_usages_lock, LW_EXCLUSIVE);
         CfsExtentAddress *extAddr = NULL;
 
-        rc = memset_s(ctrl->pca_page->allocated_chunk_usages, ALLOCATE_CHUNK_USAGE_LEN,
-                      0, ALLOCATE_CHUNK_USAGE_LEN);
+        rc = memset_s(ctrl->pca_page->allocated_chunk_usages, CFS_FRAGMENT_BITMAP_LENGTH,
+                      0, CFS_FRAGMENT_BITMAP_LENGTH);
         securec_check(rc, "\0", "\0");
 
         /* recount n_fragment_chunks */
@@ -1756,6 +1759,10 @@ static void CfsRecycleOneExtent(SMgrRelation reln, ForkNumber forknum, ExtentLoc
 void CfsRecycleChunkProc(SMgrRelation reln, ForkNumber forknum)
 {
     ExtentLocation location = FormExtLocation(reln, 0);
+    if (!CfsCanUseFragmentChunks(location.chunk_size)) {
+        return;
+    }
+
     MdfdVec *mdfd = CfsMdOpenReln(reln, forknum, EXTENSION_RETURN_NULL);
     if (unlikely(mdfd == NULL)) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("can not get vfd using CfsMdOpen")));

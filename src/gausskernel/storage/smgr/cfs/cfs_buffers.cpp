@@ -327,13 +327,14 @@ void pca_buf_load_page(pca_page_ctrl_t *item, const ExtentLocation& location, Cf
     }
 
     /* construct the allocated_chunks bitmap in memory */
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(item->pca_page->chunk_size)) {
         /* lock the allocated_chunks bitmap */
         (void)LWLockAcquire(item->allocated_chunk_usages_lock, LW_EXCLUSIVE);
         CfsExtentAddress *extAddr = NULL;
 
-        rc = memset_s(item->pca_page->allocated_chunk_usages, ALLOCATE_CHUNK_USAGE_LEN,
-                      0, ALLOCATE_CHUNK_USAGE_LEN);
+        rc = memset_s(item->pca_page->allocated_chunk_usages, CFS_FRAGMENT_BITMAP_LENGTH,
+                      0, CFS_FRAGMENT_BITMAP_LENGTH);
         securec_check(rc, "\0", "\0");
 
         uint16 usedChunkCount = 0;
