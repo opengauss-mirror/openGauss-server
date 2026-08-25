@@ -2357,7 +2357,7 @@ static void InitConfigureNamesBool()
             PGC_USERSET,
             NODE_ALL,
             QUERY_TUNING,
-            gettext_noop("Enable unique checks for non-primary-key unique constraints, "
+            gettext_noop("Enable unique checks for non-primary-key unique indexes, "
             "only applicable to B-format databases."
             ),
             NULL},

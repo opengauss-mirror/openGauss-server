@@ -2264,7 +2264,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
 
 /*
  * Determine the uniqueness-check mode for an index insertion.
- * unique_checks can only disable checks for non-primary-key unique constraints
+ * unique_checks can only disable checks for non-primary-key unique indexes
  * in a B-format database, and only for the table owner or a superuser.
  */
 IndexUniqueCheck ExecGetIndexUniqueCheck(Relation heapRelation, Relation indexRelation, bool hasConflict)
@@ -2274,11 +2274,9 @@ IndexUniqueCheck ExecGetIndexUniqueCheck(Relation heapRelation, Relation indexRe
     }
 
     if (DB_IS_CMPT(B_FORMAT) && !u_sess->attr.attr_common.unique_checks &&
-        !indexRelation->rd_index->indisprimary) {
-        if (pg_class_ownercheck(RelationGetRelid(heapRelation), GetUserId()) || superuser()) {
-            return UNIQUE_CHECK_NO;
-        }
-        return UNIQUE_CHECK_YES;
+        !indexRelation->rd_index->indisprimary &&
+        (pg_class_ownercheck(RelationGetRelid(heapRelation), GetUserId()) || superuser())) {
+        return UNIQUE_CHECK_NO;
     }
 
     if (hasConflict) {
