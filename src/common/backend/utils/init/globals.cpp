@@ -73,11 +73,12 @@ bool will_shutdown = false;
  *       3.1.X  |    -     |     -      |     -     
  *       5.0.X  |  92656   |   92848    |   92898   
  *       6.0.X  |  92899   |   92950    |   92999
- *       NEXT   |  93000   |     ?      |     ?
+ *       7.0.X  |  93000   |   93102    |   93152
+ *       NEXT   |  93153   |     ?      |     ?
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93102;
+const uint32 GRAND_VERSION_NUM = 93153;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
