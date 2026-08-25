@@ -125,7 +125,7 @@ GRANT USAGE, SELECT ON SEQUENCE ogai.model_sources_id_seq TO PUBLIC;
 GRANT USAGE, SELECT ON SEQUENCE ogai.vectorize_tasks_task_id_seq TO PUBLIC;
 GRANT USAGE, SELECT ON SEQUENCE ogai.vectorize_queue_msg_id_seq TO PUBLIC;
 
-GRANT CREATE ON SCHEMA ogai TO PUBLIC;
+REVOKE CREATE ON SCHEMA ogai FROM PUBLIC;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ogai TO PUBLIC;
 
 -- Auto-encrypt api_key trigger function
@@ -181,7 +181,7 @@ BEGIN
         IF p_operation = 'INSERT' AND p_content IS NOT NULL THEN
             IF p_table_method = 'append' THEN
                 EXECUTE format(
-                    'UPDATE %I.%I SET ogai_embedding = ogai_embedding($1, $2, $3) WHERE %I = $4',
+                    'UPDATE %I.%I SET ogai_embedding = pg_catalog.ogai_embedding($1, $2, $3) WHERE %I = $4',
                     p_src_schema, p_src_table, p_primary_key
                 ) USING p_content, p_embed_model, p_dim, p_pk_value;
 ELSE
@@ -195,11 +195,11 @@ ELSE
                 IF p_max_chunk_size > 0 THEN
                     -- Need chunking processing
                     FOR v_chunk_record IN
-SELECT chunk FROM ogai_chunk(p_content, p_max_chunk_size, p_max_chunk_overlap)
+SELECT chunk FROM pg_catalog.ogai_chunk(p_content, p_max_chunk_size, p_max_chunk_overlap)
                       LOOP
     EXECUTE format(
                             'INSERT INTO %I.%I (%I, chunk_id, chunk_text, ogai_embedding, updated_at)
-                             VALUES ($1, $2, $3, ogai_embedding($4, $5, $6), CURRENT_TIMESTAMP)',
+                             VALUES ($1, $2, $3, pg_catalog.ogai_embedding($4, $5, $6), CURRENT_TIMESTAMP)',
                             p_src_schema, p_src_table || '_vector', p_primary_key
                         ) USING p_pk_value, v_chunk_id, v_chunk_record.chunk,
                                 v_chunk_record.chunk, p_embed_model, p_dim;
@@ -209,7 +209,7 @@ ELSE
                     -- No chunking, only store vectors
                     EXECUTE format(
                         'INSERT INTO %I.%I (%I, ogai_embedding, updated_at)
-                         VALUES ($1, ogai_embedding($2, $3, $4), CURRENT_TIMESTAMP)',
+                         VALUES ($1, pg_catalog.ogai_embedding($2, $3, $4), CURRENT_TIMESTAMP)',
                         p_src_schema, p_src_table || '_vector', p_primary_key
                     ) USING p_pk_value, p_content, p_embed_model, p_dim;
 END IF;
@@ -245,7 +245,7 @@ ELSE
             VALUES (v_task_id, p_pk_value::INTEGER, 'ready', CURRENT_TIMESTAMP);
             
             -- Notify background processing
-            PERFORM ogai_notify();
+            PERFORM pg_catalog.ogai_notify();
         END;
 END IF;
 END;
@@ -530,7 +530,7 @@ END IF;
             IF p_table_method = 'append' THEN
                 -- Append mode: update vector column in original table
                 EXECUTE format(
-                    'UPDATE %I.%I SET %I = ogai_embedding($1, $2, $3) WHERE %I = $4',
+                    'UPDATE %I.%I SET %I = pg_catalog.ogai_embedding($1, $2, $3) WHERE %I = $4',
                     p_src_schema, p_src_table, v_vector_col, p_primary_key
                 ) USING v_row.content, p_embed_model, p_dim, v_row.pk;
             ELSE
@@ -542,11 +542,11 @@ END IF;
                         v_chunk_id INTEGER := 1;
                     BEGIN
                         FOR v_chunk_record IN
-                            SELECT chunk FROM ogai_chunk(v_row.content, p_max_chunk_size, p_max_chunk_overlap)
+                            SELECT chunk FROM pg_catalog.ogai_chunk(v_row.content, p_max_chunk_size, p_max_chunk_overlap)
                         LOOP
                             EXECUTE format(
                                 'INSERT INTO %I.%I (%I, chunk_id, chunk_text, ogai_embedding)
-                                 VALUES ($1, $2, $3, ogai_embedding($4, $5, $6))',
+                                 VALUES ($1, $2, $3, pg_catalog.ogai_embedding($4, $5, $6))',
                                 p_src_schema, p_src_table || '_vector', p_primary_key
                             ) USING v_row.pk, v_chunk_id, v_chunk_record.chunk,
                                     v_chunk_record.chunk, p_embed_model, p_dim;
@@ -557,7 +557,7 @@ END IF;
                     -- No chunking, only store vectors
                     EXECUTE format(
                         'INSERT INTO %I.%I (%I, ogai_embedding)
-                         VALUES ($1, ogai_embedding($2, $3, $4))',
+                         VALUES ($1, pg_catalog.ogai_embedding($2, $3, $4))',
                         p_src_schema, p_src_table || '_vector', p_primary_key
                     ) USING v_row.pk, v_row.content, p_embed_model, p_dim;
                 END IF;
@@ -585,7 +585,7 @@ END IF;
         GET DIAGNOSTICS v_processed = ROW_COUNT;
 
         -- Notify background worker
-        PERFORM ogai_notify();
+        PERFORM pg_catalog.ogai_notify();
     END IF;
 
     -- 7. Create indexes
@@ -706,7 +706,7 @@ END IF;
         v_vector_col := 'ogai_embedding';
         -- append mode query source table
         v_embedding_vector := format(
-            'ogai_embedding(%L, %L, %L)',
+            'pg_catalog.ogai_embedding(%L, %L, %L)',
             p_query,
             v_task_record.model_key,
             v_task_record.dim
@@ -803,7 +803,7 @@ ELSE
         -- join mode query view
         v_vector_col := 'ogai_embedding';
         v_embedding_vector := format(
-            'ogai_embedding(%L, %L, %L)',
+            'pg_catalog.ogai_embedding(%L, %L, %L)',
             p_query,
             v_task_record.model_key,
             v_task_record.dim
@@ -1094,7 +1094,7 @@ BEGIN
     -- Vector search
     FOR v_search_result IN
         SELECT result_record
-        FROM ogai.search(p_task_name, p_user_question, '', p_search_limit, '')
+        FROM ogai.search(p_task_name, p_user_question, ''::TEXT, p_search_limit, ''::TEXT)
     LOOP
         IF v_search_result IS NULL THEN
             CONTINUE;
@@ -1112,13 +1112,13 @@ BEGIN
     END LOOP;
 
     IF array_length(v_raw_docs, 1) IS NULL OR array_length(v_raw_docs, 1) = 0 THEN
-        RETURN ogai_generate(p_user_question, p_chat_model);
+        RETURN pg_catalog.ogai_generate(p_user_question, p_chat_model);
     END IF;
 
     -- Reranking
     FOR v_reranked IN
         SELECT document
-        FROM ogai_rerank(p_user_question, v_raw_docs, p_reranker_model)
+        FROM pg_catalog.ogai_rerank(p_user_question, v_raw_docs, p_reranker_model)
         ORDER BY rerank_score DESC
         LIMIT p_rerank_limit
     LOOP
@@ -1137,7 +1137,7 @@ BEGIN
     );
 
     -- Call LLM to generate answer
-    v_answer := ogai_generate(v_final_prompt, p_chat_model);
+    v_answer := pg_catalog.ogai_generate(v_final_prompt, p_chat_model);
 
     RETURN v_answer;
 END;
@@ -1204,7 +1204,7 @@ BEGIN
 
     -- Generate embedding for vector search
     v_embedding_vector := format(
-        'ogai_embedding(%L, %L, %L)',
+        'pg_catalog.ogai_embedding(%L, %L, %L)',
         p_query,
         v_task_record.model_key,
         v_task_record.dim
