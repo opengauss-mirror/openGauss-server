@@ -1697,6 +1697,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
+    /* Materialize ROWNUM at the scan and carry it through ORDER BY / window. */
+    preprocess_rownum_carrythrough(root, parse);
     /* Change ROWNUM to LIMIT if possible */
     preprocess_rownum(root, parse);
     DEBUG_QRW("After preprocess rownum");

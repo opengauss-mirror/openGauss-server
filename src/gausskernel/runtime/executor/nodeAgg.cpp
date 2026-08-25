@@ -832,6 +832,16 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
     int numAggs = aggstate->numaggs;
     TupleTableSlot *slot = aggstate->evalslot;
 
+    /*
+     * Publish the per-input ordinal into ps_rownum so a ROWNUM referenced
+     * inside an aggregate argument (evaluated below via evalproj) sees
+     * 1, 2, 3, ... per input row. See the comment on AggState.has_rownum_arg.
+     * We overwrite ps_rownum here, so any wrapper increments done when the
+     * Agg emits tuples do not corrupt the input ordinal.
+     */
+    if (aggstate->has_rownum_arg)
+        aggstate->ss.ps.ps_rownum = aggstate->agg_input_rownum++;
+
     /* compute input for all aggregates */
     if (aggstate->evalproj)
         aggstate->evalslot = ExecProject(aggstate->evalproj, NULL);
@@ -2417,6 +2427,12 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
     aggstate->is_final = node->is_final;
     aggstate->ss.ps.ExecProcNode = ExecAgg;
 
+    /* Does this Agg reference ROWNUM (e.g. max(rownum))? See AggState comment. */
+    aggstate->has_rownum_arg =
+        contain_rownum_walker((Node*)node->plan.targetlist, NULL) ||
+        contain_rownum_walker((Node*)node->plan.qual, NULL);
+    aggstate->agg_input_rownum = 0;
+
     if (aggstate->ss.ps.state->es_is_flt_frame) {
         aggstate->numtrans = 0;
         aggstate->aggstrategy = node->aggstrategy;
@@ -2818,6 +2834,9 @@ void ExecReScanAgg(AggState* node)
     int numGroupingSets = Max(node->maxsets, 1);
     int setno;
     errno_t rc;
+
+    /* reset ROWNUM-in-agg-arg per-input ordinal for this scan */
+    node->agg_input_rownum = 0;
 
     /* Already reset, just rescan lefttree */
     bool isRescan = node->ss.ps.recursive_reset && node->ss.ps.state->es_recursive_next_iteration;
@@ -3505,6 +3524,10 @@ static void advance_transition_function_flattened(AggState *aggstate, AggStatePe
 static void advance_aggregates_flattened(AggState *aggstate, AggStatePerGroup pergroup)
 {
     bool dummynull;
+
+    /* see advance_aggregates(): publish per-input ordinal for ROWNUM-in-agg-arg */
+    if (aggstate->has_rownum_arg)
+        aggstate->ss.ps.ps_rownum = aggstate->agg_input_rownum++;
 
     ExecEvalExprSwitchContext(aggstate->phase->evaltrans, aggstate->tmpcontext, &dummynull, NULL);
 }
