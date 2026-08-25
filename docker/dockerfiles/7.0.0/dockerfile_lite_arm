@@ -1,6 +1,6 @@
 FROM openeuler/openeuler:22.03-lts
 
-ARG VERSION=7.0.0-RC3
+ARG VERSION=7.0.0
 
 COPY openGauss-Lite-${VERSION}-openEuler22.03-aarch64.tar.gz .
 COPY gosu-arm64 /usr/local/bin/gosu
