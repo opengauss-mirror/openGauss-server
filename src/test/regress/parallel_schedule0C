@@ -223,3 +223,6 @@ test: sql_limit
 
 test: insert_on_conflict
 test: insert_on_conflict_1
+
+# RECORD field deparsing for proven-dummy subqueries
+test: ruleutils_record
