@@ -66,6 +66,7 @@
 #include "storage/smgr/segment.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/bufpage.h"
@@ -9079,7 +9080,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].forknum = bufHdr->tag.forkNum;
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
-            fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
+            fctx->record[i].pinning_backends = GetBufferRefCount(buf_state, bufHdr->buf_id);
             fctx->record[i].segfileno = bufHdr->extra->seg_fileno;
             fctx->record[i].segblockno = bufHdr->extra->seg_blockno;
 

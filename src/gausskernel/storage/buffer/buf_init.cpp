@@ -35,6 +35,7 @@
 #include "access/htap/ss_imcucache_mgr.h"
 #endif
 #include "storage/buf/crbuf.h"
+#include "storage/buf/buf_group_ref.h"
 
 #ifdef ENABLE_LITE_MODE
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 2;
@@ -195,6 +196,8 @@ void InitBufferPool(void)
         }
         g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);
         g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_FORK_TBL);
+
+        InitGroupRefCounts(NORMAL_SHARED_BUFFER_NUM);
     }
 
     /* re-assign locks for un-reinited buffers, may delete this */

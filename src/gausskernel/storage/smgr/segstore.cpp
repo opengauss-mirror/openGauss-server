@@ -32,6 +32,7 @@
 #include "pgstat.h"
 #include "portability/instr_time.h"
 #include "postmaster/aiocompleter.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/procarray.h"
 #include "storage/smgr/segment.h"
@@ -2537,7 +2538,7 @@ static void spc_evict_extent_buffers(RelFileNode rnode, uint32 logic_start, uint
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
         UnpinBuffer(buf_desc, true);
         buf_state = LockBufHdr(buf_desc);
-        if (BUF_STATE_GET_REFCOUNT(buf_state) > 0) {
+        if (IsBufferRefCountGreaterThanZero(buf_state, buf_desc->buf_id)) {
             UnlockBufHdr(buf_desc, buf_state);
             ereport(WARNING, (errmodule(MOD_SEGMENT_PAGE),
                               errmsg("[MOVE_EXTENT] block %u has reference count, skip evict buffer", blkno)));

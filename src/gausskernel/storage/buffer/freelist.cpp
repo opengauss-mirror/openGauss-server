@@ -20,6 +20,7 @@
 #include "access/xlog.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/proc.h"
 #include "postmaster/aiocompleter.h" /* this is for the function AioCompltrIsReady() */
 #include "postmaster/bgwriter.h"
@@ -290,7 +291,8 @@ retry:
             continue;
         }
 #endif
-        if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META) &&
+        bool is_evictable = IsBufferRefCountZero(local_buf_state, buf->buf_id);
+        if (is_evictable && !(local_buf_state & BM_IS_META) &&
             (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
             /* Found a usable buffer */
             if (strategy != NULL)
@@ -315,8 +317,8 @@ retry:
                 goto retry;
             } else if (dw_page_writer_running()) {
                 ereport(LOG, (errmsg("double writer is on, no buffer available, this buffer dirty is %lu, "
-                                     "this buffer refcount is %lu, now dirty page num is %ld",
-                                     (local_buf_state & BM_DIRTY), BUF_STATE_GET_REFCOUNT(local_buf_state),
+                                     "this buffer refcount is %u, now dirty page num is %ld",
+                                     (local_buf_state & BM_DIRTY), GetBufferRefCount(local_buf_state, buf->buf_id),
                                      get_dirty_page_num())));
                 perform_delay(&retry_buf_status);
                 goto retry;
@@ -624,7 +626,7 @@ RETRY:
     }
 
     local_buf_state = LockBufHdr(buf);
-    if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(local_buf_state) <= 1 &&
+    if (IsBufferRefCountZero(local_buf_state, buf->buf_id) && BUF_STATE_GET_USAGECOUNT(local_buf_state) <= 1 &&
         (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY)) &&
         !(local_buf_state & BM_IS_META)) {
         strategy->current_was_in_ring = true;
@@ -746,7 +748,7 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
 
             if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id]) {
                 g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] = false;
-                enable_available = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META);
+                enable_available = IsBufferRefCountZero(local_buf_state, buf->buf_id) && !(local_buf_state & BM_IS_META);
                 need_push_dirst_list = need_scan_dirty && dirty_list_num < CANDIDATE_DIRTY_LIST_LEN &&
                         free_space_enough(buf_id);
                 if (enable_available) {
@@ -777,7 +779,7 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
             buf_id = candidate_dirty_list[i];
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);
-            enable_available = (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0) && !(local_buf_state & BM_IS_META)
+            enable_available = IsBufferRefCountZero(local_buf_state, buf->buf_id) && !(local_buf_state & BM_IS_META)
                 && free_space_enough(buf_id);
             if (enable_available) {
                 if (strategy != NULL) {
@@ -810,7 +812,8 @@ BufferDesc *SSTryGetBuffer(uint64 times, uint64 *buf_state)
             return NULL;
         }
 
-        if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META) &&
+        bool is_evictable = IsBufferRefCountZero(local_buf_state, buf->buf_id);
+        if (is_evictable && !(local_buf_state & BM_IS_META) &&
             (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
             *buf_state = local_buf_state;
             (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->get_buf_num_clock_sweep, 1);
