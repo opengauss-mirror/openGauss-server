@@ -1191,3 +1191,6 @@ test: remotetype_trust_security
 
 # test create force view
 test: create_force_view
+
+# RECORD field deparsing for proven-dummy subqueries
+test: ruleutils_record

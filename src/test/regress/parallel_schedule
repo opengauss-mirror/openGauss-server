@@ -829,3 +829,6 @@ test: wlm_memory_trace
 
 # test remotetype=coordinator trust bypass security
 test: remotetype_trust_security
+
+# RECORD field deparsing for proven-dummy subqueries
+test: ruleutils_record
