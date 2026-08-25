@@ -346,6 +346,51 @@ bool SqlLimitIsExceedMaxConcurrency(const SqlLimit *limit)
     return limit->stats.currConcurrency >= limit->maxConcurrency;
 }
 
+/* Identifier character: keyword must be bounded by non-ident chars to avoid
+ * matching substrings inside names like test_no_from / from_col. */
+static bool IsSqlLimitIdentChar(unsigned char c)
+{
+    return ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            c == '_' || c == '$');
+}
+
+/*
+ * Case-insensitive search for keyword as a whole word (SQL ident boundaries).
+ * Continues past substring hits that are part of a larger identifier.
+ */
+static const char* FindSqlLimitKeywordAsWord(const char* haystack, const char* keyword)
+{
+    size_t kwLen;
+    const char* search;
+
+    if (haystack == NULL || keyword == NULL) {
+        return NULL;
+    }
+
+    kwLen = strlen(keyword);
+    if (kwLen == 0) {
+        return NULL;
+    }
+
+    search = haystack;
+    while ((search = strcasestr(search, keyword)) != NULL) {
+        bool leftOk;
+        bool rightOk;
+
+        if (search == haystack) {
+            leftOk = true;
+        } else {
+            leftOk = !IsSqlLimitIdentChar((unsigned char)*(search - 1));
+        }
+        rightOk = !IsSqlLimitIdentChar((unsigned char)search[kwLen]);
+        if (leftOk && rightOk) {
+            return search;
+        }
+        search++;
+    }
+    return NULL;
+}
+
 bool SqlLimitIsHit(const SqlLimit *limit, const char *queryString, uint64 queryId)
 {
     if (limit == NULL || !limit->isValid) {
@@ -375,8 +420,7 @@ bool SqlLimitIsHit(const SqlLimit *limit, const char *queryString, uint64 queryI
             const char* currentPos = queryString;
             foreach_cell(cell, limit->typeData.keyword.keywords) {
                 const char* keyword = (const char*)lfirst(cell);
-                // find keyword in current position and after
-                const char* foundPos = strcasestr(currentPos, keyword);
+                const char* foundPos = FindSqlLimitKeywordAsWord(currentPos, keyword);
                 if (foundPos == NULL) {
                     return false;
                 }
