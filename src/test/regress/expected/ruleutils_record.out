@@ -12,3 +12,14 @@ Result
   Output: ((ss.x).f2)::information_schema.cardinal_number
   One-Time Filter: false
 (3 rows)
+explain performance
+select ordinal_position
+from information_schema.parameters
+where specific_name = null;
+QUERY PLAN
+--?Result  \(cost=.* rows=1 width=0\) \(actual time=.* rows=0 loops=1\)
+  Output: ((ss.x).f2)::information_schema.cardinal_number
+  One-Time Filter: false
+--?  \(CPU: ex c/r=.*, ex row=0, ex cyc=.*, inc cyc=.*\)
+--?Total runtime: .* ms
+(5 rows)

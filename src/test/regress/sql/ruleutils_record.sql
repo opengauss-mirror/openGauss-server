@@ -7,3 +7,8 @@ explain (verbose, costs off)
 select ordinal_position
 from information_schema.parameters
 where specific_name = null;
+
+explain performance
+select ordinal_position
+from information_schema.parameters
+where specific_name = null;
