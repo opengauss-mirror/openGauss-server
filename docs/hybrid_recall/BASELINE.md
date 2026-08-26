@@ -164,7 +164,8 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 | P2-2 BM25 branch Path | 1e9a24cae5 | `Limit → BM25 Index Scan`，经 1:1 LOCAL GATHER 接入 HybridRecall |
 | P2-3 ANN branch Path | 1e9a24cae5 | `Limit → Ann Index Scan`，小表嵌套规划期间局部关闭 seqscan 且调用后恢复 |
 | P2-2/3 payload | 1e9a24cae5 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
-| P2-4 公共 filter/recheck | 本提交 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
+| P2-4 公共 filter/recheck | 9b14a3b8d0 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
+| P2-5 串/并行 Path 与模式 | 待提交 | `off` 无 Stream、`force` 双 LOCAL GATHER、`auto` 枚举候选；串并行结果逐字节一致 |
 
 实现与回归证据：
 
@@ -203,5 +204,16 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
   LOCAL GATHER，`EXPLAIN` 保持普通 Sort/SeqScan（SubPlan 例包含 InitPlan）。
 - 标准增量构建、安装、重启日志：`build_logs/incremental_20260826_094243.log`。
 
-**P2-4 完成，G3 尚未关闭**：下一步为 P2-5 串并行候选与强制模式、P2-6 成本模型、
-P2-7 Param/custom/generic plan。
+### P2-5 串行/并行模式证据
+
+- 新增会话级 `hybrid_recall_parallel_mode = off|auto|force`，默认 `auto`；`off` 仅关闭
+  branch task stream，保留语义相同的串行 HybridRecall，reserved marker 不会漏到逐行执行。
+- `evidence/P2-5_test.sql` / `evidence/P2-5_live.log`：`off` 计划为 Hybrid Recall 下两个
+  `Limit → Index Scan/Ann Index Scan`，没有 Streaming；`force` 在两支路各增加一个
+  `Streaming(type: LOCAL GATHER)`；两种模式 Top-10 外部 `diff` 为空。
+- `auto` 同时枚举低启动成本串行 Path 与低总成本并行 Path；P2-5 的交叉占位成本在当前
+  500 行短查询上选择串行，P2-6 将替换为基于真实 branch cost、融合和 Stream 开销的模型。
+- 公共头文件触发的全树增量构建、安装和重启成功：
+  `build_logs/incremental_20260826_113242.log`；P2-4、P2-2/P2-3 活实例复测均 exit=0。
+
+**P2-5 完成，G3 尚未关闭**：下一步为 P2-6 成本模型、P2-7 Param/custom/generic plan。

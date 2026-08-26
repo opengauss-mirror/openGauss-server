@@ -31,12 +31,63 @@
 #include "optimizer/hybrid_recall_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/tlist.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
 static bool is_ann_am(Oid relam)
 {
     return relam == HNSW_AM_OID || relam == IVFFLAT_AM_OID || relam == DISKANN_AM_OID;
+}
+
+static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
+                                                 Index relid,
+                                                 AttrNumber id_attno,
+                                                 AttrNumber text_attno,
+                                                 AttrNumber vector_attno,
+                                                 Node* query_text,
+                                                 Node* query_vector,
+                                                 List* common_quals,
+                                                 int64 final_topk,
+                                                 bool parallel_branches,
+                                                 bool require_parallel)
+{
+    HybridRecallPath* path = (HybridRecallPath*)palloc0(sizeof(HybridRecallPath));
+    path->path.type = T_HybridRecallPath;
+    path->path.pathtype = T_HybridRecall;
+    path->path.parent = rel;
+    path->path.pathkeys = NIL; /* fused order is delivered, const sort dropped */
+    path->path.rows = (double)final_topk;
+    if (path->path.rows < 1)
+        path->path.rows = 1;
+
+    /*
+     * [P2-5] Keep both alternatives alive in auto mode by giving serial the
+     * lower startup cost and parallel the lower total cost.  P2-6 replaces
+     * these deliberately simple crossing costs with branch-derived costs.
+     */
+    path->path.startup_cost = parallel_branches ? (Cost)5.0 : (Cost)0.1;
+    path->path.total_cost = parallel_branches ? (Cost)10.0 : (Cost)20.0;
+
+    path->text_path = NULL;  /* branches are planned recursively at plan time */
+    path->vector_path = NULL;
+    path->relid = relid; /* RT index, not relation OID */
+    path->id_attno = id_attno;
+    path->text_attno = text_attno;
+    path->vector_attno = vector_attno;
+    path->query_text = (Expr*)copyObject(query_text);
+    path->query_vector = (Expr*)copyObject(query_vector);
+    path->common_quals = (List*)copyObject(common_quals);
+    path->final_topk_est = final_topk;
+    path->text_candidates_est = 100;
+    path->vector_candidates_est = 100;
+    path->fusion = HYBRID_FUSION_RRF;
+    path->rrf_k = 60.0;
+    path->text_weight = 0.5;
+    path->vector_weight = 0.5;
+    path->parallel_branches = parallel_branches;
+    path->require_parallel = require_parallel;
+    return path;
 }
 
 void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte)
@@ -182,35 +233,6 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
     root->sort_pathkeys = NIL;
     root->group_pathkeys = NIL;
 
-    HybridRecallPath* path = (HybridRecallPath*)palloc0(sizeof(HybridRecallPath));
-    path->path.type = T_HybridRecallPath;
-    path->path.pathtype = T_HybridRecall;
-    path->path.parent = rel;
-    path->path.pathkeys = NIL; /* fused order is delivered, const sort dropped */
-    path->path.rows = (double)final_topk;
-    if (path->path.rows < 1)
-        path->path.rows = 1;
-    path->path.startup_cost = (Cost)0.1;
-    path->path.total_cost = (Cost)10.0; /* P2-6 calibrates */
-
-    path->text_path = NULL;  /* branches are planned recursively at plan time */
-    path->vector_path = NULL;
-    path->relid = rel->relid; /* RT index, not relation OID */
-    path->id_attno = id_var->varattno;
-    path->text_attno = text_var->varattno;
-    path->vector_attno = vec_var->varattno;
-    path->query_text = (Expr*)copyObject(q_text_raw);
-    path->query_vector = (Expr*)copyObject(q_vec_raw);
-    path->common_quals = common_quals;
-    path->final_topk_est = (int64)path->path.rows;
-    path->text_candidates_est = 100;
-    path->vector_candidates_est = 100;
-    path->fusion = HYBRID_FUSION_RRF;
-    path->rrf_k = 60.0;
-    path->text_weight = 0.5;
-    path->vector_weight = 0.5;
-    path->parallel_branches = true;
-
     /*
      * The reserved marker is a planner directive, not a function with a
      * meaningful scalar fallback.  Once recognized we have also replaced
@@ -223,6 +245,26 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
      */
     rel->pathlist = NIL;
     rel->partial_pathlist = NIL;
-    add_path(root, rel, (Path*)path);
+    switch (u_sess->attr.attr_sql.hybrid_recall_parallel_mode) {
+        case HYBRID_RECALL_PARALLEL_OFF:
+            add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
+                rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
+                q_text_raw, q_vec_raw, common_quals, final_topk, false, false));
+            break;
+        case HYBRID_RECALL_PARALLEL_FORCE:
+            add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
+                rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
+                q_text_raw, q_vec_raw, common_quals, final_topk, true, true));
+            break;
+        case HYBRID_RECALL_PARALLEL_AUTO:
+        default:
+            add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
+                rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
+                q_text_raw, q_vec_raw, common_quals, final_topk, false, false));
+            add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
+                rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
+                q_text_raw, q_vec_raw, common_quals, final_topk, true, false));
+            break;
+    }
     set_cheapest(rel);
 }

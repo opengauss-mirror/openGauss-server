@@ -457,6 +457,17 @@ typedef enum {
     HNSW_ITERATIVE_SCAN_STRICT
 } HnswIterativeScanOptions;
 
+/*
+ * HybridRecall branch scheduling policy.  "off" disables only the two
+ * branch task streams; the dedicated serial HybridRecall executor remains
+ * available so the reserved marker never falls through to scalar execution.
+ */
+typedef enum {
+    HYBRID_RECALL_PARALLEL_OFF = 0,
+    HYBRID_RECALL_PARALLEL_AUTO,
+    HYBRID_RECALL_PARALLEL_FORCE
+} HybridRecallParallelMode;
+
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
 

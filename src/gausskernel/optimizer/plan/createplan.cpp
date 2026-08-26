@@ -1154,8 +1154,8 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("hybrid recall: branch planning failed")));
 
-    Plan* text_stream = make_hybrid_task_stream(text_branch, 0);
-    Plan* vector_stream = make_hybrid_task_stream(vector_branch, 1);
+    Plan* text_input = best_path->parallel_branches ? make_hybrid_task_stream(text_branch, 0) : text_branch;
+    Plan* vector_input = best_path->parallel_branches ? make_hybrid_task_stream(vector_branch, 1) : vector_branch;
 
     /* Both branch queries emit (id, ...) - the score expr is consumed as
      * the index ORDER BY key, so the planner may drop it from the branch
@@ -1177,8 +1177,8 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
         }
     }
     HybridRecall* node = makeNode(HybridRecall);
-    node->plan.lefttree = text_stream;
-    node->plan.righttree = vector_stream;
+    node->plan.lefttree = text_input;
+    node->plan.righttree = vector_input;
     node->plan.targetlist = NIL; /* populated with the query targetlist below */
     node->plan.qual = NIL;
     /* Planner-generated nodes keep the original key attribute here.  At
@@ -1199,7 +1199,7 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
     node->text_weight = best_path->text_weight;
     node->vector_weight = best_path->vector_weight;
     node->parallel_branches = best_path->parallel_branches;
-    node->require_parallel = false;
+    node->require_parallel = best_path->require_parallel;
     node->recheck_quals = (List*)copyObject(best_path->common_quals);
     /* SetCheckInfo (execStream.h) dereferences planTree->exec_nodes. */
     node->plan.exec_nodes = (ExecNodes*)copyObject(text_branch->exec_nodes);

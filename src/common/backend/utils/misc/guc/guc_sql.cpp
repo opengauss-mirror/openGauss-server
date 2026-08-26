@@ -366,6 +366,13 @@ static const struct config_enum_entry hnsw_iterative_scan_options[] = {
     {NULL, 0, false}
 };
 
+static const struct config_enum_entry hybrid_recall_parallel_mode_options[] = {
+    {"off", HYBRID_RECALL_PARALLEL_OFF, false},
+    {"auto", HYBRID_RECALL_PARALLEL_AUTO, false},
+    {"force", HYBRID_RECALL_PARALLEL_FORCE, false},
+    {NULL, 0, false}
+};
+
 typedef struct format_behavior_compat_entry {
     const char *name; /* name of behavior compat entry */
     int flag;         /* bit flag position */
@@ -3734,6 +3741,19 @@ static void InitSqlConfigureNamesEnum()
             &u_sess->datavec_ctx.hnsw_iterative_scan,
             HNSW_ITERATIVE_SCAN_RELAXED,
             hnsw_iterative_scan_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"hybrid_recall_parallel_mode",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Controls serial or parallel execution of HybridRecall branches."),
+            gettext_noop("Valid values are off, auto, and force. Off keeps HybridRecall serial; "
+                         "force requires two task streams; auto lets planner cost choose.")},
+            &u_sess->attr.attr_sql.hybrid_recall_parallel_mode,
+            HYBRID_RECALL_PARALLEL_AUTO,
+            hybrid_recall_parallel_mode_options,
             NULL,
             NULL,
             NULL},

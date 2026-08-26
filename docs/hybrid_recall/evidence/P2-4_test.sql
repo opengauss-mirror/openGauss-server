@@ -1,6 +1,7 @@
 -- P2-4 / P07: identical common-filter pushdown plus fusion-layer recheck.
 -- Prerequisite: S0 hybrid_recall_docs data/indexes and ogai marker function.
 \set ON_ERROR_STOP on
+SET hybrid_recall_parallel_mode = force;
 
 \echo === P2-4 PLAN: HIDDEN FILTER PAYLOAD ON BOTH BRANCHES ===
 SHOW enable_seqscan;
@@ -154,3 +155,4 @@ ORDER BY ogai.hybrid_rrf_marker(
 LIMIT 3;
 
 SHOW enable_seqscan;
+RESET hybrid_recall_parallel_mode;

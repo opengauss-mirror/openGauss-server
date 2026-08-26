@@ -1289,6 +1289,7 @@ typedef struct HybridRecallPath {
     double text_weight;
     double vector_weight;
     bool parallel_branches;
+    bool require_parallel;
 } HybridRecallPath;
 
 typedef struct PartIteratorPath {

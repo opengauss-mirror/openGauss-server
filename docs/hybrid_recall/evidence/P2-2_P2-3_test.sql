@@ -2,6 +2,7 @@
 -- Prerequisite: S0 hybrid_recall_docs data/indexes and ogai marker function.
 \set ON_ERROR_STOP on
 
+SET hybrid_recall_parallel_mode = force;
 SHOW enable_seqscan;
 
 -- Plan contract: Hybrid Recall, two LOCAL GATHER task streams, branch Limit,
@@ -129,3 +130,4 @@ ORDER BY ogai.hybrid_rrf_marker(
 LIMIT 3 OFFSET 1;
 
 SHOW enable_seqscan;
+RESET hybrid_recall_parallel_mode;

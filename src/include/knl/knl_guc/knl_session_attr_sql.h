@@ -286,6 +286,7 @@ typedef struct knl_session_attr_sql {
     bool var_eq_const_selectivity;
     bool enable_func_cache;
     int vectorEngineStrategy;
+    int hybrid_recall_parallel_mode;
     int gms_stats_history_retention;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     bool enable_custom_parser;
@@ -303,4 +304,3 @@ typedef struct knl_session_attr_sql {
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
-
