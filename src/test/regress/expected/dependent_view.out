@@ -124,27 +124,23 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 (12 rows)
 
 select * from second_dependent_view3;
- sec_dependent_field 
----------------------
- 1.0000
- 2.0000
-(2 rows)
-
+ERROR:  The view second_dependent_view3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
         relname         | object_type | valid 
 ------------------------+-------------+-------
  base_table             | r           | t
- master_view1           | v           | t
+ master_view1           | v           | f
  master_view2           | v           | f
  master_view3           | v           | t
  dependent_view1        | v           | f
  dependent_view2        | v           | f
- dependent_view3        | v           | t
+ dependent_view3        | v           | f
  dependent_view4        | v           | f
  dependent_view5        | v           | t
  second_dependent_view1 | v           | f
  second_dependent_view2 | v           | f
- second_dependent_view3 | v           | t
+ second_dependent_view3 | v           | f
 (12 rows)
 
 \d base_table
@@ -174,27 +170,23 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 (12 rows)
 
 select * from second_dependent_view3;
- sec_dependent_field 
----------------------
- 1.0000
- 2.0000
-(2 rows)
-
+ERROR:  The view second_dependent_view3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
         relname         | object_type | valid 
 ------------------------+-------------+-------
  base_table             | r           | t
- master_view1           | v           | t
+ master_view1           | v           | f
  master_view2           | v           | f
  master_view3           | v           | t
  dependent_view1        | v           | f
  dependent_view2        | v           | f
- dependent_view3        | v           | t
+ dependent_view3        | v           | f
  dependent_view4        | v           | f
  dependent_view5        | v           | t
  second_dependent_view1 | v           | f
  second_dependent_view2 | v           | f
- second_dependent_view3 | v           | t
+ second_dependent_view3 | v           | f
 (12 rows)
 
 \d base_table
@@ -269,34 +261,26 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 (12 rows)
 
 select * from second_dependent_view3;
- sec_dependent_field 
----------------------
-                    
-                    
-(2 rows)
-
+ERROR:  The view second_dependent_view3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select * from dependent_view3;
- dependent_field 
------------------
-                
-                
-(2 rows)
-
+ERROR:  The view dependent_view3 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
         relname         | object_type | valid 
 ------------------------+-------------+-------
  base_table             | r           | t
- master_view1           | v           | t
+ master_view1           | v           | f
  master_view2           | v           | f
  master_view3           | v           | t
  dependent_view1        | v           | f
  dependent_view2        | v           | f
- dependent_view3        | v           | t
+ dependent_view3        | v           | f
  dependent_view4        | v           | f
  dependent_view5        | v           | t
  second_dependent_view1 | v           | f
  second_dependent_view2 | v           | f
- second_dependent_view3 | v           | t
+ second_dependent_view3 | v           | f
 (12 rows)
 
 \d base_table
@@ -310,8 +294,6 @@ DROP TABLE base_table CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to view master_view2
 drop cascades to view dependent_view4
-drop cascades to view master_view3
-drop cascades to view dependent_view5
 drop cascades to view master_view1
 drop cascades to view dependent_view3
 drop cascades to view second_dependent_view3
@@ -319,6 +301,8 @@ drop cascades to view dependent_view1
 drop cascades to view second_dependent_view1
 drop cascades to view dependent_view2
 drop cascades to view second_dependent_view2
+drop cascades to view master_view3
+drop cascades to view dependent_view5
 -- test2：物化视图
 DROP TABLE IF EXISTS base_table;
 NOTICE:  table "base_table" does not exist, skipping
@@ -450,26 +434,27 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 (2 rows)
 
 REFRESH MATERIALIZED VIEW master_view1;
+ERROR:  The materialized view master_view1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
    relname    | object_type | valid 
 --------------+-------------+-------
  base_table   | r           | t
- master_view1 | m           | t
+ master_view1 | m           | f
 (2 rows)
 
 select * from master_view1;
- id | field 
-----+-------
- 1  |      
- 2  |      
- 3  |      
-(3 rows)
+ id | field  
+----+--------
+  1 | 1.0000
+  2 | 2.0000
+(2 rows)
 
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
    relname    | object_type | valid 
 --------------+-------------+-------
  base_table   | r           | t
- master_view1 | m           | t
+ master_view1 | m           | f
 (2 rows)
 
 \d base_table
@@ -507,7 +492,7 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_1_pkey | i           | t
  t_view_independent_2      | r           | t
@@ -521,23 +506,19 @@ HINT:  Please re-add missing table fields.
 ALTER TABLE t_view_independent_1 ADD COLUMN c2 text;
 --- 查询视图
 select * from v_view_independent_1;
- vc1 | vc2 | vc3 | vc4 
------+-----+-----+-----
-   2 |     |   2 | 2y
-   3 |     |   3 | 3y
-(2 rows)
-
+ERROR:  The view v_view_independent_1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 -- 查看视图为有效状态
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_1_pkey | i           | t
  t_view_independent_2      | r           | t
  t_view_independent_2_pkey | i           | t
- v_view_independent_1      | v           | t
+ v_view_independent_1      | v           | f
 (7 rows)
 
 --- 修改字段类型
@@ -546,7 +527,7 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_2      | r           | t
  t_view_independent_2_pkey | i           | t
@@ -555,21 +536,17 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
 (7 rows)
 
 select * from v_view_independent_1;
- vc1 | vc2 | vc3 | vc4 
------+-----+-----+-----
- 2   |     |   2 | 2y
- 3   |     |   3 | 3y
-(2 rows)
-
+ERROR:  The view v_view_independent_1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_2      | r           | t
  t_view_independent_2_pkey | i           | t
- v_view_independent_1      | v           | t
+ v_view_independent_1      | v           | f
  t_view_independent_1_pkey | i           | t
 (7 rows)
 
@@ -579,7 +556,7 @@ select relname, object_type, valid from pg_object join pg_class on object_oid=oi
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_2      | r           | t
  v_view_independent_1      | v           | f
@@ -591,18 +568,16 @@ ERROR:  The view v_view_independent_1 is invalid, please make it valid before op
 HINT:  Please re-add missing table fields.
 ALTER TABLE t_view_independent_2 ADD COLUMN c1 text;
 select * from v_view_independent_1;
- vc1 | vc2 | vc3 | vc4 
------+-----+-----+-----
-(0 rows)
-
+ERROR:  The view v_view_independent_1 is invalid, please make it valid before operation.
+HINT:  Please re-add missing table fields.
 select relname, object_type, valid from pg_object join pg_class on object_oid=oid and relnamespace = (select Oid from pg_namespace where nspname='dependent_view') order by object_oid;
           relname          | object_type | valid 
 ---------------------------+-------------+-------
  base_table                | r           | t
- master_view1              | m           | t
+ master_view1              | m           | f
  t_view_independent_1      | r           | t
  t_view_independent_2      | r           | t
- v_view_independent_1      | v           | t
+ v_view_independent_1      | v           | f
  t_view_independent_1_pkey | i           | t
 (6 rows)
 
