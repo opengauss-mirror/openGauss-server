@@ -1011,4 +1011,4 @@
 ./include/pqcomm.h
 ./include/pqexpbuffer.h
 [version]
-7.0.0-RC3
+7.0.0
