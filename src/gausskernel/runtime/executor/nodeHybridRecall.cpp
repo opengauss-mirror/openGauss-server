@@ -47,15 +47,65 @@ typedef struct HybridCandEntry {
 
 /*
  * hash_create's custom hash/match callbacks receive only the key, so the
- * doc-key TypeCacheEntry is passed through this process-local pointer.
- * Safe because the fusion parent always runs in the query's main thread
- * (design doc §5.1 - stream workers never execute this node), one query
- * at a time per backend; stream worker threads in this process never
- * touch this path. Asserted below.
+ * doc-key TypeCacheEntry is passed through this thread-local pointer.  A
+ * gaussdb process hosts multiple session threads; process-global state here
+ * would race concurrent HybridRecall queries using different key types.
+ * Stream workers never execute the fusion parent (design doc §5.1).
  */
-static TypeCacheEntry* g_hybrid_id_tcache = NULL;
+static THR_LOCAL TypeCacheEntry* g_hybrid_id_tcache = NULL;
 
 static TupleTableSlot* ExecHybridRecall(PlanState* state);
+
+/*
+ * Planner-generated HybridRecall targetlists deliberately retain base-table
+ * Vars through planning, because openGauss plan-copy/cache processing can
+ * restore varattno from the original-column metadata.  Once ExecInit starts,
+ * the Plan is final: map each distinct payload column to the positional branch
+ * schema (key=1, score=2, payload=3..N) exactly once.  Handmade P0 vehicle
+ * plans have a NIL targetlist and continue to use id_resno as a branch resno.
+ */
+static void hybrid_map_planner_output_vars(HybridRecall* node)
+{
+    if (node->plan.targetlist == NIL)
+        return;
+
+    List* payload_attnos = NIL;
+    ListCell* lc = NULL;
+    foreach (lc, node->plan.targetlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (!IsA(tle->expr, Var))
+            continue;
+
+        Var* var = (Var*)tle->expr;
+        AttrNumber original_attno = var->varoattno > 0 ? var->varoattno : var->varattno;
+        AttrNumber branch_attno = InvalidAttrNumber;
+        if (original_attno == node->id_resno) {
+            branch_attno = 1;
+        } else {
+            int payload_index = 0;
+            ListCell* pc = NULL;
+            foreach (pc, payload_attnos) {
+                if ((AttrNumber)lfirst_int(pc) == original_attno) {
+                    branch_attno = (AttrNumber)(3 + payload_index);
+                    break;
+                }
+                payload_index++;
+            }
+            if (branch_attno == InvalidAttrNumber) {
+                branch_attno = (AttrNumber)(3 + list_length(payload_attnos));
+                payload_attnos = lappend_int(payload_attnos, original_attno);
+            }
+        }
+
+        var->varno = OUTER_VAR;
+        var->varattno = branch_attno;
+        /* Keep varoattno as the immutable base-table identity.  Cached plans
+         * can be executed more than once; the next ExecInit must rebuild the
+         * same mapping from original coordinates, not from a prior run's
+         * branch position. */
+    }
+    list_free(payload_attnos);
+}
 
 static uint32 hybrid_id_hash(const void* key, Size keysize)
 {
@@ -167,6 +217,7 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     state->ps.righttree = state->vector_state;
 
     ExecAssignExprContext(estate, &state->ps);
+    hybrid_map_planner_output_vars(node);
 
     /*
      * Branch schema contract: children output (doc_id, branch score,
@@ -176,27 +227,34 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     TupleDesc text_desc = state->text_state->ps_ResultTupleSlot->tts_tupleDescriptor;
     TupleDesc vector_desc = state->vector_state->ps_ResultTupleSlot->tts_tupleDescriptor;
 
-    if (node->id_resno < 1 || node->id_resno > text_desc->natts || node->id_resno > vector_desc->natts)
+    AttrNumber branch_id_resno = node->plan.targetlist == NIL ? node->id_resno : 1;
+    if (branch_id_resno < 1 || branch_id_resno > text_desc->natts || branch_id_resno > vector_desc->natts)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("HybridRecall id_resno %d is outside the branch targetlists", node->id_resno)));
+                 errmsg("HybridRecall id_resno %d is outside the branch targetlists", branch_id_resno)));
 
-    Oid id_type = text_desc->attrs[node->id_resno - 1].atttypid;
-    if (vector_desc->attrs[node->id_resno - 1].atttypid != id_type)
+    Oid id_type = text_desc->attrs[branch_id_resno - 1].atttypid;
+    if (vector_desc->attrs[branch_id_resno - 1].atttypid != id_type)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("HybridRecall branches disagree on the doc key type")));
 
-    if (node->text_score_resno < 1 || node->text_score_resno > text_desc->natts ||
-        text_desc->attrs[node->text_score_resno - 1].atttypid != FLOAT8OID)
+    /* Score columns are diagnostic only (rank drives fusion), so float4 or
+     * float8 are both fine and a missing column (resno 0) is tolerated. */
+    if (node->text_score_resno > text_desc->natts ||
+        (node->text_score_resno >= 1 &&
+         text_desc->attrs[node->text_score_resno - 1].atttypid != FLOAT8OID &&
+         text_desc->attrs[node->text_score_resno - 1].atttypid != FLOAT4OID))
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("HybridRecall text branch must supply a float8 score column")));
-    if (node->vector_distance_resno < 1 || node->vector_distance_resno > vector_desc->natts ||
-        vector_desc->attrs[node->vector_distance_resno - 1].atttypid != FLOAT8OID)
+                 errmsg("HybridRecall text branch must supply a float4/float8 score column")));
+    if (node->vector_distance_resno > vector_desc->natts ||
+        (node->vector_distance_resno >= 1 &&
+         vector_desc->attrs[node->vector_distance_resno - 1].atttypid != FLOAT8OID &&
+         vector_desc->attrs[node->vector_distance_resno - 1].atttypid != FLOAT4OID))
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("HybridRecall vector branch must supply a float8 distance column")));
+                 errmsg("HybridRecall vector branch must supply a float4/float8 distance column")));
 
     state->id_tcache = lookup_type_cache(id_type,
                                          TYPECACHE_HASH_PROC | TYPECACHE_EQ_OPR | TYPECACHE_LT_OPR);
@@ -220,19 +278,25 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     state->text_candidates_state = ExecInitExpr((Expr*)node->text_candidates, (PlanState*)state);
     state->vector_candidates_state = ExecInitExpr((Expr*)node->vector_candidates, (PlanState*)state);
 
-    /* Result layout (V1): doc_id, source_mask, text_rank, vector_rank,
-     * hybrid_score. Full projection against a planner targetlist arrives
-     * with P2; the debug/vehicle path (P0-4b) consumes exactly this. */
-    TupleDesc result_desc;
-    result_desc = CreateTemplateTupleDesc(5, false);
-    TupleDescInitEntry(result_desc, (AttrNumber)1, "doc_id", id_type, -1, 0);
-    TupleDescInitEntry(result_desc, (AttrNumber)2, "source_mask", INT4OID, -1, 0);
-    TupleDescInitEntry(result_desc, (AttrNumber)3, "text_rank", INT4OID, -1, 0);
-    TupleDescInitEntry(result_desc, (AttrNumber)4, "vector_rank", INT4OID, -1, 0);
-    TupleDescInitEntry(result_desc, (AttrNumber)5, "hybrid_score", FLOAT8OID, -1, 0);
-
-    ExecInitResultTupleSlot(estate, &state->ps);
-    ExecSetSlotDescriptor(state->ps.ps_ResultTupleSlot, result_desc);
+    /* Result layout: the PLAN targetlist (query tlist, marker already a
+     * Const). The executor materializes each entry: Var -> stored candidate
+     * tuple attribute, Const -> constant. The vehicle's 5-column contract
+     * remains supported when plan->targetlist is NIL (handmade plans). */
+    if (node->plan.targetlist != NIL) {
+        TupleDesc result_desc = ExecTypeFromTL(node->plan.targetlist, false);
+        ExecInitResultTupleSlot(estate, &state->ps);
+        ExecSetSlotDescriptor(state->ps.ps_ResultTupleSlot, result_desc);
+    } else {
+        TupleDesc result_desc;
+        result_desc = CreateTemplateTupleDesc(5, false);
+        TupleDescInitEntry(result_desc, (AttrNumber)1, "doc_id", id_type, -1, 0);
+        TupleDescInitEntry(result_desc, (AttrNumber)2, "source_mask", INT4OID, -1, 0);
+        TupleDescInitEntry(result_desc, (AttrNumber)3, "text_rank", INT4OID, -1, 0);
+        TupleDescInitEntry(result_desc, (AttrNumber)4, "vector_rank", INT4OID, -1, 0);
+        TupleDescInitEntry(result_desc, (AttrNumber)5, "hybrid_score", FLOAT8OID, -1, 0);
+        ExecInitResultTupleSlot(estate, &state->ps);
+        ExecSetSlotDescriptor(state->ps.ps_ResultTupleSlot, result_desc);
+    }
     state->ps.ps_ProjInfo = NULL;
 
     /* Candidates live in a dedicated context so that End/Rescan can drop
@@ -302,6 +366,19 @@ static void hybrid_validate_options(HybridRecallState* node)
                         errmsg("HybridRecall RRF parameters are invalid")));
 }
 
+static double hybrid_get_float_column(TupleTableSlot* slot, AttrNumber resno, bool* isnull)
+{
+    Datum value = heap_slot_getattr(slot, resno, isnull);
+    if (*isnull)
+        return 0.0;
+
+    Oid type = slot->tts_tupleDescriptor->attrs[resno - 1].atttypid;
+    if (type == FLOAT4OID)
+        return (double)DatumGetFloat4(value);
+    Assert(type == FLOAT8OID);
+    return DatumGetFloat8(value);
+}
+
 /* Insert-or-merge one branch row. Rank is the 1-based position inside the
  * branch stream (index order == recall order, design doc §3.4). */
 static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slot, bool is_text, uint32 rank)
@@ -311,14 +388,15 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
      * canonical accessor deforms on demand - direct tts_values reads
      * are only valid for materialized slots. */
     bool id_isnull = false;
-    Datum id = heap_slot_getattr(slot, plan->id_resno, &id_isnull);
+    AttrNumber branch_id_resno = plan->plan.targetlist == NIL ? plan->id_resno : 1;
+    Datum id = heap_slot_getattr(slot, branch_id_resno, &id_isnull);
     if (id_isnull)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                         errmsg("HybridRecall doc key must not be NULL (V1 requires a stable non-null key)"),
                         errdetail("branch=%s natts=%d nvalid=%d id_resno=%d",
                                   is_text ? "text" : "vector",
                                   slot->tts_tupleDescriptor ? slot->tts_tupleDescriptor->natts : -1,
-                                  slot->tts_nvalid, plan->id_resno)));
+                                  slot->tts_nvalid, branch_id_resno)));
 
     bool found = false;
 
@@ -352,16 +430,16 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
         entry->cand.text_rank = rank;
         entry->cand.source_mask |= 1;
         bool score_null = false;
-        entry->cand.text_score = DatumGetFloat8(heap_slot_getattr(slot, plan->text_score_resno, &score_null));
-        if (score_null)
-            entry->cand.text_score = 0.0;
+        if (plan->text_score_resno >= 1) {
+            entry->cand.text_score = hybrid_get_float_column(slot, plan->text_score_resno, &score_null);
+        }
     } else {
         entry->cand.vector_rank = rank;
         entry->cand.source_mask |= 2;
         bool dist_null = false;
-        entry->cand.vector_distance = DatumGetFloat8(heap_slot_getattr(slot, plan->vector_distance_resno, &dist_null));
-        if (dist_null)
-            entry->cand.vector_distance = 0.0;
+        if (plan->vector_distance_resno >= 1) {
+            entry->cand.vector_distance = hybrid_get_float_column(slot, plan->vector_distance_resno, &dist_null);
+        }
     }
 }
 
@@ -439,18 +517,59 @@ static void hybrid_fuse(HybridRecallState* node)
 static TupleTableSlot* hybrid_store_result(HybridRecallState* node, HybridCandidate* cand)
 {
     TupleTableSlot* slot = node->ps.ps_ResultTupleSlot;
+    HybridRecall* plan = (HybridRecall*)node->ps.plan;
 
     ExecClearTuple(slot);
-    slot->tts_values[0] = cand->id;
-    slot->tts_isnull[0] = false;
-    slot->tts_values[1] = Int32GetDatum((int32)cand->source_mask);
-    slot->tts_isnull[1] = false;
-    slot->tts_values[2] = Int32GetDatum((int32)cand->text_rank);
-    slot->tts_isnull[2] = false;
-    slot->tts_values[3] = Int32GetDatum((int32)cand->vector_rank);
-    slot->tts_isnull[3] = false;
-    slot->tts_values[4] = Float8GetDatum(cand->hybrid_score);
-    slot->tts_isnull[4] = false;
+    if (plan->plan.targetlist == NIL) {
+        /* vehicle 5-column contract */
+        slot->tts_values[0] = cand->id;
+        slot->tts_isnull[0] = false;
+        slot->tts_values[1] = Int32GetDatum((int32)cand->source_mask);
+        slot->tts_isnull[1] = false;
+        slot->tts_values[2] = Int32GetDatum((int32)cand->text_rank);
+        slot->tts_isnull[2] = false;
+        slot->tts_values[3] = Int32GetDatum((int32)cand->vector_rank);
+        slot->tts_isnull[3] = false;
+        slot->tts_values[4] = Float8GetDatum(cand->hybrid_score);
+        slot->tts_isnull[4] = false;
+        return ExecStoreVirtualTuple(slot);
+    }
+
+    /* Planner path: Vars address the common branch tuple contract; Consts
+     * pass through.  The ORDER BY marker TLE keeps its ressortgroupref after
+     * becoming a float8 Const sentinel, so only that exact column is replaced
+     * by the fused score (never an unrelated user-selected 0::float8). */
+    {
+        TupleTableSlot* payload_slot = node->text_state->ps_ResultTupleSlot;
+        ExecStoreMinimalTuple(cand->tuple, payload_slot, false);
+
+        ListCell* lc = NULL;
+        int i = 0;
+        foreach (lc, plan->plan.targetlist) {
+            TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            if (IsA(tle->expr, Var)) {
+                Var* v = (Var*)tle->expr;
+                bool isnull = false;
+                slot->tts_values[i] = heap_slot_getattr(payload_slot, v->varattno, &isnull);
+                slot->tts_isnull[i] = isnull;
+            } else if (IsA(tle->expr, Const)) {
+                Const* c = (Const*)tle->expr;
+                if (tle->ressortgroupref != 0 && c->consttype == FLOAT8OID &&
+                    c->constbyval && !c->constisnull &&
+                    DatumGetFloat8(c->constvalue) == 0.0) {
+                    /* the eliminated marker position */
+                    slot->tts_values[i] = Float8GetDatum(cand->hybrid_score);
+                    slot->tts_isnull[i] = false;
+                } else {
+                    slot->tts_values[i] = c->constvalue;
+                    slot->tts_isnull[i] = c->constisnull;
+                }
+            } else {
+                slot->tts_isnull[i] = true;
+            }
+            i++;
+        }
+    }
     /* Candidate memory is owned by candidate_cxt, which lives until End;
      * no per-row copy is needed. */
     return ExecStoreVirtualTuple(slot);

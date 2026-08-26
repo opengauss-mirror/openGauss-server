@@ -924,7 +924,7 @@ typedef struct AnnIndexScan {
  */
 typedef struct HybridRecall {
     Plan plan;
-    AttrNumber id_resno;          /* doc-key position in branch tuples */
+    AttrNumber id_resno;          /* handmade: branch key resno; planner path: base key attno */
     AttrNumber text_score_resno;  /* BM25 score position, text branch */
     AttrNumber vector_distance_resno; /* ANN distance position, vector branch */
     Expr* final_topk;             /* evaluated at runtime, >= branch tops */

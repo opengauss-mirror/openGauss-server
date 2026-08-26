@@ -1,0 +1,134 @@
+ enable_seqscan
+----------------
+ on
+(1 row)
+
+                                                          QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: id, tenant_id, title, content, (0::double precision)
+   ->  Hybrid Recall
+         Output: id, tenant_id, title, content, 0::double precision
+         ->  Streaming(type: LOCAL GATHER)
+               Output: id, ((content <&> 'database'::text)), tenant_id, title, content
+               ->  Limit
+                     Output: id, ((content <&> 'database'::text)), tenant_id, title, content
+                     ->  Index Scan using hrd_bm25_idx on public.hybrid_recall_docs
+                           Output: id, (content <&> 'database'::text), tenant_id, title, content
+                           Order By: (hybrid_recall_docs.content <&> 'database'::text)
+                           Filter: (hybrid_recall_docs.tenant_id = 1)
+         ->  Streaming(type: LOCAL GATHER)
+               Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id, title, content
+               ->  Limit
+                     Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id, title, content
+                     ->  Ann Index Scan using hrd_hnsw_idx on public.hybrid_recall_docs
+                           Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id, title, content
+                           Order By: (hybrid_recall_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (hybrid_recall_docs.tenant_id = 1)
+(21 rows)
+
+ id  |       score
+-----+-------------------
+ 245 | .0145416227608008
+ 165 | .0141908212560386
+  25 | .0139468690702087
+ 485 |  .013458110516934
+ 445 | .0126030437539632
+  45 | .0124410124410124
+  65 | .0119791666666667
+ 145 | .0118983957219251
+ 265 | .0114296539530184
+ 345 | .0114102564102564
+(10 rows)
+
+            content_first            | id  |            content_again            | zero |       score
+-------------------------------------+-----+-------------------------------------+------+-------------------
+ database alphaalphaalpha record 245 | 245 | database alphaalphaalpha record 245 |    0 | .0145416227608008
+ database epsilon record 165         | 165 | database epsilon record 165         |    0 | .0141908212560386
+ database epsilonepsilon record 25   |  25 | database epsilonepsilon record 25   |    0 | .0139468690702087
+(3 rows)
+
+               content               |       score
+-------------------------------------+-------------------
+ database alphaalphaalpha record 245 | .0145416227608008
+ database epsilon record 165         | .0141908212560386
+ database epsilonepsilon record 25   | .0139468690702087
+(3 rows)
+
+                                                                                                     QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Limit
+         ->  Sort
+               Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_docs.id, hybrid_recall_docs.content, hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+               ->  Seq Scan on hybrid_recall_docs
+                     Filter: (tenant_id = 1)
+(6 rows)
+
+PREPARE
+ id  | tenant_id |  title  |               content               |       score
+-----+-----------+---------+-------------------------------------+-------------------
+ 245 |         1 | doc-245 | database alphaalphaalpha record 245 | .0145416227608008
+ 165 |         1 | doc-165 | database epsilon record 165         | .0141908212560386
+  25 |         1 | doc-025 | database epsilonepsilon record 25   | .0139468690702087
+(3 rows)
+
+ id  | tenant_id |  title  |               content               |       score
+-----+-----------+---------+-------------------------------------+-------------------
+ 245 |         1 | doc-245 | database alphaalphaalpha record 245 | .0145416227608008
+ 165 |         1 | doc-165 | database epsilon record 165         | .0141908212560386
+  25 |         1 | doc-025 | database epsilonepsilon record 25   | .0139468690702087
+(3 rows)
+
+DEALLOCATE
+                                                                   QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+         ->  Seq Scan on hybrid_recall_docs
+               Filter: (tenant_id = 1)
+(5 rows)
+
+                                                                       QUERY PLAN
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC, id
+         ->  Seq Scan on hybrid_recall_docs
+               Filter: (tenant_id = 1)
+(5 rows)
+
+                                                                  QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+   ->  Seq Scan on hybrid_recall_docs
+         Filter: (tenant_id = 1)
+(4 rows)
+
+                                                                     QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+         ->  Seq Scan on hybrid_recall_docs
+               Filter: (tenant_id = 1)
+(5 rows)
+
+                                                                     QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+         ->  Seq Scan on hybrid_recall_docs
+               Filter: (tenant_id = 1)
+(5 rows)
+
+ enable_seqscan
+----------------
+ on
+(1 row)
+
+total time: 9124  ms

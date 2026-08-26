@@ -155,3 +155,38 @@ producer 启动、快照共享、错误联动、overlap 证明）。
 **G2 关闭**（evidence/G2_gate.log）：真实 overlap ✅ 同快照 ✅ 取消无泄漏 ✅。
 P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 下一阶段：P2 Planner → G3。
+
+## 11. P2 Planner 进展（2026-08-26）
+
+| 任务 | commit | 判据 |
+| --- | --- | --- |
+| P2-1 marker 解析与白名单 | 69d7335109 | `ogai` namespace、单表、单 DESC sort、双索引正向识别；负向不误匹配 |
+| P2-2 BM25 branch Path | 本提交 | `Limit → BM25 Index Scan`，经 1:1 LOCAL GATHER 接入 HybridRecall |
+| P2-3 ANN branch Path | 本提交 | `Limit → Ann Index Scan`，小表嵌套规划期间局部关闭 seqscan 且调用后恢复 |
+| P2-2/3 payload | 本提交 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
+
+实现与回归证据：
+
+- `evidence/P2-2_P2-3_test.sql`
+- `evidence/P2-2_P2-3_live.log`（exit=0，Top-10 与 S0 golden 逐项一致）
+- 计划包含 `Hybrid Recall`、两条 `Streaming(type: LOCAL GATHER)`、BM25 `Index Scan`、
+  `Ann Index Scan` 和两个 branch `Limit`；调用前后 `enable_seqscan=on`。
+- 同时启动两个顶层 marker 查询：均 exit=0、各返回 10 行。
+- P0 手工节点载具在本轮改动后复测，Top-3 仍为 245/165/25，旧 5 列契约保持兼容。
+
+本轮修复的三个边界问题：
+
+1. openGauss 计划复制/缓存会保留或恢复原表 `Var` 坐标；payload 映射必须在
+   `ExecInitHybridRecall` 最终计划上完成，并保留 `varoattno` 供 cached plan 下一次重建。
+2. 递归外层 setrefs 必须继续调整 nested planner branch 的 RTE offset；否则上层计划可能
+   把 branch `scanrelid=1` 指向 relid=0 的 Subquery RTE。
+3. V1 明确拒绝在 CTE/子查询/聚合/窗口等上层计划内注入 task stream；P06 负向
+   `EXPLAIN` 为普通 Sort/SeqScan，避免尚无 rescan generation 语义时出现等待。
+4. P2-7 前只接受非 NULL 的 int8 常量 `LIMIT`，并拒绝 `OFFSET`；这两类形态
+   均通过负例确认保持普通 Sort/SeqScan，避免将非有限 K 或 offset 误解为 final_topk。
+
+另将 hash callback 的类型缓存指针改为 `THR_LOCAL`，避免同一 gaussdb 进程内并发会话
+使用不同主键类型时发生进程级数据竞争。
+
+**G3 尚未关闭**：下一步为 P2-4 公共 filter/recheck、P2-5 串并行候选与强制模式、
+P2-6 成本模型、P2-7 Param/custom/generic plan。

@@ -691,6 +691,20 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 rc->prti += rtoffset;
             }
         } break;
+        case T_HybridRecall: {
+            HybridRecall* splan = (HybridRecall*)plan;
+
+            /*
+             * The fusion node owns its query targetlist and materializes
+             * the slot itself (Var->candidate doc key, Const->value or
+             * fused score); nothing above evaluates these expressions, so
+             * the raw planner-format tlist is deliberately left as-is.
+             */
+            splan->final_topk = (Expr*)fix_scan_expr(root, (Node*)splan->final_topk, rtoffset);
+            splan->text_candidates = (Expr*)fix_scan_expr(root, (Node*)splan->text_candidates, rtoffset);
+            splan->vector_candidates = (Expr*)fix_scan_expr(root, (Node*)splan->vector_candidates, rtoffset);
+            splan->recheck_quals = (List*)fix_scan_list(root, splan->recheck_quals, rtoffset);
+        } break;
         case T_Limit:
         case T_VecLimit: {
             Limit* splan = (Limit*)plan;
