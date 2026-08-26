@@ -18,6 +18,9 @@
 #include "utils/syscache.h"
 #include "storage/ipc.h"
 #include "executor/executor.h"
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
 
 /*
  * We maintain a simple linked list caching the fmgr lookup info for the
@@ -1061,6 +1064,24 @@ int pg_encoding_mbcliplen(int encoding, const char* mbstr, int len, int limit)
     if (pg_encoding_max_length(encoding) == 1) {
         return cliplen(mbstr, len, limit);
     }
+#ifdef __aarch64__
+    const int vector_len = 16;
+    if (encoding == PG_UTF8) {
+        while (len > vector_len) {
+            uint8x16_t vec_arg1 = vld1q_u8((const unsigned char*)mbstr);
+            /* break if there are non-ascii char */
+            if (vmaxvq_u8(vec_arg1) >= 0x80) {
+                break;
+            }
+            len -= vector_len;
+            mbstr += vector_len;
+            clen += vector_len;
+            if (clen >= limit) {
+                return limit;
+            }
+        }
+    }
+#endif
     mblen_fn = pg_wchar_table[encoding].mblen;
 
     while (len > 0 && *mbstr) {

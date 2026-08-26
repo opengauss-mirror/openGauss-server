@@ -83,15 +83,17 @@ static void report_iud_time_for_opfusion(PlannedStmt *plannedstmt)
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
             continue;
         }
-        Relation rel = NULL;
-        rel = heap_open(rid, AccessShareLock);
-        if (rel->rd_rel->relkind == RELKIND_RELATION) {
-            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+        HeapTuple reltup = SearchSysCache1(RELOID, ObjectIdGetDatum(rid));
+        if (HeapTupleIsValid(reltup)) {
+            Form_pg_class relform = (Form_pg_class)GETSTRUCT(reltup);
+            if (relform->relkind == RELKIND_RELATION) {
+                if (relform->relpersistence == RELPERSISTENCE_PERMANENT ||
+                    relform->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                    pgstat_report_data_changed(rid, STATFLG_RELATION, relform->relisshared);
+                }
             }
+            ReleaseSysCache(reltup);
         }
-        heap_close(rel, AccessShareLock);
     }
 }
 #endif
@@ -447,8 +449,7 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted, long 
 
     auditRecord();
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count) {
-        report_qps_type(m_global->m_planstmt->commandType);
-        report_qps_type(CMD_DML);
+        report_qps_type(m_global->m_planstmt->commandType, CMD_DML);
     }
 
     m_hasRelationLock = false;
@@ -876,9 +877,15 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
         return 0;
     }
 
+    int max_arg_num = 4;
+    int length = list_length(args);
+    if (length < 1 || length > max_arg_num) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("unexpected arg length : %d when processing bypass expression.", length)));
+    }
     Node *first_arg_node = (Node *)linitial(args);
-    Datum arg[4] = {0};
-    bool is_nulls[4] = {false};
+    Datum arg[max_arg_num] = {0};
+    bool is_nulls[max_arg_num] = {false};
 
     /* for now, we assuming FuncExpr and OpExpr only appear in the first arg */
     if (IsA(first_arg_node, FuncExpr)) {
@@ -891,11 +898,6 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
         arg[0] = EvalSimpleArg(first_arg_node, &is_nulls[0], values, isNulls);
     }
 
-    int length = list_length(args);
-    if (unlikely(length < 1 || length > 4)) {
-        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-            errmsg("unexpected arg length : %d when processing bypass expression.", length)));
-    }
     *is_null = is_nulls[0];
     ListCell *tmp_arg = list_head(args);
     for (int i = 1; i < length; i++) {
@@ -914,6 +916,8 @@ Datum OpFusion::CalFuncNodeVal(Oid functionId, List *args, bool *is_null, Datum 
                     return DirectFunctionCall1(float8_numeric, arg[0]);
                 case NUMTOFLOAT8FUNCOID:
                     return DirectFunctionCall1(numeric_float8, arg[0]);
+                case F_VARCHAR_NUMERIC:
+                    return DirectFunctionCall1(varchar_numeric, arg[0]);
                 default:
                     return finfo != NULL ? FunctionCall1(finfo, arg[0]) : OidFunctionCall1(functionId, arg[0]);
             }

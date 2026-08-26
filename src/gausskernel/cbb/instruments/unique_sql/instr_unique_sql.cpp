@@ -531,7 +531,10 @@ static void UpdateUniqueSQLTimeStat(UniqueSQL* entry, int64 timeInfo[])
         int idx;
 
         for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
-            (void)gs_atomic_add_64(&(entry->timeInfo.TimeInfoArray[idx]), timeInfo[idx]);
+            if (timeInfo[idx] == 0) {
+                continue;
+            }
+            (void)pg_atomic_fetch_add_u64((uint64*)&(entry->timeInfo.TimeInfoArray[idx]), timeInfo[idx]);
         }
     }
 }
@@ -540,6 +543,9 @@ static void UpdateUniqueSQLNetInfo(UniqueSQL* entry, const uint64* netInfo)
     if (netInfo == NULL)
         return;
     for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
+        if (netInfo[i] == 0) {
+            continue;
+        }
         (void)pg_atomic_fetch_add_u64(&(entry->netInfo.netInfoArray[i]), netInfo[i]);
     }
 }

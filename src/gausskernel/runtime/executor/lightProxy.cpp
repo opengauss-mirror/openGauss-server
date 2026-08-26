@@ -117,7 +117,7 @@ extern bool light_node_receive(PGXCNodeHandle* handle);
 extern bool light_node_receive_from_logic_conn(PGXCNodeHandle* handle);
 extern void light_pgaudit_ExecutorEnd(Query* query);
 
-void report_qps_type(CmdType commandType);
+void report_qps_type(CmdType commandType, CmdType queryType);
 CmdType set_cmd_type(const char* commandTag);
 
 static void report_iud_time_for_lightproxy(const Query* query)
@@ -1036,8 +1036,7 @@ void lightProxy::runSimpleQuery(StringInfo exec_message)
     /* doing sql count accordiong to cmdType */
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count &&
         !u_sess->attr.attr_sql.enable_cluster_resize) {
-        report_qps_type(m_cmdType);
-        report_qps_type(queryType);
+        report_qps_type(m_cmdType, queryType);
     }
 
     /* update unique sql stat */
@@ -1120,8 +1119,7 @@ int lightProxy::runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_c
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count &&
         !u_sess->attr.attr_sql.enable_cluster_resize) {
         for (int i = 0; i < batch_count; i++) {
-            report_qps_type(m_cmdType);
-            report_qps_type(queryType);
+            report_qps_type(m_cmdType, queryType);
         }
     }
 
@@ -1235,8 +1233,7 @@ void lightProxy::runMsg(StringInfo exec_message)
      */
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count &&
         !u_sess->attr.attr_sql.enable_cluster_resize) {
-        report_qps_type(m_cmdType);
-        report_qps_type(queryType);
+        report_qps_type(m_cmdType, queryType);
     }
 
     /* update unique sql stat */
@@ -1260,40 +1257,49 @@ bool lightProxy::isDeleteLimit(const Query* query)
  * @Description:  according to commandType get corresponsile  WaitEventSQL,
  *    and call function 'pgstat_report_wait_count' to increase sql count
  */
-void report_qps_type(CmdType commandType)
+void report_qps_type(CmdType commandType, CmdType queryType)
 {
+    uint32 command_id = WAIT_EVENT_END;
+    uint32 query_id = WAIT_EVENT_END;
     switch (commandType) {
         case CMD_SELECT:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_SELECT);
+            command_id = WAIT_EVENT_SQL_SELECT;
             break;
         case CMD_UPDATE:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_UPDATE);
+            command_id = WAIT_EVENT_SQL_UPDATE;
             break;
         case CMD_INSERT:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_INSERT);
+            command_id = WAIT_EVENT_SQL_INSERT;
             break;
         case CMD_DELETE:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_DELETE);
+            command_id = WAIT_EVENT_SQL_DELETE;
             break;
         case CMD_MERGE:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_MERGEINTO);
+            command_id = WAIT_EVENT_SQL_MERGEINTO;
             break;
+        default:
+            break;
+    }
+
+    switch (queryType) {
         case CMD_DML:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_DML);
+            query_id = WAIT_EVENT_SQL_DML;
             break;
         case CMD_DDL:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_DDL);
+            query_id = WAIT_EVENT_SQL_DDL;
             break;
         case CMD_DCL:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_DCL);
+            query_id = WAIT_EVENT_SQL_DCL;
             break;
         case CMD_TCL:
-            pgstat_report_wait_count(WAIT_EVENT_SQL_TCL);
+            query_id = WAIT_EVENT_SQL_TCL;
             break;
         default:
             /* do not map any commandType */
             break;
     }
+
+    pgstat_report_wait_count(command_id, query_id);
 }
 
 /*

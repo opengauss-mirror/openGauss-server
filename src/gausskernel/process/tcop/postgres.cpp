@@ -251,6 +251,9 @@ static inline bool fast_bind_text_input(Oid ptype, char* pstring, Datum* pval)
         case TIMESTAMPOID:
             *pval = input_timestamp_in(pstring, InvalidOid, -1, false);
             return true;
+        case VARCHAROID:
+            *pval = (Datum)varchar_input(pstring, strlen(pstring), -1);
+            return true;
         default:
             return false;
     }
@@ -5222,7 +5225,7 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
     t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
-    pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+    pgstat_report_activity(STATE_RUNNING, psrc->query_string, psrc->query_string_mblen);
     instr_stmt_report_start_time();
 
     set_ps_display("BIND", false);

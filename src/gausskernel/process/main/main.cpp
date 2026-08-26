@@ -383,7 +383,7 @@ int main(int argc, char* argv[])
      * @BuiltinFunc
      * Create a global BuiltinFunc object shared among threads
      */
-    if (g_sorted_funcs[0] == NULL) {
+    if (g_built_in_funcs[0] == NULL) {
         initBuiltinFuncs();
     }
 

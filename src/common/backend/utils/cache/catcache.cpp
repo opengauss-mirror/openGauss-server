@@ -2489,9 +2489,13 @@ Datum pv_builtin_functions(PG_FUNCTION_ARGS)
 
     funcctx = SRF_PERCALL_SETUP();
 
-    while (funcctx->call_cntr < nBuiltinFuncs) {
+    while (funcctx->call_cntr < FirstBootstrapObjectId) {
+        if (g_built_in_funcs[funcctx->call_cntr] == NULL) {
+            funcctx->call_cntr++;
+            continue;
+        }
         HeapTuple tuple;
-        const Builtin_func* func = g_sorted_funcs[funcctx->call_cntr];
+        const Builtin_func* func = g_built_in_funcs[funcctx->call_cntr];
         tuple = CreateHeapTuple4BuiltinFunc(func, funcctx->tuple_desc);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }

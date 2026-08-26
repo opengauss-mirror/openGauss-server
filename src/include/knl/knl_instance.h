@@ -120,6 +120,8 @@ const int SMBWRITER_THD_NUM = 8;
 const int DB_CMPT_MAX = 5;
 #endif
 
+#define FirstBootstrapObjectId 10000
+
 enum knl_virtual_role {
     VUNKNOWN = 0,
     VCOORDINATOR = 1,

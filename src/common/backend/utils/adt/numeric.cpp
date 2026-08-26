@@ -369,7 +369,7 @@ Datum numeric_in(PG_FUNCTION_ARGS)
      * Check for NaN
      */
     int level = fcinfo->can_ignore ? WARNING : ERROR;
-    if (pg_strncasecmp(cp, "NaN", 3) == 0) {
+    if (unlikely(pg_strncasecmp(cp, "NaN", 3) == 0)) {
         res = make_result(&const_nan);
 
         /* Should be nothing left but spaces */
@@ -827,7 +827,6 @@ Datum numeric(PG_FUNCTION_ARGS)
     int scale;
     int ddigits;
     int maxdigits;
-    NumericVar var;
 
     if (NUMERIC_IS_NANORBI(num)) {
         /*
@@ -886,7 +885,8 @@ Datum numeric(PG_FUNCTION_ARGS)
      * We really need to fiddle with things - unpack the number into a
      * variable and let apply_typmod() do it.
      */
-    init_var(&var);
+    NumericVar var = {0};
+    var.buf = var.ndb;
 
     set_var_from_num(num, &var);
     apply_typmod(&var, typmod);
@@ -4681,20 +4681,17 @@ static const char* set_var_from_str_with_sign(const char* str, const char* cp, i
         cp++;
     }
 
-    if (!isdigit((unsigned char)*cp) && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
-        char* bcp = (char*)palloc0(sizeof(char));
-        return bcp;
-    }
-    if (!isdigit((unsigned char)*cp))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+    if (!isdigit((unsigned char)*cp)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+            char* bcp = (char*)palloc0(sizeof(char));
+            return bcp;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type numeric: \"%s\"", str)));
+        }
+    }
 
-    decdigits = (unsigned char*)palloc(strlen(cp) + DEC_DIGITS * 2);
-
-    /* leading padding for digit alignment later */
-    errno_t rc = memset_s(decdigits, strlen(cp) + DEC_DIGITS * 2, 0, DEC_DIGITS);
-    securec_check_c(rc, "", "");
+    decdigits = (unsigned char*)palloc0(strlen(cp) + DEC_DIGITS * 2);
 
     i = DEC_DIGITS;
 
@@ -4718,7 +4715,7 @@ static const char* set_var_from_str_with_sign(const char* str, const char* cp, i
 
     ddigits = i - DEC_DIGITS;
     /* trailing padding for digit alignment later */
-    rc = memset_s(decdigits + i, DEC_DIGITS - 1, 0, DEC_DIGITS - 1);
+    errno_t rc = memset_s(decdigits + i, DEC_DIGITS - 1, 0, DEC_DIGITS - 1);
     securec_check(rc, "\0", "\0");
 
     /* Handle exponent, if any */
@@ -9180,10 +9177,12 @@ Datum varchar_numeric(PG_FUNCTION_ARGS)
     Datum txt = PG_GETARG_DATUM(0);
     char* tmp = NULL;
     Datum result;
-    tmp = DatumGetCString(DirectFunctionCall1(varcharout, txt));
+    tmp = output_text_to_cstring((text*)DatumGetPointer(txt));
 
     result = DirectFunctionCall3(numeric_in, CStringGetDatum(tmp), ObjectIdGetDatum(0), Int32GetDatum(-1));
-    pfree_ext(tmp);
+    if (tmp != u_sess->utils_cxt.guc_cold->varcharoutput_buffer) {
+        pfree_ext(tmp);
+    }
 
     PG_RETURN_DATUM(result);
 }
