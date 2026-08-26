@@ -354,3 +354,28 @@ WLM/worker 资源观测字段。
 
 **P3-4 完成。** 下一原子任务是 P3-5：debug/release/memcheck 构建与循环执行、取消和
 rescan 内存稳定性验证。
+
+### P3-5 debug/release/memcheck 稳定性
+
+- 测试模块新增 `hybrid_recall_debug_rescan`：在同一个 `QueryDesc` 上执行 1 次
+  `ExecutorRun` 和 99 次 `ExecutorRewind -> ExecReScanHybridRecall -> ExecutorRun`，
+  100 轮共返回 300 行，证明不是 cursor 物化伪重扫。并行测试异常路径通过
+  `PG_CATCH` 恢复测试专用 producer delay 后原样重抛 timeout/cancel。
+- 主 debug+cassert 实例完成 100 次真重扫、100 次交替 options 的真实 OGAI 并行执行，
+  以及两个 producer 同时工作时的确定性 statement timeout。取消后并行结果仍为
+  `245,165,25`，实例存活，postmaster 线程数 `32 -> 32`，服务端无断言/PANIC/崩溃。
+- 提交 `4c032d0fb7` 在隔离 worktree 完成干净 release 构建：`-O2`、
+  `enable_debug=no`、`enable_cassert=no`，退出 0，耗时 3044 秒。独立 55541 实例执行
+  同口径测试退出 0，线程数 `33 -> 33`，取消后查询正常。
+- 官方 `build.sh -m memcheck` 干净构建退出 0，耗时 2358 秒；产物包含
+  `-O0 -fsanitize=address -fsanitize=leak`、debug/cassert，并正确解析 GCC 10.3
+  `libasan.so.6`。ASAN `gaussdb` 在 55641 完成同口径测试，退出 0；测试后连续五次
+  线程采样均为 29，无残留 stream/producer，ASAN 报告文件为 0，服务端无
+  ASAN/LSAN/断言/PANIC/段错误。
+- 官方 memcheck `gs_initdb` 自身在本环境即使 `--version` 也会递归输出
+  `AddressSanitizer:DEADLYSIGNAL` 且无符号化报告；运行验证因此使用同提交 release
+  实例停机后复制的 PGDATA，由当前 memcheck `gaussdb` 启动。该工具边界已如实记录，
+  未使用或修改主实例 PGDATA。完整命令、时间和日志判据见
+  `evidence/P3-5_test.sql` / `evidence/P3-5_live.log`。
+
+**P3-5 完成。** 下一原子任务是 P3-6：主备查询与故障切换后重试语义验证。

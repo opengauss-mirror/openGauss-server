@@ -43,6 +43,7 @@ PG_MODULE_MAGIC;
 typedef struct CaptureState {
     DestReceiver pub;
     Tuplestorestate* store;
+    uint64 rows;
 } CaptureState;
 
 static void capture_receiveSlot(TupleTableSlot* slot, DestReceiver* self)
@@ -50,6 +51,7 @@ static void capture_receiveSlot(TupleTableSlot* slot, DestReceiver* self)
     CaptureState* cap = (CaptureState*)self;
 
     tuplestore_puttupleslot(cap->store, slot);
+    cap->rows++;
 }
 
 static void capture_noop(DestReceiver* self)
@@ -156,6 +158,62 @@ static int renumber_plan_node_ids(Plan* plan, int next_id)
     return next_id;
 }
 
+static PlannedStmt* build_serial_hybrid_stmt(const char* text_sql,
+                                             const char* vector_sql,
+                                             int32 id_resno,
+                                             int32 text_resno,
+                                             int32 vector_resno,
+                                             int64 final_topk,
+                                             int64 text_candidates,
+                                             int64 vector_candidates,
+                                             float8 rrf_k,
+                                             float8 text_weight,
+                                             float8 vector_weight)
+{
+    Plan* text_plan = plan_branch_sql(text_sql, "text");
+    Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
+
+    /* Attach the branch Limit plans DIRECTLY: Limit is not a scan node,
+     * so tlist_matches_tupdesc never asserts on its setrefs varnos, and
+     * the SubqueryScan wrapper layer (init quirks) is eliminated.
+     * Both subplans reference the relation as varno 1; the parent range
+     * table below carries that same relation once. */
+    HybridRecall* hybrid = makeNode(HybridRecall);
+    hybrid->plan.lefttree = text_plan;
+    hybrid->plan.righttree = vector_plan;
+    hybrid->plan.targetlist = NIL;
+    hybrid->plan.qual = NIL;
+    hybrid->id_resno = (AttrNumber)id_resno;
+    hybrid->text_score_resno = (AttrNumber)text_resno;
+    hybrid->vector_distance_resno = (AttrNumber)vector_resno;
+    hybrid->final_topk = make_int8_const(final_topk);
+    hybrid->text_candidates = make_int8_const(text_candidates);
+    hybrid->vector_candidates = make_int8_const(vector_candidates);
+    hybrid->fusion = HYBRID_FUSION_RRF;
+    hybrid->rrf_k = rrf_k;
+    hybrid->text_weight = text_weight;
+    hybrid->vector_weight = vector_weight;
+    hybrid->parallel_branches = false;
+    hybrid->require_parallel = false;
+    hybrid->recheck_quals = NIL;
+
+    PlannedStmt* stmt = makeNode(PlannedStmt);
+    stmt->commandType = CMD_SELECT;
+    stmt->canSetTag = true;
+    (void)renumber_plan_node_ids((Plan*)hybrid, 1);
+    stmt->planTree = (Plan*)hybrid;
+    stmt->num_streams = 0;
+
+    /* one relation RTE: the single shared base table, whose Var numbering
+     * both sub-plans use */
+    List* raw_list = raw_parser(text_sql, NULL);
+    Node* parsetree = (Node*)linitial(raw_list);
+    Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
+    stmt->rtable = query->rtable;
+
+    return stmt;
+}
+
 /* fmgr.h 的宏只对 pg_finfo_* 自动加 extern "C"；SQL 可调用主符号需要
  * 单独的 C 链接声明（与 contrib/pg_stat_statements.cpp 的写法一致）。 */
 extern "C" Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS);
@@ -183,48 +241,17 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         old_cxt = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        Plan* text_plan = plan_branch_sql(text_sql, "text");
-        Plan* vector_plan = plan_branch_sql(vector_sql, "vector");
-
-        /* Attach the branch Limit plans DIRECTLY: Limit is not a scan node,
-         * so tlist_matches_tupdesc never asserts on its setrefs varnos, and
-         * the SubqueryScan wrapper layer (init quirks) is eliminated.
-         * Both subplans reference the relation as varno 1; the parent range
-         * table below carries that same relation once. */
-        HybridRecall* hybrid = makeNode(HybridRecall);
-        hybrid->plan.lefttree = text_plan;
-        hybrid->plan.righttree = vector_plan;
-        hybrid->plan.targetlist = NIL;
-        hybrid->plan.qual = NIL;
-        hybrid->id_resno = (AttrNumber)arg_id_resno;
-        hybrid->text_score_resno = (AttrNumber)arg_text_resno;
-        hybrid->vector_distance_resno = (AttrNumber)arg_vector_resno;
-        hybrid->final_topk = make_int8_const(final_topk);
-        hybrid->text_candidates = make_int8_const(text_candidates);
-        hybrid->vector_candidates = make_int8_const(vector_candidates);
-        hybrid->fusion = HYBRID_FUSION_RRF;
-        hybrid->rrf_k = rrf_k;
-        hybrid->text_weight = text_weight;
-        hybrid->vector_weight = vector_weight;
-        hybrid->parallel_branches = false;
-        hybrid->require_parallel = false;
-        hybrid->recheck_quals = NIL;
-
-        PlannedStmt* stmt = makeNode(PlannedStmt);
-        stmt->commandType = CMD_SELECT;
-        stmt->canSetTag = true;
-        hybrid->parallel_branches = false;
-        (void)renumber_plan_node_ids((Plan*)hybrid, 1);
-        stmt->planTree = (Plan*)hybrid;
-        stmt->num_streams = 0;
-        /* one relation RTE: the single shared base table, whose Var
-         * numbering both sub-plans use */
-        {
-            List* raw_list = raw_parser(text_sql, NULL);
-            Node* parsetree = (Node*)linitial(raw_list);
-            Query* query = parse_analyze(parsetree, text_sql, NULL, 0);
-            stmt->rtable = query->rtable;
-        }
+        PlannedStmt* stmt = build_serial_hybrid_stmt(text_sql,
+                                                     vector_sql,
+                                                     arg_id_resno,
+                                                     arg_text_resno,
+                                                     arg_vector_resno,
+                                                     final_topk,
+                                                     text_candidates,
+                                                     vector_candidates,
+                                                     rrf_k,
+                                                     text_weight,
+                                                     vector_weight);
 
         CaptureState* cap = (CaptureState*)palloc0(sizeof(CaptureState));
         cap->pub.receiveSlot = capture_receiveSlot;
@@ -272,6 +299,62 @@ Datum hybrid_recall_debug_execute(PG_FUNCTION_ARGS)
     }
 
     SRF_RETURN_DONE(funcctx);
+}
+
+extern "C" Datum hybrid_recall_debug_rescan(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(hybrid_recall_debug_rescan);
+
+/* P3-5 test-only entry point: execute one serial HybridRecall QueryDesc,
+ * rewind it in place and execute again.  This reaches
+ * ExecutorRewind -> ExecReScanHybridRecall without cursor materialization. */
+Datum hybrid_recall_debug_rescan(PG_FUNCTION_ARGS)
+{
+    char* text_sql = text_to_cstring(PG_GETARG_TEXT_P(0));
+    char* vector_sql = text_to_cstring(PG_GETARG_TEXT_P(1));
+    int32 loops = PG_GETARG_INT32(11);
+
+    if (loops < 1 || loops > 10000)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("HybridRecall rescan loops must be between 1 and 10000, got %d", loops)));
+
+    PlannedStmt* stmt = build_serial_hybrid_stmt(text_sql,
+                                                 vector_sql,
+                                                 PG_GETARG_INT32(2),
+                                                 PG_GETARG_INT32(3),
+                                                 PG_GETARG_INT32(4),
+                                                 PG_GETARG_INT64(5),
+                                                 PG_GETARG_INT64(6),
+                                                 PG_GETARG_INT64(7),
+                                                 PG_GETARG_FLOAT8(8),
+                                                 PG_GETARG_FLOAT8(9),
+                                                 PG_GETARG_FLOAT8(10));
+
+    CaptureState* cap = (CaptureState*)palloc0(sizeof(CaptureState));
+    cap->pub.receiveSlot = capture_receiveSlot;
+    cap->pub.rStartup = capture_startup;
+    cap->pub.rShutdown = capture_noop;
+    cap->pub.rDestroy = capture_noop;
+    cap->store = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
+
+    QueryDesc* qd = CreateQueryDesc(stmt,
+                                    "hybrid_recall_rescan",
+                                    GetActiveSnapshot(),
+                                    InvalidSnapshot,
+                                    &cap->pub,
+                                    NULL,
+                                    0);
+    ExecutorStart(qd, 0);
+    for (int32 i = 0; i < loops; i++) {
+        if (i > 0)
+            ExecutorRewind(qd);
+        ExecutorRun(qd, ForwardScanDirection, 0L);
+    }
+    ExecutorFinish(qd);
+    ExecutorEnd(qd);
+    FreeQueryDesc(qd);
+
+    PG_RETURN_INT64((int64)cap->rows);
 }
 
 
@@ -399,8 +482,9 @@ extern "C" int g_hybrid_test_producer_delay_ms;
 extern "C" Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(hybrid_recall_debug_parallel);
 
-/* [P1-3] PARALLEL variant: branches wrapped in 1:1 task streams.
- * Currently under debugging - ExecutorStart hangs in stream setup. */
+/* Parallel variant: branches wrapped in 1:1 task streams.  The optional
+ * producer delay is used by P3-5 to make statement-timeout cleanup
+ * deterministic while both workers are active. */
 Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;
@@ -457,17 +541,30 @@ Datum hybrid_recall_debug_parallel(PG_FUNCTION_ARGS)
     /* 12th arg semantics: producer delay ms for the overlap wall-clock
      * proof (design doc 12.3); passed through the same-process global. */
     g_hybrid_test_producer_delay_ms = (int)PG_GETARG_INT32(11);
-    QueryDesc* qd = CreateQueryDesc(stmt, "hybrid_recall_parallel", GetActiveSnapshot(),
-                                    InvalidSnapshot, &cap->pub, NULL, 0);
-    ExecutorStart(qd, 0);
-    if (qd->tupDesc != NULL) {
-        funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
-        BlessTupleDesc(funcctx->tuple_desc);
+    PG_TRY();
+    {
+        QueryDesc* qd = CreateQueryDesc(stmt, "hybrid_recall_parallel", GetActiveSnapshot(),
+                                        InvalidSnapshot, &cap->pub, NULL, 0);
+        ExecutorStart(qd, 0);
+        if (qd->tupDesc != NULL) {
+            funcctx->tuple_desc = CreateTupleDescCopy(qd->tupDesc);
+            BlessTupleDesc(funcctx->tuple_desc);
+        }
+        ExecutorRun(qd, ForwardScanDirection, 0L);
+        ExecutorFinish(qd);
+        ExecutorEnd(qd);
+        FreeQueryDesc(qd);
     }
-    ExecutorRun(qd, ForwardScanDirection, 0L);
-    ExecutorFinish(qd);
-    ExecutorEnd(qd);
-    FreeQueryDesc(qd);
+    PG_CATCH();
+    {
+        /* A timeout/cancel must never leave the process-wide test delay set
+         * for later unrelated stream queries. Executor resources are owned
+         * by the statement ResourceOwner and unwind through the normal error
+         * path; this catch only restores the test hook before rethrowing. */
+        g_hybrid_test_producer_delay_ms = 0;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     g_hybrid_test_producer_delay_ms = 0;
 
     funcctx->user_fctx = cap->store;
