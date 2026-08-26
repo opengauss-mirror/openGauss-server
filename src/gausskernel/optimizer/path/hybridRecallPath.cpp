@@ -32,9 +32,206 @@
 #include "optimizer/hybrid_recall_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/tlist.h"
+#include "utils/builtins.h"
 #include "utils/guc.h"
+#include "utils/jsonb.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+
+typedef struct HybridRecallOptions {
+    int64 text_candidates;
+    int64 vector_candidates;
+    double rrf_k;
+    double text_weight;
+    double vector_weight;
+    bool require_parallel;
+} HybridRecallOptions;
+
+static bool hybrid_jsonb_string_equals(const JsonbValue* value, const char* expected)
+{
+    int expected_len = strlen(expected);
+    return value != NULL && value->type == jbvString &&
+        value->string.len == expected_len &&
+        strncmp(value->string.val, expected, expected_len) == 0;
+}
+
+static JsonbValue* hybrid_jsonb_get(Jsonb* options, const char* name)
+{
+    JsonbValue key;
+    key.type = jbvString;
+    key.string.val = (char*)name;
+    key.string.len = strlen(name);
+    return findJsonbValueFromSuperHeader(VARDATA_ANY(options), JB_FOBJECT, NULL, &key);
+}
+
+static double hybrid_jsonb_number(JsonbValue* value, const char* name)
+{
+    if (value == NULL || value->type != jbvNumeric)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"%s\" must be a number", name)));
+
+    double result = DatumGetFloat8(
+        DirectFunctionCall1(numeric_float8, PointerGetDatum(value->numeric)));
+    if (!isfinite(result))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"%s\" must be finite", name)));
+    return result;
+}
+
+static int64 hybrid_jsonb_integer(JsonbValue* value, const char* name)
+{
+    if (value == NULL || value->type != jbvNumeric)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"%s\" must be an integer", name)));
+
+    Datum numeric = PointerGetDatum(value->numeric);
+    Datum truncated = DirectFunctionCall2(numeric_trunc, numeric, Int32GetDatum(0));
+    if (DatumGetInt32(DirectFunctionCall2(numeric_cmp, numeric, truncated)) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"%s\" must be an integer", name)));
+
+    /* numeric_int8 performs the range check before conversion, avoiding an
+     * undefined out-of-range float-to-int cast for hostile JSONB input. */
+    return DatumGetInt64(DirectFunctionCall1(numeric_int8, numeric));
+}
+
+static bool hybrid_option_key_supported(const JsonbValue* key)
+{
+    static const char* supported[] = {
+        "strategy", "text_candidates", "vector_candidates", "rrf_k",
+        "weights", "on_worker_shortage", "filters", "query_vector"
+    };
+
+    for (uint32 i = 0; i < lengthof(supported); i++) {
+        if (hybrid_jsonb_string_equals(key, supported[i]))
+            return true;
+    }
+    return false;
+}
+
+static void hybrid_parse_options(Node* options_expr, HybridRecallOptions* result)
+{
+    result->text_candidates = 100;
+    result->vector_candidates = 100;
+    result->rrf_k = 60.0;
+    result->text_weight = 0.5;
+    result->vector_weight = 0.5;
+    result->require_parallel = false;
+
+    /* P3-1 keeps options a planner constant.  The OGAI wrapper quotes a
+     * validated JSONB value into its generated marker query, so prepared
+     * query text/vector/final-K parameters remain independent. */
+    if (!IsA(options_expr, Const))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("hybrid recall options must be a JSONB constant")));
+
+    Const* options_const = (Const*)options_expr;
+    if (options_const->constisnull || options_const->consttype != JSONBOID)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall options must be a non-NULL JSONB object")));
+
+    Jsonb* options = DatumGetJsonb(options_const->constvalue);
+    if (!JB_ROOT_IS_OBJECT(options))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall options must be a JSONB object")));
+
+    JsonbIterator* iterator = JsonbIteratorInit(VARDATA_ANY(options));
+    JsonbValue item;
+    int token;
+    while ((token = JsonbIteratorNext(&iterator, &item, true)) != WJB_DONE) {
+        if (token == WJB_KEY && !hybrid_option_key_supported(&item)) {
+            char* key = pnstrdup(item.string.val, item.string.len);
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("unsupported hybrid recall option \"%s\"", key)));
+        }
+    }
+
+    JsonbValue* value = hybrid_jsonb_get(options, "strategy");
+    if (value != NULL && !hybrid_jsonb_string_equals(value, "parallel_rrf"))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"strategy\" must be \"parallel_rrf\"")));
+
+    value = hybrid_jsonb_get(options, "text_candidates");
+    if (value != NULL)
+        result->text_candidates = hybrid_jsonb_integer(value, "text_candidates");
+    value = hybrid_jsonb_get(options, "vector_candidates");
+    if (value != NULL)
+        result->vector_candidates = hybrid_jsonb_integer(value, "vector_candidates");
+    value = hybrid_jsonb_get(options, "rrf_k");
+    if (value != NULL)
+        result->rrf_k = hybrid_jsonb_number(value, "rrf_k");
+
+    value = hybrid_jsonb_get(options, "weights");
+    if (value != NULL) {
+        if (value->type != jbvBinary || !JsonbSuperHeaderIsArray(value->binary.data))
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("hybrid recall option \"weights\" must be a two-number array")));
+        JsonbIterator* weights = JsonbIteratorInit(value->binary.data);
+        JsonbValue weight;
+        int weight_token;
+        int weight_count = 0;
+        while ((weight_token = JsonbIteratorNext(&weights, &weight, true)) != WJB_DONE) {
+            if (weight_token != WJB_ELEM)
+                continue;
+            if (weight_count == 0)
+                result->text_weight = hybrid_jsonb_number(&weight, "weights[0]");
+            else if (weight_count == 1)
+                result->vector_weight = hybrid_jsonb_number(&weight, "weights[1]");
+            weight_count++;
+        }
+        if (weight_count != 2)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("hybrid recall option \"weights\" must contain exactly two numbers")));
+    }
+
+    value = hybrid_jsonb_get(options, "on_worker_shortage");
+    if (value != NULL) {
+        if (hybrid_jsonb_string_equals(value, "error"))
+            result->require_parallel = true;
+        else if (!hybrid_jsonb_string_equals(value, "serial"))
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("hybrid recall option \"on_worker_shortage\" must be \"serial\" or \"error\"")));
+    }
+
+    value = hybrid_jsonb_get(options, "filters");
+    if (value != NULL &&
+        (value->type != jbvBinary || !JsonbSuperHeaderIsObject(value->binary.data)))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"filters\" must be a JSONB object")));
+
+    value = hybrid_jsonb_get(options, "query_vector");
+    if (value != NULL &&
+        (value->type != jbvBinary || !JsonbSuperHeaderIsArray(value->binary.data)))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall option \"query_vector\" must be a JSON array")));
+
+    if (result->text_candidates < 1 || result->text_candidates > 1000 ||
+        result->vector_candidates < 1 || result->vector_candidates > 1000 ||
+        result->text_candidates + result->vector_candidates > 2000)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("hybrid recall candidates exceed V1 limits"),
+                 errdetail("text=%ld vector=%ld; each must be 1..1000 and total must be <= 2000",
+                           result->text_candidates, result->vector_candidates)));
+    if (result->rrf_k <= 0.0 || result->text_weight < 0.0 || result->vector_weight < 0.0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("hybrid recall RRF options are invalid")));
+}
 
 static bool is_ann_am(Oid relam)
 {
@@ -100,6 +297,7 @@ static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
                                                  Node* query_vector,
                                                  List* common_quals,
                                                  int64 final_topk,
+                                                 const HybridRecallOptions* options,
                                                  bool parallel_branches,
                                                  bool require_parallel)
 {
@@ -122,14 +320,14 @@ static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
     path->query_vector = (Expr*)copyObject(query_vector);
     path->common_quals = (List*)copyObject(common_quals);
     path->final_topk_est = final_topk;
-    path->text_candidates_est = 100;
-    path->vector_candidates_est = 100;
+    path->text_candidates_est = options->text_candidates;
+    path->vector_candidates_est = options->vector_candidates;
     path->fusion = HYBRID_FUSION_RRF;
-    path->rrf_k = 60.0;
-    path->text_weight = 0.5;
-    path->vector_weight = 0.5;
+    path->rrf_k = options->rrf_k;
+    path->text_weight = options->text_weight;
+    path->vector_weight = options->vector_weight;
     path->parallel_branches = parallel_branches;
-    path->require_parallel = require_parallel;
+    path->require_parallel = require_parallel || options->require_parallel;
     cost_hybrid_recall_path(path, rel);
     return path;
 }
@@ -231,6 +429,9 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
         return;
     }
 
+    HybridRecallOptions options;
+    hybrid_parse_options((Node*)list_nth(func->args, 5), &options);
+
     Node* q_text_raw = (Node*)list_nth(func->args, 3);
     Node* q_vec_raw = (Node*)list_nth(func->args, 4);
     if (IsA(q_text_raw, TargetEntry))
@@ -308,21 +509,21 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
         case HYBRID_RECALL_PARALLEL_OFF:
             add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
                 rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
-                q_text_raw, q_vec_raw, common_quals, final_topk, false, false));
+                q_text_raw, q_vec_raw, common_quals, final_topk, &options, false, false));
             break;
         case HYBRID_RECALL_PARALLEL_FORCE:
             add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
                 rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
-                q_text_raw, q_vec_raw, common_quals, final_topk, true, true));
+                q_text_raw, q_vec_raw, common_quals, final_topk, &options, true, true));
             break;
         case HYBRID_RECALL_PARALLEL_AUTO:
         default:
             add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
                 rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
-                q_text_raw, q_vec_raw, common_quals, final_topk, false, false));
+                q_text_raw, q_vec_raw, common_quals, final_topk, &options, false, false));
             add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
                 rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
-                q_text_raw, q_vec_raw, common_quals, final_topk, true, false));
+                q_text_raw, q_vec_raw, common_quals, final_topk, &options, true, false));
             break;
     }
     set_cheapest(rel);

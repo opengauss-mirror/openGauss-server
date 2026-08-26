@@ -1,0 +1,62 @@
+P3-1 hybrid_search_v2/options/API/permission/injection live evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Base commit: 86ee1ea94a
+Instance: topk_test_data, port 55440, user qiumc
+Dedicated database: hybrid_recall_p31_20260826
+
+Build/install/restart
+  command: opengauss_build_install_restart.sh incremental
+  log: build_logs/incremental_20260826_153831.log
+  result: exit=0; install, restart and SQL connectivity check succeeded
+  PGDATA was preserved; no initdb was performed
+
+Fresh extension installation
+  CREATE DATABASE hybrid_recall_p31_install_20260826
+  CREATE EXTENSION ogai: ok
+  installed functions:
+    ogai.hybrid_rrf_marker          PL/pgSQL
+    ogai.hybrid_search_v2           PL/pgSQL
+    ogai.hybrid_search_v2_execute   C, $libdir/ogai
+  temporary installation-check database dropped after validation
+
+Functional/API test
+  gsql -X -p 55440 -U qiumc -d hybrid_recall_p31_20260826 \
+    -f docs/hybrid_recall/evidence/P3-1_test.sql
+  exit: 0
+  total time: 12147 ms
+  wrapper result with weights=[1,0], rrf_k=10 and filters.tenant_id=1:
+    5, 25, 45
+  direct marker result with the same options:
+    5, 25, 45
+
+Permission checks
+  non-owner role -> task not found or not owned by current user
+  task temporarily assigned to non-SELECT role -> permission denied for source table
+  task owner restored and temporary role dropped after validation
+
+Validation/injection checks
+  limit=0 rejected
+  raw p_where_clause SQL rejected
+  expression-shaped return column rejected
+  injection-shaped filter column rejected
+  unknown option rejected
+  branch candidate count below final K rejected
+  1e100 branch candidate rejected safely as bigint out of range
+  injection target public.p31_docs still exists: count=1
+
+Implementation note
+  The wrapper resolves query_vector once, validates/quotes identifiers and scalar
+  filters, then calls a C SPI materialization helper.  Materialization is required
+  because a PL/pgSQL cursor lifecycle around a parallel HybridRecall query corrupted
+  stream metadata; SPI_execute_with_args drives one complete ExecutorRun lifecycle.
+
+Regression after final install
+  P2-7 prepared/custom/generic plan: exit=0
+  P2-6 serial/parallel cost selection: exit=0
+  P2-5 off/force/auto and result equality: exit=0
+  P2-4 common filter/recheck and serial equality: exit=0
+  P2-2/P2-3 BM25/HNSW branch and payload: exit=0
+  P0-4 serial golden: exit=0
+  P0-6 tie-break/NULL/NaN boundaries: exit=0
+  final pg_isready: accepting connections

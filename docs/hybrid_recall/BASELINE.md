@@ -167,7 +167,7 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 | P2-4 公共 filter/recheck | 9b14a3b8d0 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
 | P2-5 串/并行 Path 与模式 | 593fd734c5 | `off` 无 Stream、`force` 双 LOCAL GATHER、`auto` 枚举候选；串并行结果逐字节一致 |
 | P2-6 初始成本模型 | 3b5f35a576 | 短查询自动串行、大查询自动双 Stream 并行；计划显示 HybridRecall 自身阻塞成本 |
-| P2-7 参数化与计划缓存 | 待提交 | `$1..$4` 支持 custom/generic plan；结果等价；运行时 K 边界校验 |
+| P2-7 参数化与计划缓存 | 86ee1ea94a | `$1..$4` 支持 custom/generic plan；结果等价；运行时 K 边界校验 |
 
 实现与回归证据：
 
@@ -259,3 +259,30 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 
 **G3 关闭，P2 Planner 阶段完成。** 下一阶段进入 P3：代价标定、资源治理、可观测性与
 压力/故障回归。
+
+## 13. P3 OGAI 接口进展（2026-08-26）
+
+### P3-1 `hybrid_search_v2` 与 options
+
+- 新增注入安全的同表/append V1 API：任务、源关系、主键/文本/向量列、返回列均从
+  `ogai.vectorize_tasks` 和系统目录解析；动态标识符使用 `quote_ident`/`format(%I)`，
+  用户值仅通过外部 Param 或经类型验证后的 `%L` 字面量进入生成 SQL。
+- V2 拒绝旧接口的任意 `p_where_clause` SQL，改用 `options.filters` 的结构化标量等值
+  过滤；支持 `strategy`、两路候选数、`rrf_k`、`weights`、worker 短缺策略和预计算
+  `query_vector`，未知键、错误类型及 V1 资源边界均明确报错。
+- query embedding 在 wrapper 中只求值一次并作为 `$2::vector` 传入；离线测试可通过
+  `query_vector` 跳过外部模型服务。Planner 解析同一 JSONB 常量并把候选数、RRF 参数
+  写入 HybridRecallPath，不再使用固定值。
+- wrapper 为 `SECURITY INVOKER`，同时校验任务归属和源表 SELECT 权限。跨角色实测分别
+  得到“任务不属于当前用户”和“源表权限不足”，没有绕过普通 ACL。
+- 新增 C SPI 物化 helper，一次 `SPI_execute_with_args` 完整驱动并行 HybridRecall；避免
+  PL/pgSQL cursor 分批取数与 task stream 生命周期不兼容造成的 stream 元数据损坏。
+- `evidence/P3-1_test.sql` / `evidence/P3-1_live.log`：封装 API 与直接 marker 在
+  `weights=[1,0]`、`rrf_k=10`、tenant 过滤下均返回 `5,25,45`；权限 2 例和注入/参数
+  7 例全部按预期拒绝，注入目标表仍存在。全新数据库 `CREATE EXTENSION ogai` 也已验证。
+- 标准增量构建、安装和原 PGDATA 重启成功：
+  `build_logs/incremental_20260826_153831.log`。最终安装后 P2-7、P2-6、P2-5、P2-4、
+  P2-2/P2-3、P0-4、P0-6 均回归通过，实例保持在线。
+
+**P3-1 完成。** 下一原子任务是 P3-2 legacy fallback：当能力关闭或 marker 形态不支持时，
+按明确 option/GUC 回到旧 `ogai.hybrid_search()`，并证明旧返回契约完全兼容。

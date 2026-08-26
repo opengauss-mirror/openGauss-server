@@ -795,6 +795,310 @@ END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;
 
 
+-- ------------------------------------------------------------------------
+-- HybridRecall V1 planner marker and injection-safe OGAI entry point.
+-- The marker must never execute as a scalar function: the planner replaces
+-- it with a HybridRecall node or this body raises a diagnostic error.
+-- ------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ogai.hybrid_rrf_marker(
+    id ANYELEMENT,
+    text_col TEXT,
+    vec_col VECTOR,
+    q_text TEXT,
+    q_vec VECTOR,
+    opts JSONB
+)
+RETURNS DOUBLE PRECISION AS $$
+BEGIN
+    RAISE EXCEPTION 'ogai.hybrid_rrf_marker must be executed by HybridRecall plan';
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+CREATE OR REPLACE FUNCTION ogai.hybrid_search_v2_execute(TEXT, TEXT, VECTOR)
+RETURNS SETOF JSONB
+AS '$libdir/ogai', 'ogai_hybrid_search_v2_execute'
+LANGUAGE C STRICT VOLATILE;
+
+CREATE OR REPLACE FUNCTION ogai.hybrid_search_v2(
+    p_task_name TEXT,
+    p_query TEXT,
+    p_return_cols TEXT DEFAULT '',
+    p_limit INTEGER DEFAULT 10,
+    p_where_clause TEXT DEFAULT '',
+    p_options JSONB DEFAULT '{
+        "strategy": "parallel_rrf",
+        "text_candidates": 100,
+        "vector_candidates": 100,
+        "rrf_k": 60,
+        "weights": [0.5, 0.5],
+        "on_worker_shortage": "serial",
+        "filters": {}
+    }'::JSONB
+)
+RETURNS TABLE(result_record JSONB) AS $$
+DECLARE
+    v_task_record ogai.vectorize_tasks%ROWTYPE;
+    v_relation_oid OID;
+    v_options JSONB := COALESCE(p_options, '{}'::JSONB);
+    v_filters JSONB;
+    v_query_vector VECTOR;
+    v_query TEXT;
+    v_select_fields TEXT := '';
+    v_filter_sql TEXT := '';
+    v_column TEXT;
+    v_seen_columns TEXT[] := ARRAY[]::TEXT[];
+    v_option_key TEXT;
+    v_column_type OID;
+    v_column_typmod INTEGER;
+    v_filter RECORD;
+    v_filter_text TEXT;
+    v_type_name TEXT;
+    v_text_candidates INTEGER := 100;
+    v_vector_candidates INTEGER := 100;
+    v_rrf_k DOUBLE PRECISION := 60.0;
+    v_text_weight DOUBLE PRECISION := 0.5;
+    v_vector_weight DOUBLE PRECISION := 0.5;
+BEGIN
+    IF p_task_name IS NULL OR btrim(p_task_name) = '' THEN
+        RAISE EXCEPTION 'hybrid_search_v2 task name must not be empty';
+    END IF;
+    IF p_query IS NULL THEN
+        RAISE EXCEPTION 'hybrid_search_v2 query must not be NULL';
+    END IF;
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN
+        RAISE EXCEPTION 'hybrid_search_v2 limit must be between 1 and 100, got %', p_limit;
+    END IF;
+
+    -- Raw SQL predicates are intentionally rejected in V2.  Equality
+    -- filters must be supplied as p_options.filters, whose column names and
+    -- scalar values are validated and quoted below.
+    IF p_where_clause IS NOT NULL AND btrim(p_where_clause) IS DISTINCT FROM '' THEN
+        RAISE EXCEPTION 'hybrid_search_v2 does not accept raw p_where_clause SQL'
+            USING HINT = 'Use p_options => jsonb_build_object(''filters'', jsonb_build_object(''column'', value)).';
+    END IF;
+
+    IF jsonb_typeof(v_options) <> 'object' THEN
+        RAISE EXCEPTION 'hybrid_search_v2 options must be a JSONB object';
+    END IF;
+    FOR v_option_key IN SELECT jsonb_object_keys(v_options)
+    LOOP
+        IF v_option_key NOT IN (
+            'strategy', 'text_candidates', 'vector_candidates', 'rrf_k',
+            'weights', 'on_worker_shortage', 'filters', 'query_vector'
+        ) THEN
+            RAISE EXCEPTION 'unsupported hybrid_search_v2 option: %', v_option_key;
+        END IF;
+    END LOOP;
+
+    IF v_options ? 'strategy' AND v_options->>'strategy' <> 'parallel_rrf' THEN
+        RAISE EXCEPTION 'hybrid_search_v2 strategy must be parallel_rrf';
+    END IF;
+    IF v_options ? 'on_worker_shortage' AND
+       v_options->>'on_worker_shortage' NOT IN ('serial', 'error') THEN
+        RAISE EXCEPTION 'on_worker_shortage must be serial or error';
+    END IF;
+
+    IF v_options ? 'text_candidates' THEN
+        IF jsonb_typeof(v_options->'text_candidates') <> 'number' OR
+           v_options->>'text_candidates' !~ '^[0-9]+$' THEN
+            RAISE EXCEPTION 'text_candidates must be an integer';
+        END IF;
+        v_text_candidates := (v_options->>'text_candidates')::INTEGER;
+    END IF;
+    IF v_options ? 'vector_candidates' THEN
+        IF jsonb_typeof(v_options->'vector_candidates') <> 'number' OR
+           v_options->>'vector_candidates' !~ '^[0-9]+$' THEN
+            RAISE EXCEPTION 'vector_candidates must be an integer';
+        END IF;
+        v_vector_candidates := (v_options->>'vector_candidates')::INTEGER;
+    END IF;
+    IF v_text_candidates < p_limit OR v_text_candidates > 1000 OR
+       v_vector_candidates < p_limit OR v_vector_candidates > 1000 OR
+       v_text_candidates + v_vector_candidates > 2000 THEN
+        RAISE EXCEPTION 'hybrid_search_v2 candidate limits are invalid'
+            USING DETAIL = format(
+                'final=%s text=%s vector=%s; branch range is final..1000 and total must be <= 2000',
+                p_limit, v_text_candidates, v_vector_candidates);
+    END IF;
+
+    IF v_options ? 'rrf_k' THEN
+        IF jsonb_typeof(v_options->'rrf_k') <> 'number' THEN
+            RAISE EXCEPTION 'rrf_k must be a number';
+        END IF;
+        v_rrf_k := (v_options->>'rrf_k')::DOUBLE PRECISION;
+    END IF;
+    IF v_rrf_k <= 0 OR v_rrf_k = 'NaN'::DOUBLE PRECISION THEN
+        RAISE EXCEPTION 'rrf_k must be finite and greater than zero';
+    END IF;
+
+    IF v_options ? 'weights' THEN
+        IF jsonb_typeof(v_options->'weights') <> 'array' OR
+           jsonb_array_length(v_options->'weights') <> 2 OR
+           jsonb_typeof(v_options->'weights'->0) <> 'number' OR
+           jsonb_typeof(v_options->'weights'->1) <> 'number' THEN
+            RAISE EXCEPTION 'weights must be a two-number array';
+        END IF;
+        v_text_weight := (v_options->'weights'->>0)::DOUBLE PRECISION;
+        v_vector_weight := (v_options->'weights'->>1)::DOUBLE PRECISION;
+    END IF;
+    IF v_text_weight < 0 OR v_vector_weight < 0 OR
+       v_text_weight = 'NaN'::DOUBLE PRECISION OR
+       v_vector_weight = 'NaN'::DOUBLE PRECISION THEN
+        RAISE EXCEPTION 'weights must be finite non-negative numbers';
+    END IF;
+
+    PERFORM 1
+    FROM ogai.vectorize_tasks
+    WHERE task_name = p_task_name
+      AND owner_name = CURRENT_USER;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'hybrid_search_v2 task not found or not owned by current user: %', p_task_name;
+    END IF;
+    SELECT * INTO v_task_record
+    FROM ogai.vectorize_tasks
+    WHERE task_name = p_task_name
+      AND owner_name = CURRENT_USER;
+    IF NOT v_task_record.enable_bm25 THEN
+        RAISE EXCEPTION 'BM25 is not enabled for task: %', p_task_name;
+    END IF;
+    IF v_task_record.method <> 'append'::ogai.table_method THEN
+        RAISE EXCEPTION 'hybrid_search_v2 V1 requires an append/same-table vectorization task';
+    END IF;
+
+    SELECT max(c.oid) INTO v_relation_oid
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = v_task_record.src_schema
+      AND c.relname = v_task_record.src_table
+      AND c.relkind = 'r';
+    IF v_relation_oid IS NULL THEN
+        RAISE EXCEPTION 'hybrid_search_v2 source table %.% does not exist',
+            v_task_record.src_schema, v_task_record.src_table;
+    END IF;
+    -- Use the two-argument form so the effective role is resolved when this
+    -- invocation runs.  Passing CURRENT_USER to the STABLE three-argument
+    -- overload can retain the role from an earlier cached PL/pgSQL plan.
+    IF NOT has_table_privilege(v_relation_oid, 'SELECT') THEN
+        RAISE EXCEPTION 'permission denied for hybrid_search_v2 source table %.%',
+            v_task_record.src_schema, v_task_record.src_table;
+    END IF;
+
+    -- Validate the three planner-marker columns before invoking the external
+    -- embedding provider, so metadata and permission errors are deterministic.
+    PERFORM 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = v_relation_oid AND attname = v_task_record.primary_key
+      AND attnum > 0 AND NOT attisdropped;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'hybrid_search_v2 primary key column does not exist: %',
+            v_task_record.primary_key;
+    END IF;
+    PERFORM 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = v_relation_oid AND attname = v_task_record.src_col
+      AND atttypid = 'text'::regtype AND attnum > 0 AND NOT attisdropped;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'hybrid_search_v2 text column must exist and have type text: %',
+            v_task_record.src_col;
+    END IF;
+    PERFORM 1 FROM pg_catalog.pg_attribute
+    WHERE attrelid = v_relation_oid AND attname = 'ogai_embedding'
+      AND atttypid = 'vector'::regtype AND attnum > 0 AND NOT attisdropped;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'hybrid_search_v2 requires vector column ogai_embedding';
+    END IF;
+
+    IF p_return_cols IS NULL OR btrim(p_return_cols) = '' THEN
+        SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum)
+        INTO v_select_fields
+        FROM pg_catalog.pg_attribute
+        WHERE attrelid = v_relation_oid AND attnum > 0 AND NOT attisdropped;
+    ELSE
+        FOREACH v_column IN ARRAY string_to_array(p_return_cols, ',')
+        LOOP
+            v_column := btrim(v_column);
+            IF v_column = '' OR v_column = 'hybrid_score' OR
+               v_column = ANY(v_seen_columns) THEN
+                RAISE EXCEPTION 'invalid or duplicate hybrid_search_v2 return column: %', v_column;
+            END IF;
+            PERFORM 1 FROM pg_catalog.pg_attribute
+            WHERE attrelid = v_relation_oid AND attname = v_column
+              AND attnum > 0 AND NOT attisdropped;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'hybrid_search_v2 return column does not exist: %', v_column;
+            END IF;
+            v_seen_columns := array_append(v_seen_columns, v_column);
+            IF v_select_fields IS NULL OR v_select_fields = '' THEN
+                v_select_fields := quote_ident(v_column);
+            ELSE
+                v_select_fields := v_select_fields || ', ' || quote_ident(v_column);
+            END IF;
+        END LOOP;
+    END IF;
+
+    v_filters := COALESCE(v_options->'filters', '{}'::JSONB);
+    IF jsonb_typeof(v_filters) <> 'object' THEN
+        RAISE EXCEPTION 'hybrid_search_v2 filters must be a JSONB object';
+    END IF;
+    FOR v_filter IN SELECT key, value FROM jsonb_each(v_filters)
+    LOOP
+        SELECT max(atttypid), max(atttypmod) INTO v_column_type, v_column_typmod
+        FROM pg_catalog.pg_attribute
+        WHERE attrelid = v_relation_oid AND attname = v_filter.key
+          AND attnum > 0 AND NOT attisdropped;
+        IF v_column_type IS NULL THEN
+            RAISE EXCEPTION 'hybrid_search_v2 filter column does not exist: %', v_filter.key;
+        END IF;
+        IF jsonb_typeof(v_filter.value) IN ('array', 'object') THEN
+            RAISE EXCEPTION 'hybrid_search_v2 filter values must be scalar: %', v_filter.key;
+        END IF;
+
+        IF jsonb_typeof(v_filter.value) = 'null' THEN
+            v_filter_sql := v_filter_sql || format(' AND %I IS NULL', v_filter.key);
+        ELSE
+            SELECT value INTO v_filter_text
+            FROM jsonb_array_elements_text(
+                ('[' || v_filter.value::TEXT || ']')::JSONB);
+            v_type_name := pg_catalog.format_type(v_column_type, v_column_typmod);
+            v_filter_sql := v_filter_sql ||
+                format(' AND %I = %L::%s', v_filter.key, v_filter_text, v_type_name);
+        END IF;
+    END LOOP;
+
+    -- D-005: resolve the query vector once in the caller backend, then pass
+    -- it as one external Param shared by both branches.  query_vector also
+    -- makes offline/precomputed-vector deployments independent of a model
+    -- service while retaining p_query for the BM25 branch.
+    IF v_options ? 'query_vector' THEN
+        IF jsonb_typeof(v_options->'query_vector') <> 'array' THEN
+            RAISE EXCEPTION 'query_vector must be a JSON number array';
+        END IF;
+        v_query_vector := (v_options->'query_vector')::TEXT::VECTOR;
+    ELSE
+        v_query_vector := ogai_embedding(
+            p_query, v_task_record.model_key, v_task_record.dim);
+    END IF;
+
+    v_query := format(
+        'SELECT %s, ogai.hybrid_rrf_marker(%I, %I, %I, $1, $2, %L::jsonb) AS hybrid_score '
+        'FROM %I.%I WHERE true%s ORDER BY hybrid_score DESC LIMIT %s',
+        v_select_fields,
+        v_task_record.primary_key,
+        v_task_record.src_col,
+        'ogai_embedding',
+        v_options::TEXT,
+        v_task_record.src_schema,
+        v_task_record.src_table,
+        v_filter_sql,
+        p_limit);
+
+    RETURN QUERY
+    SELECT *
+    FROM ogai.hybrid_search_v2_execute(v_query, p_query, v_query_vector);
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+COMMENT ON FUNCTION ogai.hybrid_search_v2(TEXT, TEXT, TEXT, INTEGER, TEXT, JSONB)
+IS 'Injection-safe same-table HybridRecall V1 API; use options.filters instead of raw SQL predicates';
+
 CREATE OR REPLACE FUNCTION ogai.ai_unvectorize(
     p_task_name TEXT
 ) RETURNS TABLE(
