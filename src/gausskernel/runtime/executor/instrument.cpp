@@ -1419,6 +1419,13 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             pname = "Limit";
             plan_type = UTILITY_OP;
             break;
+        case T_HybridRecall:
+            /* P3-4: HybridRecall participates in operator/WLM instrumentation.
+             * Missing this mapping makes EXPLAIN ANALYZE hit the default
+             * assertion while allocating the stream instrumentation slot. */
+            pname = "Hybrid Recall";
+            plan_type = UTILITY_OP;
+            break;
         case T_Hash:
             pname = "Hash";
             plan_type = HASHJOIN_OP;

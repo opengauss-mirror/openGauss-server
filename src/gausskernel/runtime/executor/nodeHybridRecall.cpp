@@ -58,6 +58,15 @@ static THR_LOCAL TypeCacheEntry* g_hybrid_id_tcache = NULL;
 static TupleTableSlot* ExecHybridRecall(PlanState* state);
 static void hybrid_validate_options(HybridRecallState* node);
 
+static double hybrid_elapsed_ms(instr_time start, instr_time end)
+{
+    instr_time elapsed;
+
+    INSTR_TIME_SET_ZERO(elapsed);
+    INSTR_TIME_ACCUM_DIFF(elapsed, end, start);
+    return INSTR_TIME_GET_MILLISEC(elapsed);
+}
+
 static void hybrid_check_candidate_memory(HybridRecallState* node)
 {
     Size used = AllocSetContextUsedSpace((AllocSet)node->candidate_cxt);
@@ -379,7 +388,8 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     state->vector_rows = 0;
     state->dedup_rows = 0;
     state->final_rows = 0;
-    state->actual_parallel = false;
+    state->actual_parallel = node->parallel_branches &&
+        IsA(node->plan.lefttree, Stream) && IsA(node->plan.righttree, Stream);
     state->serial_fallback = false;
 
     /* Validate during ExecutorStart as well as BUILD.  An outer LIMIT 0 does
@@ -728,10 +738,32 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
         INSTR_TIME_SET_CURRENT(node->text_first_tuple);
         hybrid_drain_branch(node, node->text_state, true, &node->text_rows);
         INSTR_TIME_SET_CURRENT(node->text_end);
+        INSTR_TIME_SET_CURRENT(node->vector_first_tuple);
         hybrid_drain_branch(node, node->vector_state, false, &node->vector_rows);
         INSTR_TIME_SET_CURRENT(node->vector_end);
         hybrid_fuse(node);
         INSTR_TIME_SET_CURRENT(node->fusion_time);
+
+        if (u_sess->attr.attr_sql.hybrid_recall_log_summary) {
+            /* Deliberately exclude query text, vector values, filters and
+             * document keys.  The opt-in GUC prevents per-query log noise;
+             * errhidestmt prevents the log collector attaching the SQL text. */
+            ereport(LOG,
+                    (errmsg("HybridRecall execution summary"),
+                     errdetail("strategy=%s final_topk=%ld text_rows=%lu vector_rows=%lu "
+                               "deduplicated=%lu output_rows=%lu text_drain_ms=%.3f "
+                               "vector_drain_ms=%.3f fusion_ms=%.3f",
+                               node->actual_parallel ? "parallel" : "serial",
+                               node->final_topk,
+                               (unsigned long)node->text_rows,
+                               (unsigned long)node->vector_rows,
+                               (unsigned long)node->dedup_rows,
+                               (unsigned long)node->final_rows,
+                               hybrid_elapsed_ms(node->text_first_tuple, node->text_end),
+                               hybrid_elapsed_ms(node->vector_first_tuple, node->vector_end),
+                               hybrid_elapsed_ms(node->vector_end, node->fusion_time)),
+                     errhidestmt(true)));
+        }
 
         node->phase = HYBRID_PHASE_OUTPUT;
     }
@@ -778,7 +810,9 @@ void ExecReScanHybridRecall(HybridRecallState* node)
         MemoryContextDelete(node->candidate_cxt);
         node->candidate_cxt = NULL;
     }
-    node->candidate_cxt = AllocSetContextCreate(node->ps.state->es_query_cxt,
+    /* Keep rescans under this operator's node context so WLM/operator memory
+     * accounting observes the same ownership tree as the first execution. */
+    node->candidate_cxt = AllocSetContextCreate(node->ps.nodeContext,
                                                 "HybridRecallCandidates",
                                                 ALLOCSET_DEFAULT_MINSIZE,
                                                 ALLOCSET_DEFAULT_INITSIZE,
@@ -792,6 +826,11 @@ void ExecReScanHybridRecall(HybridRecallState* node)
     node->vector_rows = 0;
     node->dedup_rows = 0;
     node->final_rows = 0;
+    INSTR_TIME_SET_ZERO(node->text_first_tuple);
+    INSTR_TIME_SET_ZERO(node->text_end);
+    INSTR_TIME_SET_ZERO(node->vector_first_tuple);
+    INSTR_TIME_SET_ZERO(node->vector_end);
+    INSTR_TIME_SET_ZERO(node->fusion_time);
     node->phase = HYBRID_PHASE_BUILD;
 
     ExecReScan(node->text_state);

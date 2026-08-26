@@ -332,3 +332,25 @@ worker 使用量的统一硬上限与可诊断错误，并把资源策略接入 
 
 **P3-3 完成。** 下一原子任务是 P3-4：补齐 HybridRecall EXPLAIN、非敏感诊断日志和
 WLM/worker 资源观测字段。
+
+### P3-4 EXPLAIN、日志与 WLM 可观测性
+
+- `EXPLAIN` 新增策略、最终 K、两路候选数、RRF 参数/权重和计划 worker 数；
+  `EXPLAIN ANALYZE` 进一步输出实际 worker 数、两路/去重/最终候选行数、两路耗时、
+  fusion 时间、branch overlap 和候选内存。TEXT 与 JSON 格式均验证通过。
+- 串行实测为 `planned/actual workers=0/0`、`overlap=0`；并行 JSON 实测为 `2/2`，
+  两路耗时约 `1.988/1.974 ms`，overlap `1.960 ms`，候选内存 `11 kB`。两条
+  LOCAL GATHER、BM25 Index Scan 和 Ann Index Scan 仍完整显示。
+- 首次 `EXPLAIN ANALYZE` 暴露 WLM `ThreadInstrumentation::allocInstrSlot` 未识别
+  `T_HybridRecall`，debug build 命中默认断言。现已映射为 `Hybrid Recall` utility
+  operator；`resource_track_level=operator` 下串行、并行执行均不再断言。
+- 新增默认关闭的 USERSET GUC `hybrid_recall_log_summary`。开启时仅写 strategy、K、
+  候选行数和耗时数字，且使用 `errhidestmt(true)`；带敏感测试标记的 SQL 成功执行后，
+  服务端日志中的标记计数为 0。该 bool 复用 offset 630 的既有 padding，session 结构
+  大小和后续字段 offset 均不变。
+- 仅编译四个目标对象、relink/install `gaussdb` 并重启原 PGDATA，没有全量构建或重装。
+  `evidence/P3-4_test.sql` / `evidence/P3-4_live.log` 记录完整结果；P3-1 至 P3-3、
+  P2-1 至 P2-7、P0-4/P0-5/P0-6 全量回归通过。
+
+**P3-4 完成。** 下一原子任务是 P3-5：debug/release/memcheck 构建与循环执行、取消和
+rescan 内存稳定性验证。

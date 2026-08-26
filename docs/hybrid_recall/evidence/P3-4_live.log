@@ -1,0 +1,93 @@
+P3-4 EXPLAIN, diagnostic logging and WLM observability live evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Base commit: 72897a336a
+Instance: topk_test_data, port 55440, user qiumc
+Functional database: hybrid_recall_p31_20260826
+
+Build/install/restart
+  targeted compile:
+    src/common/backend/utils/misc/guc/guc_sql.o
+    src/gausskernel/optimizer/commands/explain.o
+    src/gausskernel/runtime/executor/instrument.o
+    src/gausskernel/runtime/executor/nodeHybridRecall.o
+  targeted link: make -C src/gausskernel gaussdb -sj4
+  targeted install: gaussdb binary only
+  full openGauss build/install: not performed
+  final restart log: build_logs/restart_20260826_171549.log
+  result: restart and SQL connectivity check succeeded; original PGDATA preserved
+
+WLM assertion found and fixed
+  The first EXPLAIN ANALYZE smoke test exposed a missing T_HybridRecall entry in
+  ThreadInstrumentation::allocInstrSlot.  The debug build hit instrument.cpp's
+  default assertion while allocating WLM/stream instrumentation.
+  The affected test backend left the instance in shutdown; it was stopped with
+  gs_ctl immediate, recovered on the same PGDATA, and no database was recreated.
+  T_HybridRecall now maps to the "Hybrid Recall" utility operator.  The final
+  P3-4 test ran serial and parallel EXPLAIN ANALYZE with
+  resource_track_level=operator and produced no assertion.
+
+ABI/layout validation
+  hybrid_recall_log_summary occupies byte offset 630, an existing alignment
+  hole after enable_hybrid_recall at 629; vectorEngineStrategy remains at 632.
+  sizeof(knl_session_attr_sql): 656 bytes, unchanged
+  sizeof(knl_session_attr): 44032 bytes, unchanged
+  sizeof(knl_session_context): 52776 bytes, unchanged
+
+Functional test
+  gsql -X -p 55440 -U qiumc -d hybrid_recall_p31_20260826 \
+    -f docs/hybrid_recall/evidence/P3-4_test.sql
+  exit: 0
+  total time: 50 ms
+  use_workload_manager: on
+  hybrid_recall_log_summary default: off
+
+Serial EXPLAIN ANALYZE, resource_track_level=operator
+  Strategy: Serial RRF
+  Final Top-K: 3
+  Text/Vector Candidates: 100/100
+  Planned/Actual Branch Workers: 0/0
+  Candidate Rows: text=25 vector=100 deduplicated=104 final=3
+  Text/Vector/Fusion Time: 2.283/2.530/0.026 ms
+  Branch Overlap: 0.000 ms
+  Candidate Memory Usage: 11 kB
+
+Parallel EXPLAIN ANALYZE FORMAT JSON, resource_track_level=operator
+  Strategy: Parallel RRF
+  Planned/Actual Branch Workers: 2/2
+  Parallel Fallback: false
+  Candidate Rows: text=25 vector=100 deduplicated=104 final=3
+  Text/Vector/Fusion Time: 1.988/1.974/0.033 ms
+  Branch Overlap: 1.960 ms
+  Candidate Memory Usage: 11 kB
+  Both LOCAL GATHER branches and their BM25/HNSW index scans remain visible.
+
+Opt-in non-sensitive execution log
+  GUC: hybrid_recall_log_summary=on for one successful query, then RESET
+  server log message: HybridRecall execution summary
+  detail fields: strategy, final_topk, text/vector/deduplicated/output rows and
+  text/vector drain plus fusion milliseconds
+  source query marker: p34_sensitive_sql_token
+  marker occurrences in server log: 0
+  reason: the summary excludes query/vector/filter/key values and uses
+  errhidestmt(true); the default-off GUC prevents normal per-query log noise.
+
+Regression after final binary install
+  P3-3 resource ceilings/cache revalidation/memory error: exit=0
+  P3-2 feature switch/fallback/legacy equality: exit=0; mismatch counts=0
+  P3-1 options/API/permission/injection: exit=0
+  P2-7 prepared/custom/generic plan: exit=0
+  P2-6 cost selection: exit=0; small=serial, large=parallel
+  P2-5 serial/parallel result equality: exit=0; match=ok
+  P2-4 common filter/recheck equality: exit=0; match=ok
+  P2-2/P2-3 branch/payload/cache behavior: exit=0
+  P2-1 marker whitelist: exit=0
+  P0-4 serial golden: exit=0
+  P0-5 candidate/resource boundaries: exit=0 with expected errors
+  P0-6 tie-break/NULL/NaN boundaries: exit=0 with expected NULL-key error
+
+Verdict
+  HybridRecall is now accepted by WLM/operator instrumentation and exposes
+  stable text and JSON EXPLAIN fields for plan policy, actual worker count,
+  candidate cardinalities, branch/fusion timing, overlap and candidate memory.
+  Optional server logging is diagnostic without exposing the original query.
