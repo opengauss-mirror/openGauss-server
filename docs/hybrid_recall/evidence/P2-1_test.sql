@@ -1,4 +1,5 @@
 -- P2-1 marker 识别白名单验证（SET client_min_messages=debug1 后运行）
+SET enable_hybrid_recall = on;
 -- 正向：应输出 "hybrid_recall P2-1 recognize: ... bm25=1 ann=1"
 EXPLAIN (COSTS OFF) SELECT id FROM hybrid_recall_docs WHERE tenant_id = 1
 ORDER BY ogai.hybrid_rrf_marker(id, content, embedding, 'database',

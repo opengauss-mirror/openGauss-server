@@ -286,3 +286,25 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 
 **P3-1 完成。** 下一原子任务是 P3-2 legacy fallback：当能力关闭或 marker 形态不支持时，
 按明确 option/GUC 回到旧 `ogai.hybrid_search()`，并证明旧返回契约完全兼容。
+
+### P3-2 legacy fallback 与运行时回滚开关
+
+- 新增 USERSET GUC `enable_hybrid_recall`，默认 `off`。关闭时 Planner 不再生成新的
+  HybridRecallPath；缓存计划若在关闭后再次执行，会在初始化支路 worker 前安全拒绝。
+- `hybrid_search_v2.options.on_unsupported` 支持 `legacy`（默认）和 `error`。wrapper 在
+  GUC 关闭、任务不是 append 同表形态或 BM25/ANN 索引能力缺失时，分别进入旧串行实现
+  或返回包含具体原因的错误；内部专用 option 不再传给 marker。
+- 旧 `ogai.hybrid_search(text,text,text,integer,text)` 签名和 JSONB 投影不变。原实现抽取为
+  `hybrid_search_legacy_core`，使 V2 能把只计算一次的查询向量交给兼容路径，避免回退时
+  第二次调用 embedding 服务。
+- V2 的结构化过滤仍通过目录类型校验和 `%I/%L` 构造。实测修复了 A 兼容模式下空字符串
+  被视为 NULL 导致首个过滤谓词丢失的问题；租户过滤后的旧实现/V2 回退逐行 JSONB
+  mismatch 为 0，删除 ANN 索引触发回退后的 mismatch 也为 0。
+- `evidence/P3-2_test.sql` / `evidence/P3-2_live.log`：默认关闭、显式开启计划、缺索引回退、
+  error 策略、缓存计划关闭后拒绝、旧接口开关无关性与原五参数签名均通过。
+- 最终源文件与安装目录扩展 SQL 字节一致；新库 `hybrid_recall_p32_20260826` 上
+  `CREATE EXTENSION ogai` 成功且默认开关为 `off`。P3-1、P2-1 至 P2-7、P0-4/P0-5/P0-6
+  均完成回归。
+
+**P3-2 完成。** 下一原子任务是 P3-3：补齐候选数、最终 K、RRF 参数、单查询内存和
+worker 使用量的统一硬上限与可诊断错误，并把资源策略接入 GUC/options。

@@ -2,6 +2,7 @@
 -- Prerequisite: S0 hybrid_recall_docs data/indexes and ogai marker function.
 \set ON_ERROR_STOP on
 
+SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = force;
 SHOW enable_seqscan;
 

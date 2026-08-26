@@ -3,6 +3,7 @@
 -- branches should amortize it and select the parallel alternative.
 \set ON_ERROR_STOP on
 
+SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = auto;
 
 \echo === P2-6 SMALL FIXTURE: EXPECT SERIAL ===

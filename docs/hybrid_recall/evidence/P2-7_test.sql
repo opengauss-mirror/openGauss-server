@@ -5,6 +5,7 @@
 \timing on
 
 SET statement_timeout = '30s';
+SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = force;
 
 PREPARE hr_p27(text, vector, integer, bigint) AS

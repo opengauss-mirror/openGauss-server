@@ -18,6 +18,7 @@ RETURNS TABLE(doc_id int, source_mask int, text_rank int, vector_rank int, hybri
 AS 'hybrid_recall_test.so', 'hybrid_recall_debug_execute'
 LANGUAGE C VOLATILE;
 
+SET enable_hybrid_recall = on;
 SET enable_seqscan = off;
 
 SELECT doc_id, source_mask, text_rank, vector_rank, round(hybrid_score, 8) AS hybrid_score

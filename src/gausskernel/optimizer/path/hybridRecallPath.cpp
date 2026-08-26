@@ -336,6 +336,11 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
 {
     Query* parse = root->parse;
 
+    /* P3-2 session-level production rollback switch.  The OGAI v2 wrapper checks the same
+     * GUC before emitting marker SQL and invokes the legacy API while off. */
+    if (!u_sess->attr.attr_sql.enable_hybrid_recall)
+        return;
+
     /* V1 is a top-level, plain SELECT over one ordinary table.  In
      * particular, do not inject task streams below an upper query level:
      * rescan/generation semantics for correlated or otherwise nested plans

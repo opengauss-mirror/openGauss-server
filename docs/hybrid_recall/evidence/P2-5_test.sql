@@ -2,6 +2,7 @@
 -- Prerequisite: S0 hybrid_recall_docs data/indexes and ogai marker function.
 \set ON_ERROR_STOP on
 
+SET enable_hybrid_recall = on;
 \echo === P2-5 GUC DEFAULT ===
 SHOW hybrid_recall_parallel_mode;
 

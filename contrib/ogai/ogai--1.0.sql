@@ -941,6 +941,7 @@ CREATE OR REPLACE FUNCTION ogai.hybrid_search_v2(
         "rrf_k": 60,
         "weights": [0.5, 0.5],
         "on_worker_shortage": "serial",
+        "on_unsupported": "legacy",
         "filters": {}
     }'::JSONB
 )
@@ -949,6 +950,7 @@ DECLARE
     v_task_record ogai.vectorize_tasks%ROWTYPE;
     v_relation_oid OID;
     v_options JSONB := COALESCE(p_options, '{}'::JSONB);
+    v_marker_options JSONB;
     v_filters JSONB;
     v_query_vector VECTOR;
     v_query TEXT;
@@ -962,6 +964,11 @@ DECLARE
     v_filter RECORD;
     v_filter_text TEXT;
     v_type_name TEXT;
+    v_on_unsupported TEXT;
+    v_unsupported_reason TEXT;
+    v_legacy_where TEXT := '';
+    v_has_bm25 BOOLEAN := false;
+    v_has_ann BOOLEAN := false;
     v_text_candidates INTEGER := 100;
     v_vector_candidates INTEGER := 100;
     v_rrf_k DOUBLE PRECISION := 60.0;
@@ -993,11 +1000,17 @@ BEGIN
     LOOP
         IF v_option_key NOT IN (
             'strategy', 'text_candidates', 'vector_candidates', 'rrf_k',
-            'weights', 'on_worker_shortage', 'filters', 'query_vector'
+            'weights', 'on_worker_shortage', 'on_unsupported', 'filters', 'query_vector'
         ) THEN
             RAISE EXCEPTION 'unsupported hybrid_search_v2 option: %', v_option_key;
         END IF;
     END LOOP;
+
+    v_on_unsupported := COALESCE(v_options->>'on_unsupported', 'legacy');
+    IF v_on_unsupported NOT IN ('legacy', 'error') THEN
+        RAISE EXCEPTION 'on_unsupported must be legacy or error';
+    END IF;
+    v_marker_options := v_options - 'on_unsupported';
 
     IF v_options ? 'strategy' AND v_options->>'strategy' <> 'parallel_rrf' THEN
         RAISE EXCEPTION 'hybrid_search_v2 strategy must be parallel_rrf';
@@ -1070,8 +1083,10 @@ BEGIN
     IF NOT v_task_record.enable_bm25 THEN
         RAISE EXCEPTION 'BM25 is not enabled for task: %', p_task_name;
     END IF;
-    IF v_task_record.method <> 'append'::ogai.table_method THEN
-        RAISE EXCEPTION 'hybrid_search_v2 V1 requires an append/same-table vectorization task';
+    IF NOT current_setting('enable_hybrid_recall')::BOOLEAN THEN
+        v_unsupported_reason := 'enable_hybrid_recall is off';
+    ELSIF v_task_record.method <> 'append'::ogai.table_method THEN
+        v_unsupported_reason := 'V1 requires an append/same-table vectorization task';
     END IF;
 
     SELECT max(c.oid) INTO v_relation_oid
@@ -1108,11 +1123,43 @@ BEGIN
         RAISE EXCEPTION 'hybrid_search_v2 text column must exist and have type text: %',
             v_task_record.src_col;
     END IF;
-    PERFORM 1 FROM pg_catalog.pg_attribute
-    WHERE attrelid = v_relation_oid AND attname = 'ogai_embedding'
-      AND atttypid = 'vector'::regtype AND attnum > 0 AND NOT attisdropped;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'hybrid_search_v2 requires vector column ogai_embedding';
+    IF v_task_record.method = 'append'::ogai.table_method THEN
+        PERFORM 1 FROM pg_catalog.pg_attribute
+        WHERE attrelid = v_relation_oid AND attname = 'ogai_embedding'
+          AND atttypid = 'vector'::regtype AND attnum > 0 AND NOT attisdropped;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'hybrid_search_v2 requires vector column ogai_embedding';
+        END IF;
+    END IF;
+
+    -- The marker cannot safely fall through to scalar execution.  Detect the
+    -- two index capabilities before generating it and select legacy/error
+    -- while still in the wrapper.
+    IF v_unsupported_reason IS NULL THEN
+        SELECT count(*) > 0 INTO v_has_bm25
+        FROM pg_catalog.pg_index x
+        JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid
+        JOIN pg_catalog.pg_am am ON am.oid = i.relam
+        JOIN pg_catalog.pg_attribute a
+          ON a.attrelid = x.indrelid AND a.attnum = x.indkey[0]
+        WHERE x.indrelid = v_relation_oid AND x.indisvalid
+          AND am.amname = 'bm25' AND a.attname = v_task_record.src_col;
+
+        SELECT count(*) > 0 INTO v_has_ann
+        FROM pg_catalog.pg_index x
+        JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid
+        JOIN pg_catalog.pg_am am ON am.oid = i.relam
+        JOIN pg_catalog.pg_attribute a
+          ON a.attrelid = x.indrelid AND a.attnum = x.indkey[0]
+        WHERE x.indrelid = v_relation_oid AND x.indisvalid
+          AND am.amname IN ('hnsw', 'ivfflat', 'diskann')
+          AND a.attname = 'ogai_embedding';
+
+        IF NOT v_has_bm25 OR NOT v_has_ann THEN
+            v_unsupported_reason := format(
+                'required indexes are unavailable (bm25=%s ann=%s)',
+                v_has_bm25, v_has_ann);
+        END IF;
     END IF;
 
     IF p_return_cols IS NULL OR btrim(p_return_cols) = '' THEN
@@ -1161,21 +1208,33 @@ BEGIN
         END IF;
 
         IF jsonb_typeof(v_filter.value) = 'null' THEN
-            v_filter_sql := v_filter_sql || format(' AND %I IS NULL', v_filter.key);
+            IF v_filter_sql IS NULL THEN
+                v_filter_sql := format(' AND %I IS NULL', v_filter.key);
+            ELSE
+                v_filter_sql := v_filter_sql || format(' AND %I IS NULL', v_filter.key);
+            END IF;
         ELSE
             SELECT value INTO v_filter_text
             FROM jsonb_array_elements_text(
                 ('[' || v_filter.value::TEXT || ']')::JSONB);
             v_type_name := pg_catalog.format_type(v_column_type, v_column_typmod);
-            v_filter_sql := v_filter_sql ||
-                format(' AND %I = %L::%s', v_filter.key, v_filter_text, v_type_name);
+            IF v_filter_sql IS NULL THEN
+                v_filter_sql := format(
+                    ' AND %I = %L::%s', v_filter.key, v_filter_text, v_type_name);
+            ELSE
+                v_filter_sql := v_filter_sql || format(
+                    ' AND %I = %L::%s', v_filter.key, v_filter_text, v_type_name);
+            END IF;
         END IF;
     END LOOP;
 
+    -- An explicit error policy must fail before embedding is attempted.
+    IF v_unsupported_reason IS NOT NULL AND v_on_unsupported = 'error' THEN
+        RAISE EXCEPTION 'HybridRecall is unavailable: %', v_unsupported_reason;
+    END IF;
+
     -- D-005: resolve the query vector once in the caller backend, then pass
-    -- it as one external Param shared by both branches.  query_vector also
-    -- makes offline/precomputed-vector deployments independent of a model
-    -- service while retaining p_query for the BM25 branch.
+    -- it to either the legacy core or both HybridRecall branches.
     IF v_options ? 'query_vector' THEN
         IF jsonb_typeof(v_options->'query_vector') <> 'array' THEN
             RAISE EXCEPTION 'query_vector must be a JSON number array';
@@ -1186,6 +1245,17 @@ BEGIN
             p_query, v_task_record.model_key, v_task_record.dim);
     END IF;
 
+    IF v_unsupported_reason IS NOT NULL THEN
+        IF v_filter_sql IS NOT NULL THEN
+            v_legacy_where := substring(v_filter_sql FROM 6);
+        END IF;
+        RETURN QUERY
+        SELECT * FROM ogai.hybrid_search_legacy_core(
+            p_task_name, p_query, p_return_cols, p_limit,
+            v_legacy_where, v_query_vector);
+        RETURN;
+    END IF;
+
     v_query := format(
         'SELECT %s, ogai.hybrid_rrf_marker(%I, %I, %I, $1, $2, %L::jsonb) AS hybrid_score '
         'FROM %I.%I WHERE true%s ORDER BY hybrid_score DESC LIMIT %s',
@@ -1193,7 +1263,7 @@ BEGIN
         v_task_record.primary_key,
         v_task_record.src_col,
         'ogai_embedding',
-        v_options::TEXT,
+        v_marker_options::TEXT,
         v_task_record.src_schema,
         v_task_record.src_table,
         v_filter_sql,
@@ -1206,7 +1276,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;
 
 COMMENT ON FUNCTION ogai.hybrid_search_v2(TEXT, TEXT, TEXT, INTEGER, TEXT, JSONB)
-IS 'Injection-safe same-table HybridRecall V1 API; use options.filters instead of raw SQL predicates';
+IS 'Injection-safe HybridRecall V1 API with options.filters and explicit legacy fallback';
 
 CREATE OR REPLACE FUNCTION ogai.ai_unvectorize(
     p_task_name TEXT
@@ -1448,12 +1518,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;
 
-CREATE OR REPLACE FUNCTION ogai.hybrid_search(
+CREATE OR REPLACE FUNCTION ogai.hybrid_search_legacy_core(
     p_task_name TEXT,
     p_query TEXT,
-    p_return_cols TEXT DEFAULT '',
-    p_limit INTEGER DEFAULT 10,
-    p_where_clause TEXT DEFAULT ''
+    p_return_cols TEXT,
+    p_limit INTEGER,
+    p_where_clause TEXT,
+    p_query_vector VECTOR
 )
 RETURNS TABLE(
     result_record JSONB
@@ -1507,13 +1578,18 @@ BEGIN
         v_use_join_mode := true;
     END IF;
 
-    -- Generate embedding for vector search
-    v_embedding_vector := format(
-        'ogai_embedding(%L, %L, %L)',
-        p_query,
-        v_task_record.model_key,
-        v_task_record.dim
-    );
+    -- Preserve the legacy scoring/query shape while allowing hybrid_search_v2
+    -- to pass its single precomputed embedding into the compatibility path.
+    IF p_query_vector IS NULL THEN
+        v_embedding_vector := format(
+            'ogai_embedding(%L, %L, %L)',
+            p_query,
+            v_task_record.model_key,
+            v_task_record.dim
+        );
+    ELSE
+        v_embedding_vector := format('%L::vector', p_query_vector::TEXT);
+    END IF;
 
     -- Parse return columns
     IF p_return_cols IS NOT NULL AND trim(p_return_cols) IS DISTINCT FROM '' THEN
@@ -1760,5 +1836,24 @@ BEGIN
 
     -- Execute hybrid search query
     RETURN QUERY EXECUTE v_hybrid_query;
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
+
+
+-- Public legacy signature remains unchanged.  Its implementation is factored
+-- through the core solely so hybrid_search_v2 can reuse the exact old scoring
+-- and JSONB projection with a query vector that was resolved once.
+CREATE OR REPLACE FUNCTION ogai.hybrid_search(
+    p_task_name TEXT,
+    p_query TEXT,
+    p_return_cols TEXT DEFAULT '',
+    p_limit INTEGER DEFAULT 10,
+    p_where_clause TEXT DEFAULT ''
+)
+RETURNS TABLE(result_record JSONB) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM ogai.hybrid_search_legacy_core(
+        p_task_name, p_query, p_return_cols, p_limit, p_where_clause, NULL::VECTOR);
 END;
 $$ LANGUAGE plpgsql SECURITY INVOKER;

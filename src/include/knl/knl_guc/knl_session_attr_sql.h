@@ -285,6 +285,7 @@ typedef struct knl_session_attr_sql {
 #endif
     bool var_eq_const_selectivity;
     bool enable_func_cache;
+    bool enable_hybrid_recall;
     int vectorEngineStrategy;
     int hybrid_recall_parallel_mode;
     int gms_stats_history_retention;

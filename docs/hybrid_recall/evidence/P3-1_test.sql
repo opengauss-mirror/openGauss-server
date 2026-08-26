@@ -5,6 +5,7 @@
 \timing on
 
 SET client_min_messages = warning;
+SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = force;
 SET search_path = ogai, public;
 
@@ -141,3 +142,4 @@ WHERE n.nspname = 'public' AND c.relname = 'p31_docs';
 
 RESET search_path;
 RESET hybrid_recall_parallel_mode;
+RESET enable_hybrid_recall;

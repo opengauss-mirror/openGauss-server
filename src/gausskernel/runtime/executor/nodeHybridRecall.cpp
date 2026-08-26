@@ -229,6 +229,15 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
      * (design doc §1.3); reject them here rather than misbehave later. */
     Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
+    /* A generic/cached plan can outlive a session-level SET enable_hybrid_recall=off.  Do not
+     * execute its branch workers after rollback; callers must replan, while
+     * hybrid_search_v2 itself selects legacy SQL before creating a marker. */
+    if (!u_sess->attr.attr_sql.enable_hybrid_recall)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("HybridRecall is disabled by enable_hybrid_recall"),
+                 errhint("Discard the cached plan or enable HybridRecall before retrying.")));
+
     if (node->plan.lefttree == NULL || node->plan.righttree == NULL)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

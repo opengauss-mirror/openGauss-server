@@ -1,0 +1,66 @@
+P3-2 feature switch and legacy fallback live evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Base commit: 390e0515a4
+Instance: topk_test_data, port 55440, user qiumc
+Functional database: hybrid_recall_p31_20260826
+Fresh-install database: hybrid_recall_p32_20260826
+
+Build/install/restart
+  command: opengauss_build_install_restart.sh incremental
+  log: build_logs/incremental_20260826_160500.log
+  compile/install: succeeded; original PGDATA preserved
+  first start: failed with exit 139 because the first GUC layout enlarged a
+    session struct while stale objects retained the old offsets
+  fix: place enable_hybrid_recall in existing bool padding; final
+    sizeof(knl_session_attr)=44032, then relink/install gaussdb only
+  final restart log: build_logs/restart_20260826_162825.log
+  result: restart and SQL connectivity check succeeded
+  final SQL-only install: make -C contrib/ogai install -sj4
+  installed ogai--1.0.sql is byte-identical to contrib source
+
+Functional test
+  gsql -X -p 55440 -U qiumc -d hybrid_recall_p31_20260826 \
+    -f docs/hybrid_recall/evidence/P3-2_test.sql
+  exit: 0
+  total time: 1000 ms
+  SHOW enable_hybrid_recall: off
+  switch off + direct marker EXPLAIN: ordinary Sort + Seq Scan, no Hybrid Recall
+  switch off + on_unsupported=legacy: legacy fallback returned 245,485,165
+  legacy_contract_mismatch_count: 0
+  missing ANN index + on_unsupported=legacy: fallback mismatch count: 0
+  switch on: Hybrid Recall plan with BM25 Index Scan and Ann Index Scan
+  cached generic HybridRecall after switch off: safely rejected before workers
+  switch off + on_unsupported=error: explicit unsupported-reason error
+  invalid on_unsupported value: rejected before query execution
+  old legacy core switch on/off mismatch count: 0
+  original public hybrid_search five-argument signature count: 1
+
+Compatibility defect found and fixed during validation
+  In A-compatible databases, an empty text literal is NULL.  The original V2
+  filter accumulator therefore dropped filters while concatenating from ''.
+  P3-2 initially exposed three cross-tenant result mismatches.  The accumulator
+  now assigns its first predicate explicitly and the fallback checks IS NOT NULL;
+  both exact JSONB comparisons are zero after the fix.
+
+Fresh extension installation
+  CREATE DATABASE hybrid_recall_p32_20260826: ok
+  CREATE EXTENSION ogai: ok
+  SHOW enable_hybrid_recall: off
+  installed signatures:
+    ogai.hybrid_search(text,text,text,integer,text)
+    ogai.hybrid_search_v2(text,text,text,integer,text,jsonb)
+    ogai.hybrid_search_legacy_core(text,text,text,integer,text,vector)
+
+Regression after final source/SQL install
+  P3-1 options/API/permission/injection: exit=0; result 5,25,45
+  P2-7 prepared/custom/generic plan: exit=0
+  P2-6 serial/parallel cost selection: exit=0
+  P2-5 off/force/auto and result equality: exit=0; match=ok
+  P2-4 common filter/recheck and serial equality: exit=0; match=ok
+  P2-2/P2-3 BM25/HNSW branches and payload: exit=0
+  P2-1 marker whitelist: exit=0
+  P0-4 serial golden: exit=0
+  P0-5 zero-candidate/resource boundaries: exit=0 with expected errors
+  P0-6 tie-break/NULL/NaN boundaries: exit=0 with expected NULL-key error
+  final pg_isready on /tmp:55440: accepting connections
