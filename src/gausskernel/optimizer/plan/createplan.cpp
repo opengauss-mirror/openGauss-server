@@ -1188,8 +1188,10 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
     node->id_resno = best_path->id_attno;
     node->text_score_resno = text_score_resno;
     node->vector_distance_resno = vector_dist_resno;
-    node->final_topk = (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
-        Int64GetDatum(best_path->final_topk_est), false, true);
+    /* Preserve an external LIMIT Param in generic plans.  final_topk_est is
+     * only a Path estimate; the executor validates and evaluates this Expr
+     * for every prepared execution/rescan. */
+    node->final_topk = (Expr*)copyObject(root->parse->limitCount);
     node->text_candidates = (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
         Int64GetDatum(best_path->text_candidates_est), false, true);
     node->vector_candidates = (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),

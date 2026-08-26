@@ -166,7 +166,8 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 | P2-2/3 payload | 1e9a24cae5 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
 | P2-4 公共 filter/recheck | 9b14a3b8d0 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
 | P2-5 串/并行 Path 与模式 | 593fd734c5 | `off` 无 Stream、`force` 双 LOCAL GATHER、`auto` 枚举候选；串并行结果逐字节一致 |
-| P2-6 初始成本模型 | 待提交 | 短查询自动串行、大查询自动双 Stream 并行；计划显示 HybridRecall 自身阻塞成本 |
+| P2-6 初始成本模型 | 3b5f35a576 | 短查询自动串行、大查询自动双 Stream 并行；计划显示 HybridRecall 自身阻塞成本 |
+| P2-7 参数化与计划缓存 | 待提交 | `$1..$4` 支持 custom/generic plan；结果等价；运行时 K 边界校验 |
 
 实现与回归证据：
 
@@ -231,4 +232,30 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
   P2-5、P2-4、P2-2/P2-3 活实例复测均 exit=0，串并行结果一致性与过滤语义无回退。
 - 当前系数是保守初值；worker 紧张、I/O 竞争惩罚和冷/热缓存标定按设计留给 P3。
 
-**P2-6 完成，G3 尚未关闭**：下一步为 P2-7 Param/custom/generic plan；完成后统一关闭 G3。
+### P2-7 Param/custom/generic plan 证据
+
+- planner 同时接受有限 int8 常量 K 与 `PARAM_EXTERN/int8` K；generic plan 的 Path 行数和
+  成本使用保守估值 10，但 Plan 保留原始 `$4`，executor 每次执行/重扫重新求值。
+- `evidence/P2-7_test.sql` / `evidence/P2-7_live.log`：`force_custom_plan` 与
+  `force_generic_plan` 均生成 `Hybrid Recall` 和两条 `LOCAL GATHER`；generic 计划文本路
+  保留 `$1/$3`，向量路保留 `$2/$3`。
+- 三组参数结果逐项一致：tenant 1/K=3 为 `245,165,25`，K=1 为 `245`；替换文本、向量
+  与 tenant 后 K=3 为 `294,42,378`，证明查询参数不是 prepare 时固化的常量。
+- final K 在 `ExecutorStart` 求值并校验，因而外层 `LIMIT 0` 也不能跳过子节点校验；
+  K=0、K=101（超过两个固定候选上限 100）、K=NULL 分别得到明确错误。
+- generic plan 初测暴露 `ExecEvalExpr` 使用 NULL ExprContext 导致外部参数执行阻塞；改为
+  HybridRecall PlanState 的表达式上下文后消除。30 秒 statement timeout 下全套 9.9 秒完成。
+- 标准增量构建、安装和重启成功：`build_logs/incremental_20260826_144850.log`；P2-6、
+  P2-5、P2-4、P2-2/P2-3 与 P0-4/P0-6 回归均通过。
+
+## 12. P2 阶段完成与 G3 判定（2026-08-26）
+
+- `off`：稳定生成串行两支路 HybridRecall；`force`：稳定生成两条 1:1 LOCAL GATHER；
+  `auto`：500 行短查询选择串行，20,000 行查询选择并行。
+- BM25/ANN 两支路均保持索引 Top-N、公共过滤和统一 payload 契约；融合结果与串行 golden
+  一致，串行/并行、custom/generic 之间均无语义差异。
+- 不安全 filter/查询参数与 V1 不支持的查询形态保持普通计划，不误注入 HybridRecall。
+- 参数化 prepared statement 覆盖查询文本、向量、公共过滤和 final K，运行时边界完整校验。
+
+**G3 关闭，P2 Planner 阶段完成。** 下一阶段进入 P3：代价标定、资源治理、可观测性与
+压力/故障回归。

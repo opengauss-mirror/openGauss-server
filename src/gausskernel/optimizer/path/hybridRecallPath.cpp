@@ -209,12 +209,27 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
     if (!has_bm25 || !has_ann)
         return;
 
-    /* First cut requires a finite int8 constant final K and no OFFSET
-     * (P2-7 lifts this).  LIMIT NULL means ALL, so it is not finite. */
-    if (!IsA(parse->limitCount, Const) || ((Const*)parse->limitCount)->constisnull ||
-        ((Const*)parse->limitCount)->consttype != INT8OID)
+    /*
+     * [P2-7] A custom plan normally substitutes an external LIMIT parameter
+     * with a Const before this hook.  A generic plan deliberately retains the
+     * PARAM_EXTERN node, so keep it live for executor-time evaluation and use
+     * a conservative estimate for Path rows/cost only.  Arbitrary LIMIT
+     * expressions and LIMIT NULL/ALL remain outside the V1 whitelist.
+     */
+    int64 final_topk = 10;
+    if (IsA(parse->limitCount, Const)) {
+        Const* limit_const = (Const*)parse->limitCount;
+        if (limit_const->constisnull || limit_const->consttype != INT8OID)
+            return;
+        final_topk = DatumGetInt64(limit_const->constvalue);
+    } else if (IsA(parse->limitCount, Param)) {
+        Param* limit_param = (Param*)parse->limitCount;
+        if (limit_param->paramkind != PARAM_EXTERN || limit_param->paramtype != INT8OID ||
+            limit_param->paramid <= 0)
+            return;
+    } else {
         return;
-    int64 final_topk = DatumGetInt64(((Const*)parse->limitCount)->constvalue);
+    }
 
     Node* q_text_raw = (Node*)list_nth(func->args, 3);
     Node* q_vec_raw = (Node*)list_nth(func->args, 4);

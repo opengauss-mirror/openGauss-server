@@ -56,6 +56,7 @@ typedef struct HybridCandEntry {
 static THR_LOCAL TypeCacheEntry* g_hybrid_id_tcache = NULL;
 
 static TupleTableSlot* ExecHybridRecall(PlanState* state);
+static void hybrid_validate_options(HybridRecallState* node);
 
 /*
  * Planner-generated HybridRecall targetlists deliberately retain base-table
@@ -358,6 +359,11 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     state->actual_parallel = false;
     state->serial_fallback = false;
 
+    /* Validate during ExecutorStart as well as BUILD.  An outer LIMIT 0 does
+     * not call its child, but a parameterized HybridRecall limit must still
+     * obey the same non-NULL, positive and candidate-cap contract. */
+    hybrid_validate_options(state);
+
     return state;
 }
 
@@ -371,7 +377,10 @@ static int64 hybrid_eval_limit(HybridRecallState* node, Expr* expr, ExprState** 
         result = DatumGetInt64(((Const*)expr)->constvalue);
     } else {
         bool is_null = false;
-        Datum val = ExecEvalExpr(*expr_state, NULL, &is_null);
+        /* PARAM_EXTERN needs the owning PlanState expression context to
+         * reach EState::es_param_list_info.  Passing NULL happened to work
+         * for Const-only plans but is invalid for P2-7 generic plans. */
+        Datum val = ExecEvalExpr(*expr_state, node->ps.ps_ExprContext, &is_null);
 
         if (is_null)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
