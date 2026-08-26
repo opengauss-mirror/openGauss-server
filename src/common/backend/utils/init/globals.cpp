@@ -77,17 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92993;
+const uint32 GRAND_VERSION_NUM = 92985;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
-const uint32 SS_TRANSACTION_SYNC_STATUS_VERSION_NUM = 92991;
-const uint32 DOLPHIN_UPGRADE_606 = 92990;
-const uint32 HALFVEC_VERSION_NUM = 92988;
-const uint32 DISKANN_INDEX = 92987;
-const uint32 LSG_VERSION_NUM = 92986;
+const uint32 LSG_VERSION_NUM = 92985;
 const uint32 RABITQ_VERSION_NUM = 92985;
 const uint32 UHEAP_LOCK_VERSION_NUM = 92978;
 const uint32 PGSTAT_LAST_SCAN_VERSION_NUM = 92977;
