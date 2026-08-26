@@ -29,7 +29,7 @@ CONTEXT:  referenced column: pg_get_viewdef
 --------+---------+-----------+---------+-------------
  fun1   | numeric |           | main    | 
 View definition:
- SELECT  *
+ SELECT fun1.fun1
    FROM dependent_view2.fun1(1::numeric, 2::numeric) fun1(fun1);
 
 create or replace function fun1(n1 in number, n2 in number)
@@ -105,7 +105,7 @@ CONTEXT:  referenced column: pg_get_viewdef
  a      | numeric |           | main    | 
  b      | numeric |           | main    | 
 View definition:
- SELECT  *
+ SELECT tab.a, tab.b
    FROM tab
   WHERE tab.b = dependent_view2.fun1(1::numeric, 2::numeric);
 
@@ -145,7 +145,7 @@ View definition:
            FROM tab
           WHERE tab.b = dependent_view2.fun1(1::numeric, 2::numeric)
         )
- SELECT  *
+ SELECT tmp.a, tmp.b
    FROM tmp;
 
 create or replace function fun1(n1 in number, n2 in number)
@@ -180,7 +180,7 @@ CONTEXT:  referenced column: pg_get_viewdef
  b      | numeric |           | main    | 
  fun1   | numeric |           | main    | 
 View definition:
- SELECT  *, 
+ SELECT tab.a, tab.b, 
     ( SELECT dependent_view2.fun1(1::numeric, 2::numeric) AS fun1) AS fun1
    FROM tab;
 

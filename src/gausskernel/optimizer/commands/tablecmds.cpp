@@ -12713,6 +12713,30 @@ static void UpdatePgAttrdefFirstAfter(Relation rel, int startattnum, int endattn
  * 1. add column with first or after col_name.
  * 2. modify column to first or after column.
  */
+static bool IsInvalidViewRewriteForFirstAfter(Oid rewriteOid)
+{
+    bool isInvalid = false;
+    ScanKeyData key;
+    ScanKeyInit(&key, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rewriteOid));
+
+    Relation rewriteRel = heap_open(RewriteRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(rewriteRel, RewriteOidIndexId, true, NULL, 1, &key);
+    HeapTuple tuple = systable_getnext(scan);
+    if (HeapTupleIsValid(tuple)) {
+        Form_pg_rewrite rewriteForm = (Form_pg_rewrite)GETSTRUCT(tuple);
+        if (strcmp(NameStr(rewriteForm->rulename), ViewSelectRuleName) == 0) {
+            char relkind = get_rel_relkind(rewriteForm->ev_class);
+            if ((relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) &&
+                !GetPgObjectValid(rewriteForm->ev_class, relkind)) {
+                isInvalid = true;
+            }
+        }
+    }
+    systable_endscan(scan);
+    heap_close(rewriteRel, AccessShareLock);
+    return isInvalid;
+}
+
 static void UpdatePgDependFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
 {
     ScanKeyData key[2];
@@ -12739,6 +12763,11 @@ static void UpdatePgDependFirstAfter(Relation rel, int startattnum, int endattnu
         HeapTuple new_dep_tuple;
 
         dep_form  = (Form_pg_depend)GETSTRUCT(dep_tuple);
+
+        if (dep_form->classid == RewriteRelationId &&
+            IsInvalidViewRewriteForFirstAfter(dep_form->objid)) {
+            continue;
+        }
 
         if (dep_form->refobjsubid >= startattnum && dep_form->refobjsubid <= endattnum) {
             values[Anum_pg_depend_refobjsubid - 1] = is_increase ?
@@ -13799,7 +13828,18 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
         UpdateIndexFirstAfter(rel);
 
         /* create or replace view */
-        ReplaceViewQueryFirstAfter(query_str);
+        ListCell* viewinfo = NULL;
+        bool isViewValid = true;
+        foreach (viewinfo, query_str) {
+            ViewInfoForAdd *info = (ViewInfoForAdd *)lfirst(viewinfo);
+            isViewValid &= GetPgObjectValid(info->ev_class, get_rel_relkind(info->ev_class));
+            if (!isViewValid) {
+                break;
+            }
+        }
+        if (isViewValid) {
+            ReplaceViewQueryFirstAfter(query_str);
+        }
     } else if (rel->rd_rel->relkind == RELKIND_RELATION && query_str != NIL) {
         ListCell* viewinfo = NULL;
         bool isViewValid = true;
@@ -18398,7 +18438,18 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     CommandCounterIncrement();
 
     /* create or replace view */
-    ReplaceViewQueryFirstAfter(query_str);
+    ListCell* viewinfo = NULL;
+    bool isViewValid = true;
+    foreach (viewinfo, query_str) {
+        ViewInfoForAdd *info = (ViewInfoForAdd *)lfirst(viewinfo);
+        isViewValid &= GetPgObjectValid(info->ev_class, get_rel_relkind(info->ev_class));
+        if (!isViewValid) {
+            break;
+        }
+    }
+    if (isViewValid) {
+        ReplaceViewQueryFirstAfter(query_str);
+    }
 }
 
 static bool CheckIndexIsConstraint(Relation dep_rel, Oid objid, Oid *refobjid)
