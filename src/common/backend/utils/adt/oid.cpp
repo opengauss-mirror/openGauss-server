@@ -166,6 +166,25 @@ oidvector* buildoidvector(const Oid* oids, int n)
     return result;
 }
 
+/*
+ * validate that an array object meets the restrictions of oidvector
+ *
+ * We need this because there are pathways by which a general oid[] array can
+ * be cast to oidvector, allowing the type's restrictions to be violated.
+ * All code that receives an oidvector as a SQL parameter should check this.
+ */
+void check_valid_oidvector(const oidvector* oidArray)
+{
+    /*
+     * We insist on ndim == 1 and dataoffset == 0 (that is, no nulls) because
+     * otherwise the array's layout will not be what calling code expects.  We
+     * needn't be picky about the index lower bound though.  Checking elemtype
+     * is just paranoia.
+     */
+    if (oidArray->ndim != 1 || oidArray->dataoffset != 0 || oidArray->elemtype != OIDOID)
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("array is not a valid oidvector")));
+}
+
 #define OID_MAX_NUM 8192
 /*
  *		oidvectorin			- converts "num num ..." to internal form
@@ -207,9 +226,14 @@ Datum oidvectorout(PG_FUNCTION_ARGS)
 {
     Datum oid_array_datum = PG_GETARG_DATUM(0);
     oidvector* oidArray = (oidvector*)PG_DETOAST_DATUM(oid_array_datum);
-    int num, nnums = oidArray->dim1;
+    int num;
+    int nnums;
     char* rp = NULL;
     char* result = NULL;
+
+    /* validate input before fetching dim1 */
+    check_valid_oidvector(oidArray);
+    nnums = oidArray->dim1;
 
     /* assumes sign, 10 digits, ' ' */
     rp = result = (char*)palloc(nnums * 12 + 1);
@@ -276,6 +300,7 @@ Datum oidvectorrecv(PG_FUNCTION_ARGS)
  */
 Datum oidvectorsend(PG_FUNCTION_ARGS)
 {
+    /* We don't do check_valid_oidvector, since array_send won't care */
     return array_send(fcinfo);
 }
 

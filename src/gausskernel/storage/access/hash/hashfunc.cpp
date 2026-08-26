@@ -30,6 +30,7 @@
 
 #include "access/hash.h"
 #include "catalog/gs_collation.h"
+#include "utils/builtins.h"
 
 #ifdef PGXC
 #include "catalog/pg_type.h"
@@ -143,6 +144,7 @@ Datum hashoidvector(PG_FUNCTION_ARGS)
 {
     oidvector *key = (oidvector *)PG_GETARG_POINTER(0);
 
+    check_valid_oidvector(key);
     return hash_any((unsigned char *)key->values, key->dim1 * sizeof(Oid));
 }
 
@@ -150,6 +152,7 @@ Datum hashint2vector(PG_FUNCTION_ARGS)
 {
     int2vector *key = (int2vector *)PG_GETARG_POINTER(0);
 
+    check_valid_int2vector(key);
     return hash_any((unsigned char *)key->values, key->dim1 * sizeof(int2));
 }
 
