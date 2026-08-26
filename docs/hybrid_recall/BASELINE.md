@@ -379,3 +379,25 @@ rescan 内存稳定性验证。
   `evidence/P3-5_test.sql` / `evidence/P3-5_live.log`。
 
 **P3-5 完成。** 下一原子任务是 P3-6：主备查询与故障切换后重试语义验证。
+
+### P3-6 主备查询与故障切换后重试
+
+- 从已停机的 P3-5 release PGDATA 克隆两个隔离节点，按官方
+  `--single_node -M primary|standby` 方式启动；主备达到 `Normal/Streaming`、同步进度
+  100%。原 `topk_test_data` 未参与本测试。
+- 主节点和 `hot_standby` 只读备节点均以两个实际 branch worker 执行
+  `hybrid_search_v2`，冻结数据集都返回 `245,165,25`。V1 的承诺范围仍以主节点为准，
+  备读能力不扩张为延迟或可用性 SLA。
+- 故障注入时，旧主语句已完成真实两路召回、但在首行发送前保持 active；立即停主后旧
+  客户端退出 2，唯一终态为 `connection to server was lost`，没有收到结果行。备节点
+  `failover` 后成为 `Normal` 新主，客户端整句重试返回同一结果，随后 20 次重试全部通过。
+- 新主 `EXPLAIN ANALYZE` 仍显示 `Parallel RRF`、planned/actual workers=`2/2`、
+  `Parallel Fallback=false`、BM25/HNSW 两条索引支路和正 overlap；故障会话残留为 0，
+  服务端无断言/PANIC/段错误。
+- 明确语义：不提供透明会话迁移；客户端遇到连接错误必须丢弃该次可能已接收的所有行，
+  在确认 read-write 的新主上重试完整只读 SELECT。重试使用新快照，数据/WAL 已变化时结果
+  允许变化；session GUC 和 prepared plan 需重新建立。推荐预传 `query_vector`，避免外部
+  embedding 服务被重复调用。
+- 可复现脚本和完整证据：`evidence/P3-6_ha_test.sh`、`evidence/P3-6_live.log`。
+
+**P3-6 完成。** 下一原子任务是 P3-7：按第 18 节性能矩阵标定串行/并行收益与资源门槛。
