@@ -204,6 +204,17 @@ WHERE plan_property IN ('Hybrid Recall nodes', 'Parallel RRF strategies', 'LOCAL
 -- pushdown, and absence of task streams are all independently watched.
 SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = off;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'mode-off-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Two branch-worker metadata', 'Ordinary Sort nodes',
@@ -223,6 +234,17 @@ LIMIT 8;
 -- Supported forced parallel shape: both branch plans are wrapped by LOCAL
 -- GATHER and retain their BM25/HNSW access paths and pushed common filter.
 SET hybrid_recall_parallel_mode = force;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'force-supported-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Zero branch-worker metadata', 'Ordinary Sort nodes',
@@ -243,6 +265,17 @@ LIMIT 8;
 -- valid planner cost values make the choice independent of host load.
 SET hybrid_recall_parallel_mode = auto;
 SET cpu_operator_cost = 0.0001;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'auto-cost-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -262,6 +295,17 @@ ORDER BY hybrid_score DESC
 LIMIT 8;
 
 SET cpu_operator_cost = 0.1;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'auto-cost-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -289,18 +333,51 @@ LIMIT 8;
 -- leak into the plan.
 RESET cpu_operator_cost;
 SET hybrid_recall_parallel_mode = force;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1 AND EXISTS (SELECT 1)
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'force-reject-sublink' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('sublink')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
                         'Parallel RRF strategies', 'LOCAL GATHER streams',
                         'Ordinary Sort nodes', 'Marker Sort Keys', 'InitPlans');
 
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8 OFFSET 1;
 SELECT 'force-reject-offset' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('offset')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
                         'Parallel RRF strategies', 'LOCAL GATHER streams',
                         'Ordinary Sort nodes', 'Marker Sort Keys', 'InitPlans');
 
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC, id
+LIMIT 8;
 SELECT 'force-reject-two-sort-keys' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('two_sort_keys')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -308,6 +385,17 @@ WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
                         'Ordinary Sort nodes', 'Marker Sort Keys', 'InitPlans');
 
 DROP INDEX hybrid_recall_schedule_hnsw_idx;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
 SELECT 'force-reject-missing-hnsw' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',

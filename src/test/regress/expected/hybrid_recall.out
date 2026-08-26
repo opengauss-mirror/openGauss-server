@@ -202,6 +202,44 @@ rollback-disabled|LOCAL GATHER streams|0
 -- pushdown, and absence of task streams are all independently watched.
 SET enable_hybrid_recall = on;
 SET hybrid_recall_parallel_mode = off;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (0::double precision)
+  ->  Hybrid Recall
+        Output: id, 0::double precision
+        Strategy: Serial RRF
+        Final Top-K: 8
+        Text Candidates: 40
+        Vector Candidates: 40
+        RRF k: 60.000
+        Text Weight: 0.500
+        Vector Weight: 0.500
+        Planned Branch Workers: 0
+        ->  Limit
+              Output: id, ((content <&> 'database'::text)), tenant_id
+              ->  Index Scan using hybrid_recall_schedule_bm25_idx on public.hybrid_recall_schedule_docs
+                    Output: id, (content <&> 'database'::text), tenant_id
+                    Order By: (hybrid_recall_schedule_docs.content <&> 'database'::text)
+                    Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+        ->  Limit
+              Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+              ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
+                    Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
+                    Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                    Filter Mode: Post-Filter
+                    Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(25 rows)
 SELECT 'mode-off-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Two branch-worker metadata', 'Ordinary Sort nodes',
@@ -250,6 +288,48 @@ mode-off|1|.00819672131147541
 -- Supported forced parallel shape: both branch plans are wrapped by LOCAL
 -- GATHER and retain their BM25/HNSW access paths and pushed common filter.
 SET hybrid_recall_parallel_mode = force;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (0::double precision)
+  ->  Hybrid Recall
+        Output: id, 0::double precision
+        Strategy: Parallel RRF
+        Final Top-K: 8
+        Text Candidates: 40
+        Vector Candidates: 40
+        RRF k: 60.000
+        Text Weight: 0.500
+        Vector Weight: 0.500
+        Planned Branch Workers: 2
+        ->  Streaming(type: LOCAL GATHER)
+              Output: id, ((content <&> 'database'::text)), tenant_id
+              ->  Limit
+                    Output: id, ((content <&> 'database'::text)), tenant_id
+                    ->  Index Scan using hybrid_recall_schedule_bm25_idx on public.hybrid_recall_schedule_docs
+                          Output: id, (content <&> 'database'::text), tenant_id
+                          Order By: (hybrid_recall_schedule_docs.content <&> 'database'::text)
+                          Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+        ->  Streaming(type: LOCAL GATHER)
+              Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+              ->  Limit
+                    Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+                    ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
+                          Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
+                          Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                          Filter Mode: Post-Filter
+                          Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(29 rows)
 SELECT 'force-supported-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Zero branch-worker metadata', 'Ordinary Sort nodes',
@@ -299,6 +379,44 @@ force|1|.00819672131147541
 -- valid planner cost values make the choice independent of host load.
 SET hybrid_recall_parallel_mode = auto;
 SET cpu_operator_cost = 0.0001;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (0::double precision)
+  ->  Hybrid Recall
+        Output: id, 0::double precision
+        Strategy: Serial RRF
+        Final Top-K: 8
+        Text Candidates: 40
+        Vector Candidates: 40
+        RRF k: 60.000
+        Text Weight: 0.500
+        Vector Weight: 0.500
+        Planned Branch Workers: 0
+        ->  Limit
+              Output: id, ((content <&> 'database'::text)), tenant_id
+              ->  Index Scan using hybrid_recall_schedule_bm25_idx on public.hybrid_recall_schedule_docs
+                    Output: id, (content <&> 'database'::text), tenant_id
+                    Order By: (hybrid_recall_schedule_docs.content <&> 'database'::text)
+                    Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+        ->  Limit
+              Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+              ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
+                    Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
+                    Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                    Filter Mode: Post-Filter
+                    Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(25 rows)
 SELECT 'auto-cost-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -337,6 +455,48 @@ auto-serial|105|.0126262626262626
 auto-serial|1|.00819672131147541
 (8 rows)
 SET cpu_operator_cost = 0.1;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (0::double precision)
+  ->  Hybrid Recall
+        Output: id, 0::double precision
+        Strategy: Parallel RRF
+        Final Top-K: 8
+        Text Candidates: 40
+        Vector Candidates: 40
+        RRF k: 60.000
+        Text Weight: 0.500
+        Vector Weight: 0.500
+        Planned Branch Workers: 2
+        ->  Streaming(type: LOCAL GATHER)
+              Output: id, ((content <&> 'database'::text)), tenant_id
+              ->  Limit
+                    Output: id, ((content <&> 'database'::text)), tenant_id
+                    ->  Index Scan using hybrid_recall_schedule_bm25_idx on public.hybrid_recall_schedule_docs
+                          Output: id, (content <&> 'database'::text), tenant_id
+                          Order By: (hybrid_recall_schedule_docs.content <&> 'database'::text)
+                          Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+        ->  Streaming(type: LOCAL GATHER)
+              Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+              ->  Limit
+                    Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id
+                    ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
+                          Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
+                          Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                          Filter Mode: Post-Filter
+                          Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(29 rows)
 SELECT 'auto-cost-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -382,6 +542,32 @@ auto-parallel|1|.00819672131147541
 -- leak into the plan.
 RESET cpu_operator_cost;
 SET hybrid_recall_parallel_mode = force;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1 AND EXISTS (SELECT 1)
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: hybrid_recall_schedule_docs.id, (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+  InitPlan 1 (returns $0)
+    ->  Result
+  ->  Sort
+        Output: hybrid_recall_schedule_docs.id, (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+        Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)) DESC
+        ->  Result
+              Output: hybrid_recall_schedule_docs.id, ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)
+              One-Time Filter: $0
+              ->  Seq Scan on public.hybrid_recall_schedule_docs
+                    Output: hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.tenant_id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding
+                    Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(13 rows)
 SELECT 'force-reject-sublink' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('sublink')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -396,6 +582,27 @@ force-reject-sublink|Ordinary Sort nodes|1
 force-reject-sublink|Marker Sort Keys|1
 force-reject-sublink|InitPlans|1
 (7 rows)
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8 OFFSET 1;
+QUERY PLAN
+Limit
+  Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+  ->  Sort
+        Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+        Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)) DESC
+        ->  Seq Scan on public.hybrid_recall_schedule_docs
+              Output: id, ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)
+              Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(8 rows)
 SELECT 'force-reject-offset' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('offset')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -410,6 +617,27 @@ force-reject-offset|Ordinary Sort nodes|1
 force-reject-offset|Marker Sort Keys|1
 force-reject-offset|InitPlans|0
 (7 rows)
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC, id
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+  ->  Sort
+        Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+        Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)) DESC, hybrid_recall_schedule_docs.id
+        ->  Seq Scan on public.hybrid_recall_schedule_docs
+              Output: id, ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)
+              Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(8 rows)
 SELECT 'force-reject-two-sort-keys' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('two_sort_keys')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -425,6 +653,27 @@ force-reject-two-sort-keys|Marker Sort Keys|1
 force-reject-two-sort-keys|InitPlans|0
 (7 rows)
 DROP INDEX hybrid_recall_schedule_hnsw_idx;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id,
+       ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) AS hybrid_score
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY hybrid_score DESC
+LIMIT 8;
+QUERY PLAN
+Limit
+  Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+  ->  Sort
+        Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb))
+        Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_schedule_docs.id, hybrid_recall_schedule_docs.content, hybrid_recall_schedule_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)) DESC
+        ->  Seq Scan on public.hybrid_recall_schedule_docs
+              Output: id, ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{"rrf_k": 60, "weights": [0.5, 0.5], "text_candidates": 40, "vector_candidates": 40}'::jsonb)
+              Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
+(8 rows)
 SELECT 'force-reject-missing-hnsw' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
