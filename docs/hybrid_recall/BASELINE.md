@@ -401,3 +401,25 @@ rescan 内存稳定性验证。
 - 可复现脚本和完整证据：`evidence/P3-6_ha_test.sh`、`evidence/P3-6_live.log`。
 
 **P3-6 完成。** 下一原子任务是 P3-7：按第 18 节性能矩阵标定串行/并行收益与资源门槛。
+
+### P3-7a HNSW 10 万行 Release 性能标定
+
+- 定位到已启动两个 worker 但父节点仍顺序 drain 两个本地 Stream：先读完文本再读向量会
+  让向量 producer 填满有界缓冲后等待，墙钟收益退化。新增窄接口
+  `localStreamPoll.h`，只为多输入协调者提供本地 Stream 非阻塞 poll；并行
+  `HybridRecall` 同轮轮询两路并交替消费，串行和普通 Stream 路径不变。
+- 最终 `-O2` Release 二进制完成定向 `install-bin`，源码/安装文件 SHA-256 一致。10 万行
+  表的 BM25/HNSW 均有效；典型计划为 `Hybrid Recall -> 两个 LOCAL GATHER`，实际 worker
+  `2/2`、fallback=false、BM25/HNSW 各 1000 行，overlap ratio=1.00。
+- 串并常规 Top-10 和文本支路零命中场景逐行 mismatch 均为 0；50 ms timeout 后线程数
+  恢复 33，非 idle 会话和遗留锁均为 0，实例继续可用。
+- 5 组 warm-up 后执行 60 组交替顺序配对：120 次结果 100% 一致；串行/并行 P50 为
+  `899.084/642.882 ms`，P95 为 `1441.934/803.964 ms`，P99 为
+  `1641.037/1057.671 ms`，分别降低 `28.50%/44.24%/35.55%`。并行 60/60 获胜，
+  满足第 18.4 节 P95 推荐通过线。
+- 本轮按用户范围只测 HNSW 10 万行；DiskANN 排除，1000 万行取消，100 万行暂缓。
+  完整环境、30 轮小样本波动和 60 轮数据见
+  `evidence/P3-7_hnsw_100k_result.md`。
+
+**P3-7a 完成。** 下一步仅在确认需要扩大规模时执行 HNSW 100 万行标定；不启动
+DiskANN 或 1000 万行测试。

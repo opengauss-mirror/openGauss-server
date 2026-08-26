@@ -51,6 +51,7 @@
 #include "libpq/pqformat.h"
 #include <sys/poll.h>
 #include "executor/exec/execStream.h"
+#include "executor/exec/localStreamPoll.h"
 #include "postmaster/postmaster.h"
 #include "access/transam.h"
 #include "gssignal/gs_signal.h"
@@ -2433,6 +2434,50 @@ static TupleTableSlot* ExecStream(PlanState* state)
 
         return NULL;
     }
+}
+
+/*
+ * Non-blocking counterpart used only by operators that coordinate multiple
+ * local Stream inputs.  It preserves Stream preparation and instrumentation,
+ * but returns STREAM_POLL_WAIT instead of sleeping on this Stream alone.
+ */
+StreamPollStatus ExecPollLocalStream(StreamState* node)
+{
+    PlanState* state = &node->ss.ps;
+    Stream* plan = (Stream*)state->plan;
+    MemoryContext old_context = NULL;
+
+    if (!STREAM_IS_LOCAL_NODE(plan->smpDesc.distriType) || plan->sort != NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("non-blocking Stream polling requires an unsorted local Stream")));
+
+    if (unlikely(state->nodeContext != NULL))
+        old_context = MemoryContextSwitchTo(state->nodeContext);
+
+    if (state->chgParam != NULL)
+        ExecReScan(state);
+
+    if (unlikely(!node->isReady))
+        StreamPrepareRequest(node);
+
+    node->receive_message = true;
+    if (state->instrument != NULL)
+        InstrStartNode(state->instrument);
+
+    StreamPollStatus status = gs_memory_poll(node);
+
+    if (state->instrument != NULL) {
+        InstrStopNode(state->instrument, status == STREAM_POLL_DATA ? 1.0 : 0.0);
+        if (status == STREAM_POLL_FINISH)
+            state->instrument->status = true;
+    }
+    state->ps_rownum++;
+
+    if (old_context != NULL)
+        (void)MemoryContextSwitchTo(old_context);
+
+    return status;
 }
 
 /*

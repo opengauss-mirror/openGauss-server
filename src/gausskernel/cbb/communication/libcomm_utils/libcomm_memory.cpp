@@ -57,6 +57,7 @@
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
 #include "executor/exec/execStream.h"
+#include "executor/exec/localStreamPoll.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -530,6 +531,30 @@ bool gs_memory_recv(StreamState* node)
 }
 
 /*
+ * Inspect a local Stream once without waiting on its per-stream semaphore.
+ * This is intentionally separate from gs_memory_recv(): normal single-input
+ * consumers retain the established blocking behavior, while a multi-input
+ * consumer can poll every input and avoid blocking a ready peer Stream.
+ */
+StreamPollStatus gs_memory_poll(StreamState* node)
+{
+    int waitnode_count = 0;
+
+    if (!node->sharedContext->vectorized && gs_return_tuple(node))
+        return STREAM_POLL_DATA;
+
+    if (executorEarlyStop())
+        return STREAM_POLL_FINISH;
+
+    char result = gs_find_memory_data(node, &waitnode_count);
+    if (result == STREAM_SCAN_DATA)
+        return STREAM_POLL_DATA;
+    if (result == STREAM_SCAN_FINISH)
+        return STREAM_POLL_FINISH;
+    return STREAM_POLL_WAIT;
+}
+
+/*
  * @Description: Inform all related consuemrs that there is no more data to send.
  *
  * @param[IN] sharedContext: context for shared memory stream
@@ -579,4 +604,3 @@ void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int c
         entry->_signal();
     }
 }
-

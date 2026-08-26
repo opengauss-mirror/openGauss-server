@@ -28,6 +28,7 @@
 #include "postgres.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
+#include "executor/exec/localStreamPoll.h"
 #include "executor/node/nodeHybridRecall.h"
 #include "fmgr.h"
 #include "lib/binaryheap.h"
@@ -548,31 +549,111 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
     }
 }
 
+static bool hybrid_drain_next(HybridRecallState* node, PlanState* branch, bool is_text,
+                              uint32* rank, int64 cap)
+{
+    TupleTableSlot* slot = ExecProcNode(branch);
+    if (TupIsNull(slot))
+        return false;
+
+    (*rank)++;
+    /* Bounded candidates are a hard resource contract (design doc
+     * §1.4): a branch overflowing its cap is an error, never a silent
+     * growth. */
+    if ((int64)(*rank) > cap)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("HybridRecall %s branch exceeded its candidate cap %ld",
+                               is_text ? "text" : "vector", cap)));
+
+    ExecMaterializeSlot(slot);
+    hybrid_upsert_candidate(node, slot, is_text, *rank);
+    ResetExprContext(node->ps.ps_ExprContext);
+    return true;
+}
+
+static void hybrid_consume_polled_slot(HybridRecallState* node, PlanState* branch,
+                                       bool is_text, uint32* rank, int64 cap)
+{
+    TupleTableSlot* slot = branch->ps_ResultTupleSlot;
+
+    (*rank)++;
+    if ((int64)(*rank) > cap)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("HybridRecall %s branch exceeded its candidate cap %ld",
+                               is_text ? "text" : "vector", cap)));
+
+    ExecMaterializeSlot(slot);
+    hybrid_upsert_candidate(node, slot, is_text, *rank);
+    ResetExprContext(node->ps.ps_ExprContext);
+}
+
 static void hybrid_drain_branch(HybridRecallState* node, PlanState* branch, bool is_text, uint64* row_counter)
 {
     uint32 rank = 0;
     int64 cap = is_text ? node->text_limit : node->vector_limit;
 
-    for (;;) {
-        TupleTableSlot* slot = ExecProcNode(branch);
-        if (TupIsNull(slot))
-            break;
-
-        rank++;
-        /* Bounded candidates are a hard resource contract (design doc
-         * §1.4): a branch overflowing its cap is an error, never a silent
-         * growth. */
-        if ((int64)rank > cap)
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("HybridRecall %s branch exceeded its candidate cap %ld",
-                                   is_text ? "text" : "vector", cap)));
-
-        ExecMaterializeSlot(slot);
-        hybrid_upsert_candidate(node, slot, is_text, rank);
-        ResetExprContext(node->ps.ps_ExprContext);
-    }
+    while (hybrid_drain_next(node, branch, is_text, &rank, cap))
+        CHECK_FOR_INTERRUPTS();
 
     *row_counter = rank;
+}
+
+/*
+ * Both local Stream producers are already running in separate task workers.
+ * Draining one Stream to EOF before touching the other lets the second
+ * producer fill its bounded queue and block, turning real worker overlap into
+ * nearly serial parent latency.  Consume one candidate from each live Stream
+ * per round so both queues keep making progress.  Rank remains independent
+ * per branch, therefore RRF and deterministic tie-breaking are unchanged.
+ */
+static void hybrid_drain_parallel_branches(HybridRecallState* node)
+{
+    bool text_done = false;
+    bool vector_done = false;
+    uint32 text_rank = 0;
+    uint32 vector_rank = 0;
+
+    if (!IsA(node->text_state, StreamState) || !IsA(node->vector_state, StreamState))
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("parallel HybridRecall requires two local Stream inputs")));
+
+    while (!text_done || !vector_done) {
+        bool made_progress = false;
+
+        if (!text_done) {
+            StreamPollStatus status = ExecPollLocalStream((StreamState*)node->text_state);
+            if (status == STREAM_POLL_DATA) {
+                hybrid_consume_polled_slot(
+                    node, node->text_state, true, &text_rank, node->text_limit);
+                made_progress = true;
+            } else if (status == STREAM_POLL_FINISH) {
+                text_done = true;
+                INSTR_TIME_SET_CURRENT(node->text_end);
+                made_progress = true;
+            }
+        }
+
+        if (!vector_done) {
+            StreamPollStatus status = ExecPollLocalStream((StreamState*)node->vector_state);
+            if (status == STREAM_POLL_DATA) {
+                hybrid_consume_polled_slot(
+                    node, node->vector_state, false, &vector_rank, node->vector_limit);
+                made_progress = true;
+            } else if (status == STREAM_POLL_FINISH) {
+                vector_done = true;
+                INSTR_TIME_SET_CURRENT(node->vector_end);
+                made_progress = true;
+            }
+        }
+
+        if (!made_progress)
+            pg_usleep(50L);
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    node->text_rows = text_rank;
+    node->vector_rows = vector_rank;
 }
 
 static bool hybrid_recheck_candidate(HybridRecallState* node, HybridCandidate* cand)
@@ -735,12 +816,18 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
                                       HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
         hybrid_check_candidate_memory(node);
 
-        INSTR_TIME_SET_CURRENT(node->text_first_tuple);
-        hybrid_drain_branch(node, node->text_state, true, &node->text_rows);
-        INSTR_TIME_SET_CURRENT(node->text_end);
-        INSTR_TIME_SET_CURRENT(node->vector_first_tuple);
-        hybrid_drain_branch(node, node->vector_state, false, &node->vector_rows);
-        INSTR_TIME_SET_CURRENT(node->vector_end);
+        if (node->actual_parallel) {
+            INSTR_TIME_SET_CURRENT(node->text_first_tuple);
+            node->vector_first_tuple = node->text_first_tuple;
+            hybrid_drain_parallel_branches(node);
+        } else {
+            INSTR_TIME_SET_CURRENT(node->text_first_tuple);
+            hybrid_drain_branch(node, node->text_state, true, &node->text_rows);
+            INSTR_TIME_SET_CURRENT(node->text_end);
+            INSTR_TIME_SET_CURRENT(node->vector_first_tuple);
+            hybrid_drain_branch(node, node->vector_state, false, &node->vector_rows);
+            INSTR_TIME_SET_CURRENT(node->vector_end);
+        }
         hybrid_fuse(node);
         INSTR_TIME_SET_CURRENT(node->fusion_time);
 
@@ -761,7 +848,11 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
                                (unsigned long)node->final_rows,
                                hybrid_elapsed_ms(node->text_first_tuple, node->text_end),
                                hybrid_elapsed_ms(node->vector_first_tuple, node->vector_end),
-                               hybrid_elapsed_ms(node->vector_end, node->fusion_time)),
+                               hybrid_elapsed_ms(
+                                   INSTR_TIME_GET_MICROSEC(node->text_end) >
+                                           INSTR_TIME_GET_MICROSEC(node->vector_end) ?
+                                       node->text_end : node->vector_end,
+                                   node->fusion_time)),
                      errhidestmt(true)));
         }
 

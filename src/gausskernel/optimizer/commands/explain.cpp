@@ -2147,7 +2147,10 @@ static void show_hybrid_recall_info(HybridRecallState* state, ExplainState* es)
     double vector_ms = vector_instr != NULL && vector_instr->total > 0.0 ?
         vector_instr->total * 1000.0 :
         get_hybrid_elapsed_ms(state->vector_first_tuple, state->vector_end);
-    double fusion_ms = get_hybrid_elapsed_ms(state->vector_end, state->fusion_time);
+    instr_time drain_end = INSTR_TIME_GET_MICROSEC(state->text_end) >
+            INSTR_TIME_GET_MICROSEC(state->vector_end) ?
+        state->text_end : state->vector_end;
+    double fusion_ms = get_hybrid_elapsed_ms(drain_end, state->fusion_time);
     double overlap_ms = plan->parallel_branches ?
         get_hybrid_overlap_ms(text_instr, vector_instr) : 0.0;
     Size candidate_bytes = state->candidate_cxt == NULL ? 0 :
