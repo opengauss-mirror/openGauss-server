@@ -1,0 +1,145 @@
+-- Native regression coverage for the HybridRecall BM25 + HNSW operator.
+-- The deterministic dataset and insertion order stabilize candidate identities;
+-- the golden checks plan structure and identical serial/parallel ordered output.
+SET client_min_messages = error;
+\pset format unaligned
+CREATE EXTENSION IF NOT EXISTS ogai;
+DROP TABLE IF EXISTS hybrid_recall_schedule_docs CASCADE;
+CREATE TABLE hybrid_recall_schedule_docs (
+    id int PRIMARY KEY,
+    tenant_id int NOT NULL,
+    content text NOT NULL,
+    embedding vector(8) NOT NULL
+);
+INSERT INTO hybrid_recall_schedule_docs
+SELECT i,
+       i % 4,
+       (ARRAY['database','kernel','vector','memory','network'])[1 + i % 5]
+         || ' '
+         || repeat((ARRAY['alpha','beta','gamma','delta','epsilon','zeta','eta'])[1 + i % 7],
+                   1 + i % 3)
+         || ' record ' || i,
+       ('['  || round(((i       % 11)::numeric / 11), 4)
+         || ',' || round(((i *  2 % 13)::numeric / 13), 4)
+         || ',' || round(((i *  3 % 17)::numeric / 17), 4)
+         || ',' || round(((i *  5 % 19)::numeric / 19), 4)
+         || ',' || round(((i *  7 % 23)::numeric / 23), 4)
+         || ',' || round(((i * 11 % 29)::numeric / 29), 4)
+         || ',' || round(((i * 13 % 31)::numeric / 31), 4)
+         || ',' || round(((i * 17 % 37)::numeric / 37), 4)
+       || ']')::vector
+FROM generate_series(1, 200) AS i;
+CREATE INDEX hybrid_recall_schedule_bm25_idx
+    ON hybrid_recall_schedule_docs USING bm25(content);
+CREATE INDEX hybrid_recall_schedule_hnsw_idx
+    ON hybrid_recall_schedule_docs USING hnsw(embedding vector_cosine_ops);
+ANALYZE hybrid_recall_schedule_docs;
+-- Return a timing-free signature for the current serial/parallel GUC mode.
+CREATE OR REPLACE FUNCTION hybrid_recall_schedule_plan_signature()
+RETURNS text AS $$
+DECLARE
+    plan_line text;
+    operator_nodes int := 0;
+    strategy_lines int := 0;
+    bm25_scans int := 0;
+    ann_scans int := 0;
+    local_gathers int := 0;
+BEGIN
+    FOR plan_line IN EXECUTE $query$
+        EXPLAIN (VERBOSE, COSTS OFF)
+        SELECT id
+        FROM hybrid_recall_schedule_docs
+        WHERE tenant_id = 1
+        ORDER BY ogai.hybrid_rrf_marker(
+            id, content, embedding, 'database',
+            '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+            '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+        ) DESC
+        LIMIT 8
+    $query$ LOOP
+        IF position('Hybrid Recall' IN plan_line) > 0 THEN
+            operator_nodes := operator_nodes + 1;
+        END IF;
+        IF position('Strategy: Serial RRF' IN plan_line) > 0 OR
+           position('Strategy: Parallel RRF' IN plan_line) > 0 THEN
+            strategy_lines := strategy_lines + 1;
+        END IF;
+        IF position('hybrid_recall_schedule_bm25_idx' IN plan_line) > 0 THEN
+            bm25_scans := bm25_scans + 1;
+        END IF;
+        IF position('Ann Index Scan' IN plan_line) > 0 THEN
+            ann_scans := ann_scans + 1;
+        END IF;
+        IF position('LOCAL GATHER' IN plan_line) > 0 THEN
+            local_gathers := local_gathers + 1;
+        END IF;
+    END LOOP;
+
+    RETURN 'operator=' || operator_nodes
+        || ',strategy=' || strategy_lines
+        || ',bm25=' || bm25_scans
+        || ',ann=' || ann_scans
+        || ',gather=' || local_gathers;
+END;
+$$ LANGUAGE plpgsql;
+-- Rollback switch: no HybridRecall node is planned while disabled.
+SET enable_hybrid_recall = off;
+SELECT hybrid_recall_schedule_plan_signature() LIKE 'operator=0,%' AS rollback_plan_ok;
+rollback_plan_ok
+t
+(1 row)
+-- Serial operator: one HybridRecall, BM25 and HNSW branch, no task stream.
+SET enable_hybrid_recall = on;
+SET hybrid_recall_parallel_mode = off;
+SELECT hybrid_recall_schedule_plan_signature() AS serial_plan_signature;
+serial_plan_signature
+operator=1,strategy=1,bm25=1,ann=1,gather=0
+(1 row)
+SELECT id
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) DESC
+LIMIT 8;
+id
+25
+165
+45
+65
+145
+125
+105
+1
+(8 rows)
+-- Forced parallel operator: the same branches are wrapped by two LOCAL GATHERs.
+SET hybrid_recall_parallel_mode = force;
+SELECT hybrid_recall_schedule_plan_signature() AS parallel_plan_signature;
+parallel_plan_signature
+operator=1,strategy=1,bm25=1,ann=1,gather=2
+(1 row)
+SELECT id
+FROM hybrid_recall_schedule_docs
+WHERE tenant_id = 1
+ORDER BY ogai.hybrid_rrf_marker(
+           id, content, embedding, 'database',
+           '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector,
+           '{"text_candidates":40,"vector_candidates":40,"rrf_k":60,"weights":[0.5,0.5]}'::jsonb
+       ) DESC
+LIMIT 8;
+id
+25
+165
+45
+65
+145
+125
+105
+1
+(8 rows)
+RESET hybrid_recall_parallel_mode;
+RESET enable_hybrid_recall;
+DROP FUNCTION hybrid_recall_schedule_plan_signature();
+DROP TABLE hybrid_recall_schedule_docs;
