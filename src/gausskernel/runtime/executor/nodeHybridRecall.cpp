@@ -41,20 +41,22 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 
-/* hash table entry: doc-key Datum first (hash_create key), then payload */
-typedef struct HybridCandEntry {
+/*
+ * Keep the key type inside the dynahash key.  Custom hash/match callbacks do
+ * not receive a caller context, so a self-describing key avoids process- or
+ * thread-global callback state when concurrent sessions use different key
+ * types.
+ */
+typedef struct HybridCandKey {
     Datum id;
+    Oid type_id;
+} HybridCandKey;
+
+/* hash table entry: self-describing doc key first, then payload */
+typedef struct HybridCandEntry {
+    HybridCandKey key;
     HybridCandidate cand;
 } HybridCandEntry;
-
-/*
- * hash_create's custom hash/match callbacks receive only the key, so the
- * doc-key TypeCacheEntry is passed through this thread-local pointer.  A
- * gaussdb process hosts multiple session threads; process-global state here
- * would race concurrent HybridRecall queries using different key types.
- * Stream workers never execute the fusion parent (design doc §5.1).
- */
-static THR_LOCAL TypeCacheEntry* g_hybrid_id_tcache = NULL;
 
 static TupleTableSlot* ExecHybridRecall(PlanState* state);
 static void hybrid_validate_options(HybridRecallState* node);
@@ -165,26 +167,33 @@ static void hybrid_map_planner_vars(HybridRecall* node)
 
 static uint32 hybrid_id_hash(const void* key, Size keysize)
 {
-    Datum id = *(const Datum*)key;
+    const HybridCandKey* cand_key = (const HybridCandKey*)key;
+    TypeCacheEntry* tcache = lookup_type_cache(cand_key->type_id, TYPECACHE_HASH_PROC);
     FmgrInfo fi;
 
-    Assert(g_hybrid_id_tcache != NULL);
+    Assert(OidIsValid(tcache->hash_proc));
     /* hash_proc is a support-function OID; fill a local FmgrInfo rather
      * than assuming the cache keeps a finfo (openGauss TypeCacheEntry
      * only maintains finfos for eq/cmp). */
-    fmgr_info(g_hybrid_id_tcache->hash_proc, &fi);
-    return DatumGetUInt32(FunctionCall1Coll(&fi, InvalidOid, id));
+    fmgr_info(tcache->hash_proc, &fi);
+    return DatumGetUInt32(FunctionCall1Coll(&fi, InvalidOid, cand_key->id));
 }
 
 static int hybrid_id_match(const void* key1, const void* key2, Size keysize)
 {
-    Datum id1 = *(const Datum*)key1;
-    Datum id2 = *(const Datum*)key2;
+    const HybridCandKey* cand_key1 = (const HybridCandKey*)key1;
+    const HybridCandKey* cand_key2 = (const HybridCandKey*)key2;
+    TypeCacheEntry* tcache;
     FmgrInfo fi;
 
-    Assert(g_hybrid_id_tcache != NULL);
-    fmgr_info(get_opcode(g_hybrid_id_tcache->eq_opr), &fi);
-    return !DatumGetBool(FunctionCall2Coll(&fi, InvalidOid, id1, id2));
+    if (cand_key1->type_id != cand_key2->type_id)
+        return 1;
+
+    tcache = lookup_type_cache(cand_key1->type_id, TYPECACHE_EQ_OPR);
+    Assert(OidIsValid(tcache->eq_opr));
+    fmgr_info(get_opcode(tcache->eq_opr), &fi);
+    return !DatumGetBool(FunctionCall2Coll(&fi, InvalidOid,
+                                           cand_key1->id, cand_key2->id));
 }
 
 /* three-way doc-key compare via the type's btree procs (never byte order
@@ -504,10 +513,10 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
                                   slot->tts_nvalid, branch_id_resno)));
 
     bool found = false;
-
-    g_hybrid_id_tcache = node->id_tcache;
-    HybridCandEntry* entry = (HybridCandEntry*)hash_search(node->by_doc_id, &id, HASH_ENTER, &found);
-    g_hybrid_id_tcache = NULL;
+    HybridCandKey key;
+    key.id = id;
+    key.type_id = node->id_tcache->type_id;
+    HybridCandEntry* entry = (HybridCandEntry*)hash_search(node->by_doc_id, &key, HASH_ENTER, &found);
 
     if (!found) {
         /* first hit owns the payload copy and the doc-key copy */
@@ -523,6 +532,11 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
         entry->cand.vector_distance = 0.0;
         entry->cand.hybrid_score = 0.0;
         entry->cand.tuple = ExecCopySlotMinimalTuple(slot);
+        /* Dynahash copied the transient slot Datum into its key.  Point a
+         * pass-by-reference key at the durable candidate-context copy before
+         * the branch slot can be reused.  The value and therefore hash bucket
+         * are unchanged. */
+        entry->key.id = entry->cand.id;
         (void)MemoryContextSwitchTo(old);
         node->dedup_rows++;
         hybrid_check_candidate_memory(node);
@@ -805,7 +819,7 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
 
         errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
         securec_check(rc, "\0", "\0");
-        ctl.keysize = sizeof(Datum);
+        ctl.keysize = sizeof(HybridCandKey);
         ctl.entrysize = sizeof(HybridCandEntry);
         ctl.hash = hybrid_id_hash;
         ctl.match = hybrid_id_match;
