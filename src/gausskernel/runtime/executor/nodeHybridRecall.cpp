@@ -33,6 +33,7 @@
 #include "lib/binaryheap.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
+#include "nodes/nodeFuncs.h"
 #include "utils/datum.h"
 #include "utils/hsearch.h"
 #include "utils/lsyscache.h"
@@ -64,12 +65,58 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state);
  * schema (key=1, score=2, payload=3..N) exactly once.  Handmade P0 vehicle
  * plans have a NIL targetlist and continue to use id_resno as a branch resno.
  */
-static void hybrid_map_planner_output_vars(HybridRecall* node)
+typedef struct HybridVarMapContext {
+    HybridRecall* node;
+    List* payload_attnos;
+} HybridVarMapContext;
+
+static AttrNumber hybrid_map_branch_attno(HybridVarMapContext* context, Var* var)
+{
+    AttrNumber original_attno = var->varoattno > 0 ? var->varoattno : var->varattno;
+    if (var->varlevelsup != 0 || original_attno <= 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("hybrid recall V1 cannot map a nonlocal or system-column Var")));
+
+    if (original_attno == context->node->id_resno)
+        return 1;
+
+    int payload_index = 0;
+    ListCell* lc = NULL;
+    foreach (lc, context->payload_attnos) {
+        if ((AttrNumber)lfirst_int(lc) == original_attno)
+            return (AttrNumber)(3 + payload_index);
+        payload_index++;
+    }
+
+    context->payload_attnos = lappend_int(context->payload_attnos, original_attno);
+    return (AttrNumber)(3 + payload_index);
+}
+
+static bool hybrid_map_recheck_vars_walker(Node* expr, HybridVarMapContext* context)
+{
+    if (expr == NULL)
+        return false;
+    if (IsA(expr, Var)) {
+        Var* var = (Var*)expr;
+        var->varno = OUTER_VAR;
+        var->varattno = hybrid_map_branch_attno(context, var);
+        /* varoattno remains the immutable base-table identity for another
+         * ExecInit of the same cached plan. */
+        return false;
+    }
+    return expression_tree_walker(expr, (bool (*)())hybrid_map_recheck_vars_walker, (void*)context);
+}
+
+static void hybrid_map_planner_vars(HybridRecall* node)
 {
     if (node->plan.targetlist == NIL)
         return;
 
-    List* payload_attnos = NIL;
+    HybridVarMapContext context;
+    context.node = node;
+    context.payload_attnos = NIL;
+
     ListCell* lc = NULL;
     foreach (lc, node->plan.targetlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(lc);
@@ -77,34 +124,18 @@ static void hybrid_map_planner_output_vars(HybridRecall* node)
             continue;
 
         Var* var = (Var*)tle->expr;
-        AttrNumber original_attno = var->varoattno > 0 ? var->varoattno : var->varattno;
-        AttrNumber branch_attno = InvalidAttrNumber;
-        if (original_attno == node->id_resno) {
-            branch_attno = 1;
-        } else {
-            int payload_index = 0;
-            ListCell* pc = NULL;
-            foreach (pc, payload_attnos) {
-                if ((AttrNumber)lfirst_int(pc) == original_attno) {
-                    branch_attno = (AttrNumber)(3 + payload_index);
-                    break;
-                }
-                payload_index++;
-            }
-            if (branch_attno == InvalidAttrNumber) {
-                branch_attno = (AttrNumber)(3 + list_length(payload_attnos));
-                payload_attnos = lappend_int(payload_attnos, original_attno);
-            }
-        }
-
         var->varno = OUTER_VAR;
-        var->varattno = branch_attno;
+        var->varattno = hybrid_map_branch_attno(&context, var);
         /* Keep varoattno as the immutable base-table identity.  Cached plans
          * can be executed more than once; the next ExecInit must rebuild the
          * same mapping from original coordinates, not from a prior run's
          * branch position. */
     }
-    list_free(payload_attnos);
+
+    /* Visible output Vars establish the first payload positions; recursively
+     * append and map any columns referenced only by the P2-4 recheck quals. */
+    (void)hybrid_map_recheck_vars_walker((Node*)node->recheck_quals, &context);
+    list_free(context.payload_attnos);
 }
 
 static uint32 hybrid_id_hash(const void* key, Size keysize)
@@ -217,7 +248,14 @@ HybridRecallState* ExecInitHybridRecall(HybridRecall* node, EState* estate, int 
     state->ps.righttree = state->vector_state;
 
     ExecAssignExprContext(estate, &state->ps);
-    hybrid_map_planner_output_vars(node);
+    hybrid_map_planner_vars(node);
+
+    /* P2-4 defensive common-filter recheck.  Vars now address the common
+     * branch tuple through OUTER_VAR, including hidden WHERE-only payload. */
+    if (estate->es_is_flt_frame)
+        state->ps.qual = (List*)ExecInitQualByFlatten(node->recheck_quals, (PlanState*)state);
+    else
+        state->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->recheck_quals, (PlanState*)state);
 
     /*
      * Branch schema contract: children output (doc_id, branch score,
@@ -470,6 +508,23 @@ static void hybrid_drain_branch(HybridRecallState* node, PlanState* branch, bool
     *row_counter = rank;
 }
 
+static bool hybrid_recheck_candidate(HybridRecallState* node, HybridCandidate* cand)
+{
+    if (node->ps.qual == NIL)
+        return true;
+
+    TupleTableSlot* payload_slot = node->text_state->ps_ResultTupleSlot;
+    ExecStoreMinimalTuple(cand->tuple, payload_slot, false);
+
+    ExprContext* econtext = node->ps.ps_ExprContext;
+    TupleTableSlot* saved_outer = econtext->ecxt_outertuple;
+    econtext->ecxt_outertuple = payload_slot;
+    bool passed = ExecQual(node->ps.qual, econtext, false);
+    econtext->ecxt_outertuple = saved_outer;
+    ResetExprContext(econtext);
+    return passed;
+}
+
 /* RRF (design doc §3.4): score = sum of weight / (rrf_k + rank) over the
  * branches that hit the doc; missed branches contribute nothing. */
 static void hybrid_fuse(HybridRecallState* node)
@@ -483,6 +538,14 @@ static void hybrid_fuse(HybridRecallState* node)
     hash_seq_init(&seq, node->by_doc_id);
     while ((entry = (HybridCandEntry*)hash_seq_search(&seq)) != NULL) {
         HybridCandidate* cand = &entry->cand;
+
+        /* Both branches already applied the filter.  Rechecking the retained
+         * expression here is intentionally defensive: it protects semantics
+         * across lossy/in-filter AM behavior and future pushdown changes, and
+         * runs before the bounded heap so a rejected candidate is replaced by
+         * the next valid one rather than shrinking the final Top-K. */
+        if (!hybrid_recheck_candidate(node, cand))
+            continue;
 
         cand->hybrid_score = 0.0;
         if (cand->text_rank != 0)

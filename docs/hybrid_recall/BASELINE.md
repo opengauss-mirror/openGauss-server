@@ -161,9 +161,10 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 | 任务 | commit | 判据 |
 | --- | --- | --- |
 | P2-1 marker 解析与白名单 | 69d7335109 | `ogai` namespace、单表、单 DESC sort、双索引正向识别；负向不误匹配 |
-| P2-2 BM25 branch Path | 本提交 | `Limit → BM25 Index Scan`，经 1:1 LOCAL GATHER 接入 HybridRecall |
-| P2-3 ANN branch Path | 本提交 | `Limit → Ann Index Scan`，小表嵌套规划期间局部关闭 seqscan 且调用后恢复 |
-| P2-2/3 payload | 本提交 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
+| P2-2 BM25 branch Path | 1e9a24cae5 | `Limit → BM25 Index Scan`，经 1:1 LOCAL GATHER 接入 HybridRecall |
+| P2-3 ANN branch Path | 1e9a24cae5 | `Limit → Ann Index Scan`，小表嵌套规划期间局部关闭 seqscan 且调用后恢复 |
+| P2-2/3 payload | 1e9a24cae5 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
+| P2-4 公共 filter/recheck | 本提交 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
 
 实现与回归证据：
 
@@ -188,5 +189,19 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 另将 hash callback 的类型缓存指针改为 `THR_LOCAL`，避免同一 gaussdb 进程内并发会话
 使用不同主键类型时发生进程级数据竞争。
 
-**G3 尚未关闭**：下一步为 P2-4 公共 filter/recheck、P2-5 串并行候选与强制模式、
-P2-6 成本模型、P2-7 Param/custom/generic plan。
+### P2-4 公共 filter/recheck 证据
+
+- `evidence/P2-4_test.sql` / `evidence/P2-4_live.log`：exit=0；外部 `diff` 证明带
+  `tenant_id = 1 AND title LIKE 'doc-2%'` 的内核 Top-5 与独立手写串行 RRF 逐字节一致。
+- 查询只输出 `id/score` 时，`EXPLAIN VERBOSE` 仍显示两个支路都输出隐藏
+  `tenant_id/title`，并在 BM25 `Index Scan` 与 HNSW `Ann Index Scan` 上保留相同 Filter。
+- `recheck_quals` 在 `ExecInitHybridRecall` 映射到统一 branch tuple，在 doc_id 去重后、
+  有界 Top-K heap 前执行；prepared plan 连续执行两次结果完全一致。
+- 高选择率过滤分别验证候选数小于 final K（1 行）和零候选（0 行），无漏行或越权行；
+  调用前后 `enable_seqscan=on`。
+- volatile 公共过滤、SubPlan 公共过滤以及 volatile 查询参数均不生成 HybridRecall/
+  LOCAL GATHER，`EXPLAIN` 保持普通 Sort/SeqScan（SubPlan 例包含 InitPlan）。
+- 标准增量构建、安装、重启日志：`build_logs/incremental_20260826_094243.log`。
+
+**P2-4 完成，G3 尚未关闭**：下一步为 P2-5 串并行候选与强制模式、P2-6 成本模型、
+P2-7 Param/custom/generic plan。

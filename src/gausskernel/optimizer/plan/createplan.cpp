@@ -945,6 +945,27 @@ static List* hybrid_collect_payload_attnos(List* tlist, HybridRecallPath* path)
                      errmsg("hybrid recall V1 only supports plain payload columns and constants")));
         }
     }
+
+    /*
+     * [P2-4] Parent recheck runs on the common branch tuple, so columns used
+     * only by WHERE (tenant/status/time-range are the usual examples) must
+     * be carried as hidden payload too.  Append them after visible payloads;
+     * this keeps existing output positions stable while making the tuple
+     * descriptor sufficient for every recheck expression.
+     */
+    List* qual_vars = pull_var_clause((Node*)path->common_quals,
+                                      PVC_RECURSE_AGGREGATES,
+                                      PVC_RECURSE_PLACEHOLDERS);
+    foreach (lc, qual_vars) {
+        Var* var = (Var*)lfirst(lc);
+        if (var->varno != path->relid || var->varlevelsup != 0 || var->varattno <= 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("hybrid recall V1 only supports common filters on ordinary columns of the recalled table")));
+        if (var->varattno != path->id_attno && !hybrid_attno_in_list(attnos, var->varattno))
+            attnos = lappend_int(attnos, var->varattno);
+    }
+    list_free(qual_vars);
     return attnos;
 }
 

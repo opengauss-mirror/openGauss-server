@@ -15,12 +15,10 @@
  *
  * src/gausskernel/optimizer/path/hybridRecallPath.cpp
  *
- * [P2-1] HybridRecall planner recognition (hybrid recall design doc §3.3/§7.1).
- * Recognizes the marker query shape and validates the full whitelist;
- * emits a DEBUG1 verdict line for every rejection reason so tests can
- * assert non-matching shapes never slip through. Building the actual
- * HybridRecallPath (text/vector branch paths, costs) lands in P2-2..P2-5;
- * this task only recognizes, and deliberately adds nothing to pathlist.
+ * [P2] HybridRecall planner recognition and branch metadata construction
+ * (hybrid recall design doc §3.3/§7).  V1 recognizes only a deliberately
+ * narrow top-level shape, removes the reserved marker, and records the
+ * common filter for identical branch pushdown plus fusion-layer recheck.
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -29,6 +27,7 @@
 #include "catalog/pg_am.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
+#include "optimizer/clauses.h"
 #include "optimizer/hybrid_recall_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/tlist.h"
@@ -122,6 +121,43 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
         return;
     int64 final_topk = DatumGetInt64(((Const*)parse->limitCount)->constvalue);
 
+    Node* q_text_raw = (Node*)list_nth(func->args, 3);
+    Node* q_vec_raw = (Node*)list_nth(func->args, 4);
+    if (IsA(q_text_raw, TargetEntry))
+        q_text_raw = (Node*)((TargetEntry*)q_text_raw)->expr;
+    if (IsA(q_vec_raw, TargetEntry))
+        q_vec_raw = (Node*)((TargetEntry*)q_vec_raw)->expr;
+    if (contain_volatile_functions(q_text_raw) || contain_volatile_functions(q_vec_raw) ||
+        contain_subplans(q_text_raw) || contain_subplans(q_vec_raw))
+        return;
+
+    /*
+     * [P2-4] Normalize the public filter before mutating the marker query.
+     * Every safe expression is copied into both synthesized branch queries
+     * and retained on HybridRecall for a defensive recheck after dedup.
+     * A volatile expression or SubPlan cannot be evaluated independently in
+     * two task workers without changing query semantics, so V1 does not
+     * generate the parallel path for that shape.
+     */
+    List* common_quals = NIL;
+    {
+        ListCell* qc = NULL;
+        Node* quals = (Node*)parse->jointree->quals;
+        List* qual_list = quals == NULL ? NIL : (IsA(quals, List) ? (List*)quals : list_make1(quals));
+        foreach (qc, qual_list) {
+            Node* item = (Node*)lfirst(qc);
+            if (item == NULL)
+                continue;
+            if (IsA(item, TargetEntry))
+                item = (Node*)((TargetEntry*)item)->expr;
+            else if (IsA(item, RestrictInfo))
+                item = (Node*)((RestrictInfo*)item)->clause;
+            if (contain_volatile_functions(item) || contain_subplans(item))
+                return;
+            common_quals = lappend(common_quals, copyObject(item));
+        }
+    }
+
     elog(DEBUG1,
          "hybrid_recall P2-2 path added: rel=%u sortop=%u bm25=%d ann=%d",
          rte->relid, sgc->sortop, (int)has_bm25, (int)has_ann);
@@ -163,35 +199,9 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
     path->id_attno = id_var->varattno;
     path->text_attno = text_var->varattno;
     path->vector_attno = vec_var->varattno;
-    Node* q_text_raw = (Node*)list_nth(func->args, 3);
-    Node* q_vec_raw = (Node*)list_nth(func->args, 4);
-    if (IsA(q_text_raw, TargetEntry))
-        q_text_raw = (Node*)((TargetEntry*)q_text_raw)->expr;
-    if (IsA(q_vec_raw, TargetEntry))
-        q_vec_raw = (Node*)((TargetEntry*)q_vec_raw)->expr;
     path->query_text = (Expr*)copyObject(q_text_raw);
     path->query_vector = (Expr*)copyObject(q_vec_raw);
-    /* Unwrap quals into bare Exprs: the planner's function-cache walker
-     * (scan_func_rescache_recurse -> exprType) cannot handle the TLE /
-     * RestrictInfo wrappers that openGauss keeps inside jointree->quals. */
-    {
-        List* plain = NIL;
-        ListCell* qc = NULL;
-        Node* quals = (Node*)parse->jointree->quals;
-        List* qual_list = (Node*)quals == NULL ? NIL
-            : (IsA(quals, List) ? (List*)quals : list_make1(quals));
-        foreach (qc, qual_list) {
-            Node* item = (Node*)lfirst(qc);
-            if (item == NULL)
-                continue;
-            if (IsA(item, TargetEntry))
-                item = (Node*)((TargetEntry*)item)->expr;
-            else if (IsA(item, RestrictInfo))
-                item = (Node*)((RestrictInfo*)item)->clause;
-            plain = lappend(plain, copyObject(item));
-        }
-        path->common_quals = plain;
-    }
+    path->common_quals = common_quals;
     path->final_topk_est = (int64)path->path.rows;
     path->text_candidates_est = 100;
     path->vector_candidates_est = 100;
