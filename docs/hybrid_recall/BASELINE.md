@@ -308,3 +308,27 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 
 **P3-2 完成。** 下一原子任务是 P3-3：补齐候选数、最终 K、RRF 参数、单查询内存和
 worker 使用量的统一硬上限与可诊断错误，并把资源策略接入 GUC/options。
+
+### P3-3 GUC 与资源硬上限
+
+- 新增五个 USERSET GUC：最终 Top-K、单支路候选、两支路候选总数、默认 RRF `k` 和
+  单查询候选内存上限；默认值分别为 `100/1000/2000/60/65536 kB`。显式 marker/V2
+  option 仍优先于默认 `rrf_k`。
+- wrapper 在生成 embedding 前按当前 GUC 校验最终 K 和候选数；Planner 对常量 LIMIT
+  及常量 options 提前拒绝；Executor 对参数化 K 和缓存 generic plan 重新读取当前上限，
+  因而不能通过先 prepare、后降低上限绕过资源控制。
+- Executor 在候选哈希表创建、每个新候选 payload、最终 heap 和输出数组分配后检查
+  `candidate_cxt`。64 kB 压测在 `used=65576/limit=65536` 时返回可诊断错误，随后实例
+  可继续执行 SQL。最终 heap 同时迁入 `candidate_cxt`，修复 rescan 时丢弃旧指针造成的
+  query-context 内存累积。
+- 五个整数字段复用 session 结构既有对齐空洞；`knl_session_attr_sql=656`、
+  `knl_u_datavec_context=56`、`knl_session_attr=44032`、`knl_session_context=52776`，
+  既有字段 offset 均未变化。只执行目标对象编译、`gaussdb` relink、二进制/扩展 SQL
+  定向安装和原 PGDATA restart，没有重建或重装整个 openGauss。
+- `evidence/P3-3_test.sql` / `evidence/P3-3_live.log`：默认值、RRF 默认覆盖、wrapper/
+  Planner/Executor 三层上限、缓存计划再校验和候选内存错误均通过。新库
+  `hybrid_recall_p33_20260826` 可直接 `CREATE EXTENSION ogai`；P3-1/P3-2、P2-1 至
+  P2-7、P0-4/P0-5/P0-6 全量回归通过。
+
+**P3-3 完成。** 下一原子任务是 P3-4：补齐 HybridRecall EXPLAIN、非敏感诊断日志和
+WLM/worker 资源观测字段。

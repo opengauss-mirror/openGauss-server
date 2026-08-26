@@ -58,6 +58,20 @@ static THR_LOCAL TypeCacheEntry* g_hybrid_id_tcache = NULL;
 static TupleTableSlot* ExecHybridRecall(PlanState* state);
 static void hybrid_validate_options(HybridRecallState* node);
 
+static void hybrid_check_candidate_memory(HybridRecallState* node)
+{
+    Size used = AllocSetContextUsedSpace((AllocSet)node->candidate_cxt);
+    uint64 limit = (uint64)u_sess->datavec_ctx.hybrid_recall_max_candidate_memory_kb * 1024;
+
+    if ((uint64)used > limit)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("HybridRecall candidate memory exceeds configured limit"),
+                 errdetail("used=%lu bytes limit=%lu bytes (%d kB)",
+                           (unsigned long)used, (unsigned long)limit,
+                           u_sess->datavec_ctx.hybrid_recall_max_candidate_memory_kb)));
+}
+
 /*
  * Planner-generated HybridRecall targetlists deliberately retain base-table
  * Vars through planning, because openGauss plan-copy/cache processing can
@@ -413,11 +427,35 @@ static void hybrid_validate_options(HybridRecallState* node)
     if (node->final_topk < 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("HybridRecall final_topk must be >= 1")));
+    if (node->final_topk > u_sess->attr.attr_sql.hybrid_recall_max_final_topk)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("HybridRecall final_topk exceeds configured limit"),
+                 errdetail("final_topk=%ld limit=%d",
+                           node->final_topk,
+                           u_sess->attr.attr_sql.hybrid_recall_max_final_topk)));
     /* A branch cap below the final K cannot produce the final K rows. */
     if (node->text_limit < node->final_topk || node->vector_limit < node->final_topk)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("HybridRecall branch candidate caps must be >= final_topk")));
-    if (plan->rrf_k <= 0.0 || plan->text_weight < 0.0 || plan->vector_weight < 0.0)
+    if (node->text_limit > u_sess->attr.attr_sql.hybrid_recall_max_candidates_branch ||
+        node->vector_limit > u_sess->attr.attr_sql.hybrid_recall_max_candidates_branch)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("HybridRecall branch candidates exceed configured limit"),
+                 errdetail("text=%ld vector=%ld branch_limit=%d",
+                           node->text_limit, node->vector_limit,
+                           u_sess->attr.attr_sql.hybrid_recall_max_candidates_branch)));
+    if (node->text_limit + node->vector_limit >
+        u_sess->attr.attr_sql.hybrid_recall_max_candidates_total)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("HybridRecall total candidates exceed configured limit"),
+                 errdetail("text=%ld vector=%ld total_limit=%d",
+                           node->text_limit, node->vector_limit,
+                           u_sess->attr.attr_sql.hybrid_recall_max_candidates_total)));
+    if (!isfinite(plan->rrf_k) || !isfinite(plan->text_weight) || !isfinite(plan->vector_weight) ||
+        plan->rrf_k <= 0.0 || plan->text_weight < 0.0 || plan->vector_weight < 0.0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("HybridRecall RRF parameters are invalid")));
 }
@@ -476,6 +514,7 @@ static void hybrid_upsert_candidate(HybridRecallState* node, TupleTableSlot* slo
         entry->cand.tuple = ExecCopySlotMinimalTuple(slot);
         (void)MemoryContextSwitchTo(old);
         node->dedup_rows++;
+        hybrid_check_candidate_memory(node);
     } else {
         /* same-branch duplicate doc key: keep the better (earlier) rank */
         if ((is_text && entry->cand.text_rank != 0) || (!is_text && entry->cand.vector_rank != 0))
@@ -551,7 +590,10 @@ static void hybrid_fuse(HybridRecallState* node)
     HASH_SEQ_STATUS seq;
     HybridCandEntry* entry = NULL;
 
+    MemoryContext old = MemoryContextSwitchTo(node->candidate_cxt);
     node->final_heap = binaryheap_allocate((int)node->final_topk, hybrid_heap_compare, node);
+    (void)MemoryContextSwitchTo(old);
+    hybrid_check_candidate_memory(node);
 
     hash_seq_init(&seq, node->by_doc_id);
     while ((entry = (HybridCandEntry*)hash_seq_search(&seq)) != NULL) {
@@ -589,6 +631,7 @@ static void hybrid_fuse(HybridRecallState* node)
     int count = (int)node->final_heap->bh_size;
     node->output = (HybridCandidate**)MemoryContextAlloc(node->candidate_cxt,
                                                          count * sizeof(HybridCandidate*));
+    hybrid_check_candidate_memory(node);
     for (int i = count - 1; i >= 0; i--)
         node->output[i] = (HybridCandidate*)DatumGetPointer(binaryheap_remove_first(node->final_heap));
     node->output_count = (uint32)count;
@@ -680,6 +723,7 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
                                       256,
                                       &ctl,
                                       HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
+        hybrid_check_candidate_memory(node);
 
         INSTR_TIME_SET_CURRENT(node->text_first_tuple);
         hybrid_drain_branch(node, node->text_state, true, &node->text_rows);

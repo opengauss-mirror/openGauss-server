@@ -3220,9 +3220,11 @@ typedef struct knl_u_datavec_context {
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    int hybrid_recall_rrf_k;
     double rbq_refinek;
     bool enable_npu;
     bool hnsw_use_mmap;
+    int hybrid_recall_max_candidate_memory_kb;
 } knl_u_datavec_context;
 
 #ifdef ENABLE_HTAP

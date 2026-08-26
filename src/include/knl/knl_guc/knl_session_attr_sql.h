@@ -244,6 +244,8 @@ typedef struct knl_session_attr_sql {
     int max_recursive_times;
     /* Table skewness warning rows, range from 0 to INT_MAX*/
     int table_skewness_warning_rows;
+    /* P3-3 HybridRecall resource ceilings; positioned in existing ABI holes. */
+    int hybrid_recall_max_final_topk;
     /* Table skewness warning threshold, range from 0 to 1, 0 indicates feature disabled*/
     double table_skewness_warning_threshold;
     bool enable_opfusion;
@@ -265,12 +267,14 @@ typedef struct knl_session_attr_sql {
 #ifndef ENABLE_LITE_MODE
     bool enable_default_pcr_index;
 #endif
+    int hybrid_recall_max_candidates_branch;
     char* index_type;
     char* ustore_attr;
 #ifdef ENABLE_UT
     char* ustore_unit_test;
 #endif
     bool create_index_concurrently;
+    int hybrid_recall_max_candidates_total;
     /* db4ai.snapshots */
     char* db4ai_snapshot_mode;
     char* db4ai_snapshot_version_delimiter;

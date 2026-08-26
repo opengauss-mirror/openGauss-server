@@ -1,0 +1,88 @@
+P3-3 configurable resource ceilings live evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Base commit: 27dc8a617c
+Instance: topk_test_data, port 55440, user qiumc
+Functional database: hybrid_recall_p31_20260826
+Fresh-install database: hybrid_recall_p33_20260826
+
+Build/install/restart
+  targeted compile:
+    src/common/backend/utils/misc/guc/guc_sql.o
+    src/gausskernel/optimizer/path/hybridRecallPath.o
+    src/gausskernel/runtime/executor/nodeHybridRecall.o
+  targeted link: make -C src/gausskernel gaussdb -sj4
+  targeted install: gaussdb binary plus make -C contrib/ogai install -sj4
+  full openGauss rebuild/reinstall: not performed
+  restart log: build_logs/restart_20260826_165008.log
+  result: restart and SQL connectivity check succeeded; original PGDATA preserved
+  installed ogai--1.0.sql is byte-identical to contrib source
+
+ABI/layout validation
+  sizeof(knl_session_attr_sql): 656 bytes, unchanged
+  sizeof(knl_u_datavec_context): 56 bytes, unchanged
+  sizeof(knl_session_attr): 44032 bytes, unchanged
+  sizeof(knl_session_context): 52776 bytes, unchanged
+  all pre-existing field offsets stayed unchanged; the five ints occupy existing
+  alignment holes so targeted relinking remains safe with the installed objects.
+
+Resource GUC defaults
+  hybrid_recall_max_final_topk: 100
+  hybrid_recall_max_candidates_branch: 1000
+  hybrid_recall_max_candidates_total: 2000
+  hybrid_recall_rrf_k: 60
+  hybrid_recall_max_candidate_memory_kb: 65536
+  context: USERSET; explicit marker/V2 options take precedence over default rrf_k
+
+Functional test
+  gsql -X -p 55440 -U qiumc -d hybrid_recall_p31_20260826 \
+    -f docs/hybrid_recall/evidence/P3-3_test.sql
+  exit: 0
+  total time: 12995 ms
+  GUC rrf_k=10 with marker options {} changed score/ranking as expected;
+  explicit marker rrf_k=60 retained the prior result and score semantics.
+  wrapper preflight rejected:
+    final_topk=3 with configured limit=2
+    text candidates=51 with branch limit=50
+    total candidates=160 with total limit=150
+  direct constant LIMIT 3 with configured final limit=2 was rejected by Planner.
+  A cached force_generic_plan first returned 245,165,25, then ExecutorStart
+  revalidated and rejected current final/branch/total ceilings after each GUC
+  was lowered, before branch execution.
+
+Candidate-memory enforcement
+  A 2 KiB payload column and 500+500 candidate request were used with the
+  candidate-memory ceiling lowered to 64 KiB.
+  result: ERROR HybridRecall candidate memory exceeds configured limit
+  detail: used=65576 bytes limit=65536 bytes (64 kB)
+  the temporary payload column was removed after RESET; SELECT 1 succeeded.
+  The final binary heap is now allocated in candidate_cxt, which also closes
+  the previous rescan leak caused by dropping a query-context-owned heap pointer.
+
+Fresh extension installation
+  CREATE DATABASE hybrid_recall_p33_20260826 DBCOMPATIBILITY 'A': ok
+  CREATE EXTENSION ogai: ok
+  extension: ogai 1.0
+  enable_hybrid_recall: off
+  all five resource GUC defaults: correct
+  installed API count for hybrid_search_v2, hybrid_search_legacy_core and
+  hybrid_rrf_marker: 3
+
+Regression after final install
+  P3-2 feature switch/fallback/legacy equality: exit=0; mismatch counts=0
+  P3-1 options/API/permission/injection: exit=0; result 5,25,45
+  P2-7 prepared/custom/generic plan and dynamic K: exit=0
+  P2-6 serial/parallel cost selection: exit=0; small=serial, large=parallel
+  P2-5 off/force/auto and result equality: exit=0; match=ok
+  P2-4 common filter/recheck and serial equality: exit=0; match=ok
+  P2-2/P2-3 BM25/HNSW branches, payload and cache: exit=0
+  P2-1 marker whitelist: exit=0
+  P0-4 serial golden: exit=0
+  P0-5 candidate/resource boundaries: exit=0 with expected errors
+  P0-6 tie-break/NULL/NaN boundaries: exit=0 with expected NULL-key error
+
+Verdict
+  P3-3 candidate, final-K, RRF-default and per-query candidate-memory ceilings
+  are configurable and diagnostic at wrapper, Planner and Executor boundaries.
+  Cached plans cannot bypass a ceiling lowered after planning, and the server
+  remains online after a memory-limit error.

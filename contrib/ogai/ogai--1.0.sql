@@ -969,9 +969,14 @@ DECLARE
     v_legacy_where TEXT := '';
     v_has_bm25 BOOLEAN := false;
     v_has_ann BOOLEAN := false;
+    v_max_final_topk INTEGER := current_setting('hybrid_recall_max_final_topk')::INTEGER;
+    v_max_candidates_branch INTEGER :=
+        current_setting('hybrid_recall_max_candidates_branch')::INTEGER;
+    v_max_candidates_total INTEGER :=
+        current_setting('hybrid_recall_max_candidates_total')::INTEGER;
     v_text_candidates INTEGER := 100;
     v_vector_candidates INTEGER := 100;
-    v_rrf_k DOUBLE PRECISION := 60.0;
+    v_rrf_k DOUBLE PRECISION := current_setting('hybrid_recall_rrf_k')::DOUBLE PRECISION;
     v_text_weight DOUBLE PRECISION := 0.5;
     v_vector_weight DOUBLE PRECISION := 0.5;
 BEGIN
@@ -981,8 +986,9 @@ BEGIN
     IF p_query IS NULL THEN
         RAISE EXCEPTION 'hybrid_search_v2 query must not be NULL';
     END IF;
-    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN
-        RAISE EXCEPTION 'hybrid_search_v2 limit must be between 1 and 100, got %', p_limit;
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > v_max_final_topk THEN
+        RAISE EXCEPTION 'hybrid_search_v2 limit must be between 1 and %, got %',
+            v_max_final_topk, p_limit;
     END IF;
 
     -- Raw SQL predicates are intentionally rejected in V2.  Equality
@@ -1034,13 +1040,16 @@ BEGIN
         END IF;
         v_vector_candidates := (v_options->>'vector_candidates')::INTEGER;
     END IF;
-    IF v_text_candidates < p_limit OR v_text_candidates > 1000 OR
-       v_vector_candidates < p_limit OR v_vector_candidates > 1000 OR
-       v_text_candidates + v_vector_candidates > 2000 THEN
+    IF v_text_candidates < p_limit OR
+       v_text_candidates > v_max_candidates_branch OR
+       v_vector_candidates < p_limit OR
+       v_vector_candidates > v_max_candidates_branch OR
+       v_text_candidates + v_vector_candidates > v_max_candidates_total THEN
         RAISE EXCEPTION 'hybrid_search_v2 candidate limits are invalid'
             USING DETAIL = format(
-                'final=%s text=%s vector=%s; branch range is final..1000 and total must be <= 2000',
-                p_limit, v_text_candidates, v_vector_candidates);
+                'final=%s text=%s vector=%s; branch range is final..%s and total must be <= %s',
+                p_limit, v_text_candidates, v_vector_candidates,
+                v_max_candidates_branch, v_max_candidates_total);
     END IF;
 
     IF v_options ? 'rrf_k' THEN

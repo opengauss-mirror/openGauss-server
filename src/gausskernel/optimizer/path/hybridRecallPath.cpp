@@ -117,7 +117,7 @@ static void hybrid_parse_options(Node* options_expr, HybridRecallOptions* result
 {
     result->text_candidates = 100;
     result->vector_candidates = 100;
-    result->rrf_k = 60.0;
+    result->rrf_k = (double)u_sess->datavec_ctx.hybrid_recall_rrf_k;
     result->text_weight = 0.5;
     result->vector_weight = 0.5;
     result->require_parallel = false;
@@ -219,14 +219,17 @@ static void hybrid_parse_options(Node* options_expr, HybridRecallOptions* result
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("hybrid recall option \"query_vector\" must be a JSON array")));
 
-    if (result->text_candidates < 1 || result->text_candidates > 1000 ||
-        result->vector_candidates < 1 || result->vector_candidates > 1000 ||
-        result->text_candidates + result->vector_candidates > 2000)
+    int max_branch = u_sess->attr.attr_sql.hybrid_recall_max_candidates_branch;
+    int max_total = u_sess->attr.attr_sql.hybrid_recall_max_candidates_total;
+    if (result->text_candidates < 1 || result->text_candidates > max_branch ||
+        result->vector_candidates < 1 || result->vector_candidates > max_branch ||
+        result->text_candidates + result->vector_candidates > max_total)
         ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg("hybrid recall candidates exceed V1 limits"),
-                 errdetail("text=%ld vector=%ld; each must be 1..1000 and total must be <= 2000",
-                           result->text_candidates, result->vector_candidates)));
+                 errmsg("hybrid recall candidates exceed configured limits"),
+                 errdetail("text=%ld vector=%ld; each must be 1..%d and total must be <= %d",
+                           result->text_candidates, result->vector_candidates,
+                           max_branch, max_total)));
     if (result->rrf_k <= 0.0 || result->text_weight < 0.0 || result->vector_weight < 0.0)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -420,6 +423,7 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
      * expressions and LIMIT NULL/ALL remain outside the V1 whitelist.
      */
     int64 final_topk = 10;
+    bool final_topk_is_param = false;
     if (IsA(parse->limitCount, Const)) {
         Const* limit_const = (Const*)parse->limitCount;
         if (limit_const->constisnull || limit_const->consttype != INT8OID)
@@ -430,12 +434,29 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
         if (limit_param->paramkind != PARAM_EXTERN || limit_param->paramtype != INT8OID ||
             limit_param->paramid <= 0)
             return;
+        final_topk_is_param = true;
     } else {
         return;
     }
 
     HybridRecallOptions options;
     hybrid_parse_options((Node*)list_nth(func->args, 5), &options);
+
+    if (!final_topk_is_param) {
+        int max_final_topk = u_sess->attr.attr_sql.hybrid_recall_max_final_topk;
+        if (final_topk < 1 || final_topk > max_final_topk)
+            ereport(ERROR,
+                    (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                     errmsg("HybridRecall final_topk exceeds configured limit"),
+                     errdetail("final_topk=%ld; allowed range is 1..%d",
+                               final_topk, max_final_topk)));
+        if (options.text_candidates < final_topk || options.vector_candidates < final_topk)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("HybridRecall branch candidate caps must be >= final_topk"),
+                     errdetail("final_topk=%ld text=%ld vector=%ld",
+                               final_topk, options.text_candidates, options.vector_candidates)));
+    }
 
     Node* q_text_raw = (Node*)list_nth(func->args, 3);
     Node* q_vec_raw = (Node*)list_nth(func->args, 4);
