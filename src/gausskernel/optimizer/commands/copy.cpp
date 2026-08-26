@@ -4023,15 +4023,10 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
 
     /* step 1: open PARTITION relation */
     if (isPartitional) {
-        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
-            estate->es_query_cxt,
-            resultRelationDesc,
-            bulk->partOid,
-            RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
-                                                           GetCurrentPartitionNo(bulk->partOid),
-            &heaprel,
-            &partition,
-            RowExclusiveLock);
+        int partitionNo = RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
+                                                                        GetCurrentPartitionNo(bulk->partOid);
+        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
+            resultRelationDesc, &bulk->partOid, partitionNo, &heaprel, &partition, RowExclusiveLock);
         if (!res) {
             return;
         }
