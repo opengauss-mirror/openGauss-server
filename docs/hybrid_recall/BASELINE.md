@@ -165,7 +165,8 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 | P2-3 ANN branch Path | 1e9a24cae5 | `Limit → Ann Index Scan`，小表嵌套规划期间局部关闭 seqscan 且调用后恢复 |
 | P2-2/3 payload | 1e9a24cae5 | 统一 `(key, score, payload...)` tuple 契约；多列、by-ref、重复/乱序、无显式 id 均正确 |
 | P2-4 公共 filter/recheck | 9b14a3b8d0 | 两支路等价下推；WHERE-only 隐藏列随 tuple 传递；父层去重后、Top-K heap 前防御性 recheck |
-| P2-5 串/并行 Path 与模式 | 待提交 | `off` 无 Stream、`force` 双 LOCAL GATHER、`auto` 枚举候选；串并行结果逐字节一致 |
+| P2-5 串/并行 Path 与模式 | 593fd734c5 | `off` 无 Stream、`force` 双 LOCAL GATHER、`auto` 枚举候选；串并行结果逐字节一致 |
+| P2-6 初始成本模型 | 待提交 | 短查询自动串行、大查询自动双 Stream 并行；计划显示 HybridRecall 自身阻塞成本 |
 
 实现与回归证据：
 
@@ -216,4 +217,18 @@ P1-7 降级随 P2 planner 落地（模式决策处），串行路径已验证。
 - 公共头文件触发的全树增量构建、安装和重启成功：
   `build_logs/incremental_20260826_113242.log`；P2-4、P2-2/P2-3 活实例复测均 exit=0。
 
-**P2-5 完成，G3 尚未关闭**：下一步为 P2-6 成本模型、P2-7 Param/custom/generic plan。
+### P2-6 初始成本模型证据
+
+- 串行成本按“两支路之和 + 去重/RRF/Top-K 融合”估算，并行成本按“两支路较慢者 +
+  Stream 启动/传输 + 融合”估算；HybridRecall 是阻塞算子，因此自身
+  `startup_cost = total_cost`。
+- `evidence/P2-6_test.sql` / `evidence/P2-6_live.log`：默认 `auto` 下，500 行短查询
+  选择无 Stream 的串行计划（HybridRecall cost=20.42）；20,000 行查询选择含两个
+  `LOCAL GATHER` 的并行计划（HybridRecall cost=25.76）。
+- `createplan.cpp` 保留所选 HybridRecallPath 的成本，不再让 EXPLAIN 显示复制自文本支路
+  的成本；`plan_rows` 仍为 final K。
+- 标准增量构建、安装、重启成功：`build_logs/incremental_20260826_141019.log`；
+  P2-5、P2-4、P2-2/P2-3 活实例复测均 exit=0，串并行结果一致性与过滤语义无回退。
+- 当前系数是保守初值；worker 紧张、I/O 竞争惩罚和冷/热缓存标定按设计留给 P3。
+
+**P2-6 完成，G3 尚未关闭**：下一步为 P2-7 Param/custom/generic plan；完成后统一关闭 G3。

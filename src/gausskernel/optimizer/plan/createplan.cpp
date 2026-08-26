@@ -1209,6 +1209,10 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
      * tuple contract after every plan-copy/cache stage has finished. */
     node->plan.targetlist = (List*)copyObject(tlist);
     copy_plan_costsize(&node->plan, text_branch);
+    /* HybridRecall is blocking and owns both branches; expose the selected
+     * HybridRecallPath cost rather than the left branch's copied cost. */
+    node->plan.startup_cost = best_path->path.startup_cost;
+    node->plan.total_cost = best_path->path.total_cost;
     node->plan.plan_rows = best_path->final_topk_est;
     return (Plan*)node;
 }

@@ -22,6 +22,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include <math.h>
 #include "access/skey.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am.h"
@@ -38,6 +39,56 @@
 static bool is_ann_am(Oid relam)
 {
     return relam == HNSW_AM_OID || relam == IVFFLAT_AM_OID || relam == DISKANN_AM_OID;
+}
+
+/*
+ * [P2-6] Initial latency cost model (design doc section 11).
+ *
+ * HybridRecall is blocking: neither alternative can return its first tuple
+ * before both ranked candidate sets have been fused, so startup_cost equals
+ * total_cost.  The serial alternative pays both branch estimates, while the
+ * task-stream alternative pays the slower branch plus local stream startup
+ * and transfer.  The square-root terms approximate increasing index search
+ * work without pretending either AM scans the whole relation; P3 benchmarks
+ * will calibrate the coefficients and worker-pressure penalties.
+ */
+static void cost_hybrid_recall_path(HybridRecallPath* path, RelOptInfo* rel)
+{
+    double table_rows = rel->tuples;
+    if (table_rows < 1.0)
+        table_rows = rel->rows;
+    if (table_rows < 1.0)
+        table_rows = 1.0;
+
+    double sqrt_rows = sqrt(table_rows);
+    double log2_rows = log(table_rows + 1.0) / log(2.0);
+    double text_rows = (double)path->text_candidates_est;
+    double vector_rows = (double)path->vector_candidates_est;
+    double candidate_rows = text_rows + vector_rows;
+    double heap_levels = log((double)path->final_topk_est + 1.0) / log(2.0);
+
+    Cost text_cost = u_sess->attr.attr_sql.random_page_cost +
+        log2_rows * u_sess->attr.attr_sql.cpu_operator_cost * 25.0 +
+        sqrt_rows * u_sess->attr.attr_sql.cpu_operator_cost * 6.0 +
+        text_rows * u_sess->attr.attr_sql.cpu_index_tuple_cost;
+    Cost vector_cost = u_sess->attr.attr_sql.random_page_cost * 2.0 +
+        log2_rows * u_sess->attr.attr_sql.cpu_operator_cost * 50.0 +
+        sqrt_rows * u_sess->attr.attr_sql.cpu_operator_cost * 12.0 +
+        vector_rows * u_sess->attr.attr_sql.cpu_index_tuple_cost;
+    Cost fusion_cost = candidate_rows *
+        (u_sess->attr.attr_sql.cpu_tuple_cost + 2.0 * u_sess->attr.attr_sql.cpu_operator_cost) +
+        candidate_rows * heap_levels * u_sess->attr.attr_sql.cpu_operator_cost;
+    Cost stream_startup_cost = u_sess->attr.attr_sql.random_page_cost +
+        150.0 * u_sess->attr.attr_sql.cpu_tuple_cost;
+    Cost stream_transfer_cost = candidate_rows * u_sess->attr.attr_sql.cpu_tuple_cost * 0.5;
+
+    Cost serial_cost = text_cost + vector_cost + fusion_cost;
+    Cost parallel_cost = stream_startup_cost + Max(text_cost, vector_cost) +
+        stream_transfer_cost + fusion_cost;
+    Cost chosen_cost = path->parallel_branches ? parallel_cost : serial_cost;
+
+    path->path.startup_cost = chosen_cost;
+    path->path.total_cost = chosen_cost;
 }
 
 static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
@@ -61,14 +112,6 @@ static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
     if (path->path.rows < 1)
         path->path.rows = 1;
 
-    /*
-     * [P2-5] Keep both alternatives alive in auto mode by giving serial the
-     * lower startup cost and parallel the lower total cost.  P2-6 replaces
-     * these deliberately simple crossing costs with branch-derived costs.
-     */
-    path->path.startup_cost = parallel_branches ? (Cost)5.0 : (Cost)0.1;
-    path->path.total_cost = parallel_branches ? (Cost)10.0 : (Cost)20.0;
-
     path->text_path = NULL;  /* branches are planned recursively at plan time */
     path->vector_path = NULL;
     path->relid = relid; /* RT index, not relation OID */
@@ -87,6 +130,7 @@ static HybridRecallPath* make_hybrid_recall_path(RelOptInfo* rel,
     path->vector_weight = 0.5;
     path->parallel_branches = parallel_branches;
     path->require_parallel = require_parallel;
+    cost_hybrid_recall_path(path, rel);
     return path;
 }
 
