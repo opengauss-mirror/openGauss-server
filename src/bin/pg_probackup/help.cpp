@@ -150,6 +150,9 @@ void help_pg_probackup(void)
     printf(_("                 [--no-validate] [--skip-block-validation]\n"));
     printf(_("                 [-E external-directories-paths]\n"));
     printf(_("                 [--no-sync] [--note=text]\n"));
+    printf(_("                 [--incremental-type=differential|cumulative | --from-full]\n"));
+    printf(_("                 [--cumulative-fallback=differential|error]\n"));
+    printf(_("                 [--parent-backup-id=backup-id]\n"));
     printf(_("                 [--archive-timeout=timeout]\n"));
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
@@ -515,6 +518,9 @@ static void help_backup(void)
     printf(_("                 [--no-validate] [--skip-block-validation]\n"));
     printf(_("                 [-E external-directories-paths]\n"));
     printf(_("                 [--no-sync] [--note=text]\n"));
+    printf(_("                 [--incremental-type=differential|cumulative | --from-full]\n"));
+    printf(_("                 [--cumulative-fallback=differential|error]\n"));
+    printf(_("                 [--parent-backup-id=backup-id]\n"));
     printf(_("                 [--archive-timeout=timeout]\n"));
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
@@ -563,6 +569,17 @@ static void help_backup(void)
     printf(_("      --no-sync                    do not sync backed up files to disk\n"));
     printf(_("      --note=text                  add note to backup\n"));
     printf(_("                                   (example: --note='backup before app update to v13.1')\n"));
+    printf(_("      --incremental-type=incremental-type\n"));
+    printf(_("                                   parent selection policy of an incremental backup:\n"));
+    printf(_("                                   \"differential\" - base on the latest chain backup (default),\n"));
+    printf(_("                                   \"cumulative\" - base on the latest valid FULL backup\n"));
+    printf(_("      --from-full                  alias for --incremental-type=cumulative\n"));
+    printf(_("      --cumulative-fallback=cumulative-fallback\n"));
+    printf(_("                                   behavior when CBM data for a cumulative backup is unavailable:\n"));
+    printf(_("                                   \"error\" - abort the backup (default),\n"));
+    printf(_("                                   \"differential\" - degrade to differential with a warning\n"));
+    printf(_("      --parent-backup-id=backup-id use the specified backup as parent\n"));
+    printf(_("                                   (must be a valid FULL backup or the latest backup of the chain)\n"));
     printf(_("      --archive-timeout=timeout    wait timeout for WAL segment archiving (default: 5min)\n"));
     printf(_("      --backup-pg-replslot]        backup of '%s' directory\n"), PG_REPLSLOT_DIR);
 
