@@ -264,6 +264,25 @@ int2vector* buildint2vector(const int2* int2s, int n)
     return result;
 }
 
+/*
+ * validate that an array object meets the restrictions of int2vector
+ *
+ * We need this because there are pathways by which a general int2[] array can
+ * be cast to int2vector, allowing the type's restrictions to be violated.
+ * All code that receives an int2vector as a SQL parameter should check this.
+ */
+void check_valid_int2vector(const int2vector* int2Array)
+{
+    /*
+     * We insist on ndim == 1 and dataoffset == 0 (that is, no nulls) because
+     * otherwise the array's layout will not be what calling code expects.  We
+     * needn't be picky about the index lower bound though.  Checking elemtype
+     * is just paranoia.
+     */
+    if (int2Array->ndim != 1 || int2Array->dataoffset != 0 || int2Array->elemtype != INT2OID)
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("array is not a valid int2vector")));
+}
+
 /*Copy int2vector*/
 int2vector* int2vectorCopy(int2vector* from)
 {
@@ -322,9 +341,14 @@ Datum int2vectorin(PG_FUNCTION_ARGS)
 Datum int2vectorout(PG_FUNCTION_ARGS)
 {
     int2vector* int2Array = (int2vector*)PG_GETARG_POINTER(0);
-    int num, nnums = int2Array->dim1;
+    int num;
+    int nnums;
     char* rp = NULL;
     char* result = NULL;
+
+    /* validate input before fetching dim1 */
+    check_valid_int2vector(int2Array);
+    nnums = int2Array->dim1;
 
     /* assumes sign, 5 digits, ' ' */
     rp = result = (char*)palloc(nnums * 7 + 1);
@@ -383,6 +407,7 @@ Datum int2vectorrecv(PG_FUNCTION_ARGS)
  */
 Datum int2vectorsend(PG_FUNCTION_ARGS)
 {
+    /* We don't do check_valid_int2vector, since array_send won't care */
     return array_send(fcinfo);
 }
 
@@ -414,6 +439,9 @@ Datum int2vectoreq(PG_FUNCTION_ARGS)
 {
     int2vector* a = (int2vector*)PG_GETARG_POINTER(0);
     int2vector* b = (int2vector*)PG_GETARG_POINTER(1);
+
+    check_valid_int2vector(a);
+    check_valid_int2vector(b);
 
     if (a->dim1 != b->dim1)
         PG_RETURN_BOOL(false);

@@ -2544,13 +2544,16 @@ static Node* transformArrayExpr(ParseState* pstate, A_ArrayExpr* a, Oid array_ty
             newa->multidims = true;
         } else {
             newe = transformExprRecurse(pstate, e);
-
             /*
              * Check for sub-array expressions, if we haven't already found
-             * one.
+             * one.  Note we don't accept domain-over-array as a sub-array,
+             * nor int2vector nor oidvector; those have constraints that don't
+             * map well to being treated as a sub-array.
              */
-            if (!newa->multidims && type_is_array(exprType(newe))) {
-                newa->multidims = true;
+            if (!newa->multidims) {
+                Oid newetype = exprType(newe);
+                if (newetype != INT2VECTOROID && newetype != OIDVECTOROID && type_is_array(newetype))
+                    newa->multidims = true;
             }
         }
 

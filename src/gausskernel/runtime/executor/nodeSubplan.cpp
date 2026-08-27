@@ -210,7 +210,11 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
     bool found = false; /* TRUE if got at least one subplan tuple */
     ListCell* pvar = NULL;
     ListCell* l = NULL;
-    ArrayBuildState* astate = NULL;
+    ArrayBuildStateAny* astate = NULL;
+
+    /* Initialize ArrayBuildStateAny in caller's context, if needed */
+    if (sub_link_type == ARRAY_SUBLINK)
+        astate = initArrayResultAny(sub_plan->firstColType, CurrentMemoryContext);
 
     /*
      * We are probably in a short-lived expression-evaluation context. Switch
@@ -340,7 +344,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
             /* stash away current value */
             Assert(sub_plan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
-            astate = accumArrayResult(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
+            astate = accumArrayResultAny(astate, dvalue, disnull, sub_plan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
             continue;
         }
@@ -401,10 +405,7 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
 
     if (sub_link_type == ARRAY_SUBLINK) {
         /* We return the result in the caller's context */
-        if (astate != NULL)
-            result = makeArrayResult(astate, oldcontext);
-        else
-            result = PointerGetDatum(construct_empty_array(sub_plan->firstColType));
+        result = makeArrayResultAny(astate, oldcontext, true);
     } else if (!found) {
         /*
          * deal with empty subplan result.	result/isNull were previously
@@ -975,7 +976,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
     TupleTableSlot* slot = NULL;
     ListCell* l = NULL;
     bool found = false;
-    ArrayBuildState* astate = NULL;
+    ArrayBuildStateAny* astate = NULL;
 
     if (sub_link_type == ANY_SUBLINK || sub_link_type == ALL_SUBLINK)
         ereport(ERROR,
@@ -987,6 +988,10 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
             (errmodule(MOD_EXECUTOR),
                 errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("CTE subplans should not be executed when execute subplan")));
+
+    /* Initialize ArrayBuildStateAny in caller's context, if needed */
+    if (sub_link_type == ARRAY_SUBLINK)
+        astate = initArrayResultAny(subplan->firstColType, CurrentMemoryContext);
 
     /*
      * When executing a SubPlan in an expression, the EState's direction field was left alone,
@@ -1048,7 +1053,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
             /* stash away current value */
             Assert(subplan->firstColType == tdesc->attrs[0].atttypid);
             dvalue = tableam_tslot_getattr(slot, 1, &disnull);
-            astate = accumArrayResult(astate, dvalue, disnull, subplan->firstColType, oldcontext);
+            astate = accumArrayResultAny(astate, dvalue, disnull, subplan->firstColType, oldcontext);
             /* keep scanning subplan to collect all values */
             continue;
         }
@@ -1101,12 +1106,7 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
          */
         if (node->curArray != PointerGetDatum(NULL))
             pfree(DatumGetPointer(node->curArray));
-        if (astate != NULL)
-            node->curArray = makeArrayResult(astate, econtext->ecxt_per_query_memory);
-        else {
-            MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
-            node->curArray = PointerGetDatum(construct_empty_array(subplan->firstColType));
-        }
+        node->curArray = makeArrayResultAny(astate, econtext->ecxt_per_query_memory, true);
         prm->execPlan = NULL;
         prm->value = node->curArray;
         prm->isnull = false;

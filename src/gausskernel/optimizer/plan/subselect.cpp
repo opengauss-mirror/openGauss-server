@@ -884,7 +884,7 @@ static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, 
         AssertEreport(!te->resjunk, MOD_OPT_SUBPLAN, "Array sublink shouldn't have junk columns");
         AssertEreport(testexpr == NULL, MOD_OPT_SUBPLAN, "No testexpr required for array sublink");
 
-        arraytype = get_array_type(exprType((Node*)te->expr));
+        arraytype = get_promoted_array_type(exprType((Node *) te->expr));
         if (!OidIsValid(arraytype))
             ereport(ERROR,
                 (errmodule(MOD_OPT),

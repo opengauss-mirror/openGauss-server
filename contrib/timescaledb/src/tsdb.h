@@ -121,16 +121,6 @@ extern void RequestNamedLWLockTranche(const char *tranche_name, int num_lwlocks)
 extern Oid	toast_get_valid_index(Oid toastoid, LOCKMODE lock);
 extern ColumnDef *makeColumnDef(const char *colname,
 			  Oid typeOid, int32 typmod, Oid collOid); 
-extern ArrayBuildStateArr *initArrayResultArr(Oid array_type, Oid element_type,
-				   MemoryContext rcontext, bool subcontext);
-extern ArrayBuildState *initArrayResult(Oid element_type,
-				MemoryContext rcontext, bool subcontext); 
-extern ArrayBuildStateArr *accumArrayResultArr(ArrayBuildStateArr *astate,
-					Datum dvalue, bool disnull,
-					Oid array_type,
-					MemoryContext rcontext);  
-extern Datum makeArrayResultArr(ArrayBuildStateArr *astate,
-				   MemoryContext rcontext, bool release);
 extern void check_index_predicates(PlannerInfo *root, RelOptInfo *rel); 
 extern SortPath *create_sort_path(PlannerInfo *root,
 				 RelOptInfo *rel,

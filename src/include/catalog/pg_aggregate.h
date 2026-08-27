@@ -320,6 +320,7 @@ DATA(insert ( 2901	xmlconcat2	  xmlconcat2	  -					0	142		_null_ _null_ 	n	0));
 /* array */
 #ifdef PGXC
 DATA(insert ( 2335	array_agg_transfn	-	array_agg_finalfn		0	2281	_null_ _null_ 	n	0));
+DATA(insert ( 4062	array_agg_array_transfn	-	array_agg_array_finalfn	0	2281	_null_ _null_	n	0));
 #endif
 
 /* text */

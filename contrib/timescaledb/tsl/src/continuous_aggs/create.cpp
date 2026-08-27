@@ -45,6 +45,7 @@
 #include <parser/parse_type.h>
 #include <rewrite/rewriteHandler.h>
 #include <rewrite/rewriteManip.h>
+#include <utils/array.h>
 #include <utils/builtins.h>
 #include <utils/catcache.h>
 #include <utils/syscache.h>
@@ -875,15 +876,15 @@ get_input_types_array_datum(Aggref *original_aggregate)
 		AllocSetContextCreate(CurrentMemoryContext, "input types builder", ALLOCSET_DEFAULT_SIZES);
 	Oid name_array_type_oid = get_array_type(NAMEOID);
 	ArrayBuildStateArr *outer_builder =
-		initArrayResultArr(name_array_type_oid, NAMEOID, builder_context, false);
+		initArrayResultArr(name_array_type_oid, NAMEOID, builder_context);
 	Datum result;
 
 	foreach (lc, original_aggregate->args)
 	{
 		TargetEntry *te =(TargetEntry *) lfirst(lc);
 		Oid type_oid = exprType((Node *) te->expr);
-		ArrayBuildState *schema_name_builder = initArrayResult(NAMEOID, builder_context, false);
-		HeapTuple tp;
+        ArrayBuildState* schema_name_builder = initArrayResult(NAMEOID, builder_context);
+        HeapTuple tp;
 		Form_pg_type typtup;
 		char *schema_name;
 		Name type_name = (Name) palloc0(NAMEDATALEN);
