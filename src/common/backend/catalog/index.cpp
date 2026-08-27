@@ -4480,6 +4480,13 @@ double* GetGlobalIndexTuplesForPartition(Relation heapRelation, Relation indexRe
     Relation heapPartRel = NULL;
 
     partitionIdList = relationGetPartitionOidList(heapRelation);
+    if (partitionIdList == NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Get partition list failed, please retry"),
+                errcause("It might be due to concurrent DDL operations."),
+                erraction("If the attempt to retry is unsuccessful, contact technical support.")));
+    }
     double relTuples;
     int partitionIdx = 0;
     int partNum = partitionIdList->length;
