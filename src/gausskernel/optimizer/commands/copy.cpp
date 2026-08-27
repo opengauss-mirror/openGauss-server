@@ -3399,7 +3399,7 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
                     * progress.
                     */
                     PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
-                                                 ++processed);
+                                              ++processed);
                 }
 
                 scan_handler_tbl_endscan(scandesc);
@@ -4664,14 +4664,16 @@ uint64 CopyFrom(CopyState cstate)
                         break;
                     }
 
-                    if (!is_EOF) {
-                        if (cstate->rel->rd_att->constr)
-                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-
-                        ++processed;
-                    } else {
+                    if (is_EOF) {
                         break;
                     }
+
+                    if (cstate->rel->rd_att->constr) {
+                        CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                    }
+
+                    PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                              ++processed);
                 }
                 if (retryCurrentRow) {
                     continue;
@@ -4689,8 +4691,11 @@ uint64 CopyFrom(CopyState cstate)
                      * we limit the batch by two factors:
                      * 1. tuple numbers ( <= maxValuesCount );
                      * 2. memroy batchRowsPtr is using;
-                    */
-                    for (int i = 0; i < maxValuesCount; ++i) {
+                     */
+                    int i;
+                    Size tuple_size;
+
+                    for (i = 0; i < maxValuesCount; ++i) {
                         PG_TRY();
                         {
                             is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -4714,22 +4719,26 @@ uint64 CopyFrom(CopyState cstate)
                             break;
                         }
 
-                        if (!is_EOF) {
-                            if (cstate->rel->rd_att->constr)
-                                CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-
-                            Size tuple_size = batchRowsPtr->calculate_tuple_size(tupDesc, values, nulls);
-                            if ((BULKLOAD_MAX_MEMSIZE - batchRowsPtr->m_using_blocks_total_rawsize) < tuple_size) {
-                                cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
-                                batchRowsPtr->reset(true);
-                                i = 0;
-                            }
-
-                            ++processed;
-                            if (batchRowsPtr->append_one_tuple(values, nulls, tupDesc))
-                                break;
-                        } else {
+                        if (is_EOF) {
                             cstoreInsert->SetEndFlag();
+                            break;
+                        }
+
+                        if (cstate->rel->rd_att->constr) {
+                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                        }
+
+                        tuple_size = batchRowsPtr->calculate_tuple_size(tupDesc, values, nulls);
+                        if ((BULKLOAD_MAX_MEMSIZE - batchRowsPtr->m_using_blocks_total_rawsize) < tuple_size) {
+                            cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
+                            batchRowsPtr->reset(true);
+                            i = 0; /* next bacth */
+                        }
+
+                        PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                                  ++processed);
+
+                        if (batchRowsPtr->append_one_tuple(values, nulls, tupDesc)) {
                             break;
                         }
                     }
@@ -4745,8 +4754,9 @@ uint64 CopyFrom(CopyState cstate)
 
                     continue;
                 } else {
+                    int i;
                     bool endFlag = false;
-                    for (int i = 0; i < maxValuesCount; ++i) {
+                    for (i = 0; i < maxValuesCount; ++i) {
                         PG_TRY();
                         {
                             is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -4770,16 +4780,18 @@ uint64 CopyFrom(CopyState cstate)
                             break;
                         }
 
-                        if (!is_EOF) {
-                            if (cstate->rel->rd_att->constr)
-                                CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-                            cstorePartitionInsert->BatchInsert(values, nulls, hi_options);
-                            ++processed;
-                        } else {
+                        if (is_EOF) {
                             endFlag = true;
                             cstorePartitionInsert->EndBatchInsert();
                             break;
                         }
+
+                        if (cstate->rel->rd_att->constr) {
+                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                        }
+                        cstorePartitionInsert->BatchInsert(values, nulls, hi_options);
+                        PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                                  ++processed);
                     }
                     if (retryCurrentRow) {
                         continue;
@@ -4898,6 +4910,7 @@ uint64 CopyFrom(CopyState cstate)
                 if (is_EOF) {
                     break;
                 }
+
             }
         }
 
@@ -5020,7 +5033,7 @@ uint64 CopyFrom(CopyState cstate)
                 if (slot1 != NULL) {
                     /* count only tuples not suppressed by FDW. */
                     PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
-                                                 ++processed);
+                                              ++processed);
                 }
             } else if (!skip_tuple) {
                 /*
