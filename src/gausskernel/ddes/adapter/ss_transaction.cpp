@@ -152,7 +152,8 @@ void SSGetTransactionSyncStatus(SsTxnSyncStatusT *status, uint32 count)
  */
 bool SSIsUbLinkAvailable(void)
 {
-    bool configured = (g_instance.attr.attr_storage.dms_attr.enable_ub && !IsInitdb);
+    bool configured = (g_instance.attr.attr_storage.dms_attr.enable_ub &&
+                       g_instance.attr.attr_storage.dms_attr.enable_ub_ha && !IsInitdb);
     bool memAccess = g_instance.shmem_cxt.UBMemAccessEnabled.load(std::memory_order_acquire);
     bool inReform = SS_IN_REFORM;
     bool shmemReady = (g_instance.shmem_cxt.UBTxnCachePtr != NULL) &&

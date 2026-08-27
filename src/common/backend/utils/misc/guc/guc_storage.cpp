@@ -188,6 +188,7 @@ static const char* show_archive_command(void);
 bool check_enable_gtm_free(bool* newval, void** extra, GucSource source);
 static bool check_phony_autocommit(bool* newval, void** extra, GucSource source);
 static void assign_phony_autocommit(bool newval, void* extra);
+static void assign_enable_ub_ha(bool newval, void* extra);
 static bool check_enable_data_replicate(bool* newval, void** extra, GucSource source);
 static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source);
 static bool check_adio_function_guc(bool* newval, void** extra, GucSource source);
@@ -1150,6 +1151,19 @@ static void InitStorageConfigureNamesBool()
             false,
             NULL,
             NULL,
+            NULL},
+
+        {{"enable_ub_ha",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Enable UB HA feature. UB is active only when both enable_ub and enable_ub_ha are on."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ub_ha,
+            false,
+            NULL,
+            assign_enable_ub_ha,
             NULL},
 
         {{"ub_debug_log",
@@ -7515,6 +7529,31 @@ static void assign_dcf_flow_control_rpo(int newval, void *extra)
 }
 
 #endif
+
+static void assign_enable_ub_ha(bool newval, void *extra)
+{
+    if (newval) {
+        return;
+    }
+
+    g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+
+    if (!ENABLE_DMS || !g_instance.dms_cxt.dmsInited) {
+        return;
+    }
+    if (t_thrd.proc_cxt.MyProcPid != PostmasterPid) {
+        return;
+    }
+    if (pg_strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "SHM") != 0) {
+        return;
+    }
+
+    int ret = dms_request_mes_shm_to_tcp_fallback(1);
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING,
+            (errmsg("failed to request MES SHM to TCP fallback when enable_ub_ha is off, ret=%d", ret)));
+    }
+}
 
 static void assign_ss_log_level(int newval, void *extra)
 {

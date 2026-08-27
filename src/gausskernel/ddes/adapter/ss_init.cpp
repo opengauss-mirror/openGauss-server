@@ -134,6 +134,9 @@ static inline dms_conn_mode_t convertInterconnectType()
     } else if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "UBC")) {
         return DMS_CONN_MODE_UBC;
     } else if (!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "SHM")) {
+        if (!g_instance.attr.attr_storage.dms_attr.enable_ub_ha) {
+            return DMS_CONN_MODE_TCP;
+        }
         return DMS_CONN_MODE_SHM;
     }
 }

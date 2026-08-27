@@ -107,6 +107,7 @@ typedef struct st_ss_dms_func {
     void (*ddes_fi_call)(unsigned int point, ...);
     // this is for function calling
     void (*ddes_fi_call_ex)(unsigned int point, va_list args);
+    int (*dms_request_mes_shm_to_tcp_fallback)(int notify_peers);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -161,6 +162,7 @@ int dms_info(char *buf, unsigned int len, dms_info_id_e id);
 void dms_get_buf_res(unsigned long long *row_id, dv_drc_buf_info *drc_info, int type);
 void dms_get_cmd_stat(int index, wait_cmd_stat_result_t *cmd_stat_result);
 void dms_fsync_logfile(void);
+int dms_request_mes_shm_to_tcp_fallback(int notify_peers);
 
 extern ss_dms_func_t g_ss_dms_func;
 #ifdef __cplusplus

@@ -106,6 +106,7 @@ typedef struct knl_instance_attr_dss {
 typedef struct knl_instance_attr_dms {
     bool enable_dms;
     bool enable_ub;
+    bool enable_ub_ha;
     bool ub_debug_log;
     bool ub_sigbus_handler;
     bool enable_catalog_centralized;
