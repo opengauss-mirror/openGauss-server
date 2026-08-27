@@ -8482,6 +8482,8 @@ void deal_fronted_lost()
 
     if (IS_THREAD_POOL_WORKER) {
         (void)gs_signal_block_sigusr2();
+        /* for the corner case: got a unexpected X/EOF in a xact */
+        LWLockReleaseAll();
         t_thrd.threadpool_cxt.worker->CleanUpSession(false);
         (void)gs_signal_unblock_sigusr2();
         return;
