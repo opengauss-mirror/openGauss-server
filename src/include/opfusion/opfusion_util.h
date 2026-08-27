@@ -275,7 +275,7 @@ const Oid function_id[] = {
 };
 
 extern int namestrcmp(Name name, const char *str);
-extern void report_qps_type(CmdType commandType);
+extern void report_qps_type(CmdType commandType, CmdType queryType);
 
 void InitOpfusionFunctionId();
 Node *JudgePlanIsPartIterator(Plan *plan);

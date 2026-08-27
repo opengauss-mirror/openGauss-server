@@ -109,7 +109,6 @@
  * reassigning OIDs that might have been assigned during initdb.
  * ----------
  */
-#define FirstBootstrapObjectId 10000
 #define FirstNormalObjectId 16384
 
 #define IsSystemObjOid(id) ((OidIsValid(id)) && (id < FirstBootstrapObjectId))

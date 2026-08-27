@@ -50,7 +50,6 @@ static_assert(sizeof(false) == sizeof(char), "illegal bool size");
 #endif
 
 static struct HTAB* nameHash = NULL;
-static struct HTAB* oidHash = NULL;
 
 /* for whale */
 struct HTAB* a_nameHash = NULL;
@@ -93,7 +92,7 @@ static void SortBuiltinFuncGroups(FuncGroup* funcGroups)
     qsort(funcGroups, g_nfuncgroups, sizeof(FuncGroup), FuncGroupCmp);
 }
 
-const Builtin_func* g_sorted_funcs[nBuiltinFuncs];
+const Builtin_func* g_built_in_funcs[FirstBootstrapObjectId] = {nullptr};
 
 static void InitHashTable(int size)
 {
@@ -103,12 +102,6 @@ static void InitHashTable(int size)
     info.hash = string_hash;
     info.hcxt = g_instance.builtin_proc_context;
     nameHash = hash_create("builtin proc name Lookup Table", size, &info,
-                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-    info.keysize = sizeof(Oid);
-    info.entrysize = sizeof(HashEntryOidToBuiltinFunc);
-    info.hash = oid_hash;
-    info.hcxt = g_instance.builtin_proc_context;
-    oidHash = hash_create("builtin proc Oid Lookup Table", size, &info,
                                 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
@@ -137,7 +130,7 @@ static HTAB* get_oid_hash_table_type()
         }
     }
 #endif
-    return oidHash;
+    return NULL;
 }
 
 static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name, const FuncGroup* group)
@@ -170,7 +163,12 @@ static const Builtin_func* OidHashTableAccess(HASHACTION action, Oid oid, const 
     HashEntryOidToBuiltinFunc *result = NULL;
     bool found = false;
     Assert(oid > 0);
-    result = (HashEntryOidToBuiltinFunc *)hash_search(get_oid_hash_table_type(), &oid, action, &found);
+    HTAB* oidHash = get_oid_hash_table_type();
+    if (oidHash == NULL) {
+        return g_built_in_funcs[oid];
+    }
+
+    result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
     if (action == HASH_ENTER) {
         Assert(!found);
         result->func = func;
@@ -206,8 +204,8 @@ void initBuiltinFuncs()
 
         for (int j = 0; j < fg->fnums; j++) {
             CheckNameLength(fg->funcs[j].funcName);
-            OidHashTableAccess(HASH_ENTER, fg->funcs[j].foid, &fg->funcs[j]);
-            g_sorted_funcs[nfunc++] = &fg->funcs[j];
+            g_built_in_funcs[fg->funcs[j].foid] = &fg->funcs[j];
+            nfunc++;
         }
     }
 
@@ -216,7 +214,6 @@ void initBuiltinFuncs()
             (errmsg("initialize the built-in function failed: %s",
                 "the number of functions in is mismatch with the declaration")));
     }
-    qsort(g_sorted_funcs, nBuiltinFuncs, sizeof(g_sorted_funcs[0]), cmp_func_by_oid);
 }
 
 const FuncGroup* SearchBuiltinFuncByName(const char* funcname)
@@ -232,6 +229,10 @@ const Builtin_func* SearchBuiltinFuncByOid(Oid oid)
 {
     if (!IsSystemObjOid(oid)){
         return NULL;
+    }
+
+    if (a_oidHash == NULL && b_oidHash == NULL) {
+        return g_built_in_funcs[oid];
     }
 
     return OidHashTableAccess(HASH_FIND, oid, NULL);

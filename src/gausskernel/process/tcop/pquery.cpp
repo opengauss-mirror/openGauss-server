@@ -68,7 +68,7 @@ static void DoPortalRewind(Portal portal);
 
 extern bool StreamTopConsumerAmI();
 
-extern void report_qps_type(CmdType commandType);
+extern void report_qps_type(CmdType commandType, CmdType queryType);
 extern CmdType set_cmd_type(const char* commandTag);
 
 /*
@@ -1327,8 +1327,7 @@ bool PortalRun(
 
     /* doing sql count accordiong to cmdType */
     if (cmdType != CMD_UNKNOWN || queryType != CMD_UNKNOWN) {
-        report_qps_type(cmdType);
-        report_qps_type(queryType);
+        report_qps_type(cmdType, queryType);
     }
 
     /* update unique sql stat */

@@ -169,7 +169,7 @@ text* cstring_to_text(const char* s)
  */
 text* cstring_to_text_with_len(const char* s, size_t len)
 {
-    text* result = (text*)palloc0(len + VARHDRSZ);
+    text* result = (text*)palloc(len + VARHDRSZ);
 
     SET_VARSIZE(result, len + VARHDRSZ);
     if (len > 0) {

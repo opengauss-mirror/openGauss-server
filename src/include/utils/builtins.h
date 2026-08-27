@@ -1120,6 +1120,7 @@ extern Datum bpchar_pattern_gt(PG_FUNCTION_ARGS);
 extern Datum bpchar_pattern_ge(PG_FUNCTION_ARGS);
 extern Datum btbpchar_pattern_cmp(PG_FUNCTION_ARGS);
 
+extern VarChar* varchar_input(const char* s, size_t len, int32 atttypmod);
 extern Datum varcharin(PG_FUNCTION_ARGS);
 extern Datum input_varcharin(char* str, Oid typioparam, int32 atttypmod);
 extern Datum varcharout(PG_FUNCTION_ARGS);

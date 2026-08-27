@@ -1902,12 +1902,12 @@ extern void pgstat_beshutdown_session(int ctrl_index);
 
 extern const char* pgstat_get_wait_io(WaitEventIO w);
 extern const char* pgstat_get_wait_dms(WaitEventDMS w);
-extern void pgstat_report_activity(BackendState state, const char* cmd_str);
+extern void pgstat_report_activity(BackendState state, const char* cmd_str, int string_len = -1);
 extern void pgstat_report_tempfile(size_t filesize);
 extern void pgstat_report_memReserved(int4 memReserved, int reserve_or_release);
 extern void pgstat_report_statement_wlm_status();
 extern void pgstat_refresh_statement_wlm_time(volatile PgBackendStatus* beentry);
-extern void pgstat_report_wait_count(uint32 wait_event_info);
+extern void pgstat_report_wait_count(uint32 wait_event_command, uint32 wait_event_info);
 extern void pgstat_report_appname(const char* appname);
 extern void pgstat_report_conninfo(const char* conninfo);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);

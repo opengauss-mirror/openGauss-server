@@ -269,6 +269,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->magic = CACHEDPLANSOURCE_MAGIC;
     plansource->raw_parse_tree = (Node*)copyObject(raw_parse_tree);
     plansource->query_string = pstrdup(query_string);
+    plansource->query_string_mblen = pg_mbcliplen(query_string, strlen(query_string),
+                                                  g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
     plansource->commandTag = commandTag;
     plansource->param_types = NULL;
     plansource->num_params = 0;

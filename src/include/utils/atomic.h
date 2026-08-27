@@ -27,6 +27,7 @@
 #include "c.h"
 #include "storage/barrier.h"
 #include "utils/atomic_arm.h"
+#include "utils/atomic_lse.h"
 
 typedef volatile uint16 pg_atomic_uint16;
 typedef volatile uint32 pg_atomic_uint32;
@@ -421,6 +422,8 @@ static inline uint64 pg_atomic_fetch_add_u64(volatile uint64* ptr, uint64 inc)
     :		"0" (inc), "m"(*ptr)
     :		"memory", "cc");
     return res;
+#elif __aarch64__ and __ARM_LSE
+    return __lse_atomic_fetch_add_u64(ptr, inc);
 #else
     return __sync_fetch_and_add(ptr, inc);
 #endif

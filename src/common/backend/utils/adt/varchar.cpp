@@ -518,7 +518,7 @@ Datum bpchartypmodout(PG_FUNCTION_ARGS)
  * Uses the C string to text conversion function, which is only appropriate
  * if VarChar and text are equivalent types.
  */
-static VarChar* varchar_input(const char* s, size_t len, int32 atttypmod)
+VarChar* varchar_input(const char* s, size_t len, int32 atttypmod)
 {
     VarChar* result = NULL;
     size_t maxlen;

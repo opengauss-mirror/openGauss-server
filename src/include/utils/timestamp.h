@@ -272,6 +272,7 @@ extern Datum make_timestamp(PG_FUNCTION_ARGS);
 /* Internal routines (not fmgr-callable) */
 
 extern TimestampTz GetCurrentTimestamp(void);
+extern TimestampTz GetCurrentStatTime(void);
 extern TimestampTz timestamp2timestamptz(Timestamp timestamp);
 
 extern void TimestampDifference(TimestampTz start_time, TimestampTz stop_time, long* secs, int* microsecs);

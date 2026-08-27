@@ -1724,6 +1724,37 @@ TimestampTz GetCurrentTimestamp(void)
     return result;
 }
 
+TimestampTz GetCurrentStatTime()
+{
+    uint64 US_PER_SEC = 1000000ULL;
+#ifndef WIN32
+#ifdef __aarch64__
+    uint64 freq = 0;
+    uint64 cval = 0;
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    asm volatile("mrs %0, cntvct_el0" : "=r"(cval)::"memory");
+    if (freq == 0) {
+        /* This should not be executed here; if the obtained cycle frequency equal 0,
+         * configure the default frequency 100000000.
+         */
+        freq = 100000000;
+    }
+    static double usPerTick = (double)US_PER_SEC / (double)freq;
+    return (int64)((double)cval * usPerTick);
+#else
+    uint64 MS_PER_SEC = 1000;
+    struct timespec tv;
+    int64 res;
+
+    (void)clock_gettime(CLOCK_REALTIME, &tv);
+    res = tv.tv_sec * US_PER_SEC + tv.tv_nsec / MS_PER_SEC;
+
+    return res;
+#endif
+#else
+    return 0;
+#endif
+}
 /*
  * TimestampDifference -- convert the difference between two timestamps
  *		into integer seconds and microseconds
