@@ -1721,6 +1721,18 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
          * autonm session pkgs to current session, and remove
          * sessionpkgs from g_instance.global_session_pkg
          */
+        if (unlikely(u_sess->plsql_cxt.is_package_instantiation)) {
+            PLpgSQL_package* curr_comp_pkg = (u_sess->plsql_cxt.curr_compile_context != NULL) ?
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package : NULL;
+            ereport(LOG, (errmodule(MOD_PLSQL),
+                errmsg("Package instantiation contain autonomous function, package oid:%u, package signature:%s, "
+                    "function oid:%u, function signature:%s",
+                    curr_comp_pkg == NULL ? InvalidOid : curr_comp_pkg->pkg_oid,
+                    curr_comp_pkg == NULL ? "" : curr_comp_pkg->pkg_signature,
+                    func->fn_oid, func->fn_signature == NULL ? "" : func->fn_signature)));
+            return;
+        }
+
         if (u_sess->SPI_cxt.autonomous_session == NULL) {
             /* exception before create autonomous_session */
             return;
