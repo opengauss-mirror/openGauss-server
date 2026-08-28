@@ -617,3 +617,694 @@ static void ComputeKekCheck(const BackupEncKey *key, unsigned char *out)
     securec_check_c(rc, "", "");
 }
 
+/*-------------------------------------------------------------------------
+ * backup.keyinfo
+ *-------------------------------------------------------------------------
+ */
+
+static void KeyinfoPath(const char *backupRoot, char *out, size_t outSize)
+{
+    errno_t rc = snprintf_s(out, outSize, outSize - 1, "%s/%s",
+                            backupRoot, GSPB_KEYINFO_FILE);
+
+    securec_check_ss_c(rc, "", "");
+}
+
+bool EncryptDirIsEncrypted(const char *backupRoot)
+{
+    char        path[MAXPGPATH];
+    struct stat st;
+
+    KeyinfoPath(backupRoot, path, sizeof(path));
+    return stat(path, &st) == 0;
+}
+
+static void WriteKeyinfo(const char *backupRoot, BackupEncKey *key,
+              const unsigned char *salt, uint32 iterations,
+              const unsigned char *wrapped, size_t wrappedLen,
+              const char *kekSource)
+{
+    char          path[MAXPGPATH];
+    char          pathTmp[MAXPGPATH];
+    FILE         *fp;
+    char         *saltB64 = EncBase64Encode(salt, GSPB_ENC_SALT_LEN);
+    char         *wrappedB64 = EncBase64Encode(wrapped, wrappedLen);
+    unsigned char check[GSPB_ENC_KEKCHECK_LEN];
+    char         *checkB64;
+    errno_t       rc;
+
+    ComputeKekCheck(key, check);
+    checkB64 = EncBase64Encode(check, sizeof(check));
+
+    KeyinfoPath(backupRoot, path, sizeof(path));
+    rc = snprintf_s(pathTmp, sizeof(pathTmp), sizeof(pathTmp) - 1, "%s.tmp", path);
+    securec_check_ss_c(rc, "", "");
+
+    fp = fopen(pathTmp, PG_BINARY_W);
+    if (fp == NULL) {
+        elog(ERROR, "Cannot create \"%s\": %s", pathTmp, gs_strerror(errno));
+    }
+
+    if (chmod(pathTmp, S_IRUSR | S_IWUSR) != 0) {
+        elog(ERROR, "Cannot set permissions of \"%s\": %s", pathTmp, gs_strerror(errno));
+    }
+
+    (void) fprintf(fp, "keyinfo-version = %d\n", GSPB_ENC_FORMAT_VERSION);
+    (void) fprintf(fp, "encrypt-algorithm = AES128\n");
+    (void) fprintf(fp, "kek-source = %s\n", kekSource);
+    (void) fprintf(fp, "kdf = PBKDF2-HMAC-SHA256\n");
+    (void) fprintf(fp, "kdf-iterations = %u\n", iterations);
+    (void) fprintf(fp, "kdf-salt = %s\n", saltB64);
+    (void) fprintf(fp, "chunk-size = %u\n", key->chunkSize);
+    (void) fprintf(fp, "wrapped-dek = %s\n", wrappedB64);
+    (void) fprintf(fp, "kek-check = %s\n", checkB64);
+
+    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0) {
+        elog(ERROR, "Cannot flush \"%s\": %s", pathTmp, gs_strerror(errno));
+    }
+    if (fclose(fp) != 0) {
+        elog(ERROR, "Cannot close \"%s\": %s", pathTmp, gs_strerror(errno));
+    }
+
+    if (rename(pathTmp, path) != 0) {
+        elog(ERROR, "Cannot rename \"%s\" to \"%s\": %s", pathTmp, path, gs_strerror(errno));
+    }
+
+    pg_free(saltB64);
+    pg_free(wrappedB64);
+    pg_free(checkB64);
+}
+
+/* strip leading and trailing blanks in place */
+static char *TrimValue(char *s)
+{
+    char *end;
+
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+
+    end = s + strlen(s);
+    while (end > s && (end[-1] == '\n' || end[-1] == '\r' ||
+                       end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    *end = '\0';
+
+    return s;
+}
+
+/* text fields of backup.keyinfo, as they appear on disk */
+typedef struct KeyinfoFields {
+    char   saltB64[GSPB_ENC_B64_FIELD_LEN];
+    char   wrappedB64[GSPB_ENC_B64_FIELD_LEN];
+    char   checkB64[GSPB_ENC_B64_SHORT_LEN];
+    char   algorithm[GSPB_ENC_B64_SHORT_LEN];
+    uint32 iterations;
+    int    version;
+} KeyinfoFields;
+
+static void ReadKeyinfoFields(const char *path, BackupEncKey *key, KeyinfoFields *out)
+{
+    FILE   *fp;
+    char    line[GSPB_ENC_TEXT_BUF_LEN];
+    errno_t rc;
+
+    fp = fopen(path, PG_BINARY_R);
+    if (fp == NULL) {
+        elog(ERROR, "Cannot open \"%s\": %s", path, gs_strerror(errno));
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *sep = strchr(line, '=');
+        char *name;
+        char *value;
+
+        if (sep == NULL) {
+            continue;
+        }
+        *sep = '\0';
+        name = TrimValue(line);
+        value = TrimValue(sep + 1);
+
+        if (strcmp(name, "keyinfo-version") == 0) {
+            out->version = atoi(value);
+        } else if (strcmp(name, "encrypt-algorithm") == 0) {
+            rc = strncpy_s(out->algorithm, sizeof(out->algorithm), value,
+                           sizeof(out->algorithm) - 1);
+            securec_check_c(rc, "", "");
+        } else if (strcmp(name, "kdf-iterations") == 0) {
+            out->iterations = (uint32) strtoul(value, NULL, GSPB_ENC_DECIMAL_BASE);
+        } else if (strcmp(name, "kdf-salt") == 0) {
+            rc = strncpy_s(out->saltB64, sizeof(out->saltB64), value,
+                           sizeof(out->saltB64) - 1);
+            securec_check_c(rc, "", "");
+        } else if (strcmp(name, "chunk-size") == 0) {
+            key->chunkSize = (uint32) strtoul(value, NULL, GSPB_ENC_DECIMAL_BASE);
+        } else if (strcmp(name, "wrapped-dek") == 0) {
+            rc = strncpy_s(out->wrappedB64, sizeof(out->wrappedB64), value,
+                           sizeof(out->wrappedB64) - 1);
+            securec_check_c(rc, "", "");
+        } else if (strcmp(name, "kek-check") == 0) {
+            rc = strncpy_s(out->checkB64, sizeof(out->checkB64), value,
+                           sizeof(out->checkB64) - 1);
+            securec_check_c(rc, "", "");
+        }
+    }
+    (void) fclose(fp);
+}
+
+static void LoadKeyinfo(const char *backupRoot, BackupEncKey *key)
+{
+    char          path[MAXPGPATH];
+    KeyinfoFields f;
+    unsigned char salt[GSPB_ENC_SALT_LEN];
+    unsigned char wrapped[GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN + GSPB_ENC_TAG_LEN];
+    unsigned char storedCheck[GSPB_ENC_KEKCHECK_LEN * 2];
+    unsigned char expectedCheck[GSPB_ENC_KEKCHECK_LEN];
+    unsigned char kek[GSPB_ENC_DEK_LEN];
+    int           len;
+    errno_t       rc;
+
+    rc = memset_s(&f, sizeof(f), 0, sizeof(f));
+    securec_check_c(rc, "", "");
+
+    KeyinfoPath(backupRoot, path, sizeof(path));
+    ReadKeyinfoFields(path, key, &f);
+
+    if (f.version != GSPB_ENC_FORMAT_VERSION) {
+        elog(ERROR, "Unsupported keyinfo version %d in \"%s\", this gs_probackup "
+             "supports version %d", f.version, path, GSPB_ENC_FORMAT_VERSION);
+    }
+
+    if (f.algorithm[0] != '\0' && pg_strcasecmp(f.algorithm, "AES128") != 0) {
+        elog(ERROR, "Unsupported encryption algorithm \"%s\" in \"%s\"", f.algorithm, path);
+    }
+
+    if (f.iterations == 0 || f.saltB64[0] == '\0' || f.wrappedB64[0] == '\0') {
+        elog(ERROR, "Key information file \"%s\" is incomplete", path);
+    }
+
+    if (key->chunkSize < GSPB_ENC_MIN_CHUNK || key->chunkSize > GSPB_ENC_MAX_CHUNK) {
+        elog(ERROR, "Invalid chunk size %u in \"%s\"", key->chunkSize, path);
+    }
+
+    if (EncBase64Decode(f.saltB64, salt, sizeof(salt)) != GSPB_ENC_SALT_LEN) {
+        elog(ERROR, "Malformed kdf-salt in \"%s\"", path);
+    }
+
+    len = EncBase64Decode(f.wrappedB64, wrapped, sizeof(wrapped));
+    if (len != (int) sizeof(wrapped)) {
+        elog(ERROR, "Malformed wrapped-dek in \"%s\"", path);
+    }
+
+    DeriveKek(salt, f.iterations, kek);
+
+    if (!AesGcmCrypt(false, kek, sizeof(kek), wrapped, NULL, 0,
+                       wrapped + GSPB_ENC_NONCE_LEN, GSPB_ENC_DEK_LEN,
+                       key->dek,
+                       wrapped + GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN)) {
+        EncWipe(kek, sizeof(kek));
+        elog(ERROR, "Cannot unwrap the data key of backup \"%s\": "
+             "the encryption key is wrong or the key information file is damaged",
+             backupRoot);
+    }
+    EncWipe(kek, sizeof(kek));
+
+    DeriveSubkeys(key);
+
+    if (f.checkB64[0] != '\0') {
+        ComputeKekCheck(key, expectedCheck);
+        if (EncBase64Decode(f.checkB64, storedCheck, sizeof(storedCheck)) != GSPB_ENC_KEKCHECK_LEN ||
+            memcmp(storedCheck, expectedCheck, GSPB_ENC_KEKCHECK_LEN) != 0) {
+            elog(ERROR, "Key check of backup \"%s\" failed", backupRoot);
+        }
+    }
+
+    key->alg = GSPB_ENC_ALG_AES128_GCM;
+    key->encrypted = true;
+}
+
+/*-------------------------------------------------------------------------
+ * key cache, keyed by backup root directory
+ *-------------------------------------------------------------------------
+ */
+
+/* caller must hold g_keyCacheMutex */
+static BackupEncKey *KeyCacheLookup(const char *path)
+{
+    for (int i = 0; i < g_keyCacheNum; i++) {
+        BackupEncKey *key = g_keyCache[i];
+        if (strncmp(path, key->root, key->rootLen) == 0 &&
+            (path[key->rootLen] == '/' || path[key->rootLen] == '\0')) {
+            return key;
+        }
+    }
+    return NULL;
+}
+
+/* caller must hold g_keyCacheMutex */
+static BackupEncKey *KeyCacheAdd(const char *backupRoot)
+{
+    BackupEncKey *key;
+    errno_t       rc;
+
+    if (g_keyCacheNum >= ENC_MAX_KEYS) {
+        elog(ERROR, "Too many encrypted backups are open at the same time");
+    }
+
+    key = (BackupEncKey *) pgut_malloc(sizeof(BackupEncKey));
+    rc = memset_s(key, sizeof(BackupEncKey), 0, sizeof(BackupEncKey));
+    securec_check_c(rc, "", "");
+
+    rc = strncpy_s(key->root, sizeof(key->root), backupRoot, sizeof(key->root) - 1);
+    securec_check_c(rc, "", "");
+    key->rootLen = strlen(key->root);
+    key->chunkSize = GSPB_ENC_DEFAULT_CHUNK;
+
+    g_keyCache[g_keyCacheNum++] = key;
+    return key;
+}
+
+/*
+ * Walk up from a file to the directory of the backup that owns it. Backup
+ * roots are recognized by their backup.control file and the search never
+ * leaves the catalog given with -B.
+ */
+static bool FindBackupRoot(const char *path, char *root, size_t rootSize)
+{
+    char        dir[MAXPGPATH];
+    char        probe[MAXPGPATH];
+    struct stat st;
+    size_t      backupPathLen;
+    errno_t     rc;
+
+    if (backup_path == NULL) {
+        return false;
+    }
+
+    backupPathLen = strlen(backup_path);
+    if (strncmp(path, backup_path, backupPathLen) != 0) {
+        return false;
+    }
+
+    rc = strncpy_s(dir, sizeof(dir), path, sizeof(dir) - 1);
+    securec_check_c(rc, "", "");
+
+    for (int depth = 0; depth < GSPB_ENC_MAX_PARENT_DEPTH; depth++) {
+        get_parent_directory(dir);
+
+        if (dir[0] == '\0' || strlen(dir) <= backupPathLen) {
+            return false;
+        }
+
+        rc = snprintf_s(probe, sizeof(probe), sizeof(probe) - 1,
+                        "%s/%s", dir, BACKUP_CONTROL_FILE);
+        securec_check_ss_c(rc, "", "");
+
+        if (stat(probe, &st) == 0) {
+            rc = strncpy_s(root, rootSize, dir, rootSize - 1);
+            securec_check_c(rc, "", "");
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Files that stay in the clear even in an encrypted backup, because the
+ * catalog has to be navigable without a key. They carry no user data:
+ * backup.control holds status and chain information, backup.keyinfo holds
+ * the wrapped key, and the lock files hold pids.
+ */
+static bool PathIsPlaintextByDesign(const char *path)
+{
+    static const char *const plainNames[] = {
+        BACKUP_CONTROL_FILE, GSPB_KEYINFO_FILE, GSPB_CONTROL_MAC_FILE,
+        BACKUP_LOCK_FILE, BACKUP_RO_LOCK_FILE, NULL
+    };
+    const char *name = last_dir_separator(path);
+    name = (name != NULL) ? name + 1 : path;
+
+    for (int i = 0; plainNames[i] != NULL; i++) {
+        size_t len = strlen(plainNames[i]);
+        /* also covers the "<name>-<pid>.tmp" and "<name>.tmp" variants */
+        if (strncmp(name, plainNames[i], len) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Return the key material protecting the given file, or NULL when the file
+ * does not belong to an encrypted backup.
+ */
+static BackupEncKey *KeyForPath(const char *path)
+{
+    BackupEncKey *key;
+    char          root[MAXPGPATH];
+    bool          mustLoad = false;
+
+    if (PathIsPlaintextByDesign(path)) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_keyCacheMutex);
+    key = KeyCacheLookup(path);
+    while (key != NULL && key->loading) {
+        pthread_cond_wait(&g_keyCacheCond, &g_keyCacheMutex);
+    }
+    pthread_mutex_unlock(&g_keyCacheMutex);
+
+    if (key != NULL) {
+        return key->encrypted ? key : NULL;
+    }
+
+    if (!FindBackupRoot(path, root, sizeof(root))) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_keyCacheMutex);
+    key = KeyCacheLookup(path);
+    if (key == NULL) {
+        key = KeyCacheAdd(root);
+        if (EncryptDirIsEncrypted(root)) {
+            key->loading = true;
+            mustLoad = true;
+        }
+    } else {
+        while (key->loading) {
+            pthread_cond_wait(&g_keyCacheCond, &g_keyCacheMutex);
+        }
+    }
+    pthread_mutex_unlock(&g_keyCacheMutex);
+
+    if (mustLoad) {
+        LoadKeyinfo(root, key);
+        pthread_mutex_lock(&g_keyCacheMutex);
+        key->loading = false;
+        pthread_cond_broadcast(&g_keyCacheCond);
+        pthread_mutex_unlock(&g_keyCacheMutex);
+    }
+
+    return key->encrypted ? key : NULL;
+}
+
+bool EncryptPathIsEncrypted(const char *path)
+{
+    return KeyForPath(path) != NULL;
+}
+
+static BackupEncKey *KeyForBackupRoot(const char *backupRoot)
+{
+    char probe[MAXPGPATH];
+    errno_t rc = snprintf_s(probe, sizeof(probe), sizeof(probe) - 1,
+                            "%s/%s", backupRoot, DATABASE_FILE_LIST);
+    securec_check_ss_c(rc, "", "");
+    return KeyForPath(probe);
+}
+
+static void ControlMacPaths(const char *backupRoot, char *controlPath,
+                  char *macPath, char *tmpPath)
+{
+    errno_t rc = snprintf_s(controlPath, MAXPGPATH, MAXPGPATH - 1,
+                            "%s/%s", backupRoot, BACKUP_CONTROL_FILE);
+    securec_check_ss_c(rc, "", "");
+    rc = snprintf_s(macPath, MAXPGPATH, MAXPGPATH - 1,
+                    "%s/%s", backupRoot, GSPB_CONTROL_MAC_FILE);
+    securec_check_ss_c(rc, "", "");
+    rc = snprintf_s(tmpPath, MAXPGPATH, MAXPGPATH - 1, "%s.tmp", macPath);
+    securec_check_ss_c(rc, "", "");
+}
+
+static void ComputeFileHmac(const char *path, const BackupEncKey *key, unsigned char *mac)
+{
+    struct stat st;
+    FILE       *fp;
+    unsigned char *buffer;
+    size_t      size;
+
+    if (stat(path, &st) != 0 || st.st_size < 0 || st.st_size > GSPB_ENC_METADATA_MAX_SIZE) {
+        elog(ERROR, "Invalid backup metadata file \"%s\": %s",
+             path, gs_strerror(errno));
+    }
+
+    fp = fopen(path, PG_BINARY_R);
+    if (fp == NULL) {
+        elog(ERROR, "Cannot open \"%s\" for metadata authentication: %s",
+             path, gs_strerror(errno));
+    }
+
+    size = (size_t) st.st_size;
+    buffer = (unsigned char *) pgut_malloc(Max(size, (size_t) 1));
+    if (size > 0 && fread(buffer, 1, size, fp) != size) {
+        elog(ERROR, "Cannot read backup metadata \"%s\": %s", path, gs_strerror(errno));
+    }
+    (void) fclose(fp);
+
+    HmacSha256(key->kMac, sizeof(key->kMac), buffer, size, mac);
+    EncWipe(buffer, Max(size, (size_t) 1));
+    pg_free(buffer);
+}
+
+void EncryptPrepareMetadataUpdate(const char *backupRoot)
+{
+    char key_path[MAXPGPATH];
+    char macPath[MAXPGPATH];
+    struct stat st;
+    errno_t rc = snprintf_s(key_path, sizeof(key_path), sizeof(key_path) - 1,
+                            "%s/%s", backupRoot, GSPB_KEYINFO_FILE);
+    securec_check_ss_c(rc, "", "");
+    rc = snprintf_s(macPath, sizeof(macPath), sizeof(macPath) - 1,
+                    "%s/%s", backupRoot, GSPB_CONTROL_MAC_FILE);
+    securec_check_ss_c(rc, "", "");
+
+    if (stat(key_path, &st) != 0) {
+        return;
+    }
+
+    (void) KeyForBackupRoot(backupRoot);
+    if (stat(macPath, &st) == 0) {
+        EncryptVerifyControlMac(backupRoot);
+    }
+}
+
+void EncryptRefreshControlMac(const char *backupRoot)
+{
+    BackupEncKey *key;
+
+    pthread_mutex_lock(&g_keyCacheMutex);
+    key = KeyCacheLookup(backupRoot);
+    pthread_mutex_unlock(&g_keyCacheMutex);
+    if (key == NULL || !key->encrypted) {
+        elog(ERROR, "Updating metadata of encrypted backup \"%s\" requires its encryption key",
+             backupRoot);
+    }
+    char controlPath[MAXPGPATH];
+    char macPath[MAXPGPATH];
+    char tmpPath[MAXPGPATH];
+    unsigned char mac[GSPB_ENC_MAC_LEN];
+    FILE *fp;
+
+    if (key == NULL) {
+        return;
+    }
+
+    ControlMacPaths(backupRoot, controlPath, macPath, tmpPath);
+    ComputeFileHmac(controlPath, key, mac);
+
+    fp = fopen(tmpPath, PG_BINARY_W);
+    if (fp == NULL) {
+        elog(ERROR, "Cannot create \"%s\": %s", tmpPath, gs_strerror(errno));
+    }
+    for (size_t i = 0; i < sizeof(mac); i++) {
+        (void) fprintf(fp, "%02x", mac[i]);
+    }
+    (void) fputc('\n', fp);
+
+    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0 || fclose(fp) != 0) {
+        elog(ERROR, "Cannot flush metadata authentication file \"%s\": %s",
+             tmpPath, gs_strerror(errno));
+    }
+    if (rename(tmpPath, macPath) != 0) {
+        elog(ERROR, "Cannot rename \"%s\" to \"%s\": %s",
+             tmpPath, macPath, gs_strerror(errno));
+    }
+}
+
+void EncryptVerifyControlMac(const char *backupRoot)
+{
+    BackupEncKey *key = KeyForBackupRoot(backupRoot);
+    char controlPath[MAXPGPATH];
+    char macPath[MAXPGPATH];
+    char tmpPath[MAXPGPATH];
+    unsigned char expected[GSPB_ENC_MAC_LEN];
+    unsigned char actual[GSPB_ENC_MAC_LEN];
+    char hex[GSPB_ENC_MAC_LEN * 2 + 2];
+    FILE *fp;
+
+    if (key == NULL) {
+        return;
+    }
+
+    ControlMacPaths(backupRoot, controlPath, macPath, tmpPath);
+    ComputeFileHmac(controlPath, key, expected);
+
+    fp = fopen(macPath, PG_BINARY_R);
+    if (fp == NULL || fgets(hex, sizeof(hex), fp) == NULL) {
+        elog(ERROR, "Backup metadata authentication file \"%s\" is missing or unreadable",
+             macPath);
+    }
+    (void) fclose(fp);
+
+    for (size_t i = 0; i < sizeof(actual); i++) {
+        unsigned int byte;
+        if (sscanf_s(hex + i * 2, "%2x", &byte) != 1) {
+            elog(ERROR, "Backup metadata authentication file \"%s\" is malformed",
+                 macPath);
+        }
+        actual[i] = (unsigned char) byte;
+    }
+
+    if (CRYPTO_memcmp(expected, actual, sizeof(actual)) != 0) {
+        elog(ERROR, "Authentication of backup.control in \"%s\" failed: "
+             "the metadata is damaged or has been tampered with", backupRoot);
+    }
+}
+
+/*
+ * Create the data key of a new backup and store it, wrapped, in the backup
+ * directory. Must be called before any file of that backup is written.
+ */
+void EncryptSetupBackup(const char *backupRoot)
+{
+    BackupEncKey *key;
+    unsigned char salt[GSPB_ENC_SALT_LEN];
+    unsigned char wrapped[GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN + GSPB_ENC_TAG_LEN];
+    unsigned char kek[GSPB_ENC_DEK_LEN];
+
+    if (!g_encryptEnabled) {
+        return;
+    }
+
+    pthread_mutex_lock(&g_keyCacheMutex);
+    key = KeyCacheAdd(backupRoot);
+    key->chunkSize = g_configuredChunkSize;
+    key->alg = GSPB_ENC_ALG_AES128_GCM;
+    key->encrypted = true;
+    EncRandomBytes(key->dek, sizeof(key->dek));
+    DeriveSubkeys(key);
+    pthread_mutex_unlock(&g_keyCacheMutex);
+
+    EncRandomBytes(salt, sizeof(salt));
+    EncRandomBytes(wrapped, GSPB_ENC_NONCE_LEN);
+
+    DeriveKek(salt, GSPB_KDF_DEFAULT_ITERATIONS, kek);
+
+    if (!AesGcmCrypt(true, kek, sizeof(kek), wrapped, NULL, 0,
+                       key->dek, GSPB_ENC_DEK_LEN,
+                       wrapped + GSPB_ENC_NONCE_LEN,
+                       wrapped + GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN)) {
+        EncWipe(kek, sizeof(kek));
+        elog(ERROR, "Cannot wrap the data key of the new backup");
+    }
+    EncWipe(kek, sizeof(kek));
+
+    WriteKeyinfo(backupRoot, key, salt, GSPB_KDF_DEFAULT_ITERATIONS,
+                  wrapped, sizeof(wrapped),
+                  g_encryptKeyFile != NULL ? "keyfile" : "passphrase");
+    EncryptRefreshControlMac(backupRoot);
+
+    elog(LOG, "Backup encryption enabled: AES-128-GCM, chunk size %u bytes",
+         key->chunkSize);
+}
+
+void EncryptRekeyBackup(const char *backupRoot)
+{
+    BackupEncKey *key = KeyForBackupRoot(backupRoot);
+    unsigned char salt[GSPB_ENC_SALT_LEN];
+    unsigned char wrapped[GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN + GSPB_ENC_TAG_LEN];
+    unsigned char kek[GSPB_ENC_DEK_LEN];
+    char         *newPassphrase;
+
+    if (key == NULL) {
+        elog(ERROR, "Backup \"%s\" is not encrypted with the streaming format", backupRoot);
+    }
+
+    newPassphrase = GetNewPassphrase();
+    EncRandomBytes(salt, sizeof(salt));
+    EncRandomBytes(wrapped, GSPB_ENC_NONCE_LEN);
+    DeriveKekFromPassphrase(newPassphrase, salt,
+                               GSPB_KDF_DEFAULT_ITERATIONS, kek);
+
+    if (!AesGcmCrypt(true, kek, sizeof(kek), wrapped, NULL, 0,
+                       key->dek, GSPB_ENC_DEK_LEN,
+                       wrapped + GSPB_ENC_NONCE_LEN,
+                       wrapped + GSPB_ENC_NONCE_LEN + GSPB_ENC_DEK_LEN)) {
+        elog(ERROR, "Cannot wrap the data key with the new encryption key");
+    }
+
+    EncWipe(kek, sizeof(kek));
+    EncWipe(newPassphrase, strlen(newPassphrase));
+    pg_free(newPassphrase);
+
+    WriteKeyinfo(backupRoot, key, salt, GSPB_KDF_DEFAULT_ITERATIONS,
+                  wrapped, sizeof(wrapped),
+                  g_newEncryptKeyFile != NULL ? "keyfile" : "passphrase");
+    EncryptRefreshControlMac(backupRoot);
+}
+
+void EncryptForgetBackup(const char *backupRoot)
+{
+    pthread_mutex_lock(&g_keyCacheMutex);
+
+    for (int i = 0; i < g_keyCacheNum; i++) {
+        if (strcmp(g_keyCache[i]->root, backupRoot) != 0) {
+            continue;
+        }
+
+        EncWipe(g_keyCache[i], sizeof(BackupEncKey));
+        pg_free(g_keyCache[i]);
+        g_keyCache[i] = g_keyCache[--g_keyCacheNum];
+        break;
+    }
+
+    pthread_mutex_unlock(&g_keyCacheMutex);
+}
+
+void EncryptBackupRenamed(const char *oldRoot, const char *newRoot)
+{
+    pthread_mutex_lock(&g_keyCacheMutex);
+
+    BackupEncKey *renamedKey = NULL;
+    for (int i = 0; i < g_keyCacheNum;) {
+        BackupEncKey *key = g_keyCache[i];
+        if (strcmp(key->root, oldRoot) == 0) {
+            renamedKey = key;
+            i++;
+            continue;
+        }
+
+        if (strcmp(key->root, newRoot) == 0) {
+            EncWipe(key, sizeof(BackupEncKey));
+            pg_free(key);
+            g_keyCache[i] = g_keyCache[--g_keyCacheNum];
+            continue;
+        }
+
+        i++;
+    }
+
+    if (renamedKey != NULL) {
+        errno_t rc = strncpy_s(renamedKey->root, sizeof(renamedKey->root),
+                               newRoot, sizeof(renamedKey->root) - 1);
+        securec_check_c(rc, "", "");
+        renamedKey->rootLen = strlen(renamedKey->root);
+    }
+
+    pthread_mutex_unlock(&g_keyCacheMutex);
+}
+
