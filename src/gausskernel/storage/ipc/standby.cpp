@@ -452,6 +452,7 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
     LOCKTAG locktag;
     TimestampTz waitStart;
     int retry_count;
+    uint64 expected;
 
     SET_LOCKTAG_RELATION(locktag, dbOid, relOid);
 
@@ -465,7 +466,8 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
      */
     waitStart = GetCurrentTimestamp();
     /* here store waitstart for myproc */
-    pg_atomic_compare_exchange_u64(&t_thrd.proc->waitStart, 0, waitStart);
+    expected = 0;
+    (void)pg_atomic_compare_exchange_u64(&t_thrd.proc->waitStart, &expected, waitStart);
 
     retry_count = 0;
     while (!lock_acquired) {
