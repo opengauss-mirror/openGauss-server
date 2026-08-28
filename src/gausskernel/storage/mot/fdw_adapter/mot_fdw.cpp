@@ -1698,6 +1698,7 @@ static void MOTXactCallback(XactEvent event, void* arg)
     MOT::RC rc = MOT::RC_OK;
     MOT::TxnManager* txn = nullptr;
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    volatile bool ignoreSafeTxnError = false;
 
     PG_TRY();
     {
@@ -1714,12 +1715,17 @@ static void MOTXactCallback(XactEvent event, void* arg)
             case XACT_EVENT_ABORT:
             case XACT_EVENT_ROLLBACK_PREPARED:
             case XACT_EVENT_PREROLLBACK_CLEANUP:
-                return;
+                FlushErrorState();
+                ignoreSafeTxnError = true;
+                break;
             default:
                 PG_RE_THROW();
         }
     }
     PG_END_TRY();
+    if (ignoreSafeTxnError) {
+        return;
+    }
 
     ::TransactionId tid = GetCurrentTransactionIdIfAny();
     if (TransactionIdIsValid(tid)) {
@@ -1882,32 +1888,9 @@ static void MOTXactCallback(XactEvent event, void* arg)
     }
 }
 
-static void MOTSubxactCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void* arg)
+static void MOTHandleSubxactEvent(
+    MOT::TxnManager* txn, SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
-    MOT::TxnManager* txn = nullptr;
-    MOT::RC rc = MOT::RC_OK;
-    bool hasCommitedSubTxn = false;
-    int savedInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
-    PG_TRY();
-    {
-        txn = GetSafeTxn(__FUNCTION__);
-    }
-    PG_CATCH();
-    {
-        /*
-         * handle ereport error will reset InterruptHoldoffCount issue,
-         * if not handle, caller may fail on assert
-         */
-        t_thrd.int_cxt.InterruptHoldoffCount = savedInterruptHoldoffCount;
-        switch (event) {
-            case SUBXACT_EVENT_ABORT_SUB:
-                return;
-            default:
-                PG_RE_THROW();
-        }
-    }
-    PG_END_TRY();
-
     switch (event) {
         case SUBXACT_EVENT_START_SUB:
             elog(DEBUG2, "Start sub transaction %lu, parent %lu", mySubid, parentSubid);
@@ -1923,10 +1906,10 @@ static void MOTSubxactCallback(SubXactEvent event, SubTransactionId mySubid, Sub
             }
             txn->CommitSubTransaction(mySubid);
             break;
-        case SUBXACT_EVENT_ABORT_SUB:
+        case SUBXACT_EVENT_ABORT_SUB: {
             elog(DEBUG2, "Abort sub transaction %lu, parent %lu", mySubid, parentSubid);
-            rc = txn->RollbackSubTransaction(mySubid);
-            hasCommitedSubTxn = txn->HasCommitedSubTxnDDL();
+            MOT::RC rc = txn->RollbackSubTransaction(mySubid);
+            bool hasCommitedSubTxn = txn->HasCommitedSubTxnDDL();
             if (rc != MOT::RC_OK) {
                 MOTAdaptor::Rollback();
                 txn->SetTxnAborted();
@@ -1935,10 +1918,43 @@ static void MOTSubxactCallback(SubXactEvent event, SubTransactionId mySubid, Sub
                 }
             }
             break;
+        }
         default:
             break;
     }
-    return;
+}
+
+static void MOTSubxactCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void* arg)
+{
+    MOT::TxnManager* txn = nullptr;
+    int savedInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    volatile bool ignoreSafeTxnError = false;
+    PG_TRY();
+    {
+        txn = GetSafeTxn(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        /*
+         * handle ereport error will reset InterruptHoldoffCount issue,
+         * if not handle, caller may fail on assert
+         */
+        t_thrd.int_cxt.InterruptHoldoffCount = savedInterruptHoldoffCount;
+        switch (event) {
+            case SUBXACT_EVENT_ABORT_SUB:
+                FlushErrorState();
+                ignoreSafeTxnError = true;
+                break;
+            default:
+                PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+    if (ignoreSafeTxnError) {
+        return;
+    }
+
+    MOTHandleSubxactEvent(txn, event, mySubid, parentSubid);
 }
 
 static int MOTXlateCheckpointErr(int err)
@@ -2196,6 +2212,8 @@ static void MOTVacuumForeignTable(VacuumStmt* stmt, Relation rel)
         return;
     }
     ::TransactionId tid = GetCurrentTransactionId();
+    volatile bool vacuumFailed = false;
+    MemoryContext oldcontext = CurrentMemoryContext;
 
     PG_TRY();
     {
@@ -2203,10 +2221,15 @@ static void MOTVacuumForeignTable(VacuumStmt* stmt, Relation rel)
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(oldcontext);
+        FlushErrorState();
+        vacuumFailed = true;
+    }
+    PG_END_TRY();
+    if (vacuumFailed) {
         elog(LOG, "Vacuum of table %s failed", NameStr(rel->rd_rel->relname));
         return;
     }
-    PG_END_TRY();
 }
 
 static uint64_t MOTGetForeignRelationMemSize(Oid reloid, Oid ixoid)

@@ -667,6 +667,7 @@ NdpRetCode NdpScanChannel::SendReq(NdpIoSlot* req, NdpScanDesc ndpScan)
     }
     PG_CATCH();
     {
+        FlushErrorState();
         ereport(WARNING, (errmsg("send failed, it is possible a palloc failed.")));
         ret = NdpRetCode::NDP_ERROR;
     }

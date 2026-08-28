@@ -8983,8 +8983,10 @@ void DumpMemoryContext(DUMP_TYPE type)
         dump_file, MAX_PATH_LEN, "%s/%s_%lu_%lu.log", dump_dir, ctx_name, (unsigned long)tid, (uint64)time(NULL));
 #endif
     securec_check_ss(rc, "\0", "\0");
+    StringInfo memBuf = makeStringInfo();
     FILE* dump_fp = fopen(dump_file, "w");
     if (NULL == dump_fp) {
+        DestroyStringInfo(memBuf);
         elog(LOG, "dump_memory: Failed to create file: %s, cause: %s", dump_file, strerror(errno));
         return;
     }
@@ -9001,33 +9003,35 @@ void DumpMemoryContext(DUMP_TYPE type)
         default:
             elog(LOG, "dump_memory: invalid dump type: %d", type);
             fclose(dump_fp);
+            DestroyStringInfo(memBuf);
             return;
     }
 
     // 4. walk all memory context
+    volatile bool dumpFailed = false;
     PG_TRY();
     {
-        StringInfoData memBuf;
+        recursiveMemoryContextForDump(ctx, ctx_name, memBuf);
 
-        initStringInfo(&memBuf);
+        uint64 bytes = fwrite(memBuf->data, 1, memBuf->len, dump_fp);
 
-        recursiveMemoryContextForDump(ctx, ctx_name, &memBuf);
-
-        uint64 bytes = fwrite(memBuf.data, 1, memBuf.len, dump_fp);
-
-        if (bytes != (uint64)memBuf.len) {
-            elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf.len);
+        if (bytes != (uint64)memBuf->len) {
+            elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf->len);
         }
-
-        pfree(memBuf.data);
     }
     PG_CATCH();
     {
+        FlushErrorState();
+        DestroyStringInfo(memBuf);
         fclose(dump_fp);
-        return;
+        dumpFailed = true;
     }
     PG_END_TRY();
+    if (dumpFailed) {
+        return;
+    }
 
+    DestroyStringInfo(memBuf);
     fclose(dump_fp);
     return;
 }

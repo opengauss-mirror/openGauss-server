@@ -646,14 +646,15 @@ void get_stack_and_write_result()
 {
     pid_t lwtid = 0;
     pid_t ctl_pid = 0;
-    StringInfoData result;
+    volatile pid_t result_ctl_pid = 0;
 
     MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
+    StringInfo result = makeStringInfo();
     PG_TRY();
     {
-        initStringInfo(&result);
         gs_stack_read_signal_file(&lwtid, &ctl_pid);
-        get_stack_according_to_lwtid(lwtid, &result);
+        result_ctl_pid = ctl_pid;
+        get_stack_according_to_lwtid(lwtid, result);
     }
     PG_CATCH();
     {
@@ -661,38 +662,38 @@ void get_stack_and_write_result()
         (void)MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
         ErrorData* edata = CopyErrorData();
         FlushErrorState();
-        appendStringInfo(&result, "%s", edata->message);
+        appendStringInfo(result, "%s", edata->message);
         /* release edata */
         FreeErrorData(edata);
     }
     PG_END_TRY();
 
-    gs_stack_write_result_file(result.data, result.len, ctl_pid);
-    FreeStringInfo(&result);
+    gs_stack_write_result_file(result->data, result->len, (pid_t)result_ctl_pid);
+    DestroyStringInfo(result);
     (void)MemoryContextSwitchTo(oldcontext);
 }
 
 void print_all_stack()
 {
-    StringInfoData result;
     MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
+    StringInfo result = makeStringInfo();
     PG_TRY();
     {
-        initStringInfo(&result);
-        get_stack_according_to_lwtid(0, &result);
+        get_stack_according_to_lwtid(0, result);
     }
     PG_CATCH();
     {
         /* Must reset elog.c's state */
+        (void)MemoryContextSwitchTo(g_instance.stat_cxt.GsStackContext);
         ErrorData* edata = CopyErrorData();
         FlushErrorState();
-        appendStringInfo(&result, "%s", edata->message);
+        appendStringInfo(result, "%s", edata->message);
         /* release edata */
         FreeErrorData(edata);
     }
     PG_END_TRY();
-    ereport(LOG, (errmsg("Print all thread stack \n%s", result.data)));
-    FreeStringInfo(&result);
+    ereport(LOG, (errmsg("Print all thread stack \n%s", result->data)));
+    DestroyStringInfo(result);
     (void)MemoryContextSwitchTo(oldcontext);
 }
 

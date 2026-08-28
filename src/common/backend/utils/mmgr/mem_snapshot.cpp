@@ -913,6 +913,7 @@ static void CleanConnectionByMemory()
     PG_CATCH();
     {
         g_instance.comm_cxt.rejectRequest = false;
+        FlushErrorState();
     }
     PG_END_TRY();
 }
@@ -947,6 +948,7 @@ static void CleanConnectionByThreadpool()
     PG_CATCH();
     {
         g_instance.comm_cxt.rejectRequest = false;
+        FlushErrorState();
     }
     PG_END_TRY();
 }
@@ -1140,4 +1142,3 @@ void InitMemoryLogDirectory()
     init_instr_log_directory(true, MEMORY_LOG_TAG);
     (void)MemoryContextSwitchTo(oldContext);
 }
-
