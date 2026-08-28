@@ -1308,3 +1308,874 @@ void EncryptBackupRenamed(const char *oldRoot, const char *newRoot)
     pthread_mutex_unlock(&g_keyCacheMutex);
 }
 
+
+/*-------------------------------------------------------------------------
+ * container streams
+ *-------------------------------------------------------------------------
+ */
+
+static void StreamRegister(EncStream *s)
+{
+    pthread_mutex_lock(&g_streamRegistryMutex);
+    if (g_streamRegistryNum >= ENC_MAX_STREAMS) {
+        pthread_mutex_unlock(&g_streamRegistryMutex);
+        elog(ERROR, "Too many encrypted files are open at the same time");
+    }
+    g_streamRegistry[g_streamRegistryNum++] = s;
+    pthread_mutex_unlock(&g_streamRegistryMutex);
+}
+
+static void StreamUnregister(EncStream *s)
+{
+    pthread_mutex_lock(&g_streamRegistryMutex);
+    for (int i = 0; i < g_streamRegistryNum; i++) {
+        if (g_streamRegistry[i] == s) {
+            g_streamRegistry[i] = g_streamRegistry[--g_streamRegistryNum];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_streamRegistryMutex);
+}
+
+static EncStream *StreamLookup(FILE *fp)
+{
+    EncStream *found = NULL;
+
+    if (fp == NULL) {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_streamRegistryMutex);
+    for (int i = 0; i < g_streamRegistryNum; i++) {
+        if (g_streamRegistry[i]->self == fp) {
+            found = g_streamRegistry[i];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_streamRegistryMutex);
+
+    return found;
+}
+
+/* ciphertext offset of the first byte of a chunk */
+static inline off_t ChunkDiskOffset(const EncStream *s, uint32 chunkIndex)
+{
+    return (off_t) GSPB_ENC_HDR_LEN +
+           (off_t) chunkIndex * ((off_t) s->chunkSize + GSPB_ENC_TAG_LEN);
+}
+
+static void BuildAad(const EncStream *s, uint32 chunkIndex, uint32 plainLen,
+          unsigned char *aad)
+{
+    errno_t rc = memcpy_s(aad, GSPB_ENC_AAD_LEN, s->header, GSPB_HDR_AAD_PREFIX_LEN);
+
+    securec_check_c(rc, "", "");
+    StoreUint32(aad + GSPB_ENC_AAD_OFF_CHUNK, chunkIndex);
+    StoreUint32(aad + GSPB_ENC_AAD_OFF_PLAIN_LEN, plainLen);
+}
+
+static void BuildNonce(const EncStream *s, uint32 chunkIndex, unsigned char *nonce)
+{
+    StoreUint64(nonce, s->fileNonce);
+    StoreUint32(nonce + GSPB_ENC_NONCE_OFF_CHUNK, chunkIndex);
+}
+
+/* Authenticate all non-MAC fields of the file header. */
+static void ComputeHeaderMac(const BackupEncKey *key, const unsigned char *header,
+                   unsigned char *mac16)
+{
+    unsigned char mac[GSPB_ENC_MAC_LEN];
+    errno_t       rc;
+
+    HmacSha256(key->kMac, sizeof(key->kMac), header, GSPB_HDR_MAC_INPUT_LEN, mac);
+    rc = memcpy_s(mac16, GSPB_ENC_TAG_LEN, mac, GSPB_ENC_TAG_LEN);
+    securec_check_c(rc, "", "");
+    EncWipe(mac, sizeof(mac));
+}
+
+static bool FinalizeWriteHeader(EncStream *s)
+{
+    unsigned char mac[GSPB_ENC_TAG_LEN];
+    off_t endPos;
+
+    if (fseeko(s->raw, 0, SEEK_END) != 0 || (endPos = ftello(s->raw)) < 0) {
+        return false;
+    }
+
+    StoreUint64(s->header + GSPB_HDR_OFF_PLAIN_SIZE, (uint64) s->plainPos);
+    StoreUint32(s->header + GSPB_HDR_OFF_CHUNK_COUNT, s->wrChunk);
+    ComputeHeaderMac(s->key, s->header, mac);
+    errno_t rc = memcpy_s(s->header + GSPB_HDR_OFF_MAC, GSPB_ENC_TAG_LEN, mac, sizeof(mac));
+    securec_check_c(rc, "", "");
+
+    if (fseeko(s->raw, 0, SEEK_SET) != 0 ||
+        fwrite(s->header, 1, GSPB_ENC_HDR_LEN, s->raw) != GSPB_ENC_HDR_LEN ||
+        fflush(s->raw) != 0 || fseeko(s->raw, endPos, SEEK_SET) != 0) {
+        elog(WARNING, "Cannot finalize encrypted file header of \"%s\": %s",
+             s->path, gs_strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
+/* encrypt and write out the chunk currently accumulated in the write buffer */
+static bool FlushWriteChunk(EncStream *s)
+{
+    unsigned char nonce[GSPB_ENC_NONCE_LEN];
+    unsigned char aad[GSPB_ENC_AAD_LEN];
+    unsigned char tag[GSPB_ENC_TAG_LEN];
+
+    if (s->wrFill == 0) {
+        return true;
+    }
+
+    BuildNonce(s, s->wrChunk, nonce);
+    BuildAad(s, s->wrChunk, s->wrFill, aad);
+
+    if (!AesGcmCrypt(true, s->key->kData, GSPB_ENC_KEY_LEN, nonce,
+                       aad, sizeof(aad),
+                       (unsigned char *) s->wrBuf, (int) s->wrFill,
+                       s->cipherBuf, tag)) {
+        elog(WARNING, "Cannot encrypt chunk %u of \"%s\"", s->wrChunk, s->path);
+        return false;
+    }
+
+    if (fwrite(s->cipherBuf, 1, s->wrFill, s->raw) != s->wrFill ||
+        fwrite(tag, 1, GSPB_ENC_TAG_LEN, s->raw) != GSPB_ENC_TAG_LEN) {
+        elog(WARNING, "Cannot write to \"%s\": %s", s->path, gs_strerror(errno));
+        return false;
+    }
+
+    s->wrChunk++;
+    s->wrFill = 0;
+    return true;
+}
+
+static ssize_t EncCookieWrite(void *cookie, const char *buf, size_t size)
+{
+    EncStream *s = (EncStream *) cookie;
+    size_t     done = 0;
+
+    while (done < size) {
+        uint32  space = s->chunkSize - s->wrFill;
+        size_t  take = Min((size_t) space, size - done);
+        errno_t rc = memcpy_s(s->wrBuf + s->wrFill, space, buf + done, take);
+
+        securec_check_c(rc, "", "");
+        s->wrFill += (uint32) take;
+        done += take;
+
+        if (s->wrFill == s->chunkSize && !FlushWriteChunk(s)) {
+            return -1;
+        }
+    }
+
+    s->plainPos += (off_t) size;
+    return (ssize_t) size;
+}
+
+/* make sure the requested chunk sits decrypted in the read buffer */
+static bool LoadReadChunk(EncStream *s, uint32 chunkIndex)
+{
+    unsigned char nonce[GSPB_ENC_NONCE_LEN];
+    unsigned char aad[GSPB_ENC_AAD_LEN];
+    unsigned char tag[GSPB_ENC_TAG_LEN];
+    off_t         offset;
+    off_t         plainStart;
+    uint32        plainLen;
+    size_t        got;
+
+    if (s->rdChunk == (int64) chunkIndex) {
+        return true;
+    }
+
+    plainStart = (off_t) chunkIndex * s->chunkSize;
+    if (plainStart >= s->plainSize) {
+        return false;
+    }
+
+    plainLen = (uint32) Min((off_t) s->chunkSize, s->plainSize - plainStart);
+    offset = ChunkDiskOffset(s, chunkIndex);
+    if (fseeko(s->raw, offset, SEEK_SET) != 0) {
+        elog(WARNING, "Cannot seek in \"%s\": %s", s->path, gs_strerror(errno));
+        return false;
+    }
+
+    got = fread(s->cipherBuf, 1, plainLen, s->raw);
+    if (got != plainLen ||
+        fread(tag, 1, GSPB_ENC_TAG_LEN, s->raw) != GSPB_ENC_TAG_LEN) {
+        elog(WARNING, "Cannot read chunk %u of \"%s\": %s",
+             chunkIndex, s->path, gs_strerror(errno));
+        return false;
+    }
+
+    BuildNonce(s, chunkIndex, nonce);
+    BuildAad(s, chunkIndex, plainLen, aad);
+
+    if (!AesGcmCrypt(false, s->key->kData, GSPB_ENC_KEY_LEN, nonce,
+                       aad, sizeof(aad), s->cipherBuf, (int) plainLen,
+                       (unsigned char *) s->rdBuf, tag)) {
+        elog(ERROR, "Authentication of chunk %u of \"%s\" failed: the file is "
+             "damaged or has been tampered with", chunkIndex, s->path);
+        return false;
+    }
+
+    s->rdChunk = (int64) chunkIndex;
+    s->rdLen = plainLen;
+    return true;
+}
+
+static ssize_t EncCookieRead(void *cookie, char *buf, size_t size)
+{
+    EncStream *s = (EncStream *) cookie;
+    size_t     done = 0;
+
+    if (s->plainPos >= s->plainSize) {
+        return 0;
+    }
+
+    if ((off_t) size > s->plainSize - s->plainPos) {
+        size = (size_t) (s->plainSize - s->plainPos);
+    }
+
+    while (done < size) {
+        uint32  chunkIndex = (uint32) (s->plainPos / s->chunkSize);
+        uint32  inChunk = (uint32) (s->plainPos % s->chunkSize);
+        size_t  take;
+        errno_t rc;
+
+        if (!LoadReadChunk(s, chunkIndex)) {
+            return done > 0 ? (ssize_t) done : -1;
+        }
+
+        take = Min(size - done, (size_t) (s->rdLen - inChunk));
+        if (take == 0) {
+            break;
+        }
+
+        rc = memcpy_s(buf + done, size - done, s->rdBuf + inChunk, take);
+        securec_check_c(rc, "", "");
+
+        done += take;
+        s->plainPos += (off_t) take;
+    }
+
+    return (ssize_t) done;
+}
+
+static int EncCookieSeek(void *cookie, off64_t *offset, int whence)
+{
+    EncStream *s = (EncStream *) cookie;
+    off_t      target;
+
+    switch (whence) {
+        case SEEK_SET:
+            target = (off_t) *offset;
+            break;
+        case SEEK_CUR:
+            target = s->plainPos + (off_t) *offset;
+            break;
+        case SEEK_END:
+            target = (s->writeMode ? s->plainPos : s->plainSize) + (off_t) *offset;
+            break;
+        default:
+            errno = EINVAL;
+            return -1;
+    }
+
+    if (target < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    /*
+     * Chunks are sealed as soon as they are written, so a write stream can
+     * only report its position, never move it.
+     */
+    if (s->writeMode && target != s->plainPos) {
+        elog(WARNING, "Cannot seek in the encrypted output file \"%s\"", s->path);
+        errno = ESPIPE;
+        return -1;
+    }
+
+    s->plainPos = target;
+    *offset = (off64_t) target;
+    return 0;
+}
+
+static int EncCookieClose(void *cookie)
+{
+    EncStream *s = (EncStream *) cookie;
+    int        result = 0;
+
+    /* s->raw is NULL when closing a stream whose creation failed midway */
+    if (s->writeMode && s->raw != NULL && !FlushWriteChunk(s)) {
+        result = -1;
+    }
+    if (s->writeMode && s->raw != NULL && result == 0 && !FinalizeWriteHeader(s)) {
+        result = -1;
+    }
+
+    if (s->raw != NULL && fclose(s->raw) != 0) {
+        result = -1;
+    }
+
+    StreamUnregister(s);
+
+    /*
+     * Only the plaintext buffer of the active direction was allocated;
+     * the ciphertext buffer holds no secrets and needs no wiping.
+     */
+    EncWipe(s->wrBuf, s->chunkSize);
+    EncWipe(s->rdBuf, s->chunkSize);
+    pg_free(s->wrBuf);
+    pg_free(s->rdBuf);
+    pg_free(s->cipherBuf);
+    pg_free(s);
+
+    return result;
+}
+
+/* plaintext size of an already written container, derived from its length */
+static off_t ContainerPlainSize(off_t diskSize, uint32 chunkSize)
+{
+    off_t body = diskSize - GSPB_ENC_HDR_LEN;
+    off_t unit = (off_t) chunkSize + GSPB_ENC_TAG_LEN;
+    off_t full;
+    off_t rest;
+
+    if (body <= 0) {
+        return 0;
+    }
+
+    full = body / unit;
+    rest = body % unit;
+    if (rest > 0 && rest <= GSPB_ENC_TAG_LEN) {
+        return -1;
+    }
+
+    return full * chunkSize + (rest > 0 ? rest - GSPB_ENC_TAG_LEN : 0);
+}
+
+static EncStream *EncStreamAlloc(const char *path, BackupEncKey *key, bool writeMode)
+{
+    EncStream *s = (EncStream *) pgut_malloc(sizeof(EncStream));
+    errno_t    rc = memset_s(s, sizeof(EncStream), 0, sizeof(EncStream));
+
+    securec_check_c(rc, "", "");
+
+    s->key = key;
+    s->writeMode = writeMode;
+    s->chunkSize = key->chunkSize;
+    s->rdChunk = -1;
+    rc = strncpy_s(s->path, sizeof(s->path), path, sizeof(s->path) - 1);
+    securec_check_c(rc, "", "");
+
+    /*
+     * Only the buffers of the active direction are needed. Backups open
+     * thousands of small files, so allocating (and wiping at close) an
+     * unused chunk-sized buffer per file is measurable overhead.
+     */
+    s->wrBuf = writeMode ? (char *) pgut_malloc(s->chunkSize) : NULL;
+    s->rdBuf = writeMode ? NULL : (char *) pgut_malloc(s->chunkSize);
+    s->cipherBuf = (unsigned char *) pgut_malloc(s->chunkSize);
+
+    return s;
+}
+
+/*
+ * Open a file that belongs to a backup. Files of unencrypted backups, and
+ * files outside of the backup catalog, are returned as plain streams.
+ */
+FILE *EncFopen(const char *path, const char *mode)
+{
+    BackupEncKey *key;
+    EncStream    *s;
+    FILE         *raw;
+    bool          writeMode;
+    cookie_io_functions_t ioFuncs;
+    errno_t       rc;
+
+    key = KeyForPath(path);
+    if (key == NULL) {
+        return fopen(path, mode);
+    }
+
+    writeMode = (strchr(mode, 'w') != NULL);
+    if (!writeMode && strchr(mode, 'r') == NULL) {
+        elog(ERROR, "Unsupported mode \"%s\" for encrypted file \"%s\"", mode, path);
+    }
+    if (strchr(mode, '+') != NULL || strchr(mode, 'a') != NULL) {
+        elog(ERROR, "Unsupported mode \"%s\" for encrypted file \"%s\"", mode, path);
+    }
+
+    raw = fopen(path, mode);
+    if (raw == NULL) {
+        return NULL;
+    }
+
+    s = EncStreamAlloc(path, key, writeMode);
+    s->raw = raw;
+
+    if (writeMode) {
+        rc = memcpy_s(s->header, sizeof(s->header), GSPB_ENC_MAGIC, GSPB_ENC_MAGIC_LEN);
+        securec_check_c(rc, "", "");
+        StoreUint16(s->header + GSPB_HDR_OFF_VERSION, GSPB_ENC_FORMAT_VERSION);
+        StoreUint16(s->header + GSPB_HDR_OFF_ALG, key->alg);
+        StoreUint32(s->header + GSPB_HDR_OFF_CHUNK_SIZE, s->chunkSize);
+        EncRandomBytes(s->header + GSPB_HDR_OFF_FILE_NONCE, GSPB_ENC_FILE_NONCE_LEN);
+        EncRandomBytes(s->header + GSPB_HDR_OFF_FILE_ID, GSPB_ENC_FILE_ID_LEN);
+        s->fileNonce = LoadUint64(s->header + GSPB_HDR_OFF_FILE_NONCE);
+
+        if (fwrite(s->header, 1, GSPB_ENC_HDR_LEN, raw) != GSPB_ENC_HDR_LEN) {
+            int saveErrno = errno;
+
+            (void) fclose(raw);
+            pg_free(s->wrBuf);
+            pg_free(s->rdBuf);
+            pg_free(s->cipherBuf);
+            pg_free(s);
+            errno = saveErrno;
+            return NULL;
+        }
+    } else {
+        struct stat st;
+
+        if (fread(s->header, 1, GSPB_ENC_HDR_LEN, raw) != GSPB_ENC_HDR_LEN ||
+            memcmp(s->header, GSPB_ENC_MAGIC, GSPB_ENC_MAGIC_LEN) != 0) {
+            (void) fclose(raw);
+            pg_free(s->wrBuf);
+            pg_free(s->rdBuf);
+            pg_free(s->cipherBuf);
+            pg_free(s);
+            elog(ERROR, "File \"%s\" is not a valid encrypted backup file", path);
+        }
+
+        if (LoadUint16(s->header + GSPB_HDR_OFF_VERSION) != GSPB_ENC_FORMAT_VERSION) {
+            elog(ERROR, "Unsupported container version in \"%s\"", path);
+        }
+
+        s->chunkSize = LoadUint32(s->header + GSPB_HDR_OFF_CHUNK_SIZE);
+        if (s->chunkSize < GSPB_ENC_MIN_CHUNK || s->chunkSize > GSPB_ENC_MAX_CHUNK) {
+            elog(ERROR, "Invalid chunk size %u in \"%s\"", s->chunkSize, path);
+        }
+        s->fileNonce = LoadUint64(s->header + GSPB_HDR_OFF_FILE_NONCE);
+
+        /* the header may announce a chunk size different from the backup default */
+        if (s->chunkSize != key->chunkSize) {
+            pg_free(s->rdBuf);
+            pg_free(s->cipherBuf);
+            s->rdBuf = (char *) pgut_malloc(s->chunkSize);
+            s->cipherBuf = (unsigned char *) pgut_malloc(s->chunkSize);
+        }
+
+        if (fstat(fileno(raw), &st) != 0) {
+            elog(ERROR, "Cannot stat \"%s\": %s", path, gs_strerror(errno));
+        }
+
+        unsigned char expectedMac[GSPB_ENC_TAG_LEN];
+        ComputeHeaderMac(key, s->header, expectedMac);
+        if (CRYPTO_memcmp(expectedMac, s->header + GSPB_HDR_OFF_MAC, GSPB_ENC_TAG_LEN) != 0) {
+            elog(ERROR, "Authentication of the header of \"%s\" failed: "
+                 "the file is damaged or has been tampered with", path);
+        }
+
+        s->plainSize = (off_t) LoadUint64(s->header + GSPB_HDR_OFF_PLAIN_SIZE);
+        uint32 declared_chunks = LoadUint32(s->header + GSPB_HDR_OFF_CHUNK_COUNT);
+        uint32 expected_chunks = s->plainSize == 0 ? 0 :
+            (uint32) ((s->plainSize + s->chunkSize - 1) / s->chunkSize);
+        off_t expectedDiskSize = GSPB_ENC_HDR_LEN + s->plainSize +
+            (off_t) expected_chunks * GSPB_ENC_TAG_LEN;
+
+        if (declared_chunks != expected_chunks || st.st_size != expectedDiskSize) {
+            elog(ERROR, "Encrypted file \"%s\" is truncated or has an invalid length", path);
+        }
+    }
+
+    ioFuncs.read = writeMode ? NULL : EncCookieRead;
+    ioFuncs.write = writeMode ? EncCookieWrite : NULL;
+    ioFuncs.seek = EncCookieSeek;
+    ioFuncs.close = EncCookieClose;
+
+    s->self = fopencookie(s, writeMode ? "w" : "r", ioFuncs);
+    if (s->self == NULL) {
+        (void) fclose(raw);
+        s->raw = NULL;
+        EncCookieClose(s);
+        elog(ERROR, "Cannot create encrypted stream for \"%s\"", path);
+    }
+
+    StreamRegister(s);
+    return s->self;
+}
+
+/*
+ * Staging file that never gets a name in the directory tree. O_TMPFILE is
+ * the direct way to ask for that; filesystems without support for it fall
+ * back to creating a uniquely named file and unlinking it right away, which
+ * leaves the same unnamed open file behind.
+ */
+static FILE *OpenAnonymousTempFile(void)
+{
+    const char *dir = gs_getenv_r("TMPDIR");
+    char        path[MAXPGPATH];
+    int         fd;
+    FILE       *fp;
+    errno_t     rc;
+
+    if (dir == NULL || dir[0] == '\0') {
+        dir = "/tmp";
+    }
+
+#ifdef O_TMPFILE
+    fd = open(dir, O_TMPFILE | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR);
+    if (fd >= 0) {
+        fp = fdopen(fd, "w+b");
+        if (fp == NULL) {
+            (void) close(fd);
+        }
+        return fp;
+    }
+#endif
+
+    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/gspb_stage_XXXXXX", dir);
+    securec_check_ss_c(rc, "", "");
+
+    fd = mkostemp(path, O_CLOEXEC);
+    if (fd < 0) {
+        return NULL;
+    }
+    (void) unlink(path);
+
+    fp = fdopen(fd, "w+b");
+    if (fp == NULL) {
+        (void) close(fd);
+    }
+    return fp;
+}
+
+/*
+ * Merge restores a sparse data file with random writes before it recompresses
+ * the result. Keep that intermediate plaintext in an anonymous staging file,
+ * then seal it into the named container when the caller closes this stream.
+ */
+FILE *EncFopenStaged(const char *path)
+{
+    BackupEncKey *key = KeyForPath(path);
+    if (key == NULL) {
+        return fopen(path, PG_BINARY_W);
+    }
+
+    FILE *stage = OpenAnonymousTempFile();
+    if (stage == NULL) {
+        elog(ERROR, "Cannot create anonymous merge staging file for \"%s\": %s",
+             path, gs_strerror(errno));
+    }
+
+    return stage;
+}
+
+bool EncSealStagedFile(FILE *stage, const char *path)
+{
+    BackupEncKey *key = KeyForPath(path);
+    char         *buffer;
+    FILE         *out;
+    size_t        readLen;
+    bool          ok = true;
+
+    if (key == NULL) {
+        return true;
+    }
+
+    if (fflush(stage) != 0 || fseeko(stage, 0, SEEK_SET) != 0) {
+        elog(ERROR, "Cannot rewind anonymous merge staging file for \"%s\": %s",
+             path, gs_strerror(errno));
+    }
+
+    out = EncFopen(path, PG_BINARY_W);
+    if (out == NULL) {
+        elog(ERROR, "Cannot create encrypted merge staging file \"%s\": %s",
+             path, gs_strerror(errno));
+    }
+
+    buffer = (char *) pgut_malloc(key->chunkSize);
+    while ((readLen = fread(buffer, 1, key->chunkSize, stage)) > 0) {
+        if (fwrite(buffer, 1, readLen, out) != readLen) {
+            ok = false;
+            break;
+        }
+    }
+
+    if (ferror(stage)) {
+        ok = false;
+    }
+    EncWipe(buffer, key->chunkSize);
+    pg_free(buffer);
+
+    if (fclose(out) != 0) {
+        ok = false;
+    }
+    if (!ok) {
+        (void) unlink(path);
+        elog(ERROR, "Cannot seal anonymous merge staging file into \"%s\"", path);
+    }
+
+    return true;
+}
+
+bool EncStreamIsEncrypted(FILE *fp)
+{
+    return StreamLookup(fp) != NULL;
+}
+
+/* fsync a stream that may be an encryption container */
+int EncFsyncStream(FILE *fp)
+{
+    EncStream *s = StreamLookup(fp);
+    if (fflush(fp) != 0) {
+        return -1;
+    }
+
+    if (s == NULL) {
+        return fsync(fileno(fp));
+    }
+
+    if (s->writeMode) {
+        if (!FlushWriteChunk(s) || !FinalizeWriteHeader(s)) {
+            return -1;
+        }
+    }
+    if (fflush(s->raw) != 0) {
+        return -1;
+    }
+
+    return fsync(fileno(s->raw));
+}
+
+/* tell an encryption container from a plain file by its magic */
+bool EncFileIsContainer(const char *path)
+{
+    FILE         *fp = fopen(path, PG_BINARY_R);
+    unsigned char magic[GSPB_ENC_MAGIC_LEN];
+    bool          isContainer;
+
+    if (fp == NULL) {
+        return false;
+    }
+
+    isContainer = (fread(magic, 1, sizeof(magic), fp) == sizeof(magic)) &&
+                   memcmp(magic, GSPB_ENC_MAGIC, GSPB_ENC_MAGIC_LEN) == 0;
+    (void) fclose(fp);
+
+    return isContainer;
+}
+
+/*
+ * Rewrite an existing plaintext file of a backup as an encryption container.
+ * Used for files that are produced outside of the stdio paths, such as the
+ * WAL segments written by the streaming thread. Idempotent: a file that is
+ * already a container is left alone.
+ */
+bool EncEncryptFileInplace(const char *path)
+{
+    BackupEncKey *key = KeyForPath(path);
+    char          tmpPath[MAXPGPATH];
+    FILE         *in = NULL;
+    FILE         *out = NULL;
+    char         *buf = NULL;
+    size_t        got;
+    errno_t       rc;
+
+    if (key == NULL || EncFileIsContainer(path)) {
+        return true;
+    }
+
+    rc = snprintf_s(tmpPath, sizeof(tmpPath), sizeof(tmpPath) - 1, "%s.enctmp", path);
+    securec_check_ss_c(rc, "", "");
+
+    in = fopen(path, PG_BINARY_R);
+    if (in == NULL) {
+        elog(WARNING, "Cannot open \"%s\" for encryption: %s", path, gs_strerror(errno));
+        return false;
+    }
+
+    out = EncFopen(tmpPath, PG_BINARY_W);
+    if (out == NULL) {
+        (void) fclose(in);
+        elog(WARNING, "Cannot create \"%s\": %s", tmpPath, gs_strerror(errno));
+        return false;
+    }
+
+    buf = (char *) pgut_malloc(key->chunkSize);
+
+    while ((got = fread(buf, 1, key->chunkSize, in)) > 0) {
+        if (fwrite(buf, 1, got, out) != got) {
+            elog(WARNING, "Cannot write to \"%s\": %s", tmpPath, gs_strerror(errno));
+            pg_free(buf);
+            (void) fclose(in);
+            (void) fclose(out);
+            (void) unlink(tmpPath);
+            return false;
+        }
+    }
+
+    pg_free(buf);
+    (void) fclose(in);
+
+    if (fclose(out) != 0) {
+        elog(WARNING, "Cannot close \"%s\": %s", tmpPath, gs_strerror(errno));
+        (void) unlink(tmpPath);
+        return false;
+    }
+
+    if (rename(tmpPath, path) != 0) {
+        elog(WARNING, "Cannot rename \"%s\" to \"%s\": %s",
+             tmpPath, path, gs_strerror(errno));
+        (void) unlink(tmpPath);
+        return false;
+    }
+
+    return true;
+}
+
+/*
+ * Random read from an encrypted file, used by readers that work on file
+ * descriptors instead of stdio, such as the WAL page reader. The container
+ * of the last file touched by this thread is kept open, because callers
+ * walk a segment page by page.
+ */
+static THR_LOCAL FILE *g_cachedReader = NULL;
+static THR_LOCAL char  g_cachedReaderPath[MAXPGPATH] = {0};
+
+bool EncReadAt(const char *path, void *buf, size_t len, off_t offset)
+{
+    errno_t rc;
+
+    if (KeyForPath(path) == NULL) {
+        return false;
+    }
+
+    if (g_cachedReader != NULL && strcmp(g_cachedReaderPath, path) != 0) {
+        (void) fclose(g_cachedReader);
+        g_cachedReader = NULL;
+        g_cachedReaderPath[0] = '\0';
+    }
+
+    if (g_cachedReader == NULL) {
+        if (!EncFileIsContainer(path)) {
+            return false;
+        }
+
+        g_cachedReader = EncFopen(path, PG_BINARY_R);
+        if (g_cachedReader == NULL) {
+            return false;
+        }
+
+        rc = strncpy_s(g_cachedReaderPath, sizeof(g_cachedReaderPath),
+                       path, sizeof(g_cachedReaderPath) - 1);
+        securec_check_c(rc, "", "");
+    }
+
+    if (fseeko(g_cachedReader, offset, SEEK_SET) != 0 ||
+        fread(buf, 1, len, g_cachedReader) != len) {
+        (void) fclose(g_cachedReader);
+        g_cachedReader = NULL;
+        g_cachedReaderPath[0] = '\0';
+        elog(ERROR, "Cannot read %lu bytes at offset %ld of encrypted file \"%s\"",
+             (unsigned long) len, (long) offset, path);
+    }
+
+    return true;
+}
+
+/* read a whole encrypted file into a freshly allocated, zero terminated buffer */
+char *EncSlurpFile(const char *path, size_t *filesize, bool safe)
+{
+    FILE       *fp;
+    char       *buffer;
+    off_t       len;
+
+    fp = EncFopen(path, PG_BINARY_R);
+    if (fp == NULL) {
+        if (safe) {
+            return NULL;
+        }
+        elog(ERROR, "Could not open file \"%s\" for reading: %s", path, gs_strerror(errno));
+    }
+
+    if (fseeko(fp, 0, SEEK_END) != 0) {
+        (void) fclose(fp);
+        if (safe) {
+            return NULL;
+        }
+        elog(ERROR, "Could not seek in file \"%s\": %s", path, gs_strerror(errno));
+    }
+
+    len = ftello(fp);
+    rewind(fp);
+
+    buffer = (char *) pg_malloc(len + 1);
+    if (fread(buffer, 1, (size_t) len, fp) != (size_t) len) {
+        pg_free(buffer);
+        (void) fclose(fp);
+        if (safe) {
+            return NULL;
+        }
+        elog(ERROR, "Could not read file \"%s\": %s", path, gs_strerror(errno));
+    }
+    (void) fclose(fp);
+
+    buffer[len] = '\0';
+    if (filesize != NULL) {
+        *filesize = (size_t) len;
+    }
+
+    return buffer;
+}
+
+void EncCloseCachedReader(void)
+{
+    if (g_cachedReader != NULL) {
+        (void) fclose(g_cachedReader);
+        g_cachedReader = NULL;
+        g_cachedReaderPath[0] = '\0';
+    }
+}
+
+/* payload size of a container, given the size it occupies on disk */
+int64 enc_plain_size(const char *path, int64 diskSize)
+{
+    BackupEncKey *key = KeyForPath(path);
+    off_t         plain;
+
+    if (key == NULL || !EncFileIsContainer(path)) {
+        return diskSize;
+    }
+
+    plain = ContainerPlainSize(diskSize, key->chunkSize);
+    if (plain < 0) {
+        elog(ERROR, "Encrypted file \"%s\" is truncated", path);
+    }
+
+    return (int64) plain;
+}
+
+/* on-disk size a container holding plainSize bytes of payload takes */
+int64 enc_expected_disk_size(const char *path, int64 plainSize)
+{
+    BackupEncKey *key = KeyForPath(path);
+    int64         full;
+    int64         rest;
+
+    if (key == NULL) {
+        return plainSize;
+    }
+
+    full = plainSize / key->chunkSize;
+    rest = plainSize % key->chunkSize;
+
+    return GSPB_ENC_HDR_LEN +
+           full * ((int64) key->chunkSize + GSPB_ENC_TAG_LEN) +
+           (rest > 0 ? rest + GSPB_ENC_TAG_LEN : 0);
+}
