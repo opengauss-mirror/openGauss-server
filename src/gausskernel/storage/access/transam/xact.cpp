@@ -4991,6 +4991,7 @@ static void CallSequenceCallbacks(GTMEvent event)
     GTMCallbackItem *item = NULL;
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         for (item = t_thrd.xact_cxt.Seq_callbacks; item; item = item->next) {
@@ -5004,6 +5005,8 @@ static void CallSequenceCallbacks(GTMEvent event)
          * if the error level is ERROR, which may cause coredump.
          */
         if (event == GTM_EVENT_ABORT) {
+            (void)MemoryContextSwitchTo(oldcontext);
+            FlushErrorState();
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             ereport(WARNING, (errmsg("Fail to call sequence call backs when aborting transaction.")));
         } else {

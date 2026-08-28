@@ -385,6 +385,7 @@ int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTupl
                 return VERIFY_XID_TOO_LARGE;
             }
             MemoryContext currentContext = CurrentMemoryContext;
+            volatile bool xidStatusError = false;
             PG_TRY();
             {
                 if (TransactionIdDidCommit(xmax) && !TransactionIdDidCommit(xmin)) {
@@ -408,9 +409,12 @@ int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTupl
                 (void)MemoryContextSwitchTo(currentContext);
                 /* hit some errors when fetching xid status */
                 FlushErrorState();
-                return VERIFY_XID_STATUS_ERROR;
+                xidStatusError = true;
             }
             PG_END_TRY();
+            if (xidStatusError) {
+                return VERIFY_XID_STATUS_ERROR;
+            }
         }
     }
     return VERIFY_NORMAL;

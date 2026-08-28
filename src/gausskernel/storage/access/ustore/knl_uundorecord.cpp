@@ -484,6 +484,7 @@ static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     uint32 saveCritSectionCount = t_thrd.int_cxt.CritSectionCount;
     MemoryContext currentContext = CurrentMemoryContext;
+    volatile bool discardRecord = false;
     PG_TRY();
     {
         t_thrd.undo_cxt.fetchRecord = true;
@@ -510,13 +511,16 @@ static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
                 urec->SetBuff(InvalidBuffer);
             }
             FlushErrorState();
-            return state;
+            discardRecord = true;
         } else {
             (void)MemoryContextSwitchTo(oldContext);
             PG_RE_THROW();
         }
     }
     PG_END_TRY();
+    if (discardRecord) {
+        return state;
+    }
     t_thrd.undo_cxt.fetchRecord = false;
     return state;
 }

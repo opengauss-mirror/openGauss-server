@@ -137,71 +137,75 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
         }
         return COMMITSEQNO_ABORTED;
     }
-MemoryContext old = CurrentMemoryContext;
-RETRY:
-    /*
-     * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
-     * check the csnlog.
-     */
-    if (snapshot != NULL && snapshot->satisfies == SNAPSHOT_DECODE_MVCC) {
-        xid = GetReplicationSlotCatalogXmin();
-    } else if (!isMvcc || GTM_LITE_MODE) {
-        TransactionId recentGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
-        if (!TransactionIdIsValid(recentGlobalXmin)) {
-            xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
-        } else {
-            xid = recentGlobalXmin;
-        }
-    } else if (snapshot != NULL && IsMVCCSnapshot(snapshot)) {
-        xid = snapshot->xmin;
-    } else {
-        xid = u_sess->utils_cxt.RecentXmin;
-    }
-
-    Assert(TransactionIdIsValid(xid));
-    if ((!IS_MULTI_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
-        TransactionIdPrecedes(transactionId, xid)) {
-        result = GetCSNByCLog(transactionId, isCommit);
-    } else {
-        uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    MemoryContext old = CurrentMemoryContext;
+    volatile bool retryByClog = false;
+    do {
+        retryByClog = false;
         /*
-         * In gtm-lite mode, recentGlobalXmin acrroding to oldest csn, it can be updated when we read csn log.
-         * Make sure that we restore the right hold interrupt count and release
-         * all lock about csn log(control lock and page lock).
-         * just retry one times, if we try to read csn log again, meaning any other problem happen, ereport as usual.
+         * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
+         * check the csnlog.
          */
-        PG_TRY();
-        {
-            result = isNest ? CSNLogGetNestCommitSeqNo(transactionId) : CSNLogGetCommitSeqNo(transactionId);
+        if (snapshot != NULL && snapshot->satisfies == SNAPSHOT_DECODE_MVCC) {
+            xid = GetReplicationSlotCatalogXmin();
+        } else if (!isMvcc || GTM_LITE_MODE) {
+            TransactionId recentGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
+            if (!TransactionIdIsValid(recentGlobalXmin)) {
+                xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
+            } else {
+                xid = recentGlobalXmin;
+            }
+        } else if (snapshot != NULL && IsMVCCSnapshot(snapshot)) {
+            xid = snapshot->xmin;
+        } else {
+            xid = u_sess->utils_cxt.RecentXmin;
         }
-        PG_CATCH();
-        {
-            if ((IS_CN_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) &&
-                t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED)
+
+        Assert(TransactionIdIsValid(xid));
+        if ((!IS_MULTI_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
+            TransactionIdPrecedes(transactionId, xid)) {
+            result = GetCSNByCLog(transactionId, isCommit);
+        } else {
+            uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+            /*
+             * In gtm-lite mode, recentGlobalXmin acrroding to oldest csn, it can be updated when we read csn log.
+             * Make sure that we restore the right hold interrupt count and release
+             * all lock about csn log(control lock and page lock).
+             * just retry one times, if we try to read csn log again, meaning any other problem happen, ereport as
+             * usual.
+             */
+            PG_TRY();
             {
-                (void)MemoryContextSwitchTo(old);
-                FlushErrorState();
-                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
-                result = GetCSNByCLog(transactionId, isCommit);
-                ereport(LOG,
+                result = isNest ? CSNLogGetNestCommitSeqNo(transactionId) : CSNLogGetCommitSeqNo(transactionId);
+            }
+            PG_CATCH();
+            {
+                if ((IS_CN_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE) &&
+                    t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED) {
+                    (void)MemoryContextSwitchTo(old);
+                    FlushErrorState();
+                    t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                    result = GetCSNByCLog(transactionId, isCommit);
+                    ereport(
+                        LOG,
                         (errmsg("TransactionIdGetCommitSeqNo: "
                                 "Treat CSN as frozen when csnlog file cannot be found for the given xid: %lu csn: %lu",
                                 transactionId, result)));
-            } else if ((GTM_LITE_MODE || (ENABLE_DMS && t_thrd.role == DMS_WORKER)) && retry_times == 0) {
-                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
-                FlushErrorState();
-                ereport(LOG, (errmsg("recentGlobalXmin has been updated, csn log may be truncated, try clog, xid"
-                                     " %lu recentLocalXmin %lu.",
-                                     xid, t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin)));
-                retry_times++;
-                (void)MemoryContextSwitchTo(old);
-                goto RETRY;
-            } else {
-                PG_RE_THROW();
+                } else if ((GTM_LITE_MODE || (ENABLE_DMS && t_thrd.role == DMS_WORKER)) && retry_times == 0) {
+                    (void)MemoryContextSwitchTo(old);
+                    t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                    FlushErrorState();
+                    ereport(LOG, (errmsg("recentGlobalXmin has been updated, csn log may be truncated, try clog, xid"
+                                         " %lu recentLocalXmin %lu.",
+                                         xid, t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin)));
+                    retry_times++;
+                    retryByClog = true;
+                } else {
+                    PG_RE_THROW();
+                }
             }
+            PG_END_TRY();
         }
-        PG_END_TRY();
-    }
+    } while (retryByClog);
     if (SHOW_DEBUG_MESSAGE()) {
         ereport(DEBUG1,
                 (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "

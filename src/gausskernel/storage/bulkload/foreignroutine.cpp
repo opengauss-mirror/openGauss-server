@@ -1556,41 +1556,44 @@ TupleTableSlot *distExecImport(ForeignScanState *node)
      * We can also pass tupleOid = NULL because we don't allow oids for
      * foreign tables.
      */
-retry:
-    CHECK_FOR_INTERRUPTS();
-    (void)ExecClearTuple(slot);
-    MemoryContextReset(node->scanMcxt);
+    volatile bool retryImport = false;
+    do {
+        CHECK_FOR_INTERRUPTS();
+        (void)ExecClearTuple(slot);
+        MemoryContextReset(node->scanMcxt);
 #ifndef ENABLE_LITE_MODE
-    SetObsMemoryContext(((CopyState)importState)->copycontext);
+        SetObsMemoryContext(((CopyState)importState)->copycontext);
 #endif
-    ReportIllegalCharExceptionThreshold();
+        ReportIllegalCharExceptionThreshold();
+        retryImport = false;
 
-    PG_TRY();
-    {
-        /*
-         * Synchronize the current bulkload states.
-         */
-        SyncBulkloadStates((CopyState)importState);
-        found = NextCopyFrom((CopyState)importState, NULL, slot->tts_values, slot->tts_isnull, NULL);
-    }
-    PG_CATCH();
-    {
-        /*
-         * Clean the current bulkload states.
-         */
-        CleanBulkloadStates();
-
-        if (TrySaveImportError(importState, node)) {
-            MemoryContextSwitchTo(scanMcxt);
-            goto retry;
-        } else {
-            /* clean copy state and re throw */
-            importState->isExceptionShutdown = true;
-            EndDistImport(importState);
-            PG_RE_THROW();
+        PG_TRY();
+        {
+            /*
+             * Synchronize the current bulkload states.
+             */
+            SyncBulkloadStates((CopyState)importState);
+            found = NextCopyFrom((CopyState)importState, NULL, slot->tts_values, slot->tts_isnull, NULL);
         }
-    }
-    PG_END_TRY();
+        PG_CATCH();
+        {
+            /*
+             * Clean the current bulkload states.
+             */
+            CleanBulkloadStates();
+
+            if (TrySaveImportError(importState, node)) {
+                MemoryContextSwitchTo(scanMcxt);
+                retryImport = true;
+            } else {
+                /* clean copy state and re throw */
+                importState->isExceptionShutdown = true;
+                EndDistImport(importState);
+                PG_RE_THROW();
+            }
+        }
+        PG_END_TRY();
+    } while (retryImport);
 
     /*
      * Clean the current bulkload states.

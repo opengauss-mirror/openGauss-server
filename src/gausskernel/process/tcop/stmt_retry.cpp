@@ -552,6 +552,7 @@ void StatementRetryController::TriggerRetry(bool is_extend_query)
         PG_CATCH();
         {
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+            FlushErrorState();
             SimpleLogToServer(LOG, false, "%s fail to invalid all prepared statements", PRINT_PREFIX_TYPE_ALERT);
         }
         PG_END_TRY();

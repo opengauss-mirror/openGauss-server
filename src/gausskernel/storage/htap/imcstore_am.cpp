@@ -543,18 +543,24 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
     dms_request_imcstore_delta(&dms_ctx, m_relation->rd_id, cuid, m_cuDeltaMask, &delta_max);
     m_deltaMaskMax = delta_max;
 
+    int* slotId = (int*)palloc(sizeof(int));
+    *slotId = CACHE_BLOCK_INVALID_IDX;
     RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
     if (rowgroup == NULL) {
+        pfree_ext(slotId);
         return;
     }
     CU* cu = NULL;
-    int slotId = CACHE_BLOCK_INVALID_IDX;
+    volatile bool rowgroupLocked = false;
+    volatile bool rowgroupReferenced = true;
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         rowgroup->RDLockRowGroup();
+        rowgroupLocked = true;
         if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
             m_isCtidCU = true;
-            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
+            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), *slotId);
             m_isCtidCU = false;
         }
 
@@ -591,20 +597,36 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
             m_cuDelMask[rowIdx >> 3] |= (1 << (rowIdx % 8));
         }
         rowgroup->UnlockRowGroup();
-        m_imcstoreDesc->UnReferenceRowGroup();
-        if (IsValidCacheSlotID(slotId)) {
-            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        rowgroupLocked = false;
+        if (IsValidCacheSlotID(*slotId)) {
+            int pinnedSlotId = *slotId;
+            *slotId = CACHE_BLOCK_INVALID_IDX;
+            UnPinCUDataBlock(pinnedSlotId, rowgroup->m_cuDescs[m_ctidCol]);
         }
+        m_imcstoreDesc->UnReferenceRowGroup();
+        rowgroupReferenced = false;
     }
     PG_CATCH();
     {
-        rowgroup->UnlockRowGroup();
-        m_imcstoreDesc->UnReferenceRowGroup();
-        if (IsValidCacheSlotID(slotId)) {
-            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        (void)MemoryContextSwitchTo(oldcontext);
+        m_isCtidCU = false;
+        if (rowgroupLocked) {
+            rowgroup->UnlockRowGroup();
+            rowgroupLocked = false;
         }
+        if (IsValidCacheSlotID(*slotId)) {
+            int pinnedSlotId = *slotId;
+            *slotId = CACHE_BLOCK_INVALID_IDX;
+            UnPinCUDataBlock(pinnedSlotId, rowgroup->m_cuDescs[m_ctidCol]);
+        }
+        if (rowgroupReferenced) {
+            m_imcstoreDesc->UnReferenceRowGroup();
+            rowgroupReferenced = false;
+        }
+        FlushErrorState();
     }
     PG_END_TRY();
+    pfree_ext(slotId);
 }
 
 void IMCStore::GetCUDeleteMaskIfNeedForSSStandby(_in_ uint32 cuid)
@@ -655,39 +677,61 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
         return;
     }
 
+    int* slotId = (int*)palloc(sizeof(int));
+    *slotId = CACHE_BLOCK_INVALID_IDX;
     RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
     if (rowgroup == NULL) {
+        pfree_ext(slotId);
         return;
     }
 
     CU* cu = NULL;
-    int slotId = CACHE_BLOCK_INVALID_IDX;
+    volatile bool rowgroupLocked = false;
+    volatile bool rowgroupReferenced = true;
+    MemoryContext oldcontext = CurrentMemoryContext;
 
     PG_TRY();
     {
         rowgroup->RDLockRowGroup();
+        rowgroupLocked = true;
         if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
             m_isCtidCU = true;
-            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
+            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), *slotId);
             m_isCtidCU = false;
         }
         FormLocalCUDeleteMask(rowgroup, cu, cuid);
         rowgroup->UnlockRowGroup();
-        m_imcstoreDesc->UnReferenceRowGroup();
-        if (IsValidCacheSlotID(slotId)) {
-            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        rowgroupLocked = false;
+        if (IsValidCacheSlotID(*slotId)) {
+            int pinnedSlotId = *slotId;
+            *slotId = CACHE_BLOCK_INVALID_IDX;
+            UnPinCUDataBlock(pinnedSlotId, rowgroup->m_cuDescs[m_ctidCol]);
         }
+        m_imcstoreDesc->UnReferenceRowGroup();
+        rowgroupReferenced = false;
     }
     PG_CATCH();
     {
-        rowgroup->UnlockRowGroup();
-        m_imcstoreDesc->UnReferenceRowGroup();
-        if (IsValidCacheSlotID(slotId)) {
-            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        (void)MemoryContextSwitchTo(oldcontext);
+        m_isCtidCU = false;
+        if (rowgroupLocked) {
+            rowgroup->UnlockRowGroup();
+            rowgroupLocked = false;
         }
+        if (IsValidCacheSlotID(*slotId)) {
+            int pinnedSlotId = *slotId;
+            *slotId = CACHE_BLOCK_INVALID_IDX;
+            UnPinCUDataBlock(pinnedSlotId, rowgroup->m_cuDescs[m_ctidCol]);
+        }
+        if (rowgroupReferenced) {
+            m_imcstoreDesc->UnReferenceRowGroup();
+            rowgroupReferenced = false;
+        }
+        pfree_ext(slotId);
         PG_RE_THROW();
     }
     PG_END_TRY();
+    pfree_ext(slotId);
 }
 
 void IMCStore::FormCUDeleteMaskFullRowGroup(_in_ RowGroup* rowgroup, _in_ uint32 cuid)

@@ -123,6 +123,7 @@ static PyObject* PLy_cursor_query(const char* query)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         PLyExecutionContext* exec_ctx = PLy_current_execution_context();
@@ -150,9 +151,12 @@ static PyObject* PLy_cursor_query(const char* query)
     PG_CATCH();
     {
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     Assert(cursor->portalname != NULL);
     return (PyObject*)cursor;
@@ -222,6 +226,7 @@ PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         PLyExecutionContext* exec_ctx = PLy_current_execution_context();
@@ -285,9 +290,12 @@ PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
         Py_DECREF(cursor);
 
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     for (i = 0; i < nargs; i++) {
         if (!plan->args[i].out.d.typbyval && (plan->values[i] != PointerGetDatum(NULL))) {
@@ -348,6 +356,7 @@ static PyObject* PLy_cursor_iternext(PyObject* self)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         SPI_cursor_fetch(portal, true, 1);
@@ -371,9 +380,12 @@ static PyObject* PLy_cursor_iternext(PyObject* self)
         SPI_freetuptable(SPI_tuptable);
 
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     return ret;
 }
@@ -414,6 +426,7 @@ static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         SPI_cursor_fetch(portal, true, count);
@@ -448,9 +461,12 @@ static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args)
         SPI_freetuptable(SPI_tuptable);
 
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     return (PyObject*)ret;
 }

@@ -165,6 +165,19 @@ void IMCSHashTable::UpdateImcsStatus(Oid relOid, int imcsStatus)
     LWLockRelease(m_imcs_lock);
 }
 
+static void ReleaseImcsLocks(
+    IMCSDesc* imcsDesc, LWLock* imcsHashLock, volatile bool& imcsDescLocked, volatile bool& imcsHashLocked)
+{
+    if (imcsDescLocked) {
+        LWLockRelease(imcsDesc->imcsDescLock);
+        imcsDescLocked = false;
+    }
+    if (imcsHashLocked) {
+        LWLockRelease(imcsHashLock);
+        imcsHashLocked = false;
+    }
+}
+
 void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
 {
     bool found = false;
@@ -177,12 +190,15 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         LWLockRelease(m_imcs_lock);
         return;
     }
+    volatile bool imcsHashLocked = true;
+    volatile bool imcsDescLocked = false;
 
     PG_TRY();
     {
         if (imcsDesc->imcuDescContext != NULL) {
             /* drop rowgroup\cu\cudesc, no need to drop RowGroups for primary node */
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
+            imcsDescLocked = true;
             Assert(relNode);
             if (imcsDesc->populateInShareMem && imcsDesc->shareMemPool != NULL) {
                 imcsDesc->shareMemPool->Destroy();
@@ -194,6 +210,7 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
             }
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
+            imcsDescLocked = false;
             MemoryContextDelete(imcsDesc->imcuDescContext);
         }
         if (!imcsDesc->isPartition) {
@@ -202,11 +219,13 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         (void)hash_search(m_relfilenode_hash, &imcsDesc->relfilenode, HASH_REMOVE, NULL);
         (void)hash_search(m_imcs_hash, &relOid, HASH_REMOVE, NULL);
         LWLockRelease(m_imcs_lock);
+        imcsHashLocked = false;
         pg_atomic_sub_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);
     }
     PG_CATCH();
     {
-        LWLockRelease(m_imcs_lock);
+        ReleaseImcsLocks(imcsDesc, m_imcs_lock, imcsDescLocked, imcsHashLocked);
+        FlushErrorState();
     }
     PG_END_TRY();
 }
@@ -220,11 +239,14 @@ void IMCSHashTable::ClearImcsMem(Oid relOid, RelFileNode* relNode)
         LWLockRelease(m_imcs_lock);
         return;
     }
+    volatile bool imcsHashLocked = true;
+    volatile bool imcsDescLocked = false;
 
     PG_TRY();
     {
         if (imcsDesc->imcsStatus == IMCS_POPULATE_ERROR && imcsDesc->imcuDescContext != NULL) {
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
+            imcsDescLocked = true;
             if (imcsDesc->populateInShareMem && imcsDesc->shareMemPool != NULL) {
                 imcsDesc->shareMemPool->Destroy();
                 imcsDesc->shareMemPool = NULL;
@@ -232,14 +254,17 @@ void IMCSHashTable::ClearImcsMem(Oid relOid, RelFileNode* relNode)
 
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
+            imcsDescLocked = false;
             MemoryContextDelete(imcsDesc->imcuDescContext);
             imcsDesc->imcuDescContext = NULL;
         }
         LWLockRelease(m_imcs_lock);
+        imcsHashLocked = false;
     }
     PG_CATCH();
     {
-        LWLockRelease(m_imcs_lock);
+        ReleaseImcsLocks(imcsDesc, m_imcs_lock, imcsDescLocked, imcsHashLocked);
+        FlushErrorState();
     }
     PG_END_TRY();
 }

@@ -1591,6 +1591,7 @@ bool IsLogicalSlot(const char *name)
  */
 static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
 {
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         if (IsLogicalSlot(cmd->slotname)) {
@@ -1614,6 +1615,7 @@ static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
             StringInfoData buf;
             StringInfoData msgbuf;
 
+            (void)MemoryContextSwitchTo(oldcontext);
             FlushErrorState();
 
             initStringInfo(&msgbuf);
@@ -1634,9 +1636,9 @@ static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
             ereport(LOG, (errmsg("replication slot \"%s\" does not exist, skipped", cmd->slotname)));
 
             ReadyForQuery_noblock(DestRemote, WalSndTimeout());
-            return;
+        } else {
+            PG_RE_THROW();
         }
-        PG_RE_THROW();
     }
     PG_END_TRY();
 }
