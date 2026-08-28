@@ -1443,7 +1443,7 @@ static bool CheckRelationColumnExists(Oid rel_oid, int2 attnum, Query* query, in
      * so retain the RTE-based lookup used by view recompilation. */
     attname = get_attname_from_targetlist(query, rel_oid, attnum);
     bool attnameFromTargetList = (attname != NULL);
-    if (attname == NULL && !oldDropped) {
+    if (attname == NULL) {
         attname = get_attname_from_rte(query, rel_oid, attnum);
     }
     if (attname == NULL) {
