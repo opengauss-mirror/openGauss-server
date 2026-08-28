@@ -110,8 +110,8 @@
 #include "commands/sequence.h"
 #include "client_logic/client_logic.h"
 
-/* Restore saved column identities before deparsing an invalid view. */
-static void restore_invalid_view_column_names(Query* query)
+/* Restore saved column identities before deparsing one invalid-view query. */
+static void restore_invalid_view_column_names_one(Query* query)
 {
     ListCell* lc = NULL;
     foreach (lc, query->targetList) {
@@ -141,6 +141,32 @@ static void restore_invalid_view_column_names(Query* query)
     query->starStart = NIL;
     query->starEnd = NIL;
     query->starOnly = NIL;
+}
+
+/* Recursively restore nested CTE and subquery definitions as well. */
+static void restore_invalid_view_column_names_recursive(Query* query)
+{
+    ListCell* lc = NULL;
+    restore_invalid_view_column_names_one(query);
+
+    foreach (lc, query->cteList) {
+        CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
+        if (cte->ctequery != NULL && IsA(cte->ctequery, Query)) {
+            restore_invalid_view_column_names_recursive((Query*)cte->ctequery);
+        }
+    }
+
+    foreach (lc, query->rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        if (rte->rtekind == RTE_SUBQUERY && rte->subquery != NULL) {
+            restore_invalid_view_column_names_recursive(rte->subquery);
+        }
+    }
+}
+
+static void restore_invalid_view_column_names(Query* query)
+{
+    restore_invalid_view_column_names_recursive(query);
 }
 
 /* ----------

@@ -141,7 +141,7 @@ CONTEXT:  referenced column: pg_get_viewdef
  b      | numeric |           | main    | 
 View definition:
  WITH tmp AS (
-         SELECT  *
+         SELECT tab.a, tab.b
            FROM tab
           WHERE tab.b = dependent_view2.fun1(1::numeric, 2::numeric)
         )
