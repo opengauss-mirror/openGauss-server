@@ -1215,7 +1215,7 @@ CONTEXT:  referenced column: pg_get_viewdef
  a      | integer |           | plain   | 
 View definition:
  WITH tmp AS (
-         SELECT  *
+         SELECT t1.a
            FROM t1
         )
  SELECT tmp.a
@@ -1294,7 +1294,7 @@ CONTEXT:  referenced column: pg_get_viewdef
  a      | integer |           | plain   | 
 View definition:
  SELECT __unnamed_subquery__.a
-   FROM ( SELECT  *
+   FROM ( SELECT t1.a
            FROM t1) __unnamed_subquery__;
 
 select * from v2;
