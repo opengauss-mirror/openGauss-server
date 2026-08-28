@@ -28,6 +28,8 @@
  */
 
 #include "optimizer/prep.h"
+#include "nodes/nodeFuncs.h"
+#include "parser/parse_relation.h"
 #include "nodes/makefuncs.h"
 #include "utils/int8.h"
 
@@ -81,6 +83,332 @@ void preprocess_rownum(PlannerInfo *root, Query *parse)
     }
 
     parse->jointree->quals = quals;
+}
+
+/*
+ * ROWNUM carry-through (Oracle-compatible): materialize ROWNUM at the scan
+ * and carry it through the outer ORDER BY / window as a plain column.
+ *
+ * A bare `rownum` in a SELECT list binds to the node that projects the final
+ * targetlist. When that node sits above a Sort/WindowAgg, `rownum` counts the
+ * post-reorder (output) arrival order instead of the base-scan order. To get
+ * the base-scan (Oracle-style) ordinal carried through, wrap the FROM + WHERE
+ * into an inner subquery that exposes `rownum` as a column; the inner subquery
+ * has no sort/window/agg, so its ROWNUM binds to the inner scan, and the outer
+ * Sort/WindowAgg carry the materialized value upward as ordinary data.
+ *
+ *   select rownum, row_number() over (order by amount desc) from t order by ...
+ * becomes
+ *   select q.__rn as rownum, row_number() over (order by q.amount desc)
+ *     from (select rownum as __rn, <needed cols> from t [where ...]) q
+ *   order by ...
+ *
+ * is_simple_subquery() refuses to flatten a subquery whose targetList contains
+ * ROWNUM, so the inner subquery survives pull-up. The gate below is narrow on
+ * purpose (bare rownum + ORDER BY or window; no plain agg / GROUP BY / DISTINCT
+ * / setops / sublinks) to avoid disturbing the grouped-rownum and
+ * aggregate-arg-rownum paths that already have their own handling.
+ */
+typedef struct RownumCarryVarMap {
+    Index varno;
+    AttrNumber varattno;
+    AttrNumber resno;
+} RownumCarryVarMap;
+
+typedef struct RownumCarryCtx {
+    List* varmap;        /* RownumCarryVarMap* list: outer var -> inner resno */
+    AttrNumber rn_resno; /* resno of the materialized rownum column in the inner subquery */
+} RownumCarryCtx;
+
+typedef struct RownumCollectCtx {
+    List* vars;          /* collected level-0 Vars (may contain duplicates) */
+    bool bad;            /* set true if an unsupported var (correlated / whole-row) is seen */
+} RownumCollectCtx;
+
+/* Look up the inner-tlist resno mapped to (varno, varattno); NULL if absent. */
+static RownumCarryVarMap* rownum_carry_find_map(List* varmap, Index varno, AttrNumber varattno)
+{
+    ListCell* lc = NULL;
+    
+    foreach (lc, varmap) {
+        RownumCarryVarMap* m = (RownumCarryVarMap*)lfirst(lc);
+        
+        if (m->varno == varno && m->varattno == varattno) {
+            return m;
+        }
+    }
+
+    return NULL;
+}
+
+/* Collect every same-query-level (varlevelsup==0) Var reachable from `node`. */
+static bool rownum_collect_walker(Node* node, void* context)
+{
+    RownumCollectCtx* ctx = (RownumCollectCtx*)context;
+    
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Var)) {
+        Var* v = (Var*)node;
+        
+        /* We only carry same-query Vars. Correlated refs (varlevelsup>0) and
+         * whole-row refs (varattno==0) need handling we deliberately skip. */
+        if (v->varlevelsup != 0 || v->varattno == 0) {
+            ctx->bad = true;
+            return true;
+        }
+
+        ctx->vars = lappend(ctx->vars, v);
+        
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool (*)())rownum_collect_walker, context);
+}
+
+/* Mutator: replace each bare Rownum with a Var over the materialized inner
+ * column, and remap each same-query Var to its exposed position in the inner
+ * subquery. Recurse into everything else (Aggref/WindowFunc args, etc.).
+ */
+static Node* rownum_carry_mutator(Node* node, void* context)
+{
+    RownumCarryCtx* ctx = (RownumCarryCtx*)context;
+
+    if (node == NULL) {
+        return NULL;
+    }
+
+    if (IsA(node, Rownum)) {
+        return (Node*)makeVar(1, ctx->rn_resno, exprType(node), -1, InvalidOid, 0);
+    }
+
+    if (IsA(node, Var)) {
+        Var* v = (Var*)node;
+
+        if (v->varlevelsup == 0) {
+            ListCell* lc = NULL;
+
+            foreach (lc, ctx->varmap) {
+                RownumCarryVarMap* m = (RownumCarryVarMap*)lfirst(lc);
+                
+                if (m->varno == v->varno && m->varattno == v->varattno) {
+                    return (Node*)makeVar(1, m->resno, v->vartype, v->vartypmod, v->varcollid, 0);
+                }
+            }
+
+            /* Not collected: shouldn't happen; leave an untouched copy. */
+            return (Node*)copyObject(v);
+        }
+
+        return (Node*)copyObject(v);
+    }
+
+    return expression_tree_mutator(node, rownum_carry_mutator, context);
+}
+
+/* Gate: SELECT only, and only when a bare ROWNUM in the targetlist would
+ * otherwise bind above a Sort/WindowAgg
+ */
+static bool is_rownum_carry_wrap(const Query* parse)
+{
+    if (parse->commandType != CMD_SELECT) {
+        return false;
+    }
+
+    if (parse->setOperations != NULL || parse->cteList != NULL || parse->hasSubLinks ||
+        parse->groupClause != NULL || parse->groupingSets != NULL || parse->distinctClause != NULL ||
+        parse->hasAggs || parse->rowMarks != NULL) {
+        return false;
+    }
+
+    if (!expression_contains_rownum((Node*)parse->targetList)) {
+        return false;
+    }
+
+    if (parse->sortClause == NULL && !parse->hasWindowFuncs) {
+        return false;
+    }
+
+    return true;
+}
+
+/* Collect the level-0 Vars the outer query still needs (targetlist + having +
+ * limit). Window/GROUP/ORDER/DISTINCT key columns are present as (junk)
+ * targetlist entries at this point, so the targetlist collection covers them.
+ * Returns false if an unsupported var (correlated / whole-row) is seen.
+ */
+static bool rownum_carry_collect_vars(Query* parse, RownumCollectCtx* collect)
+{
+    collect->vars = NIL;
+    collect->bad = false;
+
+    rownum_collect_walker((Node*)parse->targetList, collect);
+    
+    if (collect->bad) {
+        return false;
+    }
+
+    if (parse->havingQual != NULL) {
+        rownum_collect_walker(parse->havingQual, collect);
+        
+        if (collect->bad) {
+            return false;
+        }
+    }
+
+    if (parse->limitOffset != NULL) {
+        rownum_collect_walker(parse->limitOffset, collect);
+        
+        if (collect->bad) {
+            return false;
+        }
+    }
+    
+    if (parse->limitCount != NULL) {
+        rownum_collect_walker(parse->limitCount, collect);
+          
+        if (collect->bad) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* Dedup collected Vars by (varno, varattno);
+ * expose each once in the inner
+ * tlist and remember its position;
+ * append the materialized __rn column.
+ * Returns the built targetlist; *varmap_out
+ * and *rn_resno_out are filled.
+ */
+static List* rownum_carry_build_inner_tlist(List* vars,
+                                            List** varmap_out,
+                                            AttrNumber* rn_resno_out)
+{
+    List* inner_tlist = NIL;
+    List* varmap = NIL;
+    ListCell* lc = NULL;
+    AttrNumber resno = 1;
+    int  rc = 0;
+    char namebuf[32];
+
+    foreach (lc, vars) {
+        Var* v = (Var*)lfirst(lc);
+          
+        if (rownum_carry_find_map(varmap, v->varno, v->varattno) != NULL) {
+            continue;
+        }
+
+        RownumCarryVarMap* m = (RownumCarryVarMap*)palloc0(sizeof(RownumCarryVarMap));
+        m->varno = v->varno;
+        m->varattno = v->varattno;
+        m->resno = resno;
+        varmap = lappend(varmap, m);
+
+        rc = snprintf_s(namebuf, sizeof(namebuf), sizeof(namebuf) - 1, "col%d", resno);
+        securec_check_ss(rc, "\0", "\0");
+
+        TargetEntry* tle = makeTargetEntry((Expr*)copyObject(v), resno, pstrdup(namebuf), false);
+        inner_tlist = lappend(inner_tlist, tle);
+        resno++;
+    }
+
+    /* The materialized ROWNUM column,
+     * appended after the carried columns.
+     */
+    Rownum* rn = makeNode(Rownum);
+    rn->rownumcollid = InvalidOid;
+    rn->location = -1;
+    inner_tlist = lappend(inner_tlist, makeTargetEntry((Expr*)rn, resno, pstrdup("__rn"), false));
+
+    *varmap_out = varmap;
+    *rn_resno_out = resno;
+    
+    return inner_tlist;
+}
+
+/* Build the inner subquery: same FROM + WHERE, no sort/window/agg/group/
+ * distinct/limit (so its ROWNUM binds to the inner scan).
+ */
+static Query* rownum_carry_build_inner(const Query* parse, List* inner_tlist)
+{
+    Query* inner = makeNode(Query);
+    inner->commandType = CMD_SELECT;
+    inner->rtable = (List*)copyObject(parse->rtable);
+    inner->jointree = (FromExpr*)copyObject(parse->jointree);
+    inner->canSetTag = parse->canSetTag;
+    inner->can_push = parse->can_push;
+
+    if (parse->sql_statement != NULL) {
+        inner->sql_statement = pstrdup(parse->sql_statement);
+    }
+
+    inner->targetList = inner_tlist;
+    
+    return inner;
+}
+
+/* Remap the outer targetlist / having / limit onto the new subquery RTE:
+ * bare Rownum -> Var(__rn), base Vars -> Var(colN).
+ */
+static void rownum_carry_remap_outer(Query* parse, List* varmap, AttrNumber rn_resno)
+{
+    RownumCarryCtx ctx;
+    ctx.varmap = varmap;
+    ctx.rn_resno = rn_resno;
+
+    parse->targetList = (List*)expression_tree_mutator((Node*)parse->targetList, rownum_carry_mutator, &ctx);
+      
+    if (parse->havingQual != NULL) {
+        parse->havingQual = expression_tree_mutator(parse->havingQual, rownum_carry_mutator, &ctx);
+    }
+    
+    if (parse->limitOffset != NULL) {
+        parse->limitOffset = expression_tree_mutator(parse->limitOffset, rownum_carry_mutator, &ctx);
+    }
+    
+    if (parse->limitCount != NULL) {
+        parse->limitCount = expression_tree_mutator(parse->limitCount, rownum_carry_mutator, &ctx);
+    }
+}
+
+/* FROM becomes the subquery; WHERE has been moved into the inner subquery. */
+static void rownum_carry_install_wrapper(Query* parse, RangeTblEntry* rte)
+{
+    RangeTblRef* rtr = makeNode(RangeTblRef);
+      
+    rtr->rtindex = 1;
+    parse->rtable = list_make1(rte);
+    parse->jointree = makeFromExpr(list_make1(rtr), NULL);
+    parse->hasSubLinks = false; /* we bailed above if hasSubLinks was set */
+}
+
+void preprocess_rownum_carrythrough(PlannerInfo* root, Query* parse)
+{
+    RownumCollectCtx collect;
+    List *varmap = NIL;
+    List *inner_tlist = NIL;
+    RangeTblEntry *rte = NULL;
+    AttrNumber rn_resno = 0;
+    Query* inner = NULL;
+
+    if (!is_rownum_carry_wrap(parse)) {
+        return;
+    }
+
+    if (!rownum_carry_collect_vars(parse, &collect)) {
+        return;
+    }
+
+    inner_tlist = rownum_carry_build_inner_tlist(collect.vars, &varmap, &rn_resno);
+    inner       = rownum_carry_build_inner(parse, inner_tlist);
+    rte         = addRangeTableEntryForSubquery(NULL, inner, makeAlias("rownum_carry_inner", NIL), false, true);
+
+    rownum_carry_remap_outer(parse, varmap, rn_resno);
+    rownum_carry_install_wrapper(parse, rte);
 }
 
 static Node* process_rownum_boolexpr(PlannerInfo* root, Query* parse, BoolExpr* quals)
