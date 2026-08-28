@@ -405,6 +405,13 @@ print_backup_json_object(PQExpBuffer buf, pgBackup *backup)
                         "cumulative" : "differential", json_level, true);
     }
 
+    if (backup->encrypt_version > 0) {
+        json_add_key(buf, "encrypt-version", json_level);
+        appendPQExpBuffer(buf, "%u", backup->encrypt_version);
+        json_add_value(buf, "encrypt-algorithm", backup->encryptAlgorithm,
+                       json_level, true);
+    }
+
     json_add_value(buf, "wal", backup->stream ? "STREAM": "ARCHIVE",
                     json_level, true);
 
@@ -767,7 +774,9 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
                     "please clear disk space");
             } else {
                 backup->status = BACKUP_STATUS_ERROR;
-                write_backup(backup, true);
+                if (backup->encrypt_version == 0) {
+                    write_backup(backup, true);
+                }
             }
         }
         row->status = status2str(backup->status);

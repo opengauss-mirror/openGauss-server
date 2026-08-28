@@ -47,6 +47,7 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
         arg.stop_lsn = dest_backup->stop_lsn;
         arg.checksum_version = dest_backup->checksum_version;
         arg.backup_version = parse_program_version(dest_backup->program_version);
+        arg.encrypt_version = dest_backup->encrypt_version;
         arg.external_prefix = external_prefix;
         arg.hdr_map = &(dest_backup->hdr_map);
         arg.ret = 1;

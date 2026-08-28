@@ -280,6 +280,10 @@ struct pgBackup
     CompressAlg        compress_alg;
     int                compress_level;
 
+    /* Streaming backup encryption container metadata. */
+    uint32             encrypt_version;
+    char               encryptAlgorithm[32];
+
     /* Fields needed for compatibility check */
     uint32            block_size;
     uint32            wal_block_size;

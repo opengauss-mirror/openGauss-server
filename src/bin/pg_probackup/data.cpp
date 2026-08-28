@@ -1853,7 +1853,7 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
             join_path_components(from_fullpath, from_root, tmp_file->rel_path);
         }
 
-        in = fopen(from_fullpath, PG_BINARY_R);
+        in = EncFopen(from_fullpath, PG_BINARY_R);
         if (in == NULL)
             elog(ERROR, "Cannot open backup file \"%s\": %s", from_fullpath,
                 strerror(errno));
@@ -2416,7 +2416,7 @@ restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
 
     join_path_components(from_fullpath, from_root, dest_file->rel_path);
 
-    in = fopen(from_fullpath, PG_BINARY_R);
+    in = EncFopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
         elog(ERROR, "Cannot open backup file \"%s\": %s", from_fullpath,
          strerror(errno));
@@ -2491,7 +2491,7 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
 
     /* open backup file for write  */
     if (current.media_type != MEDIA_TYPE_OSS) {
-        out = fopen(to_fullpath, PG_BINARY_W);
+        out = EncFopen(to_fullpath, PG_BINARY_W);
         if (out == NULL)
         {
             if (file->external_dir_num)
@@ -2504,7 +2504,7 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
                 get_parent_directory(parent);
 
                 dir_create_dir(parent, DIR_PERMISSION);
-                out = fopen(to_fullpath, PG_BINARY_W);
+                out = EncFopen(to_fullpath, PG_BINARY_W);
                 if (out == NULL)
                     elog(ERROR, "Cannot open destination file \"%s\": %s",
                         to_fullpath, strerror(errno));
@@ -2537,7 +2537,7 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     else
     {
         /* open source file for read */
-        in = fopen(from_fullpath, PG_BINARY_R);
+        in = EncFopen(from_fullpath, PG_BINARY_R);
         if (in == NULL)
         {
             /* maybe deleted, it's not error in case of backup */
@@ -2744,7 +2744,7 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
     char    curr_page[BLCKSZ];
     bool    is_valid = true;
 
-    in = fopen(from_fullpath, PG_BINARY_R);
+    in = EncFopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
     {
         /*
@@ -2821,7 +2821,7 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
     /* should not be possible */
     Assert(!(backup_version >= 20400 && file->n_headers <= 0));
 
-    in = fopen(fullpath, PG_BINARY_R);
+    in = EncFopen(fullpath, PG_BINARY_R);
     if (in == NULL)
         elog(ERROR, "Cannot open file \"%s\": %s", fullpath, strerror(errno));
 
@@ -3227,7 +3227,7 @@ open_local_file_rw(const char *to_fullpath, char **out_buf, uint32 buf_size)
 {
     FILE *out = NULL;
     /* open backup file for write  */
-    out = fopen(to_fullpath, PG_BINARY_W);
+    out = EncFopen(to_fullpath, PG_BINARY_W);
     if (out == NULL) {
         elog(ERROR, "Cannot open backup file \"%s\": %s",
             to_fullpath, strerror(errno));
@@ -3271,7 +3271,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         /* force compress page if file is compressed file */
         calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
     }
-    in = fopen(from_fullpath, PG_BINARY_R);
+    in = EncFopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
     {
         /*
@@ -3439,7 +3439,7 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
         pthread_lock(&(hdr_map->mutex));
         restoreConfigFile(hdr_map->path);
     }
-    in = fopen(hdr_map->path, PG_BINARY_R);
+    in = EncFopen(hdr_map->path, PG_BINARY_R);
     if (!in)
     {
         elog(strict ? ERROR : WARNING, "Cannot open header file1 \"%s\": %s", hdr_map->path, strerror(errno));
@@ -3569,7 +3569,7 @@ write_page_headers(BackupPageHeader2 *headers, pgFile *file, HeaderMap *hdr_map,
     {
         elog(LOG, "Creating page header map \"%s\"", map_path);
 
-        hdr_map->fp = fopen(map_path, PG_BINARY_W);
+        hdr_map->fp = EncFopen(map_path, PG_BINARY_W);
         if (hdr_map->fp == NULL)
             elog(ERROR, "Cannot open header file \"%s\": %s",
                 map_path, strerror(errno));

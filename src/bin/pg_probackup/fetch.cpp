@@ -34,6 +34,12 @@ slurpFile(const char *fullpath, size_t *filesize, bool safe, fio_location locati
     struct stat statbuf;
     int         len;
 
+    /* files of an encrypted backup are read through their container */
+    if (!fio_is_remote(location) && EncryptPathIsEncrypted(fullpath) &&
+        EncFileIsContainer(fullpath)) {
+        return EncSlurpFile(fullpath, filesize, safe);
+        }
+
     if ((fd = fio_open(fullpath, O_RDONLY | PG_BINARY, location)) == -1)
     {
         if (safe)

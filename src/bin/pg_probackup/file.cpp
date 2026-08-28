@@ -310,7 +310,7 @@ FILE* fio_open_stream(char const* path, fio_location location)
     }
     else
     {
-        f = fopen(path, "rt");
+        f = EncFopen(path, "rt");
     }
     return f;
 }
@@ -519,9 +519,10 @@ FILE* fio_fopen(char const* path, char const* mode, fio_location location)
     }
     else
     {
-        f = fopen(path, mode);
+        f = (location == FIO_BACKUP_HOST) ? EncFopen(path, mode) : fopen(path, mode);
         if (f == NULL && strcmp(mode, PG_BINARY_R "+") == 0)
-            f = fopen(path, PG_BINARY_W);
+            f = (location == FIO_BACKUP_HOST) ? EncFopen(path, PG_BINARY_W) :
+                                               fopen(path, PG_BINARY_W);
     }
     return f;
 }

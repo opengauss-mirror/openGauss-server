@@ -2179,3 +2179,128 @@ int64 enc_expected_disk_size(const char *path, int64 plainSize)
            full * ((int64) key->chunkSize + GSPB_ENC_TAG_LEN) +
            (rest > 0 ? rest + GSPB_ENC_TAG_LEN : 0);
 }
+
+/*-------------------------------------------------------------------------
+ * option handling
+ *-------------------------------------------------------------------------
+ */
+
+static uint32 ParseChunkSize(const char *value)
+{
+    char   *end = NULL;
+    double  size = strtod(value, &end);
+    uint64  bytes = 0;
+
+    while (end != NULL && (*end == ' ' || *end == '\t')) {
+        end++;
+    }
+
+    if (end == NULL || size <= 0) {
+        elog(ERROR, "Invalid encryption chunk size \"%s\"", value);
+    }
+
+    if (*end == '\0') {
+        bytes = (uint64) size;
+    } else if (pg_strcasecmp(end, "kB") == 0) {
+        bytes = (uint64) (size * GSPB_ENC_SIZE_KB);
+    } else if (pg_strcasecmp(end, "MB") == 0) {
+        bytes = (uint64) (size * GSPB_ENC_SIZE_KB * GSPB_ENC_SIZE_KB);
+    } else {
+        elog(ERROR, "Invalid encryption chunk size \"%s\", "
+             "expected a plain byte count or a value with a kB/MB suffix", value);
+    }
+
+    if (bytes < GSPB_ENC_MIN_CHUNK || bytes > GSPB_ENC_MAX_CHUNK) {
+        elog(ERROR, "Encryption chunk size must be between %d and %d bytes",
+             GSPB_ENC_MIN_CHUNK, GSPB_ENC_MAX_CHUNK);
+    }
+
+    return (uint32) bytes;
+}
+
+void EncryptValidateOptions(const char *commandName)
+{
+    bool explicitKeyGiven = (g_encryptKeyArg != NULL && g_encryptKeyArg[0] != '\0') ||
+                              g_encryptKeyFile != NULL;
+    bool keyGiven = explicitKeyGiven || gs_getenv_r(GSPB_PASSPHRASE_ENV) != NULL;
+
+    if (g_encryptAlgorithmStr != NULL &&
+        pg_strcasecmp(g_encryptAlgorithmStr, "AES128") != 0) {
+        elog(ERROR, "Unsupported value \"%s\" for --encrypt-algorithm, "
+             "only AES128 is supported", g_encryptAlgorithmStr);
+    }
+
+    if (g_encryptKeySourceStr != NULL) {
+        if (pg_strcasecmp(g_encryptKeySourceStr, "keyfile") == 0) {
+            if (g_encryptKeyFile == NULL) {
+                elog(ERROR, "--encrypt-key-source=keyfile requires --encrypt-key-file");
+            }
+            if (g_encryptKeyArg != NULL) {
+                elog(ERROR, "--encrypt-key-source=keyfile cannot be used with --encrypt-key");
+            }
+        } else if (pg_strcasecmp(g_encryptKeySourceStr, "passphrase") == 0) {
+            if (g_encryptKeyFile != NULL) {
+                elog(ERROR, "--encrypt-key-source=passphrase cannot be used with --encrypt-key-file");
+            }
+        } else {
+            elog(ERROR, "Unsupported value \"%s\" for --encrypt-key-source, "
+                 "expected \"passphrase\" or \"keyfile\"", g_encryptKeySourceStr);
+        }
+    }
+
+    if (g_encryptKeyArg != NULL && g_encryptKeyFile != NULL) {
+        elog(ERROR, "Options --encrypt-key and --encrypt-key-file "
+             "cannot be used together");
+    }
+
+    if (g_newEncryptKeyArg != NULL && g_newEncryptKeyFile != NULL) {
+        elog(ERROR, "Options --new-encrypt-key and --new-encrypt-key-file "
+             "cannot be used together");
+    }
+
+    bool newKeyGiven = (g_newEncryptKeyArg != NULL && g_newEncryptKeyArg[0] != '\0') ||
+                         g_newEncryptKeyFile != NULL;
+    if (strcmp(commandName, "rekey") == 0 && !newKeyGiven) {
+        elog(ERROR, "rekey requires --new-encrypt-key or --new-encrypt-key-file");
+    }
+    if (strcmp(commandName, "rekey") != 0 && newKeyGiven) {
+        elog(ERROR, "Options --new-encrypt-key and --new-encrypt-key-file "
+             "can only be used with rekey");
+    }
+
+    if (g_encryptChunkSizeStr != NULL) {
+        if (!g_encryptEnabled) {
+            elog(ERROR, "Option --encrypt-chunk-size can only be used with --encrypt");
+        }
+        g_configuredChunkSize = ParseChunkSize(g_encryptChunkSizeStr);
+    }
+
+    if (strcmp(commandName, "backup") == 0 && explicitKeyGiven && !g_encryptEnabled &&
+        encrypt_dev_params == NULL) {
+        elog(ERROR, "An encryption key was provided for backup, but --encrypt was not specified");
+    }
+
+    if (g_encryptEnabled) {
+        if (strcmp(commandName, "backup") != 0) {
+            elog(ERROR, "Option --encrypt can only be used with the backup command");
+        }
+
+        if (!keyGiven && !isatty(fileno(stdin))) {
+            elog(ERROR, "Backup encryption is requested but no key is available. "
+                 "Use --encrypt-key, --encrypt-key-file or the %s environment variable",
+                 GSPB_PASSPHRASE_ENV);
+        }
+
+        if (current.media_type == MEDIA_TYPE_OSS) {
+            elog(ERROR, "Backup encryption is not supported together with S3 storage");
+        }
+        if (IsDssMode()) {
+            elog(ERROR, "Backup encryption with DSS requires a dedicated deployment "
+                 "implementation and is not supported in this version");
+        }
+        if (IsSshProtocol()) {
+            elog(ERROR, "Backup encryption with remote agent requires a dedicated "
+                 "deployment implementation and is not supported in this version");
+        }
+    }
+}

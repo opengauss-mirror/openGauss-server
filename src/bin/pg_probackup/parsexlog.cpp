@@ -1112,8 +1112,13 @@ static int read_requested_page(XLogReaderData *reader_data, char *readBuf,
     /* Read the requested page */
     if (reader_data->xlogfile != -1)
     {
-        if (fio_seek(reader_data->xlogfile, (off_t) targetPageOff) < 0)
-        {
+        /* streamed WAL of an encrypted backup is read through the container */
+        if (EncReadAt(reader_data->xlogpath, readBuf, XLOG_BLCKSZ,
+                        (off_t) targetPageOff)) {
+            return 0;
+        }
+
+        if (fio_seek(reader_data->xlogfile, (off_t) targetPageOff) < 0) {
             elog(WARNING, "Thread [%d]: Could not seek in WAL segment \"%s\": %s",
                 reader_data->thread_num, reader_data->xlogpath, strerror(errno));
             isreturn = true;
@@ -1733,8 +1738,8 @@ CleanupXLogPageRead(XLogReaderState *xlogreader)
     XLogReaderData *reader_data;
 
     reader_data = (XLogReaderData *) xlogreader->private_data;
-    if (reader_data->xlogfile >= 0)
-    {
+    EncCloseCachedReader();
+    if (reader_data->xlogfile >= 0) {
         fio_close(reader_data->xlogfile);
         reader_data->xlogfile = -1;
     }
