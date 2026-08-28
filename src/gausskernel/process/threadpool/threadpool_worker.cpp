@@ -616,6 +616,7 @@ bool ThreadPoolWorker::AttachSessionToThread()
     PG_CATCH();
     {
         /* if init xlog has error, should throw fatal this thread */
+        FlushErrorState();
         ereport(FATAL, (errmsg("init xlog failed, throw fatal for this thread")));
     }
     PG_END_TRY();

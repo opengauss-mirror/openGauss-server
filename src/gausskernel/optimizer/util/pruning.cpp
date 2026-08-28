@@ -2913,12 +2913,13 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
     FmgrInfo flinfo;
     FunctionCallInfoData fcinfo;
     bool ret = true;
+    volatile bool transformFailed = false;
     int i = 0;
     PG_TRY();
     {
-        List* args = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->args : ((OpExpr*)expr)->args;
-        Oid functionId = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
-        Oid inputcollid = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
+        List* args = IsA(expr, FuncExpr) ? ((FuncExpr*)expr)->args : ((OpExpr*)expr)->args;
+        Oid functionId = IsA(expr, FuncExpr) ? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
+        Oid inputcollid = IsA(expr, FuncExpr) ? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
         fmgr_info(functionId, &flinfo);
         InitFunctionCallInfoData(fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
         fcinfo.can_ignore = false;
@@ -2944,9 +2945,13 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
     }
     PG_CATCH();
     {
-        ret = false;
+        transformFailed = true;
+        FlushErrorState();
     }
     PG_END_TRY();
+    if (transformFailed) {
+        ret = false;
+    }
     FreeFunctionCallInfoData(fcinfo);
     return ret;
 }

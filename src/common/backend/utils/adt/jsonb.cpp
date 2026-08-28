@@ -47,6 +47,8 @@ Datum jsonb_in(PG_FUNCTION_ARGS)
 
     Datum result;
     MemoryContext oldcxt = CurrentMemoryContext;
+    volatile bool returnIgnored = false;
+    volatile Datum ignoredResult = (Datum)0;
     PG_TRY();
     {
         result = jsonb_from_cstring(json, strlen(json));
@@ -55,18 +57,20 @@ Datum jsonb_in(PG_FUNCTION_ARGS)
     {
         if (fcinfo->can_ignore) {
             (void)MemoryContextSwitchTo(oldcxt);
-            ErrorData *edata = CopyErrorData();
+            FlushErrorState();
             ereport(WARNING,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                      errmsg("invalid input syntax for type json")));
-            FlushErrorState();
-            FreeErrorData(edata);
-            PG_RETURN_DATUM((Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null")));
+            ignoredResult = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null"));
+            returnIgnored = true;
         } else {
             PG_RE_THROW();
         }
     }
     PG_END_TRY();
+    if (returnIgnored) {
+        PG_RETURN_DATUM(ignoredResult);
+    }
     return result;
 }
 

@@ -129,6 +129,7 @@ VectorBatch *distExecVecImport(VecForeignScanState *node)
 #endif
     for (batch->m_rows = 0; batch->m_rows < BatchMaxSize; batch->m_rows++) {
 retry:
+        volatile bool retryImport = false;
         PG_TRY();
         {
             /*
@@ -147,8 +148,7 @@ retry:
             if (TrySaveImportError(importState, node)) {
                 (void)MemoryContextSwitchTo(scanMcxt);
                 MemoryContextReset(scanMcxt);
-                CHECK_FOR_INTERRUPTS();
-                goto retry;
+                retryImport = true;
             } else {
                 /* clean copy state and re throw */
                 importState->isExceptionShutdown = true;
@@ -157,6 +157,10 @@ retry:
             }
         }
         PG_END_TRY();
+        if (retryImport) {
+            CHECK_FOR_INTERRUPTS();
+            goto retry;
+        }
 
         /*
          * Clean the current bulkload states.

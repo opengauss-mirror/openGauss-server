@@ -4540,9 +4540,7 @@ uint64 CopyFrom(CopyState cstate)
         bool is_EOF = false;
         bool has_hash = false;
         uint64 res_hash = 0;
-
-
-    retry_copy:
+        volatile bool retryCurrentRow = false;
 
         CHECK_FOR_INTERRUPTS();
 
@@ -4571,7 +4569,7 @@ uint64 CopyFrom(CopyState cstate)
             {
                 if (TrySaveImportError(cstate)) {
                     resetPerTupCxt = true;
-                    goto retry_copy;
+                    retryCurrentRow = true;
                 } else {
                     ereport(LOG,
                         (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("An error in Copy From cannot be catched.")));
@@ -4580,6 +4578,9 @@ uint64 CopyFrom(CopyState cstate)
             }
 
             PG_END_TRY();
+            if (retryCurrentRow) {
+                continue;
+            }
 #endif
             if (unlikely(is_EOF))
                 break;
@@ -4595,7 +4596,7 @@ uint64 CopyFrom(CopyState cstate)
                     {
                         if (TrySaveImportError(cstate)) {
                             resetPerTupCxt = true;
-                            goto retry_copy;
+                            retryCurrentRow = true;
                         } else {
                             ereport(LOG,
                                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4605,6 +4606,9 @@ uint64 CopyFrom(CopyState cstate)
                     }
 
                     PG_END_TRY();
+                    if (retryCurrentRow) {
+                        break;
+                    }
 
                     if (!is_EOF) {
                         if (cstate->rel->rd_att->constr)
@@ -4614,6 +4618,9 @@ uint64 CopyFrom(CopyState cstate)
                     } else {
                         break;
                     }
+                }
+                if (retryCurrentRow) {
+                    continue;
                 }
 
                 // we will reset and free all the used memory after inserting,
@@ -4628,7 +4635,7 @@ uint64 CopyFrom(CopyState cstate)
                      * we limit the batch by two factors:
                      * 1. tuple numbers ( <= maxValuesCount );
                      * 2. memroy batchRowsPtr is using;
-                     */
+                    */
                     for (int i = 0; i < maxValuesCount; ++i) {
                         PG_TRY();
                         {
@@ -4639,7 +4646,7 @@ uint64 CopyFrom(CopyState cstate)
                         {
                             if (TrySaveImportError(cstate)) {
                                 resetPerTupCxt = true;
-                                goto ctore_non_partition_retry_copy;
+                                retryCurrentRow = true;
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4649,6 +4656,9 @@ uint64 CopyFrom(CopyState cstate)
                         }
 
                         PG_END_TRY();
+                        if (retryCurrentRow) {
+                            break;
+                        }
 
                         if (!is_EOF) {
                             if (cstate->rel->rd_att->constr)
@@ -4674,8 +4684,6 @@ uint64 CopyFrom(CopyState cstate)
                     // so make resetPerTupCxt true.
                     // reset batchRowsPtr at the start of new loop.
                     //
-                    ctore_non_partition_retry_copy:
-
                     cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
                     resetPerTupCxt = true;
                     if (cstoreInsert->IsEnd())
@@ -4694,7 +4702,7 @@ uint64 CopyFrom(CopyState cstate)
                         {
                             if (TrySaveImportError(cstate)) {
                                 resetPerTupCxt = true;
-                                goto retry_copy;
+                                retryCurrentRow = true;
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4704,6 +4712,9 @@ uint64 CopyFrom(CopyState cstate)
                         }
 
                         PG_END_TRY();
+                        if (retryCurrentRow) {
+                            break;
+                        }
 
                         if (!is_EOF) {
                             if (cstate->rel->rd_att->constr)
@@ -4715,6 +4726,9 @@ uint64 CopyFrom(CopyState cstate)
                             cstorePartitionInsert->EndBatchInsert();
                             break;
                         }
+                    }
+                    if (retryCurrentRow) {
+                        continue;
                     }
 
                     resetPerTupCxt = true;
@@ -4738,7 +4752,7 @@ uint64 CopyFrom(CopyState cstate)
                     {
                         if(TrySaveImportError(cstate)) {
                             resetPerTupCxt = true;
-                            goto retry_copy;
+                            retryCurrentRow = true;
                         } else {
                             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                                     errmsg("An error in Copy From cannot be catched.")));
@@ -4747,6 +4761,9 @@ uint64 CopyFrom(CopyState cstate)
                     }
 
                     PG_END_TRY();
+                    if (retryCurrentRow) {
+                        break;
+                    }
                     if (!is_EOF) {
                         tsstoreInsert->batch_insert(values, nulls, hi_options, false);
                     } else {
@@ -4754,6 +4771,9 @@ uint64 CopyFrom(CopyState cstate)
                         tsstoreInsert->end_batch_insert();
                         break;
                     }
+                }
+                if (retryCurrentRow) {
+                    continue;
                 }
                 resetPerTupCxt = true;
                 if (true == endFlag) {
@@ -4807,7 +4827,7 @@ uint64 CopyFrom(CopyState cstate)
                             }
                         }
                         resetPerTupCxt = true;
-                        goto retry_copy;
+                        retryCurrentRow = true;
                     } else {
                         ereport(LOG,
                             (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4817,6 +4837,9 @@ uint64 CopyFrom(CopyState cstate)
                 }
 
                 PG_END_TRY();
+                if (retryCurrentRow) {
+                    continue;
+                }
 
                 if (is_EOF) {
                     break;

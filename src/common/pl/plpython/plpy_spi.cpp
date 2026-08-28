@@ -69,6 +69,7 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         int i;
@@ -151,9 +152,12 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
         Py_XDECREF(optr);
 
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     Assert(plan->plan != NULL);
     return (PyObject*)plan;
@@ -235,6 +239,7 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         PLyExecutionContext* exec_ctx = PLy_current_execution_context();
@@ -297,9 +302,12 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
         }
 
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     for (i = 0; i < nargs; i++) {
         if (!plan->args[i].out.d.typbyval && (plan->values[i] != PointerGetDatum(NULL))) {
@@ -329,6 +337,7 @@ static PyObject* PLy_spi_execute_query(char* query, long limit)
 
     PLy_spi_subtransaction_begin(oldcontext, oldowner);
 
+    volatile bool caughtError = false;
     PG_TRY();
     {
         PLyExecutionContext* exec_ctx = PLy_current_execution_context();
@@ -342,9 +351,12 @@ static PyObject* PLy_spi_execute_query(char* query, long limit)
     PG_CATCH();
     {
         PLy_spi_subtransaction_abort(oldcontext, oldowner);
-        return NULL;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     if (rv < 0) {
         Py_XDECREF(ret);
@@ -376,6 +388,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
         PLy_typeinfo_init(&args);
 
         oldcontext = CurrentMemoryContext;
+        volatile bool caughtError = false;
         PG_TRY();
         {
             MemoryContext oldcontext2;
@@ -406,15 +419,19 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
         PG_CATCH();
         {
             MemoryContextSwitchTo(oldcontext);
+            FlushErrorState();
             if (!PyErr_Occurred()) {
                 PLy_exception_set(g_plpy_t_context.PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
             }
             PLy_typeinfo_dealloc(&args);
             SPI_freetuptable(tuptable);
             Py_DECREF(result);
-            return NULL;
+            caughtError = true;
         }
         PG_END_TRY();
+        if (caughtError) {
+            return NULL;
+        }
 
         PLy_typeinfo_dealloc(&args);
         SPI_freetuptable(tuptable);
