@@ -11776,13 +11776,9 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     portal = CreatePortal("", true, true);
 
     MemoryContext oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
-    const char* saved_stmt_name = NULL;
     const char* cur_stmt_name = NULL;
-    if (ENABLE_CN_GPC) {
-        saved_stmt_name = (stmt_name[0] != '\0') ? pstrdup(stmt_name) : NULL;
-        cur_stmt_name = psrc->gpc.status.IsPrivatePlan() ? psrc->stmt_name : saved_stmt_name;
-    } else {
-        cur_stmt_name = psrc->stmt_name;
+    if (stmt_name[0] != '\0') {
+        cur_stmt_name = pstrdup(stmt_name);
     }
     (void)MemoryContextSwitchTo(oldContext);
 
