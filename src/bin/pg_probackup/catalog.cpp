@@ -2403,6 +2403,15 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
     if (backup->parent_backup != 0)
         fio_fprintf(out, "parent-backup-id = '%s'\n", base36enc(backup->parent_backup));
 
+    /*
+     * Written only for cumulative incremental backups: absent key means
+     * differential, and old gs_probackup versions merely warn on unknown keys.
+     */
+    if (backup->backup_mode == BACKUP_MODE_DIFF_PTRACK &&
+        backup->incrementalType == INCR_TYPE_CUMULATIVE) {
+        fio_fprintf(out, "incremental-type = 'cumulative'\n");
+    }
+
     /* print external directories list */
     if (backup->external_dir_str)
         fio_fprintf(out, "external-dirs = '%s'\n", backup->external_dir_str);
@@ -2714,6 +2723,7 @@ readBackupControlFile(const char *path)
     char    *stop_lsn = NULL;
     char    *status = NULL;
     char    *parent_backup = NULL;
+    char    *incrementalTypeStr = NULL;
     char    *merge_dest_backup = NULL;
     char    *program_version = NULL;
     char    *server_version = NULL;
@@ -2748,6 +2758,7 @@ readBackupControlFile(const char *path)
         {'b', 0, "stream",				&backup->stream, SOURCE_FILE_STRICT},
         {'s', 0, "status",				&status, SOURCE_FILE_STRICT},
         {'s', 0, "parent-backup-id",	&parent_backup, SOURCE_FILE_STRICT},
+        {'s', 0, "incremental-type",    &incrementalTypeStr, SOURCE_FILE_STRICT},
         {'s', 0, "merge-dest-id",		&merge_dest_backup, SOURCE_FILE_STRICT},
         {'s', 0, "compress-alg",		&compress_alg, SOURCE_FILE_STRICT},
         {'u', 0, "compress-level",		&backup->compress_level, SOURCE_FILE_STRICT},
@@ -2833,8 +2844,17 @@ readBackupControlFile(const char *path)
         backup->parent_backup = base36dec(parent_backup);
     }
 
-    if (merge_dest_backup)
-    {
+    if (incrementalTypeStr) {
+        if (pg_strcasecmp(incrementalTypeStr, "cumulative") == 0) {
+            backup->incrementalType = INCR_TYPE_CUMULATIVE;
+        } else if (pg_strcasecmp(incrementalTypeStr, "differential") != 0) {
+            elog(WARNING, "Invalid INCREMENTAL_TYPE \"%s\" in control file \"%s\", "
+                 "assuming differential", incrementalTypeStr, path);
+        }
+        free(incrementalTypeStr);
+    }
+
+    if (merge_dest_backup) {
         backup->merge_dest_backup = base36dec(merge_dest_backup);
     }
 
@@ -3044,6 +3064,7 @@ pgBackupInit(pgBackup *backup)
     backup->stream = false;
     backup->from_replica = false;
     backup->parent_backup = INVALID_BACKUP_ID;
+    backup->incrementalType = INCR_TYPE_DIFFERENTIAL;
     backup->merge_dest_backup = INVALID_BACKUP_ID;
     backup->parent_backup_link = NULL;
     backup->program_version[0] = '\0';

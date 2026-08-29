@@ -89,6 +89,11 @@ int        rw_timeout = 0;
 bool         backup_logs = false;
 bool         backup_replslots = false;
 bool         smooth_checkpoint;
+time_t      g_requestedParentBackupId = INVALID_BACKUP_ID;
+bool        g_fromFull = false;
+IncrementalType g_incrementalType = INCR_TYPE_DIFFERENTIAL;
+bool        g_cumulativeFallbackError = true;
+static char *g_cumulativeFallbackStr = NULL;
 char        *remote_agent;
 static char *backup_note = NULL;
 static char *oss_status_string = NULL;
@@ -180,6 +185,11 @@ static bool help_opt = false;
 
 static void opt_incr_restore_mode(ConfigOption *opt, const char *arg);
 static void opt_backup_mode(ConfigOption *opt, const char *arg);
+/* backup ids are printed and parsed as base36, see base36enc() */
+#define BACKUP_ID_RADIX 36
+
+static void OptParentBackupId(ConfigOption *opt, const char *arg);
+static void OptIncrementalType(ConfigOption *opt, const char *arg);
 static void opt_show_format(ConfigOption *opt, const char *arg);
 static void opt_media_type(ConfigOption *opt, const char *arg);
 
@@ -202,6 +212,10 @@ static ConfigOption cmd_options[] =
     { 'b', 133, "no-sync",            &no_sync,            SOURCE_CMD_STRICT },
     { 'b', 180, "backup-pg-log",    &backup_logs,        SOURCE_CMD_STRICT },
     { 'f', 'b', "backup-mode",        (void *)opt_backup_mode,    SOURCE_CMD_STRICT },
+    { 'f', 242, "parent-backup-id",   (void *)OptParentBackupId, SOURCE_CMD_STRICT },
+    { 'b', 244, "from-full",          &g_fromFull,           SOURCE_CMD_STRICT },
+    { 'f', 245, "incremental-type",   (void *)OptIncrementalType, SOURCE_CMD_STRICT },
+    { 's', 246, "cumulative-fallback", &g_cumulativeFallbackStr, SOURCE_CMD_STRICT },
     { 'b', 'C', "smooth-checkpoint", &smooth_checkpoint,    SOURCE_CMD_STRICT },
     { 's', 'S', "slot",                &replication_slot,    SOURCE_CMD_STRICT },
     { 'b', 181, "temp-slot",        &temp_slot,            SOURCE_CMD_STRICT },
@@ -612,6 +626,40 @@ static int do_actual_operate()
                     elog(ERROR, "required parameter not specified: BACKUP_MODE "
                          "(-b, --backup-mode)");
 
+                /* --from-full is an alias for --incremental-type=cumulative */
+                if (g_fromFull) {
+                    g_incrementalType = INCR_TYPE_CUMULATIVE;
+                }
+
+                if (g_requestedParentBackupId != INVALID_BACKUP_ID &&
+                    g_incrementalType == INCR_TYPE_CUMULATIVE) {
+                    elog(ERROR, "Option --parent-backup-id cannot be used together "
+                         "with --from-full or --incremental-type=cumulative");
+                }
+
+                if (current.backup_mode == BACKUP_MODE_FULL &&
+                    (g_requestedParentBackupId != INVALID_BACKUP_ID ||
+                     g_incrementalType == INCR_TYPE_CUMULATIVE)) {
+                    elog(ERROR, "Options --parent-backup-id, --from-full and --incremental-type "
+                         "can only be used with an incremental backup");
+                }
+
+                if (g_cumulativeFallbackStr != NULL) {
+                    if (g_incrementalType != INCR_TYPE_CUMULATIVE) {
+                        elog(ERROR, "Option --cumulative-fallback can only be used "
+                             "with --incremental-type=cumulative or --from-full");
+                    }
+
+                    if (pg_strcasecmp(g_cumulativeFallbackStr, "error") == 0) {
+                        g_cumulativeFallbackError = true;
+                    } else if (pg_strcasecmp(g_cumulativeFallbackStr, "differential") == 0) {
+                        g_cumulativeFallbackError = false;
+                    } else {
+                        elog(ERROR, "Invalid cumulative-fallback \"%s\": "
+                             "must be \"differential\" or \"error\"", g_cumulativeFallbackStr);
+                    }
+                }
+
                 res = do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs, backup_replslots);
                 break;
             }
@@ -752,8 +800,14 @@ static void check_unlimit_stack_size(void)
 
 static void check_backid_option(char *command_name)
 {
-    if (backup_id_string != NULL)
-    {
+    if ((g_requestedParentBackupId != INVALID_BACKUP_ID || g_fromFull ||
+         g_incrementalType != INCR_TYPE_DIFFERENTIAL || g_cumulativeFallbackStr != NULL) &&
+        backup_subcmd != BACKUP_CMD) {
+        elog(ERROR, "Options --parent-backup-id, --from-full, --incremental-type and "
+             "--cumulative-fallback can only be used with the backup command");
+    }
+
+    if (backup_id_string != NULL) {
         if (backup_subcmd != RESTORE_CMD &&
             backup_subcmd != VALIDATE_CMD &&
             backup_subcmd != DELETE_CMD &&
@@ -995,6 +1049,38 @@ static void
 opt_backup_mode(ConfigOption *opt, const char *arg)
 {
     current.backup_mode = parse_backup_mode(arg);
+}
+
+static void OptParentBackupId(ConfigOption *opt, const char *arg)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if (arg[0] == 0 ||
+        strspn(arg, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") != strlen(arg)) {
+        elog(ERROR, "Invalid parent-backup-id '%s'", arg);
+    }
+
+    errno = 0;
+    value = strtoul(arg, &end, BACKUP_ID_RADIX);
+    if (errno == ERANGE || *end != 0 || value == INVALID_BACKUP_ID ||
+        value > (unsigned long)PG_INT64_MAX) {
+        elog(ERROR, "Invalid parent-backup-id '%s'", arg);
+    }
+
+    g_requestedParentBackupId = (time_t)value;
+}
+
+static void OptIncrementalType(ConfigOption *opt, const char *arg)
+{
+    if (pg_strcasecmp(arg, "differential") == 0) {
+        g_incrementalType = INCR_TYPE_DIFFERENTIAL;
+    } else if (pg_strcasecmp(arg, "cumulative") == 0) {
+        g_incrementalType = INCR_TYPE_CUMULATIVE;
+    } else {
+        elog(ERROR, "Invalid incremental-type \"%s\": "
+             "must be \"differential\" or \"cumulative\"", arg);
+    }
 }
 
 static void

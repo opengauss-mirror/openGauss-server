@@ -95,6 +95,18 @@ typedef enum BackupMode
     BACKUP_MODE_FULL            /* full backup */
 } BackupMode;
 
+/*
+ * Parent selection policy of a PTRACK incremental backup.
+ * Kept out of BackupMode: old gs_probackup versions fail hard on unknown
+ * backup-mode values in backup.control, while unknown keys only produce
+ * a warning, so this is stored as a separate 'incremental-type' key.
+ */
+typedef enum IncrementalType
+{
+    INCR_TYPE_DIFFERENTIAL = 0, /* parent is the latest backup of the chain (default) */
+    INCR_TYPE_CUMULATIVE        /* parent is the latest valid FULL backup */
+} IncrementalType;
+
 typedef enum ShowFormat
 {
     SHOW_PLAIN,
@@ -282,6 +294,8 @@ struct pgBackup
                                      * Which is basic backup for this
                                      * incremental backup. */
     pgBackup        *parent_backup_link;
+    IncrementalType incrementalType;    /* how the parent of this PTRACK
+                                          * backup was selected */
     char            *external_dir_str;    /* List of external directories,
                                          * separated by ':' */
     char            *root_dir;        /* Full path for root backup directory:

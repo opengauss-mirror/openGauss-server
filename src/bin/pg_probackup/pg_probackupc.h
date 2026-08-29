@@ -56,6 +56,10 @@ extern int        rw_timeout;
 
 /* backup options */
 extern bool        smooth_checkpoint;
+extern time_t      g_requestedParentBackupId;
+extern bool        g_fromFull;
+extern IncrementalType g_incrementalType;
+extern bool        g_cumulativeFallbackError;
 
 /* list of dirs which will not to be backuped
    it will be backuped up in external dirs  */
