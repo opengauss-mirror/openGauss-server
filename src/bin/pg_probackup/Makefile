@@ -10,7 +10,7 @@
 PROGRAM = gs_probackup
 
 # utils
-OBJS = common_cipher.o configuration.o json.o logger.o \
+OBJS = common_cipher.o backup_encrypt.o configuration.o json.o logger.o \
 	parray.o pgut.o thread.o remote.o file.o file_gz.o psprintf.o \
         atomics.o s_lock.o
 
@@ -51,7 +51,7 @@ PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subd
 LDFLAGS += -L../../lib/page_compression
 PG_CPPFLAGS = -I../../lib/page_compression -I../../src/common/port -I$(AWS_SDK_INCLUDE_PATH)
 LIBS += -lpagecompression -lzstd
-override CPPFLAGS := -DFRONTEND $(CPPFLAGS) $(PG_CPPFLAGS) -DHAVE_LIBZ
+override CPPFLAGS := -DFRONTEND -DGS_PROBACKUP_BUILD $(CPPFLAGS) $(PG_CPPFLAGS) -DHAVE_LIBZ
 PG_LIBS_INTERNAL = $(libpq_pgport) ${PTHREAD_CFLAGS}
 
 # add oss .h
