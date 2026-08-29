@@ -17,6 +17,7 @@ static void help_validate(void);
 static void help_show(void);
 static void help_delete(void);
 static void help_merge(void);
+static void HelpRekey(void);
 static void help_set_backup(void);
 static void help_set_config(void);
 static void help_show_config(void);
@@ -39,34 +40,37 @@ bool is_no_help_command(const char *command)
 
 void help_command(const char *command)
 {
-    if (strcmp(command, "init") == 0)
+    if (strcmp(command, "init") == 0) {
         help_init();
-    else if (strcmp(command, "backup") == 0)
+    } else if (strcmp(command, "backup") == 0) {
         help_backup();
-    else if (strcmp(command, "restore") == 0)
+    } else if (strcmp(command, "restore") == 0) {
         help_restore();
-    else if (strcmp(command, "validate") == 0)
+    } else if (strcmp(command, "validate") == 0) {
         help_validate();
-    else if (strcmp(command, "show") == 0)
+    } else if (strcmp(command, "show") == 0) {
         help_show();
-    else if (strcmp(command, "delete") == 0)
+    } else if (strcmp(command, "delete") == 0) {
         help_delete();
-    else if (strcmp(command, "merge") == 0)
+    } else if (strcmp(command, "merge") == 0) {
         help_merge();
-    else if (strcmp(command, "set-backup") == 0)
+    } else if (strcmp(command, "rekey") == 0) {
+        HelpRekey();
+    } else if (strcmp(command, "set-backup") == 0) {
         help_set_backup();
-    else if (strcmp(command, "set-config") == 0)
+    } else if (strcmp(command, "set-config") == 0) {
         help_set_config();
-    else if (strcmp(command, "show-config") == 0)
+    } else if (strcmp(command, "show-config") == 0) {
         help_show_config();
-    else if (strcmp(command, "add-instance") == 0)
+    } else if (strcmp(command, "add-instance") == 0) {
         help_add_instance();
-    else if (strcmp(command, "del-instance") == 0)
+    } else if (strcmp(command, "del-instance") == 0) {
         help_del_instance();
-    else if (is_no_help_command(command))
+    } else if (is_no_help_command(command)) {
         printf(_("No help page for \"%s\" command. Try gs_probackup help\n"), command);
-    else
+    } else {
         printf(_("Unknown command \"%s\". Try gs_probackup help\n"), command);
+    }
     exit(0);
 }
 
@@ -131,6 +135,10 @@ void help_pg_probackup(void)
     printf(_("                 [--s3-status=s3|local]\n"));
     printf(_("                 [--help]\n"));
 
+    printf(_("\n  %s rekey -B backup-path --instance=instance_name -i backup-id\n"), PROGRAM_NAME);
+    printf(_("                 [--encrypt-key=old-key | --encrypt-key-file=old-key-file]\n"));
+    printf(_("                 [--new-encrypt-key=new-key | --new-encrypt-key-file=new-key-file]\n"));
+
     printf(_("\n  %s show-config -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
     printf(_("                 [--format=plain|json]\n"));
     printf(_("                 [--media-type=type] [--access-id=ak] [--access-key=sk]\n"));
@@ -168,6 +176,9 @@ void help_pg_probackup(void)
     printf(_("                 [--compress-algorithm=compress-algorithm]\n"));
     printf(_("                 [--compress-level=compress-level]\n"));
     printf(_("                 [--compress]\n"));
+    printf(_("                 [--encrypt [--encrypt-algorithm=AES128]]\n"));
+    printf(_("                 [--encrypt-key=key | --encrypt-key-file=path]\n"));
+    printf(_("                 [--encrypt-chunk-size=size]\n"));
     printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
     printf(_("                 [-t rwtimeout]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
@@ -367,6 +378,16 @@ static void help_set_config(void)
     printf(_("  -E, --external-dirs=external-directories-paths\n"));
     printf(_("                                   backup some directories not from pgdata \n"));
     printf(_("                                   (example: --external-dirs=/tmp/dir1:/tmp/dir2)\n"));
+    printf(_("      --encrypt                    encrypt backup files while they are written (AES-128-GCM)\n"));
+    printf(_("      --encrypt-algorithm=algorithm\n"));
+    printf(_("                                   encryption algorithm; only AES128 is supported\n"));
+    printf(_("      --encrypt-key-source=source passphrase or keyfile (default: passphrase)\n"));
+    printf(_("      --encrypt-key=key            encryption passphrase; scrubbed from process arguments\n"));
+    printf(_("      --encrypt-key-file=path      read key material from a regular 0600 file\n"));
+    printf(_("                                   GS_PROBACKUP_PASSPHRASE or TTY input can be used instead\n"));
+    printf(_("      --encrypt-chunk-size=size    authenticated chunk size, 64kB..16MB (default: 1MB)\n"));
+    printf(_("                                   encryption with S3 storage is not supported in this version\n"));
+    printf(_("      --with-encryption/...        deprecated; read-only legacy encrypted backup options\n"));
     printf(_("      --archive-timeout=timeout    wait timeout for WAL segment archiving (default: 5min)\n"));
 
     printf(_("\n  Retention options:\n"));
@@ -536,6 +557,9 @@ static void help_backup(void)
     printf(_("                 [--compress-algorithm=compress-algorithm]\n"));
     printf(_("                 [--compress-level=compress-level]\n"));
     printf(_("                 [--compress]\n"));
+    printf(_("                 [--encrypt [--encrypt-algorithm=AES128]]\n"));
+    printf(_("                 [--encrypt-key=key | --encrypt-key-file=path]\n"));
+    printf(_("                 [--encrypt-chunk-size=size]\n"));
     printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
     printf(_("                 [-t rw-timeout]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
@@ -770,6 +794,15 @@ static void help_restore(void)
     printf(_("      --log-rotation-age=log-rotation-age\n"));
     printf(_("                                   rotate logfile if its age exceeds this value; 0 disables; (default: 0)\n"));
     printf(_("                                   available units: 'ms', 's', 'min', 'h', 'd' (default: min)\n\n"));
+}
+
+static void HelpRekey(void)
+{
+    printf(_("\n%s rekey -B backup-path --instance=instance_name -i backup-id\n"), PROGRAM_NAME);
+    printf(_("                 [--encrypt-key=old-key | --encrypt-key-file=old-key-file]\n"));
+    printf(_("                 [--new-encrypt-key=new-key | --new-encrypt-key-file=new-key-file]\n\n"));
+    printf(_("  Rewrap the backup data key without rewriting backup data files.\n"));
+    printf(_("  The old key can also be supplied with GS_PROBACKUP_PASSPHRASE.\n"));
 }
 
 static void help_merge(void)

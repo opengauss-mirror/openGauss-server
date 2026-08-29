@@ -14,5 +14,6 @@
 #include "pg_probackupa.h"
 #include "pg_probackupb.h"
 #include "pg_probackupc.h"
+#include "backup_encrypt.h"
 
 #endif /* PG_PROBACKUP_H */

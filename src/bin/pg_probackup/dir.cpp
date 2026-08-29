@@ -278,8 +278,8 @@ pgFileGetCRC(const char *file_path, bool use_crc32c, bool missing_ok)
 
     INIT_FILE_CRC32(use_crc32c, crc);
 
-    /* open file in binary read mode */
-    fp = fopen(file_path, PG_BINARY_R);
+    /* open file in binary read mode, decrypting when it belongs to a backup */
+    fp = EncFopen(file_path, PG_BINARY_R);
     if (fp == NULL)
     {
         if (is_file_delete(errno))
@@ -2059,11 +2059,17 @@ write_database_map(pgBackup *backup, parray *database_map, parray *backup_files_
             database_map_path, strerror(errno));
     }
 
+    /* database names are metadata worth protecting */
+    if (!EncEncryptFileInplace(database_map_path))
+        elog(ERROR, "Cannot encrypt database map \"%s\"", database_map_path);
+
     /* Add metadata to backup_content.control */
     file = pgFileNew(database_map_path, DATABASE_MAP, true, 0,
         FIO_BACKUP_HOST);
     if (file != nullptr) {
         file->crc = pgFileGetCRC(database_map_path, true, false);
+        /* sizes are accounted in plaintext bytes */
+        file->size = enc_plain_size(database_map_path, file->size);
         file->write_size = file->size;
         file->uncompressed_size = file->read_size;
 

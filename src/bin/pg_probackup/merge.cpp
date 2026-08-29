@@ -1107,10 +1107,15 @@ static void merge_rename(pgBackup *dest_backup,
     */
     if (dest_backup)
     {
+        char *oldRoot = pgut_strdup(full_backup->root_dir);
+
         elog(LOG, "Rename %s to %s", full_backup->root_dir, dest_backup->root_dir);
         if (rename(full_backup->root_dir, dest_backup->root_dir) == -1)
             elog(ERROR, "Could not rename directory \"%s\" to \"%s\": %s",
                 full_backup->root_dir, dest_backup->root_dir, strerror(errno));
+
+        EncryptBackupRenamed(oldRoot, dest_backup->root_dir);
+        pg_free(oldRoot);
 
         /* update root_dir after rename */
         pg_free(full_backup->root_dir);
@@ -1524,7 +1529,7 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
     securec_check_ss_c(nRet, "\0", "\0");
 
     /* open temp file */
-    out = fopen(to_fullpath_tmp1, PG_BINARY_W);
+    out = EncFopenStaged(to_fullpath_tmp1);
     if (out == NULL)
         elog(ERROR, "Cannot open merge target file \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
@@ -1535,8 +1540,11 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
                       use_bitmap, NULL, InvalidXLogRecPtr, NULL,
                       /* when retrying merge header map cannot be trusted */
                       is_retry ? false : true);
+    if (!EncSealStagedFile(out, to_fullpath_tmp1)) {
+        elog(ERROR, "Cannot seal merge staging file \"%s\"", to_fullpath_tmp1);
+    }
     if (fclose(out) != 0)
-        elog(ERROR, "Cannot close file \"%s\": %s",
+        elog(ERROR, "Cannot close anonymous merge staging file for \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
 
     pg_free(buffer);

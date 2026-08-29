@@ -640,6 +640,11 @@ copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
     } else {
         writeControlFile(&ControlFile, to_fullpath, to_location);
     }
+
+    /* pg_control is written through its own path, encrypt it afterwards */
+    if (to_location == FIO_BACKUP_HOST && !EncEncryptFileInplace(to_fullpath)) {
+        elog(ERROR, "Cannot encrypt \"%s\"", to_fullpath);
+    }
     if (current.media_type == MEDIA_TYPE_OSS) {
         uploadConfigFile(to_fullpath, to_fullpath);
     }

@@ -874,7 +874,9 @@ delete_backup_files(pgBackup *backup)
     * Update STATUS to BACKUP_STATUS_DELETING in preparation for the case which
     * the error occurs before deleting all backup files.
     */
-    write_backup_status(backup, BACKUP_STATUS_DELETING, instance_name, false);
+    if (backup->encrypt_version == 0) {
+        write_backup_status(backup, BACKUP_STATUS_DELETING, instance_name, false);
+    }
 
     /* list files to be deleted */
     files = parray_new();
