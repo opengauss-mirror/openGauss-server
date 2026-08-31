@@ -77,6 +77,10 @@ SUBDIRS = \
 	rack_dev	\
 	ogai
 
+ifneq ($(findstring -DENABLE_NEON,$(CPPFLAGS) $(CFLAGS) $(CXXFLAGS)),)
+SUBDIRS += neon_oggit
+endif
+
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo
 else
