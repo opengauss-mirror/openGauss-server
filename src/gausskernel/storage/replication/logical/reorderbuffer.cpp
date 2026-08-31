@@ -140,6 +140,10 @@ static void ReorderBufferRestoreCleanup(ReorderBuffer *rb, ReorderBufferTXN *txn
 
 static void ReorderBufferFreeSnap(ReorderBuffer *rb, Snapshot snap);
 static Snapshot ReorderBufferCopySnap(ReorderBuffer *rb, Snapshot orig_snap, ReorderBufferTXN *txn, CommandId cid);
+static void ReorderBufferReturnHeapChange(ReorderBuffer *rb, ReorderBufferChange *change);
+static void ReorderBufferReturnDDLChange(ReorderBufferChange *change);
+static void ReorderBufferReturnSnapshotChange(ReorderBuffer *rb, ReorderBufferChange *change);
+static void ReorderBufferReturnUHeapChange(ReorderBuffer *rb, ReorderBufferChange *change);
 
 /* ---------------------------------------
  * toast reassembly support
@@ -323,6 +327,11 @@ static Size ReorderBufferChangeSize(ReorderBufferChange *change)
             if (change->data.tp.oldtuple) {
                 sz += sizeof(HeapTupleData) + change->data.tp.oldtuple->tuple.t_len;
             }
+#ifdef ENABLE_NEON
+            if (change->data.tp.changed_attrs_valid) {
+                sz += sizeof(AttrNumber) * change->data.tp.nchanged_attrs;
+            }
+#endif
             break;
         }
         case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT: {
@@ -395,29 +404,13 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
         case REORDER_BUFFER_CHANGE_INSERT:
         case REORDER_BUFFER_CHANGE_UPDATE:
         case REORDER_BUFFER_CHANGE_DELETE:
-            if (change->data.tp.newtuple) {
-                ReorderBufferReturnTupleBuf(rb, change->data.tp.newtuple);
-                change->data.tp.newtuple = NULL;
-            }
-
-            if (change->data.tp.oldtuple) {
-                ReorderBufferReturnTupleBuf(rb, change->data.tp.oldtuple);
-                change->data.tp.oldtuple = NULL;
-            }
+            ReorderBufferReturnHeapChange(rb, change);
             break;
         case REORDER_BUFFER_CHANGE_DDL:
-            if (change->data.ddl.prefix != NULL)
-                pfree(change->data.ddl.prefix);
-            change->data.ddl.prefix = NULL;
-            if (change->data.ddl.message != NULL)
-                pfree(change->data.ddl.message);
-            change->data.ddl.message = NULL;
+            ReorderBufferReturnDDLChange(change);
             break;
         case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
-            if (change->data.snapshot) {
-                ReorderBufferFreeSnap(rb, change->data.snapshot);
-                change->data.snapshot = NULL;
-            }
+            ReorderBufferReturnSnapshotChange(rb, change);
             break;
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
             break;
@@ -426,15 +419,7 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
         case REORDER_BUFFER_CHANGE_UINSERT:
         case REORDER_BUFFER_CHANGE_UUPDATE:
         case REORDER_BUFFER_CHANGE_UDELETE:
-            if (change->data.utp.newtuple) {
-                ReorderBufferReturnTupleBuf(rb, (ReorderBufferTupleBuf*)change->data.utp.newtuple);
-                change->data.utp.newtuple = NULL;
-            }
-
-            if (change->data.utp.oldtuple) {
-                ReorderBufferReturnTupleBuf(rb, (ReorderBufferTupleBuf*)change->data.utp.oldtuple);
-                change->data.utp.oldtuple = NULL;
-            }
+            ReorderBufferReturnUHeapChange(rb, change);
             break;
         case REORDER_BUFFER_CHANGE_TRUNCATE:
             break;
@@ -442,6 +427,56 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
 
     pfree(change);
     change = NULL;
+}
+
+static void ReorderBufferReturnHeapChange(ReorderBuffer *rb, ReorderBufferChange *change)
+{
+    if (change->data.tp.newtuple) {
+        ReorderBufferReturnTupleBuf(rb, change->data.tp.newtuple);
+        change->data.tp.newtuple = NULL;
+    }
+
+    if (change->data.tp.oldtuple) {
+        ReorderBufferReturnTupleBuf(rb, change->data.tp.oldtuple);
+        change->data.tp.oldtuple = NULL;
+    }
+#ifdef ENABLE_NEON
+    if (change->data.tp.changed_attrs != NULL) {
+        pfree(change->data.tp.changed_attrs);
+        change->data.tp.changed_attrs = NULL;
+    }
+#endif
+}
+
+static void ReorderBufferReturnDDLChange(ReorderBufferChange *change)
+{
+    if (change->data.ddl.prefix != NULL)
+        pfree(change->data.ddl.prefix);
+    change->data.ddl.prefix = NULL;
+    if (change->data.ddl.message != NULL)
+        pfree(change->data.ddl.message);
+    change->data.ddl.message = NULL;
+}
+
+static void ReorderBufferReturnSnapshotChange(ReorderBuffer *rb, ReorderBufferChange *change)
+{
+    if (change->data.snapshot) {
+        ReorderBufferFreeSnap(rb, change->data.snapshot);
+        change->data.snapshot = NULL;
+    }
+}
+
+static void ReorderBufferReturnUHeapChange(ReorderBuffer *rb, ReorderBufferChange *change)
+{
+    if (change->data.utp.newtuple) {
+        ReorderBufferReturnTupleBuf(rb, (ReorderBufferTupleBuf*)change->data.utp.newtuple);
+        change->data.utp.newtuple = NULL;
+    }
+
+    if (change->data.utp.oldtuple) {
+        ReorderBufferReturnTupleBuf(rb, (ReorderBufferTupleBuf*)change->data.utp.oldtuple);
+        change->data.utp.oldtuple = NULL;
+    }
 }
 
 /*
@@ -2294,6 +2329,15 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
                 newlen = newtup->tuple.t_len;
                 sz += newlen;
             }
+#ifdef ENABLE_NEON
+            if ((change->action == REORDER_BUFFER_CHANGE_INSERT ||
+                 change->action == REORDER_BUFFER_CHANGE_UPDATE ||
+                 change->action == REORDER_BUFFER_CHANGE_DELETE) &&
+                change->data.tp.changed_attrs_valid &&
+                change->data.tp.nchanged_attrs > 0) {
+                sz += sizeof(AttrNumber) * change->data.tp.nchanged_attrs;
+            }
+#endif
 
             /* make sure we have enough space */
             ReorderBufferSerializeReserve(rb, sz);
@@ -2301,6 +2345,20 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
             data = ((char *)rb->outbuf) + sizeof(ReorderBufferDiskChange);
             /* might have been reallocated above */
             ondisk = (ReorderBufferDiskChange *)rb->outbuf;
+
+#ifdef ENABLE_NEON
+            if ((change->action == REORDER_BUFFER_CHANGE_INSERT ||
+                 change->action == REORDER_BUFFER_CHANGE_UPDATE ||
+                 change->action == REORDER_BUFFER_CHANGE_DELETE) &&
+                change->data.tp.changed_attrs_valid &&
+                change->data.tp.nchanged_attrs > 0) {
+                Size changed_attrs_size = sizeof(AttrNumber) * change->data.tp.nchanged_attrs;
+
+                rc = memcpy_s(data, changed_attrs_size, change->data.tp.changed_attrs, changed_attrs_size);
+                securec_check(rc, "", "");
+                data += changed_attrs_size;
+            }
+#endif
 
             if (oldlen) {
                 rc = memcpy_s(data, sizeof(HeapTupleData), &oldtup->tuple, sizeof(HeapTupleData));
@@ -2555,6 +2613,18 @@ static void ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
         case REORDER_BUFFER_CHANGE_UPDATE:
         /* fall through */
         case REORDER_BUFFER_CHANGE_DELETE:
+#ifdef ENABLE_NEON
+            if (change->data.tp.changed_attrs_valid && change->data.tp.nchanged_attrs > 0) {
+                Size changed_attrs_size = sizeof(AttrNumber) * change->data.tp.nchanged_attrs;
+
+                change->data.tp.changed_attrs = (AttrNumber *)MemoryContextAlloc(rb->context, changed_attrs_size);
+                rc = memcpy_s(change->data.tp.changed_attrs, changed_attrs_size, data, changed_attrs_size);
+                securec_check(rc, "", "");
+                data += changed_attrs_size;
+            } else {
+                change->data.tp.changed_attrs = NULL;
+            }
+#endif
             if (change->data.tp.oldtuple) {
                 Size tuplelen = ((HeapTuple)data)->t_len;
                 change->data.tp.oldtuple = ReorderBufferGetTupleBuf(rb, tuplelen - SizeofHeapTupleHeader);

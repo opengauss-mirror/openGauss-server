@@ -492,6 +492,14 @@ IsNeonComputeMode()
     const char *mode = GetConfigOption("neon.compute_mode", true, false);
     return (mode != NULL && mode[0] != '\0');
 }
+
+static bool
+IsNeonOggitEnabled()
+{
+    const char *enabled = GetConfigOption("neon.oggit_enabled", true, false);
+
+    return (enabled != NULL && pg_strcasecmp(enabled, "on") == 0);
+}
 #endif /* ENABLE_NEON */
 
 static void StartPgjobWorker(void);
@@ -4398,6 +4406,19 @@ static int ServerLoop(void)
             g_instance.pid_cxt.WALproposerPID = initialize_util_thread(WALPROPOSER);
             ereport(LOG, (errmsg("WALproposer started (tid %lu)", g_instance.pid_cxt.WALproposerPID)));
         }
+        /*
+         * Start the oggit logical decoding worker only after compute_ctl has
+         * completed catalog configuration and explicitly opened the startup
+         * gate. The gate remains open so an unexpectedly exited worker can be
+         * restarted by the normal postmaster loop.
+         */
+        if (g_instance.loadedNeonPlugin && IsNeonOggitEnabled() &&
+            g_instance.pid_cxt.OggitWorkerStartAllowed &&
+            g_instance.pid_cxt.OggitWorkerPID == 0 && pmState == PM_RUN) {
+            g_instance.pid_cxt.OggitWorkerReady = false;
+            g_instance.pid_cxt.OggitWorkerPID = initialize_util_thread(OGGITWORKER);
+            ereport(LOG, (errmsg("oggit worker started (tid %lu)", g_instance.pid_cxt.OggitWorkerPID)));
+        }
 #endif
 
         if (threadPoolActivated && (pmState == PM_RUN || pmState == PM_HOT_STANDBY))
@@ -6273,6 +6294,11 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGHUP);
 
+#ifdef ENABLE_NEON
+        if (g_instance.pid_cxt.OggitWorkerPID != 0)
+            signal_child(g_instance.pid_cxt.OggitWorkerPID, SIGHUP);
+#endif
+
         if (g_instance.pid_cxt.WalRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGHUP);
 
@@ -8013,6 +8039,11 @@ static void reaper(SIGNAL_ARGS)
                                         g_instance.pid_cxt.WALproposerPID)));
                     signal_child(g_instance.pid_cxt.WALproposerPID, SIGUSR2);
                 }
+                if (g_instance.pid_cxt.OggitWorkerPID != 0) {
+                    ereport(LOG, (errmsg("sending SIGUSR2 to oggit worker (tid %lu) for graceful shutdown",
+                                        g_instance.pid_cxt.OggitWorkerPID)));
+                    signal_child(g_instance.pid_cxt.OggitWorkerPID, SIGUSR2);
+                }
 #endif
                 if (g_instance.pid_cxt.HeartbeatPID != 0) {
                     signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
@@ -8092,6 +8123,18 @@ static void reaper(SIGNAL_ARGS)
                 ereport(LOG, (errmsg("WALproposer exited gracefully")));
             } else {
                 HandleChildCrash(pid, exitstatus, _("WALproposer process"));
+            }
+
+            continue;
+        }
+        if (pid == g_instance.pid_cxt.OggitWorkerPID) {
+            g_instance.pid_cxt.OggitWorkerPID = 0;
+            g_instance.pid_cxt.OggitWorkerReady = false;
+
+            if (EXIT_STATUS_0(exitstatus)) {
+                ereport(LOG, (errmsg("oggit worker exited gracefully")));
+            } else {
+                HandleChildCrash(pid, exitstatus, _("oggit worker process"));
             }
 
             continue;
@@ -9450,6 +9493,7 @@ static void PostmasterStateMachine(void)
             ObsArchAllShutDown() && g_instance.pid_cxt.HeartbeatPID == 0 &&
 #ifdef ENABLE_NEON
             g_instance.pid_cxt.WALproposerPID == 0 &&
+            g_instance.pid_cxt.OggitWorkerPID == 0 &&
 #endif
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0) {
             pmState = PM_WAIT_DEAD_END;
@@ -11101,6 +11145,16 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.demotion == NoDemote) {
         StartApplyWorker();
     }
+
+#ifdef ENABLE_NEON
+    if (CheckPostmasterSignal(PMSIGNAL_START_OGGIT_WORKER) &&
+        g_instance.status == NoShutdown &&
+        g_instance.demotion == NoDemote) {
+        g_instance.pid_cxt.OggitWorkerReady = false;
+        g_instance.pid_cxt.OggitWorkerStartAllowed = true;
+        ereport(LOG, (errmsg("oggit worker startup gate opened")));
+    }
+#endif
 
     /* should not start a worker in shutdown or demotion procedure */
     if (CheckPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT) && g_instance.status == NoShutdown &&
@@ -14989,6 +15043,25 @@ static void InvokeWalProposerMain()
 
     ((void (*)(Datum))walproposer_entry)((Datum)0);
 }
+
+static void InvokeOggitWorkerMain()
+{
+    static PGFunction oggit_worker_entry = NULL;
+
+    if (oggit_worker_entry == NULL) {
+        char funcname[] = "OggitWorkerMain";
+        CFunInfo func_info = load_external_function("neon", funcname, false, false);
+        oggit_worker_entry = func_info.user_fn;
+        if (oggit_worker_entry == NULL) {
+            ereport(LOG,
+                (errmsg("failed to load OggitWorkerMain from neon extension"),
+                    errhint("Ensure the neon extension is installed and OggitWorkerMain is exported.")));
+            return;
+        }
+    }
+
+    ((void (*)(Datum))oggit_worker_entry)((Datum)0);
+}
 #endif
 
 template <knl_thread_role thread_role>
@@ -15265,6 +15338,18 @@ int GaussDbThreadMain(knl_thread_arg* arg)
                 InitProcessAndShareMemory();
                 /* Load neon library and run WalProposerMain as the thread entry. */
                 InvokeWalProposerMain();
+                proc_exit(0);
+            }
+        } break;
+        case OGGITWORKER: {
+            if(g_instance.loadedNeonPlugin){
+                t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+                if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                    return STATUS_ERROR;
+                }
+                InitProcessAndShareMemory();
+                /* Load neon library and run OggitWorkerMain as the thread entry. */
+                InvokeOggitWorkerMain();
                 proc_exit(0);
             }
         } break;
@@ -15783,6 +15868,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<THREADPOOL_STREAM>, THREADPOOL_STREAM, "TPLstream", "thread pool stream" , false},
 #ifdef ENABLE_NEON
     { GaussDbThreadMain<WALPROPOSER>, WALPROPOSER, "WALproposer", "WAL proposer" },
+    { GaussDbThreadMain<OGGITWORKER>, OGGITWORKER, "OggitWorker", "oggit worker" },
 #endif   /* ENABLE_NEON */
     { GaussDbThreadMain<STREAM_WORKER>, STREAM_WORKER, "streamworker", "stream worker" },
     { GaussDbThreadMain<AUTOVACUUM_LAUNCHER>, AUTOVACUUM_LAUNCHER, "AVClauncher", "autovacuum launcher" },

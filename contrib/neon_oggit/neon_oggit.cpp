@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2026 Huawei Technologies Co.,Ltd.
+ * Copyright (c) 2026 Huawei Technologies Co.,Ltd.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -99,7 +99,7 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
 
     cb->startup_cb = neon_oggit_startup;
     cb->begin_cb = neon_oggit_begin_txn;
-    cb->change_cb = :1;
+    cb->change_cb = neon_oggit_change;
     cb->truncate_cb = neon_oggit_truncate;
     cb->commit_cb = neon_oggit_commit_txn;
     cb->abort_cb = neon_oggit_abort_txn;
@@ -454,20 +454,29 @@ static cJSON *neon_oggit_tuple_to_json(Relation relation, TupleDesc tupdesc, Hea
     return row;
 }
 
-static cJSON *neon_oggit_changed_cols(Relation relation, TupleDesc tupdesc, HeapTuple new_tuple, HeapTuple old_tuple)
+static cJSON *neon_oggit_changed_cols(TupleDesc tupdesc, ReorderBufferChange *change)
 {
     cJSON *changed_cols = cJSON_CreateArray();
-    cJSON *scratch = cJSON_CreateObject();
 
-    if (new_tuple == NULL || old_tuple == NULL) {
-        cJSON_Delete(scratch);
+    if (change->action != REORDER_BUFFER_CHANGE_UPDATE || !change->data.tp.changed_attrs_valid) {
         return changed_cols;
     }
 
-    for (int natt = 0; natt < tupdesc->natts; natt++) {
-        neon_oggit_add_tuple_column(scratch, changed_cols, relation, tupdesc, new_tuple, old_tuple, natt, false);
+    for (uint16 idx = 0; idx < change->data.tp.nchanged_attrs; idx++) {
+        AttrNumber attnum = change->data.tp.changed_attrs[idx];
+
+        if (attnum <= 0 || attnum > tupdesc->natts) {
+            continue;
+        }
+
+        Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
+        if (attr->attisdropped) {
+            continue;
+        }
+
+        cJSON_AddItemToArray(changed_cols, cJSON_CreateString(NameStr(attr->attname)));
     }
-    cJSON_Delete(scratch);
+
     return changed_cols;
 }
 
@@ -555,7 +564,7 @@ static void neon_oggit_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn
             : cJSON_CreateObject());
     cJSON_AddItemToObject(root, "old_row", neon_oggit_tuple_to_json(relation, tupdesc, old_tuple, false));
     cJSON_AddItemToObject(root, "new_row", neon_oggit_tuple_to_json(relation, tupdesc, new_tuple, false));
-    cJSON_AddItemToObject(root, "changed_cols", neon_oggit_changed_cols(relation, tupdesc, new_tuple, old_tuple));
+    cJSON_AddItemToObject(root, "changed_cols", neon_oggit_changed_cols(tupdesc, change));
 
     neon_oggit_emit_json(ctx, root);
     cJSON_Delete(root);

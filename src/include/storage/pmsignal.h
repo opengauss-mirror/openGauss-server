@@ -52,6 +52,9 @@ typedef enum {
     PMSIGNAL_START_LOGICAL_READ_WORKER,/* start logical read worker */
     PMSIGNAL_START_PARALLEL_DECODE_WORKER,/* start parallel decoding worker */
     PMSIGNAL_START_APPLY_WORKER,       /* start a apply worker */
+#ifdef ENABLE_NEON
+    PMSIGNAL_START_OGGIT_WORKER,       /* allow the Neon oggit worker to start */
+#endif
     PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS,  /* term backends in alive failover */
     PMSIGNAL_DMS_FAILOVER_STARTUP,     /* start startup thread in alive failover */
     PMSIGNAL_DMS_SWITCHOVER_PROMOTE,   /* dms standby switchover promote */

@@ -62,6 +62,7 @@ typedef enum knl_thread_role {
     THREADPOOL_STREAM,
 #ifdef ENABLE_NEON
     WALPROPOSER,
+    OGGITWORKER,
 #endif
     STREAM_WORKER,
     AUTOVACUUM_LAUNCHER,

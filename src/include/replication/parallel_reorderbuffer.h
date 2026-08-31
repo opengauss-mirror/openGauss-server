@@ -137,6 +137,11 @@ typedef struct ParallelReorderBufferChange {
             /* valid for INSERT || UPDATE */
             ReorderBufferTupleBuf* newtuple;
             CommitSeqNo snapshotcsn;
+#ifdef ENABLE_NEON
+            bool changed_attrs_valid;
+            uint16 nchanged_attrs;
+            AttrNumber *changed_attrs;
+#endif
         } tp;
         struct {
             char* ddl_opt;
