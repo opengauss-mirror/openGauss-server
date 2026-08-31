@@ -9558,7 +9558,11 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     /* Execute SQL through move cursor, only in A compatibility mode */
     if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && is_has_update_in_query(query)) {
         SPI_cursor_move(portal, true, FETCH_ALL);
-        SPI_cursor_move(portal, false, FETCH_ALL);
+        ExecutorRewind(portal->queryDesc);
+        portal->atStart = true;
+        portal->atEnd = false;
+        portal->portalPos = 0;
+        portal->posOverflow = false;
     }
     return PLPGSQL_RC_OK;
 }

@@ -38,6 +38,16 @@
 #include "pgxc/pgxc.h"
 #endif
 
+static void AdvanceHoldStore(Portal portal)
+{
+    for (long storePos = 0; storePos < portal->portalPos; storePos++) {
+        if (!tuplestore_advance(portal->holdStore, true)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_CHUNK_VALUE), errmsg("unexpected end of tuple stream")));
+        }
+    }
+}
+
 /*
  * PerformCursorOpen
  *		Execute SQL DECLARE CURSOR command.
@@ -469,6 +479,7 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
 
         PushActiveSnapshot(queryDesc->snapshot);
 
+        ScanDirection direction = ForwardScanDirection;
         if (IsA(queryDesc->planstate, StreamState)) {
             /*
              * Record current position when transaction commit for cursor with stream plan,
@@ -482,7 +493,11 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
             * tuplestore, so that subsequent backward FETCHs can be processed.
             */
             portal->commitPortalPos = 0;
+        }
+        if (portal->cursorOptions & CURSOR_OPT_SCROLL) {
             ExecutorRewind(queryDesc);
+        } else if (portal->atEnd) {
+            direction = NoMovementScanDirection;
         }
 
         /*
@@ -493,7 +508,7 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
         SetTuplestoreDestReceiverParams(queryDesc->dest, portal->holdStore, portal->holdContext, true);
 
         /* Fetch the result set into the tuplestore */
-        ExecutorRun(queryDesc, ForwardScanDirection, 0L);
+        ExecutorRun(queryDesc, direction, 0L);
 #ifdef ENABLE_MULTIPLE_NODES
         bool is_remote_plan = PortalCheckRemotePlan(queryDesc->plannedstmt);
 #endif
@@ -538,7 +553,8 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
         /*
          * This code, previously used only in cursor hold mode, is reused when we add commit/rollback features;
          * distributed or single nodes will call tuplestore_rescan to rewind the active read pointer to start, 
-         * but singlenode needs to call tuplestore_advance separately to mark the data that has been read before the deletion
+         * but singlenode needs to call tuplestore_advance separately to mark the data that has been read before the
+         * deletion
          */
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -546,20 +562,20 @@ void PersistHoldablePortal(Portal portal, bool is_rollback)
 #endif
             if (portal->atEnd) {
                 /* we can handle this case even if posOverflow */
-                while (tuplestore_advance(portal->holdStore, true))
+                while (tuplestore_advance(portal->holdStore, true)) {
                     /* continue */;
+                }
             } else {
-                long store_pos;
-
-                if (portal->posOverflow) /* oops, cannot trust portalPos */
+                if (portal->posOverflow) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not reposition held cursor")));
+                        (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("could not reposition held cursor")));
+                }
 
                 tuplestore_rescan(portal->holdStore);
 
-                for (store_pos = 0; store_pos < portal->portalPos; store_pos++) {
-                    if (!tuplestore_advance(portal->holdStore, true))
-                        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_CHUNK_VALUE), errmsg("unexpected end of tuple stream")));
+                if (portal->cursorOptions & CURSOR_OPT_SCROLL) {
+                    AdvanceHoldStore(portal);
                 }
             }
 #ifdef ENABLE_MULTIPLE_NODES
