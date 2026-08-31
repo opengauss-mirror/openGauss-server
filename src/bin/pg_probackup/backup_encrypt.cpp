@@ -2298,9 +2298,5 @@ void EncryptValidateOptions(const char *commandName)
             elog(ERROR, "Backup encryption with DSS requires a dedicated deployment "
                  "implementation and is not supported in this version");
         }
-        if (IsSshProtocol()) {
-            elog(ERROR, "Backup encryption with remote agent requires a dedicated "
-                 "deployment implementation and is not supported in this version");
-        }
     }
 }

@@ -2219,6 +2219,8 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
 
             file->crc = pgFileGetCRC(backup_label, true, false);
 
+            /* sizes are accounted in plaintext bytes */
+            file->size = enc_plain_size(backup_label, file->size);
             file->write_size = file->size;
             file->uncompressed_size = file->size;
             parray_append(backup_files_list, file);
@@ -2268,6 +2270,8 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
             if (S_ISREG(file->mode))
             {
                 file->crc = pgFileGetCRC(tablespace_map, true, false);
+                /* sizes are accounted in plaintext bytes */
+                file->size = enc_plain_size(tablespace_map, file->size);
                 file->write_size = file->size;
             }
 

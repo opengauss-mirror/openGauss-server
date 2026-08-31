@@ -1267,6 +1267,8 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
     BlockNumber n_blocks_read = 0;
     BlockNumber blknum = 0;
     int nRet = 0;
+    int sendResult = 0;
+    bool sendFailed = false;
 
     /* send message with header
 
@@ -1337,7 +1339,9 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
                 securec_check_ss_c(nRet, "\0", "\0");
             }
 
-            return hdr.arg;
+            sendResult = hdr.arg;
+            sendFailed = true;
+            break;
         }
         else if (hdr.cop == FIO_SEND_FILE_CORRUPTION)
         {
@@ -1350,7 +1354,9 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
                 nRet = snprintf_s(*errormsg, hdr.size, hdr.size - 1, "%s", buf);
                 securec_check_ss_c(nRet, "\0", "\0");
             }
-            return PAGE_CORRUPTION;
+            sendResult = PAGE_CORRUPTION;
+            sendFailed = true;
+            break;
         }
         else if (hdr.cop == FIO_SEND_FILE_EOF)
         {
@@ -1397,9 +1403,10 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
                 }
             } else {
                 if (fio_fwrite(out, buf, hdr.size) != hdr.size) {
-                    fio_fclose(out);
                     *err_blknum = blknum;
-                    return WRITE_FAILED;
+                    sendResult = WRITE_FAILED;
+                    sendFailed = true;
+                    break;
                 }
             }
 
@@ -1410,11 +1417,25 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
             elog(ERROR, "Remote agent returned message of unexpected type: %i", hdr.cop);
         }
 
+        if (!sendFailed)
+            sendResult = n_blocks_read;
+
+        /*
+         * Closing the stream is what flushes the tail of an encrypted
+         * container and finalizes its header, so a failure here means the
+         * backup file is unusable and must not be reported as written.
+         */
         if (current.media_type != MEDIA_TYPE_OSS && out)
-            fclose(out);
+        {
+            if (fclose(out) != 0 && !sendFailed)
+            {
+                *err_blknum = blknum;
+                sendResult = WRITE_FAILED;
+            }
+        }
         pg_free(out_buf);
 
-        return n_blocks_read;
+        return sendResult;
 }
 
 /* TODO: read file using large buffer
