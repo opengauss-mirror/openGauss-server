@@ -532,6 +532,7 @@ typedef struct knl_u_utils_guc_cold_context {
 
     HTAB* set_user_params_htab;
     DestReceiver* spi_printtupDR;
+    List* reserved_guc_prefixes;
 } knl_u_utils_guc_cold_context;
 
 typedef struct knl_u_utils_context {

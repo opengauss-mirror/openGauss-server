@@ -5531,9 +5531,10 @@ ProcessUtilitySlow(Node *parse_tree,
                 break;
  
             case T_AlterExtensionStmt:
-#ifdef PGXC
-                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
-#endif /* PGXC */
+#ifdef ENABLE_MULTIPLE_NODES
+                if (g_instance.role != VSINGLENODE)
+                    FEATURE_NOT_PUBLIC_ERROR("ALTER EXTENSION is not supported in multiple-node mode.");
+#endif
                 address = ExecAlterExtensionStmt((AlterExtensionStmt*)parse_tree);
 #ifdef PGXC
                 if (IS_PGXC_COORDINATOR)
@@ -5543,9 +5544,10 @@ ProcessUtilitySlow(Node *parse_tree,
 
  
             case T_AlterExtensionContentsStmt:
-#ifdef PGXC
-                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
-#endif /* PGXC */
+#ifdef ENABLE_MULTIPLE_NODES
+                if (g_instance.role != VSINGLENODE)
+                    FEATURE_NOT_PUBLIC_ERROR("ALTER EXTENSION is not supported in multiple-node mode.");
+#endif
                 address = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parse_tree, NULL);
 
 #ifdef PGXC

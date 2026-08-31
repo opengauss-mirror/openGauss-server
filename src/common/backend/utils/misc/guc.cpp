@@ -5612,6 +5612,43 @@ static bool add_guc_variable(struct config_generic* var, int elevel)
     return true;
 }
 
+static const char* find_reserved_guc_prefix(const char* name)
+{
+    List* reserved_prefixes = KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, reserved_guc_prefixes);
+    ListCell* cell = NULL;
+    size_t name_length = strlen(name);
+
+    foreach (cell, reserved_prefixes) {
+        const char* prefix = (const char*)lfirst(cell);
+        size_t prefix_length = strlen(prefix);
+
+        if (name_length > prefix_length && strncmp(name, prefix, prefix_length) == 0 &&
+            name[prefix_length] == GUC_QUALIFIER_SEPARATOR)
+            return prefix;
+    }
+
+    return NULL;
+}
+
+static void register_reserved_guc_prefix(const char* prefix)
+{
+    List* reserved_prefixes = KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, reserved_guc_prefixes);
+    ListCell* cell = NULL;
+
+    foreach (cell, reserved_prefixes) {
+        const char* registered_prefix = (const char*)lfirst(cell);
+
+        if (strcmp(prefix, registered_prefix) == 0)
+            return;
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(u_sess->self_mem_cxt);
+    char* reserved_prefix = pstrdup(prefix);
+    KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, reserved_guc_prefixes) =
+        lappend(reserved_prefixes, reserved_prefix);
+    MemoryContextSwitchTo(old_context);
+}
+
 /*
  * Create and add a placeholder variable for a custom variable name.
  */
@@ -5683,8 +5720,21 @@ struct config_generic* find_option(const char* name, bool create_placeholders, i
         sizeof(struct config_generic*),
         guc_var_compare);
 
-    if (res != NULL)
-        return *res;
+    if (res != NULL) {
+        struct config_generic* variable = *res;
+
+        if (create_placeholders && (variable->flags & GUC_CUSTOM_PLACEHOLDER) != 0) {
+            const char* prefix = find_reserved_guc_prefix(name);
+
+            if (prefix != NULL)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_NAME),
+                        errmsg("invalid configuration parameter name \"%s\"", name),
+                        errdetail("\"%s\" is a reserved prefix.", prefix)));
+        }
+
+        return variable;
+    }
 
     /*
      * See if the name is an obsolete name for a variable.	We assume that the
@@ -5700,8 +5750,17 @@ struct config_generic* find_option(const char* name, bool create_placeholders, i
         /*
          * Check if the name is qualified, and if so, add a placeholder.
          */
-        if (strchr(name, GUC_QUALIFIER_SEPARATOR) != NULL)
+        if (strchr(name, GUC_QUALIFIER_SEPARATOR) != NULL) {
+            const char* prefix = find_reserved_guc_prefix(name);
+
+            if (prefix != NULL)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_NAME),
+                        errmsg("invalid configuration parameter name \"%s\"", name),
+                        errdetail("\"%s\" is a reserved prefix.", prefix)));
+
             return add_placeholder_variable(name, elevel);
+        }
     }
 
     /* Unknown name */
@@ -10341,6 +10400,8 @@ void EmitWarningsOnPlaceholders(const char* className)
 {
     int classLen = strlen(className);
     int i;
+
+    register_reserved_guc_prefix(className);
 
     for (i = 0; i < u_sess->num_guc_variables; i++) {
         struct config_generic* var = u_sess->guc_variables[i];

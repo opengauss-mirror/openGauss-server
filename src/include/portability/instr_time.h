@@ -68,7 +68,7 @@ typedef struct timeval instr_time;
 
 #define INSTR_TIME_SET_ZERO(t) ((t).tv_sec = 0, (t).tv_usec = 0)
 
-#define INSTR_TIME_SET_CURRENT(t) gettimeofday(&(t), NULL)
+#define INSTR_TIME_SET_CURRENT(t) gettimeofday(&(t), (struct timezone *)NULL)
 
 #define INSTR_TIME_ADD(x, y)             \
     do {                                 \

@@ -160,8 +160,14 @@ function(add_cmd_gen_when_configure _target_name src_list)
         execute_process(
             COMMAND ${CMAKE_SOURCE_DIR}/${openGauss}/cmake/src/buildfunction.sh --runscript ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} "${before_cmd}" "${main_cmd}" "${thread_cmd}" "${after_cmd}"
             WORKING_DIRECTORY ${work_dir}
+            RESULT_VARIABLE command_result
             OUTPUT_VARIABLE LAST_CMD_RST
+            ERROR_VARIABLE LAST_CMD_ERROR
         )
+        if(NOT command_result EQUAL 0)
+            message(FATAL_ERROR
+                "Configure-time generator ${_target_name} failed in ${work_dir}: ${LAST_CMD_ERROR}")
+        endif()
     endforeach()
     endif()
 endfunction(add_cmd_gen_when_configure)
