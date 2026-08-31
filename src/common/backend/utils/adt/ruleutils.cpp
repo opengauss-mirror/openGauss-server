@@ -110,6 +110,65 @@
 #include "commands/sequence.h"
 #include "client_logic/client_logic.h"
 
+/* Restore saved column identities before deparsing one invalid-view query. */
+static void restore_invalid_view_column_names_one(Query* query)
+{
+    ListCell* lc = NULL;
+    foreach (lc, query->targetList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (tle->resjunk || tle->resname == NULL || !IsA(tle->expr, Var)) {
+            continue;
+        }
+
+        Var* var = (Var*)tle->expr;
+        if (var->varlevelsup != 0 || var->varattno <= 0 || var->varno <= 0 ||
+            var->varno > list_length(query->rtable)) {
+            continue;
+        }
+
+        RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, var->varno - 1);
+        if (rte->rtekind != RTE_RELATION || rte->eref == NULL) {
+            continue;
+        }
+
+        while (list_length(rte->eref->colnames) < var->varattno) {
+            rte->eref->colnames = lappend(rte->eref->colnames, makeString(pstrdup("")));
+        }
+        ListCell* colname = list_nth_cell(rte->eref->colnames, var->varattno - 1);
+        lfirst(colname) = makeString(pstrdup(tle->resname));
+    }
+
+    query->starStart = NIL;
+    query->starEnd = NIL;
+    query->starOnly = NIL;
+}
+
+/* Recursively restore nested CTE and subquery definitions as well. */
+static void restore_invalid_view_column_names_recursive(Query* query)
+{
+    ListCell* lc = NULL;
+    restore_invalid_view_column_names_one(query);
+
+    foreach (lc, query->cteList) {
+        CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
+        if (cte->ctequery != NULL && IsA(cte->ctequery, Query)) {
+            restore_invalid_view_column_names_recursive((Query*)cte->ctequery);
+        }
+    }
+
+    foreach (lc, query->rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        if (rte->rtekind == RTE_SUBQUERY && rte->subquery != NULL) {
+            restore_invalid_view_column_names_recursive(rte->subquery);
+        }
+    }
+}
+
+static void restore_invalid_view_column_names(Query* query)
+{
+    restore_invalid_view_column_names_recursive(query);
+}
+
 /* ----------
  * Pretty formatting constants
  * ----------
@@ -6065,6 +6124,7 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
             ereport(WARNING,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("View %s references invalid table(s), view(s) or column(s).", get_rel_name(ev_class))));
+            restore_invalid_view_column_names(query);
         } else {
             /* if view becomes valid, return buf directly, since it has been assigned. */
             heap_close(ev_relation, AccessShareLock);
@@ -9078,10 +9138,15 @@ static char* get_variable(
         }
     }
 
-    if (attnum == InvalidAttrNumber)
+    if (attnum == InvalidAttrNumber) {
         attname = NULL;
-    else
+    } else if (context->viewdef && context->skip_lock && rte->rtekind == RTE_RELATION && attnum > 0 &&
+                attnum <= list_length(rte->eref->colnames)) {
+        Node* colname = (Node*)list_nth(rte->eref->colnames, attnum - 1);
+        attname = (colname != NULL && IsA(colname, String)) ? pstrdup(strVal(colname)) : NULL;
+    } else {
         attname = get_rte_attribute_name(rte, attnum, true);
+    }
 
     if (refname && (context->varprefix || attname == NULL)) {
         if (schemaname != NULL)
