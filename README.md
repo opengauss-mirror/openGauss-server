@@ -263,7 +263,7 @@ openGauss通过机器学习方法自动调整数据库参数，提高调参效�
     gs_install -X /opt/software/openGauss/clusterconfig.xml
     ```
 
-    /opt/software/openGauss/script/clusterconfig.xml为openGauss配置文件的路径。在执行过程中，用户需根据提示输入数据库的密码，密码具有一定的复杂度，为保证用户正常使用该数据库，请记住输入的数据库密码。
+    /opt/software/openGauss/clusterconfig.xml为openGauss配置文件的路径。在执行过程中，用户需根据提示输入数据库的密码，密码具有一定的复杂度，为保证用户正常使用该数据库，请记住输入的数据库密码。
 
     密码复杂度要求：
 
@@ -271,10 +271,10 @@ openGauss通过机器学习方法自动调整数据库参数，提高调参效�
     - 不能和用户名、当前密码（ALTER）、当前密码的倒序相同。
     - 以下至少包含三类：大写字母（A - Z）、小写字母（a - z）、数字（0 - 9）、其他字符（仅限~!@#$%^&*()-_=+\|[{}];:,<.>/?）。
 
-4. 安装执行成功之后，需要手动删除主机root用户的互信，即删除openGauss数据库各节点上的互信文件。
+4. 安装执行成功之后，omm用户的互信需要保留，root用户互信可以删除。删除root用户互信，即从 `/root/.ssh/authorized_keys` 里面删除新增各个节点的相关公钥信息。
 
     ```shell
-    rm -rf ~/.ssh
+    sed -i '/root@<各个节点名称>/d' /root/.ssh/authorized_keys 
     ```
 
 ### 卸载openGauss
@@ -531,8 +531,8 @@ https://opengauss.org/zh/
         </tr>
     </tr>
     <tr>
-        <td rowspan=1>6.0.0</td>
-        <td rowspan=1></td>
+        <td rowspan=2>6.0.0</td>
+        <td rowspan=1>v6.0.0-v6.0.3</td>
         <td>gcc10.3</td>
         <td rowspan=1>
            <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
@@ -540,6 +540,19 @@ https://opengauss.org/zh/
             <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a><br/>
             <strong>openEuler 22.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz</a><br/>
             <strong>openEuler 22.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.0/binarylibs/gcc10.3/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz</a></td>
+        </tr>
+    </tr>
+    <tr>
+        <td rowspan=1>v6.0.5-v6.0.6</td>
+        <td>gcc10.3</td>
+        <td rowspan=1>
+           <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
+            <strong>openEuler_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz</a><br/>
+            <strong>Centos_x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz</a><br/>
+            <strong>openEuler 22.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2203_arm.tar.gz</a><br/>
+            <strong>openEuler 22.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2203_x86_64.tar.gz</a>
+            <strong>openEuler 24.03 arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2403_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2403_arm.tar.gz</a><br/>
+            <strong>openEuler 24.03 x86:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2403_x86_64.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_2403_x86_64.tar.gz</a></td>
         </tr>
     </tr>
     <tr>
