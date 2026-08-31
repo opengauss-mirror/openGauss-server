@@ -306,6 +306,9 @@ typedef struct knl_g_pid_context {
     ThreadId AtfWorkerPID;
 #ifdef ENABLE_NEON
     ThreadId WALproposerPID;
+    ThreadId OggitWorkerPID;
+    volatile sig_atomic_t OggitWorkerStartAllowed;
+    volatile sig_atomic_t OggitWorkerReady;
 #endif
 #ifdef ENABLE_HTAP
     ThreadId IMCStoreVacuumPID;

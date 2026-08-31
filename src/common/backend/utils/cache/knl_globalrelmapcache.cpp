@@ -52,6 +52,26 @@ void GlobalRelMapCache::InitPhase2()
         return;
     }
 
+#ifdef ENABLE_NEON
+    RelMapFile relmap;
+    errno_t rc = memset_s(&relmap, sizeof(RelMapFile), 0, sizeof(RelMapFile));
+    securec_check(rc, "\0", "\0");
+
+    LWLockAcquire(RelationMappingLock, LW_SHARED);
+    load_relmap_file(m_isShared, &relmap);
+    LWLockRelease(RelationMappingLock);
+
+    PthreadRWlockWrlock(LOCAL_SYSDB_RESOWNER, &m_lock);
+    if (!m_isInited) {
+        rc = memcpy_s(&m_relmap, sizeof(RelMapFile), &relmap, sizeof(RelMapFile));
+        securec_check(rc, "\0", "\0");
+        pg_memory_barrier();
+
+        /* Mark relmapcache as initalized once relmap is loaded */
+        m_isInited = true;
+    }
+    PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_lock);
+#else
     LWLockAcquire(RelationMappingLock, LW_SHARED);
 
     PthreadRWlockWrlock(LOCAL_SYSDB_RESOWNER, &m_lock);
@@ -65,14 +85,17 @@ void GlobalRelMapCache::InitPhase2()
     PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_lock);
 
     LWLockRelease(RelationMappingLock);
+#endif
 }
 
 void GlobalRelMapCache::UpdateBy(RelMapFile *rel_map)
 {
     /* here we have write lock of RelationMappingLock */
+#ifndef ENABLE_NEON
     if (!m_isInited) {
         return;
     }
+#endif
 
     /*
      * dont lock relmap by RelationMappingLock, the only call happened after
@@ -83,6 +106,13 @@ void GlobalRelMapCache::UpdateBy(RelMapFile *rel_map)
     /* we dont care what magic the rel_map is */
     errno_t rc = memcpy_s(&m_relmap, sizeof(RelMapFile), rel_map, sizeof(RelMapFile));
     securec_check(rc, "\0", "\0");
+
+#ifdef ENABLE_NEON
+    if (!m_isInited) {
+        pg_memory_barrier();
+        m_isInited = true;
+    }
+#endif
 
     PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_lock);
 }

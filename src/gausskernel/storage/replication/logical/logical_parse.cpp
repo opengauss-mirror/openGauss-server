@@ -695,7 +695,6 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     } else {
         datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(CommitSeqNo);
     }
-    tuplelen_old = datalen_old - SizeOfHeapHeader;
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (ParallelFilterByOrigin(ctx, XLogRecGetOrigin(r)))
@@ -714,11 +713,35 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &target_node, sizeof(RelFileNode));
     securec_check(rc, "\0", "\0");
 
+#ifdef ENABLE_NEON
+    if (xlrec->flags & XLH_UPDATE_CONTAINS_CHANGED_ATTRS) {
+        uint16 nchanged_attrs = 0;
+        Size changed_attrs_size = sizeof(uint16);
+
+        rc = memcpy_s(&nchanged_attrs, sizeof(uint16), data_old, sizeof(uint16));
+        securec_check(rc, "\0", "\0");
+        data_old += sizeof(uint16);
+
+        change->data.tp.changed_attrs_valid = true;
+        change->data.tp.nchanged_attrs = nchanged_attrs;
+        if (nchanged_attrs > 0) {
+            changed_attrs_size += sizeof(AttrNumber) * nchanged_attrs;
+            change->data.tp.changed_attrs = (AttrNumber *)palloc(sizeof(AttrNumber) * nchanged_attrs);
+            rc = memcpy_s(change->data.tp.changed_attrs, sizeof(AttrNumber) * nchanged_attrs,
+                data_old, sizeof(AttrNumber) * nchanged_attrs);
+            securec_check(rc, "\0", "\0");
+            data_old += sizeof(AttrNumber) * nchanged_attrs;
+        }
+        datalen_old -= changed_attrs_size;
+    }
+#endif
+
     if (xlrec->flags & XLH_UPDATE_CONTAINS_NEW_TUPLE) {
         change->data.tp.newtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, tuplelen_new, worker, true);
         DecodeXLogTuple(data_new, datalen_new, change->data.tp.newtuple, true);
     }
     if (xlrec->flags & XLH_UPDATE_CONTAINS_OLD) {
+        tuplelen_old = datalen_old - SizeOfHeapHeader;
         change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, tuplelen_old, worker, true);
         DecodeXLogTuple(data_old, datalen_old, change->data.tp.oldtuple, true);
     }
@@ -1371,4 +1394,3 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
                 errmsg("unexpected RM_XACT_ID record type: %u", info)));
     }
 }
-

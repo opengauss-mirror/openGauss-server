@@ -135,9 +135,17 @@ static void HeapParallelscanStartblockInit(HeapScanDesc scan);
 static BlockNumber HeapParallelscanNextpage(HeapScanDesc scan);
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options);
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf, HeapTuple newtup,
-    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared, char relreplident);
+    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared, char relreplident
+#ifdef ENABLE_NEON
+    , uint16 nchanged_attrs, AttrNumber *changed_attrs
+#endif
+    );
 static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitmapset* key_attrs, Bitmapset* id_attrs,
     bool* satisfies_hot, bool *satisfies_key, bool* satisfies_id, HeapTuple oldtup, HeapTuple newtup, char* page);
+#ifdef ENABLE_NEON
+static uint16 HeapComputeChangedAttrs(Relation relation, HeapTuple oldtup, HeapTuple newtup, char *page,
+    AttrNumber *changed_attrs);
+#endif
 static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool* copy, char *relreplident);
 static void SkipToNewPage(
     HeapScanDesc scan, ScanDirection dir, BlockNumber page, bool* finished, bool* isValidRelationPage);
@@ -5245,6 +5253,10 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     BlockNumber rel_end_block = InvalidBlockNumber;
     char relreplident;
     LockTupleMode mode;
+#ifdef ENABLE_NEON
+    AttrNumber changed_attrs[MaxHeapAttributeNumber];
+    uint16 nchanged_attrs = 0;
+#endif
     Assert(ItemPointerIsValid(otid));
 
     /* Don't allow any write/lock operator in stream. */
@@ -5915,6 +5927,11 @@ l2:
      */
     bool keyChanged = XLogLogicalInfoActive() ? true : !satisfies_id;
     old_key_tuple = ExtractReplicaIdentity(relation, &oldtup, keyChanged, &old_key_copied, &relreplident);
+#ifdef ENABLE_NEON
+    if (RelationIsLogicallyLogged(relation)) {
+        nchanged_attrs = HeapComputeChangedAttrs(relation, &oldtup, heaptup, page, changed_attrs);
+    }
+#endif
 
     newpage = BufferGetPage(newbuf);
     if (newbuf != buffer) {
@@ -6015,7 +6032,12 @@ l2:
             old_key_tuple,
             all_visible_cleared,
             all_visible_cleared_new,
-            relreplident);
+            relreplident
+#ifdef ENABLE_NEON
+            , nchanged_attrs,
+            changed_attrs
+#endif
+            );
 
         if (newbuf != buffer) {
             PageSetLSN(BufferGetPage(newbuf), recptr);
@@ -6241,6 +6263,28 @@ static bool heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum, HeapTuple tup
         return datumIsEqual(value1, value2, att->attbyval, att->attlen);
     }
 }
+
+#ifdef ENABLE_NEON
+static uint16 HeapComputeChangedAttrs(Relation relation, HeapTuple oldtup, HeapTuple newtup, char *page,
+    AttrNumber *changed_attrs)
+{
+    TupleDesc tupdesc = RelationGetDescr(relation);
+    uint16 nchanged_attrs = 0;
+
+    for (AttrNumber attnum = 1; attnum <= tupdesc->natts; attnum++) {
+        Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
+
+        if (attr->attisdropped) {
+            continue;
+        }
+        if (!heap_tuple_attr_equals(tupdesc, attnum, oldtup, newtup, page)) {
+            changed_attrs[nchanged_attrs++] = attnum;
+        }
+    }
+
+    return nchanged_attrs;
+}
+#endif
 
 /*
  * Check if the old and new tuples represent a HOT-safe update. To be able
@@ -8566,7 +8610,11 @@ XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer heap_bu
  */
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf,
     HeapTuple newtup, HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared,
-    char relreplident)
+    char relreplident
+#ifdef ENABLE_NEON
+    , uint16 nchanged_attrs, AttrNumber *changed_attrs
+#endif
+    )
 {
     xl_heap_update xlrec;
     xl_heap_header xlhdr;
@@ -8625,6 +8673,9 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     }
     if (need_tuple_data) {
         xlrec.flags |= XLH_UPDATE_CONTAINS_NEW_TUPLE;
+#ifdef ENABLE_NEON
+        xlrec.flags |= XLH_UPDATE_CONTAINS_CHANGED_ATTRS;
+#endif
         if (old_key_tuple) {
             if (relreplident == REPLICA_IDENTITY_FULL)
                 xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_TUPLE;
@@ -8671,6 +8722,15 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     XLogRegisterData((char *)&xlrec, useOldXlog ? SizeOfOldHeapUpdate : SizeOfHeapUpdate);
     CommitSeqNo curCSN = InvalidCommitSeqNo;
     LogCSN(&curCSN);
+
+#ifdef ENABLE_NEON
+    if (xlrec.flags & XLH_UPDATE_CONTAINS_CHANGED_ATTRS) {
+        XLogRegisterData((char *)&nchanged_attrs, sizeof(uint16));
+        if (nchanged_attrs > 0) {
+            XLogRegisterData((char *)changed_attrs, sizeof(AttrNumber) * nchanged_attrs);
+        }
+    }
+#endif
 
     /* We need to log a tuple identity */
     if (need_tuple_data && old_key_tuple) {
