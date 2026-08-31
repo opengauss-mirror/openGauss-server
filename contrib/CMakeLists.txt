@@ -11,6 +11,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/hstore
     ${CMAKE_CURRENT_SOURCE_DIR}/test_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/mppdb_decoding
+    ${CMAKE_CURRENT_SOURCE_DIR}/neon_oggit
     ${CMAKE_CURRENT_SOURCE_DIR}/sql_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/spi
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_upgrade_support
@@ -65,6 +66,9 @@ endif()
 add_subdirectory(hstore)
 add_subdirectory(test_decoding)
 add_subdirectory(mppdb_decoding)
+if("${ENABLE_NEON}" STREQUAL "ON")
+    add_subdirectory(neon_oggit)
+endif()
 add_subdirectory(sql_decoding)
 add_subdirectory(spi)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
