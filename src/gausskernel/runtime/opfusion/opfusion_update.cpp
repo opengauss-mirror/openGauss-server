@@ -194,8 +194,8 @@ void UpdateFusion::InitGlobals()
 
 #ifdef USE_ASSERT_CHECKING
     if (m_global->m_is_bucket_rel) {
-        /* ctid + tablebucketid */
-        Assert(m_global->m_natts + 2 == list_length(indexscan->scan.plan.targetlist) + hash_col_num);
+        /* ctid + tablebucketid: 2 system columns are appended. */
+        Assert(m_global->m_natts + 2 <= list_length(indexscan->scan.plan.targetlist) + hash_col_num);
     } else {
         /* ctid */
         if (indexscan->scan.isPartTbl) {
