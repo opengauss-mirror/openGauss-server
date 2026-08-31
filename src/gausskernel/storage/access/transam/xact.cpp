@@ -8650,7 +8650,8 @@ void ApplyUndoActions(bool stpRollback)
                 TransactionStateData sub_s = m_undozone->trans_mgr_ptr;
                 if (sub_s.latest_urp[j]) {
                     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
-                    TryExecuteUndoActions(&sub_s, (UndoPersistence)j, stpRollback, tmp_slot, m_undozone->undo_cxt.slotPtr[j], (last_used_stream_zone[j] == i));
+                    TryExecuteUndoActions(&sub_s, (UndoPersistence)j, stpRollback, tmp_slot,
+                        m_undozone->undo_cxt.slotPtr[j], (last_used_stream_zone[j] == i));
                     pgstat_report_waitstatus(oldStatus);
                 } else if (!IsSubTransaction() && m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
                     Assert(tmp_slot != NULL && topXid == tmp_slot->XactId());

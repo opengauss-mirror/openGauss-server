@@ -1775,8 +1775,8 @@ INSERT INTO tb_1101383 VALUES
 select b.enroll_date,b.rownum1 from (select (@rownum1:=@rownum1+1) AS rownum1,td.* from tb_1101383 td,(select @rownum1:=0)r where td.enroll_date<'2008-01-01' and td.depname='sales' order by td.enroll_date desc)b where b.rownum1<3;
  enroll_date | rownum1 
 -------------+---------
- 08-08-2007  |       1
- 10-01-2006  |       2
+ 08-08-2007  |       2
+ 10-01-2006  |       1
 (2 rows)
 
 select b.enroll_date,b.rownum1 from (select (@rownum1:=@rownum1+1) AS rownum1,td.* from tb_1101383 td,(select @rownum1:=0)r where td.enroll_date<'2008-01-01' and td.depname='sales')b where b.rownum1<3;
@@ -1789,8 +1789,8 @@ select b.enroll_date,b.rownum1 from (select (@rownum1:=@rownum1+1) AS rownum1,td
 select (@rownum1:=@rownum1+1) AS rownum1,td.* from tb_1101383 td,(select @rownum1:=0)r where td.enroll_date<'2008-01-01' and td.depname='sales' order by td.enroll_date desc;
  rownum1 | depname | empno | salary | enroll_date 
 ---------+---------+-------+--------+-------------
-       1 | sales   |     4 |   4800 | 08-08-2007
-       2 | sales   |     1 |   5000 | 10-01-2006
+       2 | sales   |     4 |   4800 | 08-08-2007
+       1 | sales   |     1 |   5000 | 10-01-2006
 (2 rows)
 
 select (@rownum1:=@rownum1+1) AS rownum1,td.* from tb_1101383 td,(select @rownum1:=0)r where td.enroll_date<'2008-01-01' and td.depname='sales' order by td.enroll_date asc;
@@ -1811,8 +1811,8 @@ set @rownum1 = 5;
 select (@rownum1:=@rownum1+1) AS rownum1,td.* from tb_1101383 td where td.enroll_date<'2008-01-01' and td.depname='sales' order by td.enroll_date desc;
  rownum1 | depname | empno | salary | enroll_date 
 ---------+---------+-------+--------+-------------
-       6 | sales   |     4 |   4800 | 08-08-2007
-       7 | sales   |     1 |   5000 | 10-01-2006
+       7 | sales   |     4 |   4800 | 08-08-2007
+       6 | sales   |     1 |   5000 | 10-01-2006
 (2 rows)
 
 set @rownum1 = 5;
