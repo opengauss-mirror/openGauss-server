@@ -2107,13 +2107,13 @@ RETRY:
     bool retry_get = false;
     uint64 retry_count = 0;
     const static uint64 WAIT_COUNT = 0x7FFFF;
-    bool get_snapshot_by_self = CheckForBufferPin() || forHSFeedBack;
+    bool get_snapshot_by_self = CheckForBufferPin();
 
     /* reset xmin before acquiring lwlock, in case blocking redo */
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
     if (snapshot->takenDuringRecovery && !StreamThreadAmI() && !IS_EXRTO_READ &&
-        !u_sess->proc_cxt.clientIsCMAgent) {
+        !u_sess->proc_cxt.clientIsCMAgent && !forHSFeedBack) {
         if (InterruptPending) {
             (void)pgstat_report_waitstatus(oldStatus);
         }
