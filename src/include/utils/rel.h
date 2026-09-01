@@ -758,6 +758,21 @@ extern void TryFreshSmgrCache(struct SMgrRelationData *smgr);
     } while (0)
 #endif
 
+#ifdef ENABLE_NEON
+#define RelationGetSmgr(rel)                                                                     \
+    (unlikely((rel)->rd_smgr == NULL)                                                            \
+            ? (smgrsetowner(&((rel)->rd_smgr),                                                   \
+                  smgropen((rel)->rd_node, (rel)->rd_backend, 0, (rel)->rd_rel->relpersistence)), \
+                (rel)->rd_smgr)                                                                  \
+            : (rel)->rd_smgr)
+#else
+#define RelationGetSmgr(rel)                                                                     \
+    (unlikely((rel)->rd_smgr == NULL)                                                            \
+            ? (smgrsetowner(&((rel)->rd_smgr),                                                   \
+                  smgropen((rel)->rd_node, (rel)->rd_backend)), (rel)->rd_smgr)                  \
+            : (rel)->rd_smgr)
+#endif
+
 /*
  * RelationCloseSmgr
  *		Close the relation at the smgr level, if not already done.

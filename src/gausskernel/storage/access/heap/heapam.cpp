@@ -2983,6 +2983,9 @@ BulkInsertState GetBulkInsertState(void)
     bistate = (BulkInsertState)palloc(sizeof(BulkInsertStateData));
     bistate->strategy = GetAccessStrategy(BAS_BULKWRITE);
     bistate->current_buf = InvalidBuffer;
+    bistate->next_free = InvalidBlockNumber;
+    bistate->last_free = InvalidBlockNumber;
+    bistate->already_extended_by = 0;
     return bistate;
 }
 
@@ -4162,6 +4165,28 @@ static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId
     }
 }
 
+static int
+heap_multi_insert_pages(HeapTuple *heaptuples, int done, int ntuples, Size saveFreeSpace)
+{
+	size_t		page_avail = BLCKSZ - SizeOfHeapPageHeaderData - saveFreeSpace;
+	int			npages = 1;
+
+	for (int i = done; i < ntuples; i++)
+	{
+		size_t		tup_sz = sizeof(ItemIdData) + MAXALIGN(heaptuples[i]->t_len);
+
+		if (page_avail < tup_sz)
+		{
+			npages++;
+			page_avail = BLCKSZ - SizeOfHeapPageHeaderData - saveFreeSpace;
+		}
+		page_avail -= tup_sz;
+	}
+
+	return npages;
+}
+
+
 /*
  *	heap_multi_insert	- insert multiple tuple into a heap
  *
@@ -4190,6 +4215,9 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
     BlockNumber rel_end_block = InvalidBlockNumber;
     bool need_tuple_data = RelationIsLogicallyLogged(relation);
     bool need_cids = RelationIsAccessibleInLogicalDecoding(relation);
+    int npages = 0;
+    int npagesUsed = 0;
+    bool startingWithEmptyPage = false;
 
     /* 1. heap bcm-based data replication feature is enable
      * 2. caller doesn't forbid the feature
@@ -4303,6 +4331,22 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
                 buffer = RelationGetNewBufferForBulkInsert(relation, heap_tuples[ndone]->t_len, cmpr_size, bistate);
             } else {
                 /*
+                 * Compute number of pages needed to fit the to-be-inserted tuples in
+                 * the worst case.  This will be used to determine how much to extend
+                 * the relation by in RelationGetBufferForTuple(), if needed.  If we
+                 * filled a prior page from scratch, we can just update our last
+                 * computation, but if we started with a partially filled page,
+                 * recompute from scratch, the number of potentially required pages
+                 * can vary due to tuples needing to fit onto the page, page headers
+                 * etc.
+                 */
+                if (ndone == 0 || !startingWithEmptyPage) {
+                    npages = heap_multi_insert_pages(heap_tuples, ndone, ntuples, save_free_space);
+                    npagesUsed = 0;
+                } else {
+                    npagesUsed++;
+                }
+                /*
                  * Find buffer where at least the next tuple will fit.	If the page is
                  * all-visible, this will also pin the requisite visibility map page.
                  */
@@ -4313,10 +4357,12 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
                     bistate,
                     &vmbuffer,
                     NULL,
-                    rel_end_block);
+                    rel_end_block,
+                    npages - npagesUsed);
             }
         }
         page = BufferGetPage(buffer);
+        startingWithEmptyPage = PageGetMaxOffsetNumber(page) == 0;
         (void)heap_page_prepare_for_xid(relation, buffer, xid, false, page_replication);
 
         /* NO EREPORT(ERROR) from here till changes are logged */

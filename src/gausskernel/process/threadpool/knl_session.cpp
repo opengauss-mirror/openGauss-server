@@ -1138,6 +1138,7 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->LocalRefCount = NULL;
     storage_cxt->nextFreeLocalBuf = 0;
     storage_cxt->LocalBufHash = NULL;
+    storage_cxt->NLocalPinnedBuffers = 0;
     storage_cxt->cur_block = NULL;
     storage_cxt->next_buf_in_block = 0;
     storage_cxt->num_bufs_in_block = 0;

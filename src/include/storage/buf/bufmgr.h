@@ -120,6 +120,49 @@ typedef struct BufferAccessStrategyData {
     Buffer buffers[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE SIZE ARRAY */
 } BufferAccessStrategyData;
 
+/*
+ * Flags influencing the behaviour of ExtendBufferedRelBy().
+ */
+typedef enum ExtendBufferedFlags {
+    /*
+     * Don't acquire extension lock. This is safe only if the relation isn't
+     * shared, an access exclusive lock is held or if this is the startup
+     * process.
+     */
+    EB_SKIP_EXTENSION_LOCK = (1 << 0),
+
+    /* Should the first (possibly only) return buffer be returned locked? */
+    EB_LOCK_FIRST = (1 << 1),
+
+    /* Keep the extension lock until the caller initializes returned pages. */
+    EB_KEEP_EXTENSION_LOCK = (1 << 2),
+
+    /* Return every newly extended buffer exclusively locked. */
+    EB_LOCK_ALL = (1 << 3),
+} ExtendBufferedFlags;
+
+/* forward declared, to avoid including smgr.h here */
+typedef struct SMgrRelationData* SMgrRelation;
+
+/*
+ * Some functions identify relations either by relation or smgr +
+ * relpersistence, initialized via the BMR_REL()/BMR_SMGR() macros below.
+ * This allows us to use the same function for both recovery and normal
+ * operation.  When BMR_REL is used, it's not valid to cache its rd_smgr here,
+ * because our pointer would be obsolete in case of relcache invalidation.
+ * For simplicity, use BMR_GET_SMGR to read the smgr.
+ */
+typedef struct BufferManagerRelation {
+    Relation rel;
+    SMgrRelation smgr;
+    char relpersistence;
+} BufferManagerRelation;
+
+#define BMR_REL(p_rel) ((BufferManagerRelation){.rel = (p_rel)})
+#define BMR_SMGR(p_smgr, p_relpersistence) \
+    ((BufferManagerRelation){.smgr = (p_smgr), .relpersistence = (p_relpersistence)})
+#define BMR_GET_SMGR(bmr) (RelationIsValid((bmr).rel) ? RelationGetSmgr((bmr).rel) : (bmr).smgr)
+
 /* forward declared, to avoid having to expose buf_internals.h here */
 struct WritebackContext;
 
@@ -382,9 +425,12 @@ extern void AsyncAbortBufferIO(BufferDesc* buf, bool isForInput, void *desc);
 extern void AsyncTerminateBufferIOByVacuum(BufferDesc* buffer);
 extern void AsyncAbortBufferIOByVacuum(BufferDesc* buffer);
 extern void AbortBufferIO(void);
+extern void AbortBufferIOForExtension(Buffer buf);
+extern void AbortBufferIOCleanup(bool isCommit, bool isTopLevel);
 extern void AbortBufferIO_common(BufferDesc* buf, bool isForInput);
 extern void AbortAsyncListIO(void);
 extern void CheckIOState(volatile void* bufHdr);
+extern void LimitAdditionalPins(uint32* additional_pins);
 extern void BufmgrCommit(void);
 extern bool BgBufferSync(struct WritebackContext* wb_context);
 extern XLogRecPtr BufferGetLSNAtomic(Buffer buffer);
@@ -449,4 +495,6 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
 void buffer_in_progress_pop();
 void buffer_in_progress_push();
 void SSTryEliminateBuf(uint64 times);
+extern BlockNumber ExtendBufferedRelBy(BufferManagerRelation bmr, ForkNumber fork, BufferAccessStrategy strategy,
+                                       uint32 flags, uint32 extend_by, Buffer* buffers, uint32* extended_by);
 #endif

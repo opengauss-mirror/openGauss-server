@@ -1419,18 +1419,9 @@ static IndexBulkDeleteResult** lazy_scan_heap(
              *
              * We have to be careful here because we could be looking at a
              * page that someone has just added to the relation and not yet
-             * been able to initialize (see RelationGetBufferForTuple). To
-             * protect against that, release the buffer lock, grab the
-             * relation extension lock momentarily, and re-lock the buffer. If
-             * the page is still uninitialized by then, it must be left over
-             * from a crashed backend, and we can initialize it.
-             *
-             * We don't really need the relation lock when this is a new or
-             * temp relation, but it's probably not worth the code space to
-             * check that, since this surely isn't a critical path.
-             *
-             * Note: the comparable code in vacuum.c need not worry because
-             * it's got exclusive lock on the whole relation.
+             * been able to initialize.  Release the page lock while taking
+             * the relation extension lock, then recheck it under a cleanup
+             * lock.  If it is still new, no extender owns it anymore.
              */
             LockBuffer(buf, BUFFER_LOCK_UNLOCK);
             LockRelationForExtension(onerel, ExclusiveLock);
@@ -1444,10 +1435,6 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                 phdr->pd_multi_base = 0;
                 const char* algo = RelationGetAlgo(onerel);
                 if (RelationisEncryptEnable(onerel) || (algo && *algo != '\0')) {
-                    /* 
-                     * For the reason of saving TdeInfo,
-                     * we need to move the pointer(pd_special) forward by the length of TdeInfo.
-                     */
                     phdr->pd_upper -= sizeof(TdePageInfo);
                     phdr->pd_special -= sizeof(TdePageInfo);
                     PageSetTDE(page);

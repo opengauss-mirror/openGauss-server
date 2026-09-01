@@ -1472,6 +1472,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->ParentInProgressBuf = NULL;
     storage_cxt->IsForInput = false;
     storage_cxt->ParentIsForInput = false;
+    storage_cxt->BatchBufferIOInProgress = false;
     storage_cxt->PinCountWaitBuf = NULL;
     storage_cxt->InProgressAioDispatch =
         (AioDispatchDesc_t **)palloc(sizeof(AioDispatchDesc_t *) * MAX_PREFETCH_REQSIZ);

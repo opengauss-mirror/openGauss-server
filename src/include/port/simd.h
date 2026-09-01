@@ -61,13 +61,13 @@ typedef uint64 Vector8;
 #endif
 
 /* load/store operations */
-static inline void vector8_load(Vector8 *v, const uint8 *s);
+static inline FORCE_INLINE void vector8_load(Vector8 *v, const uint8 *s);
 #ifndef USE_NO_SIMD
 static inline void vector32_load(Vector32 *v, const uint32 *s);
 #endif
 
 /* assignment operations */
-static inline Vector8 vector8_broadcast(const uint8 c);
+static inline FORCE_INLINE Vector8 vector8_broadcast(const uint8 c);
 #ifndef USE_NO_SIMD
 static inline Vector32 vector32_broadcast(const uint32 c);
 #endif
@@ -79,11 +79,11 @@ static inline bool vector8_has_le(const Vector8 v, const uint8 c);
 static inline bool vector8_is_highbit_set(const Vector8 v);
 #ifndef USE_NO_SIMD
 static inline bool vector32_is_highbit_set(const Vector32 v);
-static inline uint32 vector8_highbit_mask(const Vector8 v);
+static inline FORCE_INLINE uint32 vector8_highbit_mask(const Vector8 v);
 #endif
 
 /* arithmetic operations */
-static inline Vector8 vector8_or(const Vector8 v1, const Vector8 v2);
+static inline FORCE_INLINE Vector8 vector8_or(const Vector8 v1, const Vector8 v2);
 #ifndef USE_NO_SIMD
 static inline Vector32 vector32_or(const Vector32 v1, const Vector32 v2);
 static inline Vector8 vector8_ssub(const Vector8 v1, const Vector8 v2);
@@ -96,7 +96,7 @@ static inline Vector8 vector8_ssub(const Vector8 v1, const Vector8 v2);
  * have non-SIMD implementations.
  */
 #ifndef USE_NO_SIMD
-static inline Vector8 vector8_eq(const Vector8 v1, const Vector8 v2);
+static inline FORCE_INLINE Vector8 vector8_eq(const Vector8 v1, const Vector8 v2);
 static inline Vector8 vector8_min(const Vector8 v1, const Vector8 v2);
 static inline Vector32 vector32_eq(const Vector32 v1, const Vector32 v2);
 #endif
@@ -104,7 +104,7 @@ static inline Vector32 vector32_eq(const Vector32 v1, const Vector32 v2);
 /*
  * Load a chunk of memory into the given vector.
  */
-static inline void
+static inline FORCE_INLINE void
 vector8_load(Vector8 *v, const uint8 *s)
 {
 #if defined(USE_SSE2)
@@ -131,7 +131,7 @@ vector32_load(Vector32 *v, const uint32 *s)
 /*
  * Create a vector with all elements set to the same value.
  */
-static inline Vector8
+static inline FORCE_INLINE Vector8
 vector8_broadcast(const uint8 c)
 {
 #if defined(USE_SSE2)
@@ -305,7 +305,7 @@ vector32_is_highbit_set(const Vector32 v)
  * Return a bitmask formed from the high-bit of each element.
  */
 #ifndef USE_NO_SIMD
-static inline uint32
+static inline FORCE_INLINE uint32
 vector8_highbit_mask(const Vector8 v)
 {
 #ifdef USE_SSE2
@@ -334,7 +334,7 @@ vector8_highbit_mask(const Vector8 v)
 /*
  * Return the bitwise OR of the inputs
  */
-static inline Vector8
+static inline FORCE_INLINE Vector8
 vector8_or(const Vector8 v1, const Vector8 v2)
 {
 #ifdef USE_SSE2
@@ -381,7 +381,7 @@ vector8_ssub(const Vector8 v1, const Vector8 v2)
  * lanes in the inputs are equal.
  */
 #ifndef USE_NO_SIMD
-static inline Vector8
+static inline FORCE_INLINE Vector8
 vector8_eq(const Vector8 v1, const Vector8 v2)
 {
 #ifdef USE_SSE2

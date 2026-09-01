@@ -244,6 +244,8 @@ extern void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum = 
 extern void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo);
 extern void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
                        char* buffer, bool skipFsync);
+extern void smgrzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                           int nblocks, bool skipFsync);
 extern void smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 extern SMGR_READ_STATUS smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void smgrbulkread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);
@@ -274,6 +276,7 @@ extern void mdcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo);
 extern bool mdexists(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 extern void mdunlink(const RelFileNodeBackend& rnode, ForkNumber forknum, bool isRedo, BlockNumber blocknum);
 extern void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer, bool skipFsync);
+extern void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int nblocks, bool skipFsync);
 extern void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
 extern SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void mdreadbatch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount,char *buffer);

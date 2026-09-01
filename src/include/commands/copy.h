@@ -290,6 +290,7 @@ typedef struct CopyStateData {
      */
     StringInfoData line_buf;
     bool line_buf_converted; /* converted to server encoding? */
+    bool simd_enabled;       /* use SIMD to scan for line-level special characters? */
 
     /*
      * Finally, raw_buf holds raw data read from the data source (file or
