@@ -7859,6 +7859,8 @@ int WLMProcessThreadMain(void)
 
         return 0;
     }
+
+    ENABLE_MEMORY_PROTECT();
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
 
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
@@ -7881,12 +7883,14 @@ int WLMProcessThreadMain(void)
 
     /* build user info and resource pool hash table if does not exist */
     if (!g_instance.wlm_cxt->stat_manager.infoinit) {
+        DISABLE_MEMORY_PROTECT();
         if (!BuildUserRPHash()) {
             ereport(LOG, (errmsg("build user data failed")));
         } else {
             WLMSetBuildHashStat(1);
             ereport(LOG, (errmsg("build user data finished")));
         }
+        ENABLE_MEMORY_PROTECT();
 
         /* get the node group name which the local dn belongs to */
         if (IS_PGXC_DATANODE) {
