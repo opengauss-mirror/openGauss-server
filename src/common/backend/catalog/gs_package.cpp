@@ -66,6 +66,8 @@ static PLpgSQL_datum* CopyPackageVarDatum(PLpgSQL_datum* datum);
 static PackageRuntimeState* BuildPkgRunStatesbyPackage(PLpgSQL_package* pkg);
 static PackageRuntimeState* BuildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState);
 static void CopyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pkgList);
+static void ValidatePackageRuntimeState(PackageRuntimeState* pkgState);
+static bool PackageRuntimeVarTypeMatches(PLpgSQL_var* sourceVar, PLpgSQL_var* targetVar);
 static bool PkgExistInSession(PackageRuntimeState* pkgState);
 static void CopyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList);
 static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit = false);
@@ -1320,33 +1322,110 @@ static void CopyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pk
     }
 }
 
+static void ValidatePackageRuntimeState(PackageRuntimeState* pkgState)
+{
+    if (pkgState == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("package runtime state is null")));
+    }
+    if (!OidIsValid(pkgState->packageId) || pkgState->size < 0 ||
+        (pkgState->size > 0 && pkgState->datums == NULL)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("invalid package runtime state for package %u", pkgState->packageId),
+             errdetail("runtime datum count is %d, datum array is %s", pkgState->size,
+                       pkgState->datums == NULL ? "null" : "valid")));
+    }
+}
+
+static bool PackageRuntimeVarTypeMatches(PLpgSQL_var* sourceVar, PLpgSQL_var* targetVar)
+{
+    if (sourceVar == NULL || targetVar == NULL || sourceVar->dtype != PLPGSQL_DTYPE_VAR ||
+        targetVar->dtype != PLPGSQL_DTYPE_VAR || sourceVar->datatype == NULL ||
+        targetVar->datatype == NULL) {
+        return false;
+    }
+
+    return sourceVar->datatype->typoid == targetVar->datatype->typoid &&
+           sourceVar->datatype->typbyval == targetVar->datatype->typbyval &&
+           sourceVar->datatype->typlen == targetVar->datatype->typlen &&
+           sourceVar->datatype->atttypmod == targetVar->datatype->atttypmod &&
+           sourceVar->datatype->collation == targetVar->datatype->collation;
+}
+
 static bool PkgExistInSession(PackageRuntimeState* pkgState)
 {
     if (pkgState == NULL) {
         return false;
     }
+    ValidatePackageRuntimeState(pkgState);
     PLpgSQL_pkg_hashkey hashkey;
     hashkey.pkgOid = pkgState->packageId;
     PLpgSQL_package* getpkg = plpgsql_pkg_HashTableLookup(&hashkey);
-    return getpkg ? true : false;
+    if (getpkg == NULL || getpkg->pkg_cxt == NULL) {
+        return false;
+    }
+
+    /* A spec-only package must not be treated as a complete runtime package,
+     * even when its public datum count happens to match the parent state. */
+    if (!getpkg->is_bodycompiled || getpkg->ndatums < 0 || pkgState->size > getpkg->ndatums || (pkgState->size > 0 &&
+        (pkgState->datums == NULL || getpkg->datums == NULL))) {
+        return false;
+    }
+
+    /* Every value datum in the parent state must have a corresponding target
+     * datum.  Otherwise the restore path must not skip the parent state. */
+    for (int i = 0; i < pkgState->size; i++) {
+        PLpgSQL_datum* parentDatum = pkgState->datums[i];
+        if (parentDatum == NULL) {
+            continue;
+        }
+        if (getpkg->datums[i] == NULL || !PackageRuntimeVarTypeMatches(
+                (PLpgSQL_var*)parentDatum, (PLpgSQL_var*)getpkg->datums[i])) {
+            return false;
+        }
+        PLpgSQL_var* parentVar = (PLpgSQL_var*)parentDatum;
+        PLpgSQL_var* targetVar = (PLpgSQL_var*)getpkg->datums[i];
+        if (parentVar->refname == NULL || targetVar->refname == NULL ||
+            strcmp(parentVar->refname, targetVar->refname) != 0 || parentVar->dno != targetVar->dno) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static void CopyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList)
 {
     ListCell* cell = NULL;
     foreach(cell, pkgList) {
+        PackageRuntimeState* parentPkgState = (PackageRuntimeState*)lfirst(cell);
+        ValidatePackageRuntimeState(parentPkgState);
         /* if package exist in current session, we already copy it */
-        if (PkgExistInSession((PackageRuntimeState*)lfirst(cell))) {
+        if (PkgExistInSession(parentPkgState)) {
             continue;
         }
-        PackageRuntimeState* parentPkgState = (PackageRuntimeState*)lfirst(cell);
         PackageRuntimeState* pkgState = BuildPkgRunStatebyPkgRunState(parentPkgState);
-        sessionPkgs->runtimes = lappend(sessionPkgs->runtimes, pkgState);
+        /* Restore the parent snapshot first.  A partially compiled package in
+         * the current session may have changed public values; keeping the
+         * current snapshot after the parent snapshot lets those values win
+         * while still supplying private body datums from the parent. */
+        sessionPkgs->runtimes = lcons(pkgState, sessionPkgs->runtimes);
     }
 }
 
 static PackageRuntimeState* BuildPkgRunStatesbyPackage(PLpgSQL_package* pkg)
 {
+    if (pkg == NULL || pkg->ndatums < 0 || (pkg->ndatums > 0 && pkg->datums == NULL) ||
+        pkg->pkg_cxt == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("invalid package while building runtime state")));
+    }
     PackageRuntimeState* pkgState = (PackageRuntimeState*)palloc0(sizeof(PackageRuntimeState));
     pkgState->packageId = pkg->pkg_oid;
     pkgState->size = pkg->ndatums;
@@ -1360,6 +1439,7 @@ static PackageRuntimeState* BuildPkgRunStatesbyPackage(PLpgSQL_package* pkg)
 
 static PackageRuntimeState* BuildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState)
 {
+    ValidatePackageRuntimeState(parentPkgState);
     PackageRuntimeState* pkgState = (PackageRuntimeState*)palloc0(sizeof(PackageRuntimeState));
     pkgState->packageId = parentPkgState->packageId;
     pkgState->size = parentPkgState->size;
@@ -1403,10 +1483,11 @@ static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs)
 
     foreach(cell, sessionPkgs->runtimes) {
         pkgState = (PackageRuntimeState*)lfirst(cell);
+        ValidatePackageRuntimeState(pkgState);
         pkgOid = pkgState->packageId;
         hashkey.pkgOid = pkgOid;
         pkg = plpgsql_pkg_HashTableLookup(&hashkey);
-        if (pkg == NULL) {
+        if (pkg == NULL || pkg->pkg_cxt == NULL) {
             pkg = PackageInstantiation(pkgOid);
         }
         RestorePkgValuesByPkgState(pkg, pkgState);
@@ -1416,7 +1497,34 @@ static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs)
 /* restore package values by pkgState */
 static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit)
 {
-    if (targetPkg == NULL || pkgState == NULL) {
+    ValidatePackageRuntimeState(pkgState);
+    if (targetPkg == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("target package is null while restoring package %u", pkgState->packageId)));
+    }
+    if (targetPkg->pkg_oid != pkgState->packageId) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("package runtime state belongs to package %u, not package %u",
+                    pkgState->packageId, targetPkg->pkg_oid)));
+    }
+    if (targetPkg->ndatums < 0 || (targetPkg->ndatums > 0 && targetPkg->datums == NULL)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("package %u has invalid datum array", pkgState->packageId)));
+    }
+    if (targetPkg->pkg_cxt == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("package %u has no package memory context", pkgState->packageId)));
+    }
+
+    if (pkgState->size == 0 && targetPkg->ndatums == 0) {
         return;
     }
 
@@ -1427,6 +1535,24 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
     /* this session pkg only contain spec, need compile body */
     if (!isInit && targetPkg->ndatums < pkgState->size) {
         targetPkg = PackageInstantiation(targetPkg->pkg_oid);
+        if (targetPkg == NULL || targetPkg->pkg_oid != pkgState->packageId ||
+            targetPkg->ndatums < 0 || (targetPkg->ndatums > 0 && targetPkg->datums == NULL) ||
+            targetPkg->pkg_cxt == NULL) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                 errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("package instantiation produced invalid package %u",
+                        pkgState->packageId)));
+        }
+    }
+
+    if (targetPkg == NULL || (!isInit && targetPkg->ndatums < pkgState->size)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+             errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("package runtime state does not match package %u", pkgState->packageId),
+             errdetail("runtime datum count is %d, package datum count is %d", pkgState->size,
+                       targetPkg == NULL ? 0 : targetPkg->ndatums)));
     }
 
     int startNum = 0;
@@ -1435,9 +1561,14 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
     if (isInit && targetPkg->is_bodycompiled) {
         HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(targetPkg->pkg_oid));
         bool isnull = false;
-        if (HeapTupleIsValid(pkgTuple)) {
-            (void)SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgbodyinitsrc, &isnull);
+        if (!HeapTupleIsValid(pkgTuple)) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                 errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                 errmsg("cache lookup failed for package %u during runtime restoration",
+                        targetPkg->pkg_oid)));
         }
+        (void)SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgbodyinitsrc, &isnull);
         ReleaseSysCache(pkgTuple);
         /*
          * if have no initsrc, just init private vars.
@@ -1455,17 +1586,35 @@ static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
         if (fromVar == NULL) {
             continue;
         }
+
+        targetVar = (PLpgSQL_var*)targetPkg->datums[i];
+        if (!PackageRuntimeVarTypeMatches(fromVar, targetVar)) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                 errcode(ERRCODE_DATATYPE_MISMATCH),
+                 errmsg("package runtime datum mismatch at index %d for package %u", i,
+                        pkgState->packageId),
+                 errdetail("source and target package datums must both be valid variables")));
+        }
+
         /* const value cannot be changed, cursor not supported by automo func yet */
         if (fromVar->isconst || fromVar->is_cursor_var || fromVar->datatype->typoid == REFCURSOROID) {
             continue;
         }
 
         newvalue = fromVar->value;
-        targetVar = (PLpgSQL_var*)targetPkg->datums[i];
-        bool isByReference = !targetVar->datatype->typbyval && !fromVar->isnull;
+        bool isByReference = !fromVar->datatype->typbyval && !fromVar->isnull;
+        if ((isByReference || fromVar->tableOfIndex != NULL) &&
+            (targetVar->pkg == NULL || targetVar->pkg->pkg_cxt == NULL)) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                 errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("package runtime datum has no package context at index %d for package %u", i,
+                        pkgState->packageId)));
+        }
         if (isByReference) {
             MemoryContext temp = MemoryContextSwitchTo(targetVar->pkg->pkg_cxt);
-            newvalue = datumCopy(fromVar->value, false, targetVar->datatype->typlen);
+            newvalue = datumCopy(fromVar->value, false, fromVar->datatype->typlen);
             MemoryContextSwitchTo(temp);
         }
         free_var_value(targetVar);
@@ -1532,6 +1681,7 @@ void initAutoSessionPkgsValue(uint64 sessionId)
 
     foreach(cell, sessionPkgs->runtimes) {
         pkgState = (PackageRuntimeState*)lfirst(cell);
+        ValidatePackageRuntimeState(pkgState);
         pkgOid = pkgState->packageId;
         hashkey.pkgOid = pkgOid;
         pkg = plpgsql_pkg_HashTableLookup(&hashkey);
@@ -1643,6 +1793,7 @@ void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId)
 
     foreach(cell, sessionPkgs->runtimes) {
         pkgState = (PackageRuntimeState*)lfirst(cell);
+        ValidatePackageRuntimeState(pkgState);
         if (targetPkg->pkg_oid == pkgState->packageId) {
             RestorePkgValuesByPkgState(targetPkg, pkgState, true);
             break;
