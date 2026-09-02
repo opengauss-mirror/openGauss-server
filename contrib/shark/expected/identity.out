@@ -219,6 +219,15 @@ drop table if exists book;
 NOTICE:  table "book" does not exist, skipping
 CREATE TABLE book
 (
+    bookId int NOT NULL PRIMARY KEY IDENTITY(0,-1),  -- should success
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
     bookId tinyint NOT NULL PRIMARY KEY IDENTITY(255,256), 
     bookname NVARCHAR(50), 
     author NVARCHAR(50)
