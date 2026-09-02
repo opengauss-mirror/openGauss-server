@@ -2803,11 +2803,6 @@ static void ProcessSequenceOptIncrementBy(DefElem* elm, T_Form newm, bool isInit
         if (newm->increment_by == 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("INCREMENT must not be zero")));
         }
-        if (forIdentity && newm->increment_by < 0) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Identity column contains invalid INCREMENT.")));
-        }
         newm->log_cnt = 0;
     } else if (isInit) {
         AssignInt<T_Int, large>(&(newm->increment_by), (int128)1);
