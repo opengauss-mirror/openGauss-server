@@ -9229,6 +9229,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
 #ifndef ENABLE_MULTIPLE_NODES
         gsplsql_unlock_func_pkg_dependency_all();
+        GsplsqlCleanupNestedCompileInvalidPackages(true);
 #endif
 
         /* We should syncQuit after LWLockRelease to avoid dead lock of LWLocks. */

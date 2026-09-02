@@ -15952,6 +15952,18 @@ void plpgsql_hashtable_clear_invalid_obj(bool need_clear)
     plpgsql_hashtable_clear_invalid_func();
 }
 
+void gsplsql_record_nested_compile_invalid_package(Oid pkgOid)
+{
+    if (!OidIsValid(pkgOid)) {
+        return;
+    }
+
+    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList =
+        list_append_unique_oid(u_sess->plsql_cxt.nestedCompileInvalidPackageList, pkgOid);
+    MemoryContextSwitchTo(oldContext);
+}
+
 /*
  * Check dependency for function and package's hash table,
  * and delete the invalid package or functio from session.
@@ -15982,11 +15994,13 @@ void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId)
     }
 
     /*
-     * when compile, invalid the package may cause confilct, so ignore it.
-     * maybe a better way to record it and handler it later, will support in
-     * the future.
+     * when compile, invalid the package may cause conflict, so record it and
+     * handle it after the transaction outcome is known.
      */
     if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        if (classId == PACKAGEOID) {
+            gsplsql_record_nested_compile_invalid_package(objId);
+        }
         return;
     }
     
@@ -16055,6 +16069,29 @@ void delete_package_and_check_invalid_item(Oid pkgOid)
         delete_package_and_check_invalid_item(lfirst_oid(cell));
     }
     list_free_ext(invalidPkgList);
+}
+
+void GsplsqlCleanupNestedCompileInvalidPackages(bool isRollback)
+{
+    List* packageList = u_sess->plsql_cxt.nestedCompileInvalidPackageList;
+    if (packageList == NIL) {
+        return;
+    }
+
+    /* A nested compiler still owns the package while it is active. Defer the
+     * cleanup until the outer transaction cleanup has restored the context. */
+    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        return;
+    }
+
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList = NIL;
+    if (isRollback) {
+        ListCell* cell = NULL;
+        foreach (cell, packageList) {
+            delete_package_and_check_invalid_item(lfirst_oid(cell));
+        }
+    }
+    list_free_ext(packageList);
 }
 
 /*

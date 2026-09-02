@@ -3070,6 +3070,7 @@ static void CommitTransaction(bool STP_commit)
     if (!STP_commit) {
         gsplsql_unlock_func_pkg_dependency_all();
     }
+    GsplsqlCleanupNestedCompileInvalidPackages(false);
 
     ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
 
@@ -4000,6 +4001,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     if (!STP_rollback) {
         gsplsql_unlock_func_pkg_dependency_all();
     }
+    GsplsqlCleanupNestedCompileInvalidPackages(true);
 
     /*
      * Post-abort cleanup.	See notes in CommitTransaction() concerning
