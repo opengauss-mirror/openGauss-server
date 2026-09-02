@@ -1012,6 +1012,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->createFunctionOid = InvalidOid;
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
+    plsql_cxt->nestedCompileInvalidPackageList = NIL;
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
     plsql_cxt->parallel_cursor_arg_name = NULL;

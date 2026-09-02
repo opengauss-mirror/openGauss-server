@@ -269,10 +269,17 @@ DELETE from interval_partition_table_004 where c1 = 6;
 ANALYZE interval_partition_table_004;
 \parallel off
 
+\o gpi_interval_plan.txt
 explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+\o
+\! grep -E 'Scan.* on interval_partition_table_004[[:space:]]*$' gpi_interval_plan.txt
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 VACUUM full interval_partition_table_004;
+\o gpi_interval_plan.txt
 explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+\o
+\! grep -E 'Scan.* on interval_partition_table_004[[:space:]]*$' gpi_interval_plan.txt
+\! rm gpi_interval_plan.txt
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 
 --drop table and index
