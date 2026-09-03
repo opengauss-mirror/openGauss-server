@@ -392,6 +392,26 @@ select count(*) from tenk1 x where
   x.unique1 in (select aa.f1 from int4_tbl aa,float8_tbl bb where aa.f1=bb.f1);
 rollback;
 
+-- DTS22: force repeated GEQO planning while each evaluation context is reset.
+begin;
+set geqo = on;
+set geqo_threshold = 2;
+do $$
+declare
+    i integer;
+begin
+    for i in 1..5 loop
+        execute 'select count(*)
+                   from tenk1 a
+                   join tenk1 b on a.unique1 = b.unique1
+                   join tenk1 c on b.unique1 = c.unique1
+                   join tenk1 d on c.unique1 = d.unique1
+                  where a.unique1 < 3';
+    end loop;
+end;
+$$;
+rollback;
+
 --
 -- regression test: be sure we cope with proven-dummy append rels
 --

@@ -315,6 +315,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->different_nodegroup_count = 1;
     opt_cxt->is_randomfunc_shippable = true;
     opt_cxt->is_dngather_support = true;
+    opt_cxt->mmgr_geqo_backup_context = NULL;
 
     opt_cxt->srvtype = 0;
     opt_cxt->qrw_inlist2join_optmode = QRW_INLIST2JOIN_CBO;

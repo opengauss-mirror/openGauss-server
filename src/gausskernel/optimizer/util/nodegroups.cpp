@@ -134,6 +134,59 @@ static List* get_baserel_rte_list_from_query(Query* query)
 /* ------------------------------------------------------------------------- */
 /*  Private functions                                                      */
 /* ------------------------------------------------------------------------- */
+
+static Bitmapset* NgBmsAddMember(Bitmapset* bms, int nodeid)
+{
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
+    bms = bms_add_member(bms, nodeid);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
+    return bms;
+}
+
+static Bitmapset* NgBmsMakeSingleton(int nodeid)
+{
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
+    Bitmapset* bms = bms_make_singleton(nodeid);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
+    return bms;
+}
+
+static Bitmapset* NgBmsIntersect(const Bitmapset* a, const Bitmapset* b)
+{
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
+    Bitmapset* result = bms_intersect(a, b);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
+    return result;
+}
+
+static Bitmapset* NgBmsUnion(const Bitmapset* a, const Bitmapset* b)
+{
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
+    Bitmapset* result = bms_union(a, b);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
+    return result;
+}
+
 /*
  * ng_node_oid_array_to_id_bms
  *     convert node oid array to node index bitmap set
@@ -155,7 +208,7 @@ static Bitmapset* ng_node_oid_array_to_id_bms(Oid* members, int nmembers, char n
     for (int i = 0; i < nmembers; ++i) {
         /* transform node oid to node id */
         int nodeId = PGXCNodeGetNodeId(members[i], node_type);
-        bms_nodeids = bms_add_member(bms_nodeids, nodeId);
+        bms_nodeids = NgBmsAddMember(bms_nodeids, nodeId);
     }
 
     return bms_nodeids;
@@ -187,7 +240,7 @@ static Bitmapset* ng_node_oid_array_to_id_bms_skip_null(Oid* members, int nmembe
         if (nodeId < 0) {
             continue;
         }
-        bms_nodeids = bms_add_member(bms_nodeids, nodeId);
+        bms_nodeids = NgBmsAddMember(bms_nodeids, nodeId);
     }
 
     return bms_nodeids;
@@ -1008,7 +1061,7 @@ Bitmapset* ng_get_baserel_data_nodeids(Oid tableoid, char relkind)
     if (IS_PGXC_DATANODE) {
         int nodeid = u_sess->pgxc_cxt.PGXCNodeId;
         if (nodeid >= 0) {
-            bms_nodeids = bms_add_member(bms_nodeids, nodeid);
+            bms_nodeids = NgBmsAddMember(bms_nodeids, nodeid);
         } else {
             bms_nodeids = NULL;
         }
@@ -1503,7 +1556,14 @@ void ng_copy_distribution(Distribution* dest_distribution, const Distribution* s
     /* bms_copy will palloc a new bms */
     if (dest_distribution->bms_data_nodeids != NULL)
         bms_free(dest_distribution->bms_data_nodeids);
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
     dest_distribution->bms_data_nodeids = bms_copy(src_distribution->bms_data_nodeids);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
 }
 
 /*
@@ -1554,7 +1614,7 @@ Distribution* ng_get_overlap_distribution(Distribution* distribution_1, Distribu
     } else {
         distribution->group_oid = InvalidOid;
         distribution->bms_data_nodeids =
-            bms_intersect(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
+            NgBmsIntersect(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
         return distribution;
     }
 }
@@ -1589,7 +1649,8 @@ Distribution* ng_get_union_distribution(Distribution* distribution_1, Distributi
         return distribution;
     } else {
         distribution->group_oid = InvalidOid;
-        distribution->bms_data_nodeids = bms_union(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
+        distribution->bms_data_nodeids =
+            NgBmsUnion(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
         return distribution;
     }
 }
@@ -1624,7 +1685,7 @@ Distribution* ng_get_random_single_dn_distribution(Distribution* distribution)
         dn_oid = bms_next_member(distribution->bms_data_nodeids, dn_oid);
     }
     AssertEreport(dn_oid >= 0, MOD_OPT, "");
-    result_distribution->bms_data_nodeids = bms_add_member(result_distribution->bms_data_nodeids, dn_oid);
+    result_distribution->bms_data_nodeids = NgBmsAddMember(result_distribution->bms_data_nodeids, dn_oid);
     result_distribution->group_oid = InvalidOid;
     return result_distribution;
 }
@@ -1692,7 +1753,7 @@ Bitmapset* ng_convert_to_nodeids(List* nodeid_list)
     ListCell* lc = NULL;
     foreach (lc, nodeid_list) {
         int nodeid = lfirst_int(lc);
-        bms_nodeids = bms_add_member(bms_nodeids, nodeid);
+        bms_nodeids = NgBmsAddMember(bms_nodeids, nodeid);
     }
 
     return bms_nodeids;
@@ -2675,7 +2736,7 @@ Bitmapset* ng_get_single_node_group_nodeids()
         else
             nodeid = u_sess->pgxc_cxt.PGXCNodeId;
     }
-    return bms_make_singleton(nodeid);
+    return NgBmsMakeSingleton(nodeid);
 }
 
 /*
@@ -2701,7 +2762,7 @@ ExecNodes* ng_get_single_node_group_exec_node()
     if (IS_PGXC_DATANODE) {
         int nodeid = u_sess->pgxc_cxt.PGXCNodeId;
         if (nodeid >= 0) {
-            distribution->bms_data_nodeids = bms_add_member(distribution->bms_data_nodeids, nodeid);
+            distribution->bms_data_nodeids = NgBmsAddMember(distribution->bms_data_nodeids, nodeid);
         } else {
             distribution->bms_data_nodeids = NULL;
         }
@@ -2805,7 +2866,14 @@ Bitmapset *ngroup_info_hash_search(Oid ngroup_oid)
 
     if (found) {
         /* the memory is release by caller */
-        bms_nodeids = bms_copy(ngroup_info->bms_nodeids);
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
+    bms_nodeids = bms_copy(ngroup_info->bms_nodeids);
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+        }
     }
     LWLockRelease(new_partition_lock);
     LWLockRelease(NgroupDestoryLock);
@@ -2820,9 +2888,9 @@ void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset *bms_node_ids)
     LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
     Bitmapset *bms_node_ids_copy = NULL;
 
-    MemoryContext old_mem_context = MemoryContextSwitchTo(g_instance.ngroup_hash_table->hcxt);
+    MemoryContext oldMemContext = MemoryContextSwitchTo(g_instance.ngroup_hash_table->hcxt);
     bms_node_ids_copy = bms_copy(bms_node_ids);
-    MemoryContextSwitchTo(old_mem_context);
+    MemoryContextSwitchTo(oldMemContext);
     (void)LWLockAcquire(NgroupDestoryLock, LW_SHARED);
     (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
     NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_ENTER, &found);
@@ -2890,5 +2958,3 @@ void ngroup_info_hash_destory(void)
     }
     LWLockRelease(NgroupDestoryLock);
 }
-
-
