@@ -390,8 +390,8 @@ typedef struct knl_u_optimizer_context {
 
     MemoryContext ft_context;
 
-    /* Planner context used for objects that must survive a GEQO evaluation. */
-    MemoryContext geqo_backup_context;
+    /* Stable context for allocations that may outlive one GEQO evaluation. */
+    MemoryContext mmgr_geqo_backup_context;
 
     struct Distribution* in_redistribution_group_distribution;
 
