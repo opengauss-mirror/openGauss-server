@@ -49,6 +49,7 @@
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "parser/parser.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -690,16 +691,17 @@ static char* read_extension_script_file(const ExtensionControlFile* control, con
  * on printing the whole string as errcontext in case of any error, and that
  * could be very long.
  */
-static void execute_sql_string(const char* sql, const char* filename)
+static void ExecuteSqlString(const char* sql, const char* filename, bool useCoreParser)
 {
     List* raw_parsetree_list = NIL;
     DestReceiver* dest = NULL;
     ListCell* lc1 = NULL;
 
     /*
-     * Parse the SQL string into a list of raw parse trees.
+     * Parse AGE's PostgreSQL DDL with the core parser because Dolphin's
+     * B-compatibility lexer treats '?' as a parameter marker.
      */
-    raw_parsetree_list = pg_parse_query(sql);
+    raw_parsetree_list = pg_parse_query(sql, NULL, useCoreParser ? raw_parser : NULL);
 
     /* All output from SELECTs goes to the bit bucket */
     dest = CreateDestReceiver(DestNone);
@@ -923,7 +925,10 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
         /* And now back to C string */
         c_sql = text_to_cstring(DatumGetTextPP(t_sql));
 
-        execute_sql_string(c_sql, filename);
+        ExecuteSqlString(c_sql,
+            filename,
+            u_sess->attr.attr_sql.dolphin &&
+            pg_strcasecmp(control->name, "age") == 0 && DB_IS_CMPT(B_FORMAT));
     }
     PG_CATCH();
     {
@@ -2785,7 +2790,7 @@ static void ApplyExtensionUpdates(
 
         /*
          * Update prior-version name and loop around.  Since
-         * execute_sql_string did a final CommandCounterIncrement, we can
+         * ExecuteSqlString did a final CommandCounterIncrement, we can
          * update the pg_extension row again.
          */
         oldVersionName = versionName;
