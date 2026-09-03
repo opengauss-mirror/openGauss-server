@@ -705,6 +705,8 @@ static bool PrintQueryTuples(const PGresult* results)
         if (!setQFout(pset.gfname)) {
             pset.queryFout = queryFout_copy;
             pset.queryFoutPipe = queryFoutPipe_copy;
+            free(pset.gfname);
+            pset.gfname = NULL;
             return false;
         }
 
@@ -940,13 +942,15 @@ static bool PrintQueryResults(PGresult* results)
     bool success = false;
     const char* cmdstatus = NULL;
     int ret = 0;
-
-    if (NULL == results)
+    bool interactiveMode = false;
+    bool outputLocked = false;
+    if (NULL == results) {
         return false;
-
+    }
     /* Lock queryFout for write in parallel execute. */
-    if (pset.parallel) {
-        if (IsInteractiveMode()) {
+    interactiveMode = IsInteractiveMode();
+    if (pset.parallel && (!interactiveMode || pset.parallelMutex != NULL)) {
+        if (interactiveMode) {
             ret = LockMutexForParallel();
         } else {
             ret = file_lock(fileno(pset.queryFout), LOCK_EX);
@@ -955,6 +959,7 @@ static bool PrintQueryResults(PGresult* results)
             psql_error("acquiring lock on output file failed.\n");
             exit(EXIT_FAILURE);
         }
+        outputLocked = true;
     }
 
     switch (PQresultStatus(results)) {
@@ -1001,8 +1006,8 @@ static bool PrintQueryResults(PGresult* results)
 
     fflush(pset.queryFout);
 
-    if (pset.parallel) {
-        if (IsInteractiveMode()) {
+    if (outputLocked) {
+        if (interactiveMode) {
             (void)UnlockMutexForParallel();
         } else {
             (void)file_lock(fileno(pset.queryFout), LOCK_UN);
@@ -1181,14 +1186,19 @@ bool GetPrintResult(PGresult** results, bool is_explain, bool is_print, const ch
     return OK && return_value;
 }
 
+void ResetGsetPrefix(void)
+{
+    if (pset.gsetPrefix != NULL) {
+        free(pset.gsetPrefix);
+        pset.gsetPrefix = NULL;
+    }
+}
+
 static void SendqueryCleanup()
 {
     ResetCancelConn();
     /* reset \gset trigger */
-    if (pset.gsetPrefix) {
-        free(pset.gsetPrefix);
-        pset.gsetPrefix = NULL;
-    }
+    ResetGsetPrefix();
 }
 
 /*
@@ -1814,6 +1824,8 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
         if (!setQFout(pset.gfname)) {
             pset.queryFout = queryFout_copy;
             pset.queryFoutPipe = queryFoutPipe_copy;
+            free(pset.gfname);
+            pset.gfname = NULL;
             OK = false;
             goto cleanup;
         }
@@ -2719,6 +2731,7 @@ static int CreateMutexForParallel()
     }
     if (pset.parallelMutex == MAP_FAILED) {
         psql_error("Failed to create mutex for parallel execution.\n");
+        pset.parallelMutex = NULL;
         return -1;
     }
 
@@ -2727,6 +2740,7 @@ static int CreateMutexForParallel()
     if (0 != pthread_mutexattr_init(&pset.parallelMutex->mutAttr)) {
         psql_error("Failed to create mutex attribute for parallel execution.\n");
         munmap(pset.parallelMutex, sizeof(*pset.parallelMutex));
+        pset.parallelMutex = NULL;
         return -1;
     }
 
@@ -2734,6 +2748,7 @@ static int CreateMutexForParallel()
         psql_error("Failed to set mutex attribute to share mode for parallel execution.\n");
         pthread_mutexattr_destroy(&pset.parallelMutex->mutAttr);
         munmap(pset.parallelMutex, sizeof(*pset.parallelMutex));
+        pset.parallelMutex = NULL;
         return -1;
     }
 
@@ -2741,6 +2756,7 @@ static int CreateMutexForParallel()
         psql_error("Failed to create mutex for parallel execution.\n");
         pthread_mutexattr_destroy(&pset.parallelMutex->mutAttr);
         munmap(pset.parallelMutex, sizeof(*pset.parallelMutex));
+        pset.parallelMutex = NULL;
         return -1;
     }
 

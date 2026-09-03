@@ -879,6 +879,28 @@ no rows returned for \gset.
 \echo :pref_x :pref_y
 1 2
 \unset FETCH_COUNT
+\parallel on  
+select 1 \g
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \g /tmp/out.txt
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \g | cat
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \gset
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 as c \gset vv
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 as from \gset   
+Sending the query buffer by a meta-command is not supported in parallel mode.
+\parallel off
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_core_dump.sql
+Parallel is on with scale default 1024.
+gsql:@abs_srcdir@/data/parallel_core_dump.sql:2: The statement at the end of input is not terminated by a semicolon and cannot be executed in parallel mode.
+--?total time: .*  ms
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_without_off.sql
+Parallel is on with scale default 1024.
+gsql:@abs_srcdir@/data/parallel_without_off.sql:4: 3 statement(s) buffered in parallel mode were discarded because "\parallel off" was not executed before the end of input.
+--?total time: .*  ms
 \c regression;
 drop database test_sql;
 \! rm -f @abs_bindir@/gsql_ut.sql
