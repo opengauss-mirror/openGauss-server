@@ -583,6 +583,7 @@ static MOT::RC HandlePGError(JitExec::JitExecState* execState, const char* opera
     }
     PG_CATCH();
     {
+        FlushErrorState();
         MOT_LOG_PANIC("Failed to allocate memory in error handler");
     }
     PG_END_TRY();
@@ -614,6 +615,7 @@ static void SetDefaultErrorData(JitExec::JitExecState* execState)
     }
     PG_CATCH();
     {
+        FlushErrorState();
         MOT_LOG_PANIC("Failed to allocate memory while setting default error data");
     }
     PG_END_TRY();

@@ -257,6 +257,7 @@ void exec_explain_plan(QueryDesc *queryDesc)
         appendStringInfo(es.str, "Name: %s\n", g_instance.attr.attr_common.PGXCNodeName);
         ExplainBeginOutput(&es);
         MemoryContext current_ctx = CurrentMemoryContext;
+        volatile bool explainFailed = false;
         PG_TRY();
         {
             ExplainPrintPlan(&es, queryDesc);
@@ -272,9 +273,12 @@ void exec_explain_plan(QueryDesc *queryDesc)
             FreeErrorData(edata);
             pfree(es.str->data);
             t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
-            return;
+            explainFailed = true;
         }
         PG_END_TRY();
+        if (explainFailed) {
+            return;
+        }
         t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
         print_parameters(queryDesc, es);
         ereport(u_sess->attr.attr_resource.auto_explain_level,

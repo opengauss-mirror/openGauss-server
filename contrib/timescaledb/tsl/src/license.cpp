@@ -193,26 +193,31 @@ static char *base64_decode(char *license_key);
 static bool
 license_info_init_from_base64(char *license_key, LicenseInfo *out)
 {
-	char *expanded = base64_decode(license_key);
+    char *expanded = base64_decode(license_key);
+    MemoryContext oldcontext = CurrentMemoryContext;
+    volatile bool valid = true;
 
-	if (expanded == NULL)
-		return false;
+    if (expanded == NULL) {
+        return false;
+    }
 
-	PG_TRY();
-	{
-		Datum json_key = DirectFunctionCall1(jsonb_in, CStringGetDatum(expanded));
+    PG_TRY();
+    {
+        Datum json_key = DirectFunctionCall1(jsonb_in, CStringGetDatum(expanded));
 
-		license_info_init_from_jsonb((Jsonb *) DatumGetPointer(json_key), out);
-	}
-	PG_CATCH();
-	{
+        license_info_init_from_jsonb((Jsonb *) DatumGetPointer(json_key), out);
+    }
+    PG_CATCH();
+    {
+        (void) MemoryContextSwitchTo(oldcontext);
 #ifdef TS_DEBUG
-		EmitErrorReport();
+        EmitErrorReport();
 #endif
-		return false;
-	}
-	PG_END_TRY();
-	return true;
+        FlushErrorState();
+        valid = false;
+    }
+    PG_END_TRY();
+    return valid;
 }
 
 static char *

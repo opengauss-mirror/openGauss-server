@@ -389,6 +389,7 @@ static PyObject* PLy_output(volatile int level, PyObject* self, PyObject* args)
     }
 
     oldcontext = CurrentMemoryContext;
+    volatile bool caughtError = false;
     PG_TRY();
     {
         pg_verifymbstr(sv, strlen(sv), false);
@@ -410,9 +411,13 @@ static PyObject* PLy_output(volatile int level, PyObject* self, PyObject* args)
 
         /* Make Python raise the exception */
         PLy_exception_set(g_ply_ctx->PLy_exc_error, "%s", edata->message);
-        return NULL;
+        FreeErrorData(edata);
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return NULL;
+    }
 
     Py_XDECREF(so);
 

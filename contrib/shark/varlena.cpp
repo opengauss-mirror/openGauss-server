@@ -566,7 +566,8 @@ object_id_internal(PG_FUNCTION_ARGS)
     if (db_name != NULL) {
         obj_name = tok;
     } else {
-        List* nameList;
+        List* nameList = NIL;
+        volatile bool parseFailed = false;
         PG_TRY();
         {
             nameList = stringToQualifiedNameList(object_name);
@@ -574,9 +575,12 @@ object_id_internal(PG_FUNCTION_ARGS)
         PG_CATCH();
         {
             FlushErrorState();
-            PG_RETURN_NULL();
+            parseFailed = true;
         }
         PG_END_TRY();
+        if (parseFailed) {
+            PG_RETURN_NULL();
+        }
         switch (list_length(nameList)) {
             case 1:
                 obj_name = strVal(linitial(nameList));

@@ -2432,9 +2432,10 @@ bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString,
     }
     PG_CATCH();
     {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner")));
+        (void)MemoryContextSwitchTo(oldcxt);
+        FlushErrorState();
         DropPreparedStatement(entry->stmt_name, true);
-        return false;
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner")));
     }
     PG_END_TRY();
         if (psrc->opFusionObj != NULL) {
@@ -2488,9 +2489,10 @@ bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString,
     }
     PG_CATCH();
     {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner2")));
+        (void)MemoryContextSwitchTo(oldcxt);
+        FlushErrorState();
         DropPreparedStatement(entry->stmt_name, true);
-        return false;
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Invalid Param in QuickPlanner2")));
     }
     PG_END_TRY();
     /* Plain old EXECUTE */

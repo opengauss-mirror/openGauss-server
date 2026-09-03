@@ -13304,12 +13304,15 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
      */
     char* origin_def = GetSqlStatementForSWCB(query);
     List* newEvAction = NIL;
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         newEvAction = GetRefreshedViewQuery(viewid, rw_objid, origin_def);
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(oldcontext);
+        FlushErrorState();
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The view %s is invalid, please make it valid before operation.",
@@ -35894,17 +35897,33 @@ void RebuildDependViewForProc(Oid proc_oid)
         List* raw_parsetree_list = raw_parser(view_def);
         Node* stmt = (Node*)linitial(raw_parsetree_list);
         Assert(IsA(stmt, ViewStmt));
+        MemoryContext oldcontext = CurrentMemoryContext;
+        ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        volatile bool rebuildFailed = false;
 
+        BeginInternalSubTransaction(NULL);
+        (void)MemoryContextSwitchTo(oldcontext);
         PG_TRY();
         {
             DefineView((ViewStmt*)stmt, view_def);
+            ReleaseCurrentSubTransaction();
+            (void)MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
         }
         PG_CATCH();
         {
             /* If there is an error in rebuilding the view, ignore it and set it invalid. */
-            InvalidateDependView(view_oid, OBJECT_TYPE_VIEW);
+            (void)MemoryContextSwitchTo(oldcontext);
+            FlushErrorState();
+            RollbackAndReleaseCurrentSubTransaction();
+            (void)MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            rebuildFailed = true;
         }
         PG_END_TRY();
+        if (rebuildFailed) {
+            InvalidateDependView(view_oid, OBJECT_TYPE_VIEW);
+        }
         pfree(view_def);
         list_free(raw_parsetree_list);
     }
