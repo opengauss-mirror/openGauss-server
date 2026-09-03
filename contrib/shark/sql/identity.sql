@@ -122,6 +122,13 @@ CREATE TABLE book
 drop table if exists book;
 CREATE TABLE book
 (
+    bookId int NOT NULL PRIMARY KEY IDENTITY(0,-1),  -- should success
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+drop table if exists book;
+CREATE TABLE book
+(
     bookId tinyint NOT NULL PRIMARY KEY IDENTITY(255,256), 
     bookname NVARCHAR(50), 
     author NVARCHAR(50)
