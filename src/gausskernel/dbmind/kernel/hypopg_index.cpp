@@ -403,7 +403,6 @@ static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, 
              * supported
              */
             elog(ERROR, "hypopg: access method \"%s\" is not supported", accessMethod);
-            break;
         }
 
         /* No more elog beyond this point. */

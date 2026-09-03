@@ -879,17 +879,26 @@ Datum analyze_workload(PG_FUNCTION_ARGS)
     AdviseQuery* adviseQuery = NULL;
     List* queryList = NIL;
     MemoryContext oldcxt = MemoryContextSwitchTo(u_sess->adv_cxt.SQLAdvisorContext);
+    HASH_SEQ_STATUS* volatile hashSeq = NULL;
+    volatile bool sqlAdvisorLocked = false;
+    volatile bool bucketLocked = false;
+    volatile bool hashSeqActive = false;
+    volatile int lockedBucket = -1;
 
     PG_TRY();
     {
+        hashSeq = (HASH_SEQ_STATUS*)palloc0(sizeof(HASH_SEQ_STATUS));
         (void)LWLockAcquire(SQLAdvisorLock, LW_SHARED);
+        sqlAdvisorLocked = true;
         for (int i = 0; i < GWC_NUM_OF_BUCKETS; i++) {
-            HASH_SEQ_STATUS hashSeq;
             SQLStatementEntry* entry = NULL;
 
+            lockedBucket = i;
             LWLockAcquire(GetMainLWLockByIndex(g_instance.adv_cxt.GWCArray[i].lockId), LW_SHARED);
-            hash_seq_init(&hashSeq, g_instance.adv_cxt.GWCArray[i].hashTbl);
-            while ((entry = (SQLStatementEntry*)hash_seq_search(&hashSeq)) != NULL) {
+            bucketLocked = true;
+            hash_seq_init(hashSeq, g_instance.adv_cxt.GWCArray[i].hashTbl);
+            hashSeqActive = true;
+            while ((entry = (SQLStatementEntry*)hash_seq_search(hashSeq)) != NULL) {
                 foreach (cell, entry->paramList) {
                     SQLStatementParam* stmtParam = (SQLStatementParam*)lfirst(cell);
                     adviseQuery = initAdviseQuery(entry->key.queryString, stmtParam->freqence, stmtParam->boundParams,
@@ -897,19 +906,37 @@ Datum analyze_workload(PG_FUNCTION_ARGS)
                     queryList = lappend(queryList, adviseQuery);
                 }
             }
+            hashSeqActive = false;
 
             LWLockRelease(GetMainLWLockByIndex(g_instance.adv_cxt.GWCArray[i].lockId));
+            bucketLocked = false;
+            lockedBucket = -1;
         }
         LWLockRelease(SQLAdvisorLock);
+        sqlAdvisorLocked = false;
     }
     PG_CATCH();
     {
         pg_atomic_write_u32(&g_instance.adv_cxt.isUsingGWC, 0);
         (void)MemoryContextSwitchTo(oldcxt);
-        LWLockRelease(SQLAdvisorLock);
+        if (hashSeqActive) {
+            hash_seq_term(hashSeq);
+            hashSeqActive = false;
+        }
+        if (bucketLocked && lockedBucket >= 0) {
+            LWLockRelease(GetMainLWLockByIndex(g_instance.adv_cxt.GWCArray[lockedBucket].lockId));
+            bucketLocked = false;
+            lockedBucket = -1;
+        }
+        if (sqlAdvisorLocked) {
+            LWLockRelease(SQLAdvisorLock);
+            sqlAdvisorLocked = false;
+        }
+        pfree_ext(hashSeq);
         PG_RE_THROW();
     }
     PG_END_TRY();
+    pfree_ext(hashSeq);
     pg_atomic_write_u32(&g_instance.adv_cxt.isUsingGWC, 0);
 
     if (queryList == NULL) {

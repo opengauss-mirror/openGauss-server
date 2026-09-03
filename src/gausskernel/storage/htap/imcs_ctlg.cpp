@@ -772,6 +772,7 @@ void UnPopulateImcs(Relation rel)
     PG_CATCH();
     {
         IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
+        FlushErrorState();
     }
     PG_END_TRY();
 }
@@ -971,29 +972,54 @@ PGXCNodeHandle *InitMultiNodeExecutor(Oid nodeoid, char* nodename)
     return result;
 }
 
-PGXCNodeHandle **GetStandbyConnections(int *connCount, PGconn** &nodeCons)
+static void ReleaseStandbyConnectionParams(Oid* dnNode, char** connectionStrs, int connectionCount)
+{
+    for (int i = 0; i < connectionCount; i++) {
+        pfree_ext(connectionStrs[i]);
+    }
+    pfree_ext(dnNode);
+    pfree_ext(connectionStrs);
+}
+
+static bool InitStandbyConnection(
+    PGXCNodeHandle* connection, PGconn* nodeConnection, char* firstError, bool logSuccess)
+{
+    if (nodeConnection != NULL && nodeConnection->status == CONNECTION_OK) {
+        pgxc_node_init(connection, nodeConnection->sock);
+        if (logSuccess) {
+            elog(LOG, "HTAPTest: connected to standby");
+        }
+        return true;
+    }
+
+    errno_t rc;
+    if (nodeConnection == NULL) {
+        rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "out of memory");
+    } else if (nodeConnection->errorMessage.data != NULL) {
+        if (strlen(nodeConnection->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
+            nodeConnection->errorMessage.data[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
+        }
+        rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, nodeConnection->errorMessage.data);
+    } else {
+        rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "unknown error");
+    }
+    securec_check(rc, "", "");
+    return false;
+}
+
+PGXCNodeHandle **GetStandbyConnections(
+    int *connCount, PGconn** &nodeCons, PGXCNodeHandle*** registeredConnections = NULL)
 {
     int dnConnCount = MAX_REPLNODE_NUM;
-    PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc(dnConnCount * sizeof(PGXCNodeHandle *));
+    PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc0(dnConnCount * sizeof(PGXCNodeHandle *));
+    if (registeredConnections != NULL) {
+        *registeredConnections = connections;
+    }
     Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dnConnCount);
     char **connectionStrs = (char **)palloc0(sizeof(char *) * dnConnCount);
     nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
     errno_t rc;
     int replArrLength;
-    auto releaseConnect = [&](char *errMsg, int connIdx) {
-        if (errMsg != NULL) {
-            connections[connIdx]->state = DN_CONNECTION_STATE_ERROR_FATAL;
-            ereport(WARNING, (errmsg("PQconnectdbParallel error: %s", errMsg)));
-            return;
-        }
-        for (int i = 0; i < dnConnCount; i++) {
-            pfree_ext(connectionStrs[i]);
-        }
-        pfree_ext(dnNode);
-        pfree_ext(connectionStrs);
-        return;
-    };
-
     for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
         char *replconninfo = NULL;
         replconninfo = u_sess->attr.attr_storage.ReplConnInfoArr[i];
@@ -1027,53 +1053,31 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount, PGconn** &nodeCons)
     PQconnectdbParallel(connectionStrs, *connCount, nodeCons, dnNode);
 
     for (int i = 0; i < *connCount; i++) {
-        if (nodeCons[i] && (CONNECTION_OK == nodeCons[i]->status)) {
-            pgxc_node_init(connections[i], nodeCons[i]->sock);
-        } else {
-            char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
-            errno_t ss_rc = EOK;
-            if (nodeCons[i] == NULL) {
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "out of memory");
-            } else if (nodeCons[i]->errorMessage.data != NULL) {
-                if (strlen(nodeCons[i]->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
-                    nodeCons[i]->errorMessage.data[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
-                }
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, nodeCons[i]->errorMessage.data);
-            } else {
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "unknown error");
-            }
-            releaseConnect(firstError, i);
+        char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
+        if (!InitStandbyConnection(connections[i], nodeCons[i], firstError, false)) {
+            connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            ereport(WARNING, (errmsg("PQconnectdbParallel error: %s", firstError)));
         }
     }
-    releaseConnect(NULL, 0);
+    ReleaseStandbyConnectionParams(dnNode, connectionStrs, dnConnCount);
     return connections;
 }
 
-PGXCNodeHandle **GetSSStandbyConnections(int *connCount, PGconn** &nodeCons)
+PGXCNodeHandle **GetSSStandbyConnections(
+    int *connCount, PGconn** &nodeCons, PGXCNodeHandle*** registeredConnections = NULL)
 {
     int dnConnCount = SS_IMCU_CACHE->spqNodeNum - 1;
     if (dnConnCount <= 0) {
         ereport(ERROR, (errmodule(MOD_HTAP),
                           errmsg("GUC Param: ss_htap_cluster_map not set, can not enable SS imcstore")));
     }
-    PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc(dnConnCount * sizeof(PGXCNodeHandle *));
+    PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc0(dnConnCount * sizeof(PGXCNodeHandle *));
+    if (registeredConnections != NULL) {
+        *registeredConnections = connections;
+    }
     Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dnConnCount);
     char **connectionStrs = (char **)palloc0(sizeof(char *) * dnConnCount);
     nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
-    auto releaseConnect = [&](char *errMsg) {
-        for (int i = 0; i < dnConnCount; i++) {
-            pfree_ext(connectionStrs[i]);
-        }
-        pfree_ext(dnNode);
-        pfree_ext(connectionStrs);
-        if (errMsg != NULL) {
-            pfree_ext(connections);
-            connections = NULL;
-            ereport(ERROR, (errmsg("PQconnectdbParallel error: %s", errMsg)));
-        }
-        return;
-    };
-
     for (int i = 0, j = 0; i < SS_IMCU_CACHE->spqNodeNum && j < dnConnCount; i++) {
         if (i == SS_IMCU_CACHE->curSpqIdx) {
             continue;
@@ -1101,27 +1105,16 @@ PGXCNodeHandle **GetSSStandbyConnections(int *connCount, PGconn** &nodeCons)
     PQconnectdbParallel(connectionStrs, *connCount, nodeCons, dnNode);
 
     for (int i = 0; i < *connCount; i++) {
-        if (nodeCons[i] && (CONNECTION_OK == nodeCons[i]->status)) {
-            pgxc_node_init(connections[i], nodeCons[i]->sock);
-            elog(LOG, "HTAPTest: connected to standby");
-        } else {
-            char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
-            errno_t ss_rc = EOK;
-            if (nodeCons[i] == NULL) {
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "out of memory");
-            } else if (nodeCons[i]->errorMessage.data != NULL) {
-                if (strlen(nodeCons[i]->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
-                    nodeCons[i]->errorMessage.data[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
-                }
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, nodeCons[i]->errorMessage.data);
-            } else {
-                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "unknown error");
+        char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
+        if (!InitStandbyConnection(connections[i], nodeCons[i], firstError, true)) {
+            ReleaseStandbyConnectionParams(dnNode, connectionStrs, dnConnCount);
+            if (registeredConnections == NULL) {
+                pfree_ext(connections);
             }
-            securec_check(ss_rc, "", "");
-            releaseConnect(firstError);
+            ereport(ERROR, (errmsg("PQconnectdbParallel error: %s", firstError)));
         }
     }
-    releaseConnect(NULL);
+    ReleaseStandbyConnectionParams(dnNode, connectionStrs, dnConnCount);
     return connections;
 }
 
@@ -1709,65 +1702,85 @@ void PackStandbyPopulateParams(
     }
 }
 
+struct ImcstoreCleanupState {
+    int2vector* imcsAtts;
+    int connCount;
+    PGXCNodeHandle** connections;
+    PGconn** nodeCons;
+};
+
 static void CloseStandbyConnections(PGXCNodeHandle** connections, int connCount, PGconn **nodeCons)
 {
-    if (connections == NULL) {
-        return;
-    }
     for (int i = 0; i < connCount; ++i) {
-        PGXCNodeClose(nodeCons[i]);
-        nodeCons[i] = NULL;
-        PGXCNodeHandle *handle = connections[i];
-        pfree_ext(handle->inBuffer);
-        pfree_ext(handle->outBuffer);
-        pfree_ext(handle->error);
+        if (nodeCons != NULL && nodeCons[i] != NULL) {
+            PGXCNodeClose(nodeCons[i]);
+            nodeCons[i] = NULL;
+        }
+        if (connections != NULL && connections[i] != NULL) {
+            PGXCNodeHandle *handle = connections[i];
+            pfree_ext(handle->inBuffer);
+            pfree_ext(handle->outBuffer);
+            pfree_ext(handle->error);
+            pfree_ext(connections[i]);
+        }
     }
     pfree_ext(nodeCons);
     pfree_ext(connections);
 }
 
+static void ResetStandbyConnections(ImcstoreCleanupState* cleanup)
+{
+    CloseStandbyConnections(cleanup->connections, cleanup->connCount, cleanup->nodeCons);
+    cleanup->connections = NULL;
+    cleanup->nodeCons = NULL;
+    cleanup->connCount = 0;
+}
+
 void SqlExecImcstored(Relation rel, List* colList)
 {
     Oid relOid = RelationGetRelid(rel);
-    int2vector* imcsAtts = NULL;
     int imcsNatts = 0;
-    int connCount = 0;
     SendPopulateParams populateParams;
-    PGXCNodeHandle** connections = NULL;
-    PGconn **nodeCons = NULL;
+    ImcstoreCleanupState* cleanup = (ImcstoreCleanupState*)palloc0(sizeof(ImcstoreCleanupState));
+    MemoryContext oldcontext = CurrentMemoryContext;
 
     PG_TRY();
     {
         CheckForSSMode(rel);
         CheckImcstoreCacheReady();
-        CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
+        CheckForEnableImcs(rel, colList, cleanup->imcsAtts, &imcsNatts);
         if (IMCS_IS_PRIMARY_MODE) {
             AbortIfSinglePrimary();
-            CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
-            connections = GetStandbyConnections(&connCount, nodeCons);
-            PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
-            SendImcstoredRequest(connections, connCount, populateParams);
-            CloseStandbyConnections(connections, connCount, nodeCons);
-            pfree_ext(imcsAtts);
-            return;
+            CreateImcsDescForPrimaryNode(rel, cleanup->imcsAtts, imcsNatts);
+            (void)GetStandbyConnections(&cleanup->connCount, cleanup->nodeCons, &cleanup->connections);
+            PackStandbyPopulateParams(
+                populateParams, relOid, InvalidOid, cleanup->imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
+            SendImcstoredRequest(cleanup->connections, cleanup->connCount, populateParams);
+            ResetStandbyConnections(cleanup);
+            pfree_ext(cleanup->imcsAtts);
+        } else {
+            AlterTableEnableImcstore(rel, cleanup->imcsAtts, imcsNatts);
+            if (IMCS_IS_SS_MODE) {
+                (void)GetSSStandbyConnections(&cleanup->connCount, cleanup->nodeCons, &cleanup->connections);
+                PackStandbyPopulateParams(populateParams, relOid, InvalidOid, cleanup->imcsAtts->values,
+                    imcsNatts, TYPE_IMCSTORED);
+                SendImcstoredRequest(cleanup->connections, cleanup->connCount, populateParams);
+                ResetStandbyConnections(cleanup);
+            }
+            pfree_ext(cleanup->imcsAtts);
         }
-        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
-        if (IMCS_IS_SS_MODE) {
-            connections = GetSSStandbyConnections(&connCount, nodeCons);
-            PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
-            SendImcstoredRequest(connections, connCount, populateParams);
-            CloseStandbyConnections(connections, connCount, nodeCons);
-        }
-        pfree_ext(imcsAtts);
     }
     PG_CATCH();
     {
-        CloseStandbyConnections(connections, connCount, nodeCons);
+        (void)MemoryContextSwitchTo(oldcontext);
+        CloseStandbyConnections(cleanup->connections, cleanup->connCount, cleanup->nodeCons);
         IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
-        pfree_ext(imcsAtts);
+        pfree_ext(cleanup->imcsAtts);
+        pfree_ext(cleanup);
         PG_RE_THROW();
     }
     PG_END_TRY();
+    pfree_ext(cleanup);
 }
 
 void SqlExecImcstoredWithShm(Relation rel, List* colList)
@@ -1894,12 +1907,16 @@ void SqlExecModifyPartitionImcstored(Relation rel, const char* partName, List* c
 
 void SqlExecModifyPartitionUnImcstored(Relation rel, const char* partName)
 {
-    int connCount = 0;
+    struct ConnectionCleanupState {
+        int connCount;
+        PGXCNodeHandle** connections;
+        PGconn** nodeCons;
+    };
+
     Oid partOid = InvalidOid;
     Oid relOid = RelationGetRelid(rel);
     SendPopulateParams populateParams;
-    PGXCNodeHandle** connections = NULL;
-    PGconn **nodeCons = NULL;
+    ConnectionCleanupState* cleanup = (ConnectionCleanupState*)palloc0(sizeof(ConnectionCleanupState));
 
     CheckImcstoreCacheReady();
     partOid = ImcsPartNameGetPartOid(relOid, partName);
@@ -1910,15 +1927,19 @@ void SqlExecModifyPartitionUnImcstored(Relation rel, const char* partName)
     /* start unpopulate partition */
     Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
     Relation partRel = partitionGetRelation(rel, part);
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         /* unpopulate partition on standby node */
         if (IMCS_IS_PRIMARY_MODE) {
             AbortIfSinglePrimary();
-            connections = GetStandbyConnections(&connCount, nodeCons);
+            (void)GetStandbyConnections(&cleanup->connCount, cleanup->nodeCons, &cleanup->connections);
             PackStandbyPopulateParams(populateParams, relOid, partOid, NULL, 0, TYPE_PARTITION_UNIMCSTORED);
-            SendImcstoredRequest(connections, connCount, populateParams);
-            CloseStandbyConnections(connections, connCount, nodeCons);
+            SendImcstoredRequest(cleanup->connections, cleanup->connCount, populateParams);
+            CloseStandbyConnections(cleanup->connections, cleanup->connCount, cleanup->nodeCons);
+            cleanup->connections = NULL;
+            cleanup->nodeCons = NULL;
+            cleanup->connCount = 0;
         }
         /* unpopulate partition on current node */
         AlterTableDisableImcstore(partRel);
@@ -1927,11 +1948,12 @@ void SqlExecModifyPartitionUnImcstored(Relation rel, const char* partName)
     }
     PG_CATCH();
     {
-        releaseDummyRelation(&partRel);
-        partitionClose(rel, part, AccessExclusiveLock);
-        CloseStandbyConnections(connections, connCount, nodeCons);
+        (void)MemoryContextSwitchTo(oldcontext);
+        CloseStandbyConnections(cleanup->connections, cleanup->connCount, cleanup->nodeCons);
+        FlushErrorState();
     }
     PG_END_TRY();
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, AccessExclusiveLock);
+    pfree_ext(cleanup);
 }

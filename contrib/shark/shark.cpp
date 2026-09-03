@@ -590,6 +590,7 @@ PG_FUNCTION_INFO_V1(get_scope_identity);
 Datum get_scope_identity(PG_FUNCTION_ARGS)
 {
     int128 res = 0;
+    volatile bool caughtError = false;
 
     PG_TRY();
     {
@@ -598,10 +599,13 @@ Datum get_scope_identity(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         FlushErrorState();
-        PG_RETURN_NULL();
+        caughtError = true;
     }
     PG_END_TRY();
 
+    if (caughtError) {
+        PG_RETURN_NULL();
+    }
     PG_RETURN_INT128(res);
 }
 
@@ -677,6 +681,7 @@ Datum get_ident_current(PG_FUNCTION_ARGS)
     bool success = false;
     int128 start = 0;
     bool seqidSuccess = false;
+    volatile bool returnNull = false;
 
     PG_TRY();
     {
@@ -691,17 +696,21 @@ Datum get_ident_current(PG_FUNCTION_ARGS)
         tableOid = RangeVarGetRelid(tablerv, NoLock, false);
         /* Check permissions */
         if (pg_class_aclcheck(tableOid, GetUserId(), ACL_SELECT | ACL_USAGE) != ACLCHECK_OK) {
-            PG_RETURN_NULL();
+            returnNull = true;
+        } else {
+            seqid = get_identity_seq_id(tableOid);
+            seqidSuccess = get_seed(seqid, &start, &res, &success);
         }
-        seqid = get_identity_seq_id(tableOid);
-
-        seqidSuccess = get_seed(seqid, &start, &res, &success);
     }
     PG_CATCH();
     {
         FlushErrorState();
+        returnNull = true;
     }
     PG_END_TRY();
+    if (returnNull) {
+        PG_RETURN_NULL();
+    }
     if (success) {
         PG_RETURN_INT128(res);
     }

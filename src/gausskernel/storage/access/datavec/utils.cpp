@@ -181,7 +181,7 @@ static MmapShmem* MMapLookup(BufferTag* tag, uint32 hashcode)
 
 static MmapShmem* MMapInsert(BufferTag *tag, uint32 hashcode)
 {
-    MmapShmem *result = NULL;
+    MmapShmem* volatile result = NULL;
     PG_TRY();
     {
         bool found = false;
@@ -190,10 +190,12 @@ static MmapShmem* MMapInsert(BufferTag *tag, uint32 hashcode)
     }
     PG_CATCH();
     {
+        FlushErrorState();
         ereport(LOG, (errmsg("MMapInsert error")));
+        result = NULL;
     }
     PG_END_TRY();
-    return result;
+    return (MmapShmem*)result;
 }
 
 static void MMapDelete(BufferTag *tag, uint32 hashcode)
