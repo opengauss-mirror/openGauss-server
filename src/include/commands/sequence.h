@@ -255,7 +255,7 @@ extern bool CheckSeqOwnedByAutoInc(Oid seqoid);
 extern ObjectAddress DefineSequenceWrapper(CreateSeqStmt* stmt);
 extern ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt);
 extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
-extern void ResetSequence(Oid seq_relid, bool restart);
+extern void ResetSequence(Oid seq_relid, bool restart, bool isAutoInc);
 
 extern void seq_redo(XLogReaderState* rptr);
 extern void seq_desc(StringInfo buf, XLogReaderState* record);
