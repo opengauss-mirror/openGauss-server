@@ -1105,7 +1105,9 @@ Oid exprInputCollation(const Node* expr)
 static void AssertExprCollation(const Node* expr, Oid collation)
 {
     Oid expr_collation = exprCollation(expr);
-    if (DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) {
+    if ((DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) ||
+        (DB_IS_CMPT(D_FORMAT) && collation == BINARY_COLLATION_OID &&
+         IsBinaryTypeWithCollation(exprType(expr)))) {
         expr_collation = BINARY_COLLATION_OID;
     }
     Assert(collation == expr_collation);

@@ -1844,6 +1844,21 @@ bool IsBinaryType(Oid typid)
             (typid) == BYTEAOID);
 }
 
+bool IsBinaryTypeWithCollation(Oid typid)
+{
+    /* Keep this check local: IsBinaryType() can be overridden by an extension
+     * hook and must not broaden the D-format compatibility exception. */
+    if (typid == BLOBOID || typid == BYTEAOID) {
+        return true;
+    }
+
+    if (u_sess->attr.attr_sql.shark && u_sess->hook_cxt.getVarbinaryOidHook != NULL) {
+        Oid varbinaryOid = ((GetVarbinaryOidHookType)u_sess->hook_cxt.getVarbinaryOidHook)();
+        return OidIsValid(varbinaryOid) && typid == varbinaryOid;
+    }
+    return false;
+}
+
 void check_type_supports_multi_charset(Oid typid, bool allow_array)
 {
     switch (typid) {

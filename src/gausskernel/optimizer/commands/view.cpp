@@ -323,7 +323,9 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
                         (errcode(ERRCODE_INDETERMINATE_COLLATION),
                             errmsg("could not determine which collation to use for view column \"%s\"", def->colname),
                             errhint("Use the COLLATE clause to set the collation explicitly.")));
-            } else if (!(DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType((Node*)tle->expr)))) {
+            } else if (!(((DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET) ||
+                           (DB_IS_CMPT(D_FORMAT) && def->collOid == BINARY_COLLATION_OID)) &&
+                          IsBinaryTypeWithCollation(exprType((Node*)tle->expr)))) {
                 Assert(!OidIsValid(def->collOid));
             }
             def->constraints = NIL;

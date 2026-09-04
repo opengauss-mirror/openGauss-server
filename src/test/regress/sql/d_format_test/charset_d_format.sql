@@ -247,7 +247,11 @@ create extension shark;
 set d_format_behavior_compat_options = 'default_collation';
 create table test(id character(5));
 \d test
+create view test_view as select id from test;
 set d_format_behavior_compat_options = '';
+create view test_view_without_guc as select id from test;
+drop view test_view_without_guc;
+drop view test_view;
 create table test1(id character(5));
 \d test1
 
