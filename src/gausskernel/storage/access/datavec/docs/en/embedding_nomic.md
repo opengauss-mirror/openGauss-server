@@ -2,7 +2,7 @@
 
 nomic-embed-text is a high-performance embedding model specifically designed for converting text into high-dimensional vector representations. This document describes how to easily convert text into vectors using nomic-embed-text and openGauss DataVec, and quickly perform search operations based on semantic similarity.
 
-Note: For details, refer to [containerized deployment of openGauss DataVec](../installation_guide/installing_the_container_image.md).
+Note: For details, refer to [containerized deployment of openGauss DataVec](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## Environment Preparation
 

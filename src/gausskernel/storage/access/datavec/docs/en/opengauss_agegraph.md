@@ -3,13 +3,13 @@
 Traditional Retrieval-Augmented Generation (RAG) typically uses vector databases to retrieve relevant documents, improving the accuracy of LLM answers. However, vector-based RAG cannot effectively express the relationships between entities. By contrast, GraphRAG, which is based on knowledge graph retrieval-augmented generation, provides structured retrieval capabilities, incorporating graphs as one component of traditional RAG multi-path recall. This makes knowledge representation more interpretable and better suited for complex relationships.
 
 [openGauss AGEGraph](opengauss_agegraph.md) now provides graph database engine capabilities. This article details how to leverage LLMs and the openGauss graph database to quickly extract and persist document knowledge graphs. You then input a question into the LLM, which automatically extracts keywords and converts them into graph query statements to connect to the openGauss graph database for graph data retrieval. Finally, the graph data is fed into the LLM to generate an answer for the user.
-![AGEGraph](../figures/openGauss-AGEGraph.png)
+![AGEGraph](./figures/openGauss-AGEGraph.png)
 
 ## 1. Environment Setup
 
 ### 1.1 Deploying openGauss in a Container
 
-For deploying openGauss, refer to [Installing the openGauss Container Image](../installation_guide/installing_the_container_image.md).
+For deploying openGauss, refer to [Installing the openGauss Container Image](https://docs.opengauss.org/en/docs/latest/installation_guide/installing_the_container_image.html).
 
 After the openGauss container starts, run `docker ps` to check whether the container is running.
 Output

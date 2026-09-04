@@ -1,6 +1,6 @@
 # OGAI Usage Guide
 
-This document describes the environment preparation, system tables, system functions, and usage of openGauss AI (OGAI). For details about OGAI features, customer benefits, and constraints, see [OGAI Feature Description](../characteristic_description/ogai.md).
+This document describes the environment preparation, system tables, system functions, and usage of openGauss AI (OGAI). For details about OGAI features, customer benefits, and constraints, see [OGAI Feature Description](https://docs.opengauss.org/en/docs/latest/characteristic_description/ogai.html).
 
 ## Environment Preparation
 
@@ -35,7 +35,7 @@ To use asynchronous vectorization mode, enable the parameter in `postgresql.conf
 enable_async_ogai = on
 ```
 
-For details about all OGAI Grand Unified Configuration (GUC) parameters, see [OGAI Parameters](../database_reference/ogai_parameters.md).
+For details about all OGAI Grand Unified Configuration (GUC) parameters, see [OGAI Parameters](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/ogai_parameters.md).
 
 ## System Tables
 

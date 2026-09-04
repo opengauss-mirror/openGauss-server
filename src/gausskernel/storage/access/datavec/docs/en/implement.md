@@ -10,7 +10,7 @@ Due to the intrinsic nature of inverted indexes, updating a GIN index can be slo
 
 The main disadvantage of this approach is that searches must scan the list of pending entries in addition to the regular index. Therefore, a large list of pending entries can significantly slow down searches. Another disadvantage is that, although most updates are fast, an update that causes the pending list to become "too large" will trigger an immediate cleanup and will therefore be much slower than other updates. Proper use of autovacuum can mitigate both of these problems.
 
-If consistent response time (the response time of cleaning up entries and the response time of updates) is more important than update speed, pending entries can be disabled by setting the GIN index storage parameter FASTUPDATE to off. For details, see [CREATE INDEX](../sql_reference/create_index.md).
+If consistent response time (the response time of cleaning up entries and the response time of updates) is more important than update speed, pending entries can be disabled by setting the GIN index storage parameter FASTUPDATE to off. For details, see [CREATE INDEX](https://docs.opengauss.org/en/docs/latest/sql_reference/create_index.html).
 
 ## Partial Match Algorithm<a name="zh-cn_topic_0283137368_zh-cn_topic_0237122201_zh-cn_topic_0059778495_s9dc41ea95b9144c38d709b0b9a43fe9e"></a>
 

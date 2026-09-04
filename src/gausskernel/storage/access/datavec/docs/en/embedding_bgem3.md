@@ -2,7 +2,7 @@
 
 [BGE M3](https://huggingface.co/BAAI/bge-m3) is a multilingual, high-performance text embedding model developed by BAAI that converts text into semantically rich high-dimensional vector representations. This document focuses on BGE M3 and the vector database openGauss DataVec, and describes how to implement text vector generation and efficient storage. By combining these two tools, you can build more intelligent data retrieval and processing systems.
 
-Note: For containerized deployment of openGauss DataVec, see [the link](../installation_guide/installing_the_container_image.md).
+Note: For containerized deployment of openGauss DataVec, see [the link](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## Case 1: FlagEmbedding + openGauss DataVec
 

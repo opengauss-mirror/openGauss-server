@@ -6,7 +6,7 @@ This chapter introduces how to use the BM25 full-text search index in openGauss.
 
 ## 1. Installation and Deployment
 
-Use Docker to implement containerized deployment of openGauss. This can simplify installation, configuration, and environment setup for DevOps users. For details, see [Installing the Container Image](../installation_guide/installing_the_container_image.md).
+Use Docker to implement containerized deployment of openGauss. This can simplify installation, configuration, and environment setup for DevOps users. For details, see [Installing the Container Image](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## 2. Syntax Overview
 
@@ -77,7 +77,7 @@ Since BM25 index scanning requires specifying query terms, a new BM25 index oper
 
     >[!NOTE] Note
     >
-    >BM25 index scanning performance can be tuned through relevant GUC parameters. You can set them before executing statements. For details, see [BM25 Parameter Tuning](../database_reference/bm25_full_text_retrieval_index_parameters.md).
+    >BM25 index scanning performance can be tuned through relevant GUC parameters. You can set them before executing statements. For details, see [BM25 Parameter Tuning](https://docs.opengauss.org/en/docs/latest/database_reference/bm25_full_text_retrieval_index_parameters.html).
 
 - **Index Deletion**
 

@@ -251,4 +251,4 @@ public static void main(String[] args) {
 ```
 
 [More operation examples](https://gitcode.com/opengauss/openGauss-connector-jdbc)
-[Common Java examples](../getting_started/java.md)
+[Common Java examples](https://docs.opengauss.org/en/docs/latest/getting_started/java.html)

@@ -6,7 +6,7 @@ This document describes how to use the C++ language to call the openGauss vector
 
 - g++
 - libpq library
-For details, see [Development Process Based on libpq](../developer_guide/development_process_libpq.md).
+For details, see [Development Process Based on libpq](https://docs.opengauss.org/en/docs/latest/developer_guide/development_process_libpq.html).
 
 ## Basic Operations
 

@@ -4,7 +4,7 @@ This chapter mainly introduces the fusion query usage guide for the DataVec vect
 
 ## 1. Installation and Deployment
 
-Use Docker to implement containerized deployment of openGauss with DataVec, simplifying installation, configuration, and environment setup for DevOps users. For details, see [Container Image Installation](../installation_guide/installing_the_container_image.md).
+Use Docker to implement containerized deployment of openGauss with DataVec, simplifying installation, configuration, and environment setup for DevOps users. For details, see [Container Image Installation](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## 2. Fusion Query
 
@@ -83,7 +83,7 @@ Index-based query is a method that uses index structures to quickly locate targe
 
 ## 3. Full-Text Search
 
-[Full-text search](../sql_reference/full_text_retrieval.md) (FTS) is a technology that parses words and phrases in natural language, searches and retrieves text data in the database based on keywords, and finally sorts the results by document relevance. openGauss provides complete full-text search capabilities, including specific data types and ranking functions.
+[Full-text search](https://docs.opengauss.org/en/docs/latest/sql_reference/full_text_retrieval.html) (FTS) is a technology that parses words and phrases in natural language, searches and retrieves text data in the database based on keywords, and finally sorts the results by document relevance. openGauss provides complete full-text search capabilities, including specific data types and ranking functions.
 
 The following case demonstrates the basic process of full-text search. Assume there is a table `chunks_table_test` that stores raw document data, with the primary key field `chunk_id` and the text field `chunk_content`. You need to query all documents associated with the input text in the table. To implement full-text search, follow these main steps.
 
@@ -164,7 +164,7 @@ LIMIT 2;
 In the preceding SQL query:
 
 - `to_tsvector@@to_tsquery`: `@@` is the full-text search matching operator in openGauss. It returns true when the `tsvector` (document) matches the `tsquery` (query).
-- `ts_rank(to_tsvector, to_tsquery, integer)`: openGauss provides two preset [ranking methods](../sql_reference/ranking_search_results.md) (`ts_rank`, `ts_rank_cd`) that can rank the most relevant documents first. In addition, you can set the `integer` normalization option to define the degree to which document length affects the ranking.
+- `ts_rank(to_tsvector, to_tsquery, integer)`: openGauss provides two preset [ranking methods](https://docs.opengauss.org/en/docs/latest/sql_reference/ranking_search_results.html) (`ts_rank`, `ts_rank_cd`) that can rank the most relevant documents first. In addition, you can set the `integer` normalization option to define the degree to which document length affects the ranking.
 
 By combining the preceding steps, you can implement efficient full-text search.
 

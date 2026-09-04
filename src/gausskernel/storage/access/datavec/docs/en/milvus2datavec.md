@@ -5,7 +5,7 @@ This tutorial uses Python to migrate local Milvus data to an openGauss DataVec i
 ## Environment Setup
 
 - A Milvus instance version 2.3 or later has been deployed.
-- An openGauss instance version 7.0.0-RC1 or later has been deployed. For container deployment, refer to [Container Image Installation](../installation_guide/installing_the_container_image.md)
+- An openGauss instance version 7.0.0-RC1 or later has been deployed. For container deployment, refer to [Container Image Installation](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html)
 - A Python environment version 3.8 or later has been installed.
 - The required Python libraries have been installed.
 

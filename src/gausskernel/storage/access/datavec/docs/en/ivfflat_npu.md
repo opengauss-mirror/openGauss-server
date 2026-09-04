@@ -120,7 +120,7 @@ The GUC parameter `cache_data_on_npu` = (on|off): indicates whether to cache the
 
 Set the GUC parameter `enable_ivfflat_npu = off` to disable the IVFFLAT-NPU feature.
 
-For details about the GUC parameters related to the IVFFLAT-NPU feature, see [DataVec Vector Engine Parameters](../database_reference/datavec_vector_engine_parameters.md).
+For details about the GUC parameters related to the IVFFLAT-NPU feature, see [DataVec Vector Engine Parameters](https://docs.opengauss.org/en/docs/latest/database_reference/datavec_vector_engine_parameters.html).
 
 ## 5. Using IVFFLAT-NPU
 

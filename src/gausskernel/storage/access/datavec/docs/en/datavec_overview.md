@@ -14,9 +14,9 @@ DataVec currently supports the following features: exact and approximate nearest
 
 ## Quick Deployment
 
-DataVec can be rapidly deployed via [container image installation](../installation_guide/installing_the_container_image.md) and quickly integrated with large language models to build local RAG services for intelligent question-answering.
+DataVec can be rapidly deployed via [container image installation](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html) and quickly integrated with large language models to build local RAG services for intelligent question-answering.
 
-DataVec can leverage the [spqplugin_v2 plugin](../extension_reference/spqplugin_v2.md) to gain distributed storage and retrieval capabilities in large-scale data scenarios.
+DataVec can leverage the [spqplugin_v2 plugin](https://docs.opengauss.org/en/docs/latest/extension_reference/extension_reference/plugin/spqplugin_v2.html) to gain distributed storage and retrieval capabilities in large-scale data scenarios.
 
 ## Customer Value
 

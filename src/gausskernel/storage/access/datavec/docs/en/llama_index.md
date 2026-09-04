@@ -4,7 +4,7 @@ LlamaIndex (formerly GPT Index) is a data framework designed specifically for la
 
 ## Containerized Deployment of openGauss
 
-For details, see [Container Image Installation](../installation_guide/installing_the_container_image.md).
+For details, see [Container Image Installation](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## LlamaIndex Deployment
 

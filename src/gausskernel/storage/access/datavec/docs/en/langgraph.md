@@ -4,7 +4,7 @@ LangGraph is a low-level orchestration framework for building, managing, and dep
 
 ## Containerized Deployment of openGauss
 
-For details, see [Container Image Installation](../installation_guide/installing_the_container_image.md).
+For details, see [Container Image Installation](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## Installation
 

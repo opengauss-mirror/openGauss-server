@@ -4,7 +4,7 @@
 
 ## Quick Deployment
 
-For details, see [Installing the Container Image](../installation_guide/installing_the_container_image.md).
+For details, see [Installing the Container Image](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## Creating a Vector Table
 
