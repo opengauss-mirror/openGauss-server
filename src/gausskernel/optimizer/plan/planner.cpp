@@ -4012,27 +4012,28 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * but with the user var, we cannot push down into subtree in b format
                      */
                     Plan* plan_need_replace_tlist = result_plan;
-                    /*
-                     * Check if the result_plan is a stream node redistributed based on ctid.
-                     * This type of stream node is designed to resolve page lock conflicts during smp iud.
-                     */
-                    if (check_ctid_redis_stream(result_plan)) {
-                        plan_need_replace_tlist->targetlist = sub_tlist;
-                        plan_need_replace_tlist = result_plan->lefttree;
-                    }
-                    plan_need_replace_tlist->targetlist = sub_tlist;
 
                     if (parse->sortClause)
                         pullup_userset_before_sort = need_pullup_userset_before_sort(sub_tlist);
-                    if (!pullup_userset_before_sort)
+                    if (!pullup_userset_before_sort) {
+                        /*
+                         * Check if the result_plan is a stream node redistributed based on ctid.
+                         * This type of stream node is designed to resolve page lock conflicts during smp iud.
+                         */
+                        if (check_ctid_redis_stream(result_plan)) {
+                            plan_need_replace_tlist->targetlist = sub_tlist;
+                            plan_need_replace_tlist = result_plan->lefttree;
+                        }
+                        plan_need_replace_tlist->targetlist = sub_tlist;
                         result_plan->targetlist = sub_tlist;
 
-                    if (IsA(plan_need_replace_tlist, PartIterator) || IsA(plan_need_replace_tlist, VecPartIterator)) {
-                        /*
-                         * If is a PartIterator + Scan, push the PartIterator's
-                         * tlist to Scan.
-                         */
-                        plan_need_replace_tlist->lefttree->targetlist = sub_tlist;
+                        if (IsA(plan_need_replace_tlist, PartIterator) || IsA(plan_need_replace_tlist, VecPartIterator)) {
+                            /*
+                             * If is a PartIterator + Scan, push the PartIterator's
+                             * tlist to Scan.
+                             */
+                            plan_need_replace_tlist->lefttree->targetlist = sub_tlist;
+                        }
                     }
 #ifdef PGXC
                     /*
