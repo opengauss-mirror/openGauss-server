@@ -4234,8 +4234,33 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
                  * collector will not set new state for this partition and the partition
                  * ill always in a "need to be analyzed" state.
                  */
-                if (!estimate_table_rownum)
+                if (!estimate_table_rownum) {
                     pgstat_report_analyze(partRel, trows, tdrows);
+
+                    /*
+                     * Refresh pg_partition with the partition's own page and live-tuple
+                     * counts. For row-store range/list partitions the page count can be
+                     * derived from the physical blocks, so do it even when the partition
+                     * holds only dead tuples (e.g. after DELETE). Otherwise such empty
+                     * partitions keep stale/zero relpages and reltuples.
+                     *
+                     * ANALYZE PARTITION is handled later by
+                     * update_pages_and_tuples_pgclass(), so skip it here to avoid a
+                     * duplicate update.
+                     *
+                     * Bucket and sub-partitioned tables are excluded here because their
+                     * sampling partList is keyed by bucket/sub-partition rather than by
+                     * the level-1 partitions stored in vacstmt->partList, which would
+                     * make the partition oid lookup below unreliable.
+                     */
+                    if (!vacuumPartition(vacstmt->flags) && !RelationIsColStore(onerel) &&
+                        !RELATION_OWN_BUCKET(onerel) && !RelationIsSubPartitioned(onerel)) {
+                        Partition part = partitionOpen(onerel, partRel->rd_id, NoLock);
+                        vac_update_partstats(part, (BlockNumber)partBlocks[counter], trows,
+                            visibilitymap_count(onerel, part), InvalidTransactionId, InvalidMultiXactId);
+                        partitionClose(onerel, part, NoLock);
+                    }
+                }
             }
         }
 
