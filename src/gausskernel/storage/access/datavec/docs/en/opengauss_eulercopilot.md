@@ -150,7 +150,7 @@ cd euler-copilot-framework/deploy/chart/euler-copilot
 vim values.yaml
 ```
 
-![](../figures/eulercopilot-model-value.png)
+![](../figures/eulercopilot-model-value.jpg)
 
 Note that the `name`, `key`, and `endpoint` fields are all required.
 
@@ -174,7 +174,7 @@ Before accessing the web interface, you need to configure the domain name:
 ```
 
 Finally, enter <https://authhub.eulercopilot.local> (or your custom domain) in a browser to access the openEuler Intelligence web interface:
-![](../figures/euler-copilot-web.png)
+![](../figures/euler-copilot-web.jpg)
 
 ### 3. Preparing the openGauss Domain Knowledge Base
 
@@ -182,7 +182,7 @@ This article uses building an openGauss knowledge base as an example. You can do
 
 First, select **Knowledge Base** from the left toolbar on the openEuler Intelligence page. After registering an account and logging in, click the settings button in the upper-right corner to select a language model. Here, we choose the llama3.2 model deployed locally with Ollama. The configuration page is as follows:
 
-![](../figures/euler-copilot-database1.png)
+![](../figures/euler-copilot-database1.jpg)
 
 Next, create a dedicated asset library for openGauss. The description field example is shown below:
 
@@ -202,7 +202,7 @@ Once the domain-specific knowledge base is created, you can integrate it as an e
 
 - First, obtain the asset library ID from the Knowledge Base interface as a unique identifier. Then, navigate to the Dialogue page and configure the obtained ID in the knowledge base association settings. The settings page is shown below:
 
-  ![](../figures/euler-copilot-chat1.png)
+  ![](../figures/euler-copilot-chat1.jpg)
 
 - Finally, compare the response quality before and after integrating the knowledge base using a query about "openGauss versions":<br>
   Response without the knowledge base: Notable fabricated content, with incorrect version numbers and other key information.<br>
