@@ -11,7 +11,7 @@ insert into only_first_part select generate_series(1, 5000), 'Alice';
 
 analyze only_first_part;
 
--- preview, no statistic for partition
+-- preview, no column statistic for partition
 select relname, relpages, reltuples from pg_class where relname = 'only_first_part';
 select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3');
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
@@ -67,7 +67,7 @@ insert into only_first_part_two select generate_series(1, 10), 6;
 
 analyze only_first_part_two;
 
--- preview, no statistic for partition
+-- preview, no column statistic for partition
 select relname, relpages, reltuples from pg_class where relname = 'only_first_part_two';
 select relname, relpages, reltuples from pg_partition where relname in ('list_p1', 'list_p2');
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
