@@ -3854,6 +3854,28 @@ static ObjTree* deparse_DropEventStmt(Oid objectId, Node *parsetree)
     return ret;
 }
 
+/* ALTER INDEX ... REBUILD is represented as ReindexStmt. */
+static ObjTree* deparse_ReindexStmt(Oid objectId, Node *parsetree)
+{
+    ReindexStmt *stmt = (ReindexStmt *)parsetree;
+    ObjectAddress address;
+    const int partitionArgCount = 2;
+
+    if (!stmt->is_alter_index_rebuild ||
+        (stmt->kind != OBJECT_INDEX && stmt->kind != OBJECT_INDEX_PARTITION) ||
+        !OidIsValid(objectId))
+        return NULL;
+
+    ObjectAddressSet(address, RelationRelationId, objectId);
+    if (stmt->kind == OBJECT_INDEX_PARTITION) {
+        return new_objtree_VA("ALTER INDEX %{identity}s REBUILD PARTITION %{partition}I", partitionArgCount,
+                              "identity", ObjTypeString, getObjectIdentity(&address),
+                              "partition", ObjTypeString, stmt->name);
+    }
+    return new_objtree_VA("ALTER INDEX %{identity}s REBUILD", 1,
+                          "identity", ObjTypeString, getObjectIdentity(&address));
+}
+
 /*
  * Handle deparsing of simple commands.
  *
@@ -3925,6 +3947,9 @@ static ObjTree* deparse_simple_command(CollectedCommand *cmd, bool *include_owne
             return deparse_AlterEventStmt(objectId, parsetree);
         case T_DropEventStmt:
             return deparse_DropEventStmt(objectId, parsetree);
+        case T_ReindexStmt:
+            *include_owner = false;
+            return deparse_ReindexStmt(objectId, parsetree);
         default:
             if (u_sess->hook_cxt.deparseCollectedCommandHook != NULL) {
                 return (ObjTree*)((deparseCollectedCommand)(u_sess->hook_cxt.deparseCollectedCommandHook))
