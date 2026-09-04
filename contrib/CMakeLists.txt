@@ -22,6 +22,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/dummy_seclabel
     ${CMAKE_CURRENT_SOURCE_DIR}/pagehack
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_xlogdump
+    ${CMAKE_CURRENT_SOURCE_DIR}/pg_archivecleanup
     ${CMAKE_CURRENT_SOURCE_DIR}/file_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/log_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
@@ -81,6 +82,7 @@ add_subdirectory(security_plugin)
 add_subdirectory(dummy_seclabel)
 add_subdirectory(pagehack)
 add_subdirectory(pg_xlogdump)
+add_subdirectory(pg_archivecleanup)
 add_subdirectory(file_fdw)
 add_subdirectory(log_fdw)
 add_subdirectory(gms_utility)
