@@ -17139,10 +17139,47 @@ static int exec_stmt_exec(PLpgSQL_execstate *estate, PLpgSQL_stmt_exec *stmt)
     }
 
     /*
+     * A CachedPlanSource may have been invalidated by a nested call.  Its
+     * query_list is then NIL until the plan is prepared again.  Do not inspect
+     * that list before forcing a recompile, otherwise linitial() below can
+     * dereference an empty list and abort the backend.
+     */
+    if (needRecompilePlan(plan)) {
+        free_expr(expr);
+        plan = prepare_stmt_exec(estate, estate->func, stmt);
+    }
+
+    List* plan_sources = SPI_plan_get_plan_sources(plan);
+    if (plan_sources == NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                errmsg("cached plan has no plan source for EXEC statement")));
+    }
+
+    CachedPlanSource* plansource = (CachedPlanSource*)linitial(plan_sources);
+    if (plansource == NULL || plansource->query_list == NIL) {
+        /* The source can be invalidated between the first check and here. */
+        free_expr(expr);
+        plan = prepare_stmt_exec(estate, estate->func, stmt);
+        plan_sources = SPI_plan_get_plan_sources(plan);
+        if (plan_sources == NIL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                    errmsg("cached plan has no plan source for EXEC statement")));
+        }
+        plansource = (CachedPlanSource*)linitial(plan_sources);
+    }
+    if (plansource == NULL || plansource->query_list == NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                errmsg("cached plan has no valid query tree for EXEC statement")));
+    }
+
+    /*
      * If we will deal with scalar function, we need to know the correct
      * return-type.
      */
-    query = linitial_node(Query, ((CachedPlanSource *) linitial(plan->plancache_list))->query_list);
+    query = linitial_node(Query, plansource->query_list);
 
     if (query->commandType == CMD_SELECT) {
         Node        *node;

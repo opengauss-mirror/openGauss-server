@@ -2173,6 +2173,11 @@ void RePrepareQuery(ExecuteStmt* stmt)
  */
 bool checkRecompileCondition(CachedPlanSource* plansource)
 {
+    /* An invalidated plan has no query tree until it is revalidated. */
+    if (plansource == NULL || plansource->query_list == NIL) {
+        return true;
+    }
+
     ListCell* l = NULL;
     foreach (l, plansource->query_list) {
         Query* q = (Query*)lfirst(l);
