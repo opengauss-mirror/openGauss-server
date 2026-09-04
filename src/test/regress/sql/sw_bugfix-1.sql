@@ -487,6 +487,17 @@ select * from (select 'test111' col from sys_dummy) connect by rownum < length(t
 --test find siblings target name bug
 select test1.a, cast (min(1) OVER (PARTITION BY test1.a ORDER BY test1.b) as integer) from test1 where test1.b is NULL connect by exists(select test2.id from test2 where false limit 40) order siblings by test1.ctid;
 
+-- test window targetlist does not discard Start With internal arrays
+create table test_for_sysfunc_under_ops(a int,b int,c int);
+insert into test_for_sysfunc_under_ops values(1,1,1),(1,2,1),(2,3,1),(3,4,1),(1,4,1);
+select _root from (select connect_by_root(a) _root, level,
+                          max(level) over (partition by 1) mlv
+                   from test_for_sysfunc_under_ops t1
+                   start with t1.a=t1.b
+                   connect by nocycle prior b=a)
+where level = mlv;
+drop table test_for_sysfunc_under_ops;
+
 --test swcb func with aggregate
 create table test3(id text, name text, parentid text);
 insert into test3 values('001', 'root', '0');
