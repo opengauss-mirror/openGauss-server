@@ -34942,9 +34942,9 @@ int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Da
             autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
         } else {
             if (is_global_level_sequence_cache(cons_autoinc->seqoid)) {
-                autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid);
+                autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid, true);
             } else {
-                autoinc = nextval_internal(cons_autoinc->seqoid, true);
+                autoinc = nextval_internal(cons_autoinc->seqoid, true, true);
             }
         }
         if (modify_value) {

@@ -375,7 +375,8 @@ SELECT b FROM test_at_modify_default ORDER BY 1;
 (4 rows)
 
 ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCREMENT; -- ERROR
-ERROR:  multiple default values specified for column "b" of table "test_at_modify_default"
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_modify_default_b_seq" for serial column "test_at_modify_default.b"
+ERROR:  both default and AUTO INCREMENT specified for column "b" of table "test_at_modify_default"
 LINE 1: ...BLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCRE...
                                                              ^
 ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4;
@@ -1379,7 +1380,8 @@ SELECT b FROM test_at_change_default ORDER BY 1;
 (4 rows)
 
 ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCREMENT; -- ERROR
-ERROR:  multiple default values specified for column "b1" of table "test_at_change_default"
+NOTICE:  ALTER TABLE will create implicit sequence "test_at_change_default_b1_seq" for serial column "test_at_change_default.b1"
+ERROR:  both default and AUTO INCREMENT specified for column "b1" of table "test_at_change_default"
 LINE 1: ... test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCRE...
                                                              ^
 ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4;

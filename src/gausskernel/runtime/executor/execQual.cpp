@@ -5892,7 +5892,7 @@ static Datum ExecEvalNextValueExpr(ExprState* exprstate, ExprContext* econtext, 
             errmsg("no owned sequence found")));
     }
 
-    newval = nextval_internal(nve->seqid, false);
+    newval = nextval_internal(nve->seqid, false, false);
     switch (nve->typeId) {
         case INT1OID:
             result = Int8GetDatum((int8) newval);

@@ -274,7 +274,7 @@ ERROR:  Identity column 'bookid' data type invalid.
 CREATE TABLE book(id serial, bookId int identity default 5, bookname char(20));
 NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq" for serial column "book.id"
 NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
-ERROR:  multiple default values specified for column "bookid" of table "book"
+ERROR:  both default and identity specified for column "bookid" of table "book"
 LINE 1: CREATE TABLE book(id serial, bookId int identity default 5, ...
                                                          ^
 CREATE TABLE t_identity(id serial, col int identity(5,10), col2 text)

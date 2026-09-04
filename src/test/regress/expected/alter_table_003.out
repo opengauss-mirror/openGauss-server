@@ -2546,7 +2546,9 @@ alter table t1 drop f1;
 -- error
 alter table t1 add f6 int primary key auto_increment default 6 first;
 NOTICE:  ALTER TABLE will create implicit sequence "t1_f6_seq" for serial column "t1.f6"
-ERROR:  multiple default values specified for column "f6" of table "t1"
+ERROR:  both default and AUTO INCREMENT specified for column "f6" of table "t1"
+LINE 1: ...er table t1 add f6 int primary key auto_increment default 6 ...
+                                                             ^
 \d+ t1
                                     Table "public.t1"
  Column |            Type             | Modifiers | Storage  | Stats target | Description 
@@ -2568,7 +2570,9 @@ alter table t1 drop f1;
 -- error
 alter table t1 add f6 int primary key auto_increment default 6 first;
 NOTICE:  ALTER TABLE will create implicit sequence "t1_f6_seq" for serial column "t1.f6"
-ERROR:  multiple default values specified for column "f6" of table "t1"
+ERROR:  both default and AUTO INCREMENT specified for column "f6" of table "t1"
+LINE 1: ...er table t1 add f6 int primary key auto_increment default 6 ...
+                                                             ^
 select * from t1;
  f2 |               f3                |    f4    | f5 
 ----+---------------------------------+----------+----
@@ -3731,7 +3735,9 @@ alter table t1 drop f1;
 -- error
 alter table t1 add f6 int primary key auto_increment default 6 first;
 NOTICE:  ALTER TABLE will create implicit sequence "t1_f6_seq" for serial column "t1.f6"
-ERROR:  multiple default values specified for column "f6" of table "t1"
+ERROR:  both default and AUTO INCREMENT specified for column "f6" of table "t1"
+LINE 1: ...er table t1 add f6 int primary key auto_increment default 6 ...
+                                                             ^
 \d+ t1
                                     Table "public.t1"
  Column |            Type             | Modifiers | Storage  | Stats target | Description 
@@ -3753,7 +3759,9 @@ alter table t1 drop f1;
 -- error
 alter table t1 add f6 int primary key auto_increment default 6 first;
 NOTICE:  ALTER TABLE will create implicit sequence "t1_f6_seq" for serial column "t1.f6"
-ERROR:  multiple default values specified for column "f6" of table "t1"
+ERROR:  both default and AUTO INCREMENT specified for column "f6" of table "t1"
+LINE 1: ...er table t1 add f6 int primary key auto_increment default 6 ...
+                                                             ^
 select * from t1;
  f2 |               f3                |    f4    | f5 
 ----+---------------------------------+----------+----

@@ -97,8 +97,8 @@ static int64 get_uuid_from_uuids(List** uuids);
 static SeqTable InitGlobalSeqElm(Oid relid);
 static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel);
 template<typename T_Int, typename T_Form, bool large>
-static int128 GetNextvalLocal(SeqTable elm, Relation seqrel);
-static int128 GetNextvalGlobalForSingleNode(SeqTable elm);
+static int128 GetNextvalLocal(SeqTable elm, Relation seqrel, bool autoInc);
+static int128 GetNextvalGlobalForSingleNode(SeqTable elm, bool autoInc);
 template<typename T_Int, bool large>
 static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, T_Int minv, T_Int fetch,
     T_Int log, T_Int incby, T_Int rescnt, bool is_cycled, T_Int cache, Relation seqrel);
@@ -617,7 +617,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
 }
 
 template<typename T_Int, typename T_Form, bool large>
-static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
+static int128 GetNextvalLocal(SeqTable elm, Relation seqrel, bool autoInc)
 {
     Buffer buf;
     Page page;
@@ -670,13 +670,14 @@ static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
     }
 
     /* under b_format, when reach maximum value, return it */
-    if (DB_IS_CMPT(B_FORMAT) && !seq->is_cycled && last == maxv) {
+    if (DB_IS_CMPT(B_FORMAT) && autoInc &&
+        !seq->is_cycled && last == maxv) {
         UnlockReleaseBuffer(buf);
         return maxv;
     }
 
     log = FetchLogLocal<T_Int, large>(&next, &result, &last, maxv, minv, fetch, log, incby,
-        rescnt, seq->is_cycled, cache, seqrel);
+                                      rescnt, seq->is_cycled, cache, seqrel);
     /* Save info in local cache for temporary sequences */
     AssignInt<int128, true>(&(elm->last), (int128)result); /* last returned number */
     AssignInt<int128, true>(&(elm->cached), (int128)last); /* last fetched number */
@@ -751,7 +752,7 @@ static T_Int GetLastAndIncrementValue(SeqTable elm, Relation seqrel, T_Int* incr
     return last_value;
 }
 
-static int128 GetNextvalGlobalForSingleNode(SeqTable elm)
+static int128 GetNextvalGlobalForSingleNode(SeqTable elm, bool autoInc)
 {
     int128 result = 0;
     Relation seqrel = lock_and_open_seq(elm);
@@ -761,9 +762,9 @@ static int128 GetNextvalGlobalForSingleNode(SeqTable elm)
                                RelationGetRelationName(seqrel))));
     } else if (seqrel->rd_rel->relkind == RELKIND_SEQUENCE ||
                seqrel->rd_rel->relkind == RELKIND_SEQUENCE_GSC) {
-        result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel);
+        result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel, autoInc);
     } else {
-        result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel);
+        result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel, autoInc);
     }
     relation_close(seqrel, NoLock);
     return result;
@@ -797,12 +798,12 @@ static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, 
                     break; /* stop fetching */
                 }
                 if (!is_cycled) {
-                    char* tmp_buf = Int8or16Out<T_Int, large>(maxv);
+                    char* maxvstr = Int8or16Out<T_Int, large>(maxv);
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("nextval: reached maximum value of sequence \"%s\" (%s)",
                                 RelationGetRelationName(seqrel),
-                                tmp_buf)));
+                                maxvstr)));
                 }
                 *next = minv;
             } else {
@@ -815,13 +816,12 @@ static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, 
                     break; /* stop fetching */
                 }
                 if (!is_cycled) {
-                    char* tmp_buf = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(minv))) :
-                        DatumGetCString(DirectFunctionCall1(int8out, minv));
+                    char* minvstr = Int8or16Out<T_Int, large>(minv);
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("nextval: reached minimum value of sequence \"%s\" (%s)",
                                 RelationGetRelationName(seqrel),
-                                tmp_buf)));
+                                minvstr)));
                 }
                 *next = maxv;
             } else {
@@ -1663,11 +1663,14 @@ void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt)
  */
 Datum nextval(PG_FUNCTION_ARGS)
 {
-    text* seqin = PG_GETARG_TEXT_P(0);
-    RangeVar* sequence = NULL;
+    text* seqin;
     Oid relid;
+    RangeVar* sequence;
+    List* nameList;
+    bool autoInc;
 
-    List* nameList = textToQualifiedNameList(seqin);
+    seqin = PG_GETARG_TEXT_P(0);
+    nameList = textToQualifiedNameList(seqin);
     sequence = makeRangeVarFromNameList(nameList);
 
     /*
@@ -1680,14 +1683,17 @@ Datum nextval(PG_FUNCTION_ARGS)
      */
     relid = RangeVarGetRelid(sequence, NoLock, false);
     list_free_deep(nameList);
-    if (CheckSeqOwnedByAutoInc(relid)) {
+
+    autoInc = CheckSeqOwnedByAutoInc(relid);
+    if (autoInc) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
+
     if (is_global_level_sequence_cache(relid)) {
-        PG_RETURN_INT64(nextval_internal_for_global_seq_cache(relid));
+        PG_RETURN_INT64(nextval_internal_for_global_seq_cache(relid, autoInc));
     } else {
-        PG_RETURN_INT64(nextval_internal(relid, true));
+        PG_RETURN_INT64(nextval_internal(relid, true, autoInc));
     }
 }
 
@@ -1752,16 +1758,21 @@ bool shouldReturnNumeric()
 
 Datum nextval_oid(PG_FUNCTION_ARGS)
 {
-    int128 result;
-    Oid relid = PG_GETARG_OID(0);
-    if (CheckSeqOwnedByAutoInc(relid)) {
+    bool    autoInc;
+    Oid     relid;
+    int128  result;
+
+    relid = PG_GETARG_OID(0);
+    autoInc = CheckSeqOwnedByAutoInc(relid);
+    if (autoInc) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
+
     if (is_global_level_sequence_cache(relid)) {
-        result = nextval_internal_for_global_seq_cache(relid);
+        result = nextval_internal_for_global_seq_cache(relid, autoInc);
     } else {
-        result = nextval_internal(relid, true);
+        result = nextval_internal(relid, true, autoInc);
     }
 
     if (shouldReturnNumeric()) {
@@ -1771,7 +1782,7 @@ Datum nextval_oid(PG_FUNCTION_ARGS)
     }
 }
 
-int128 nextval_internal(Oid relid, bool checkPermissions)
+int128 nextval_internal(Oid relid, bool checkPermissions, bool autoInc)
 {
     SeqTable elm = NULL;
     Relation seqrel;
@@ -1835,9 +1846,9 @@ int128 nextval_internal(Oid relid, bool checkPermissions)
         result = GetNextvalGlobal(elm, seqrel);
     } else {
         if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
-            result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel);
+            result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel, autoInc);
         } else { /* can only be large sequence. init_sequence rules out other cases */
-            result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel);
+            result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel, autoInc);
         }
     }
 
@@ -1861,7 +1872,7 @@ int128 nextval_internal(Oid relid, bool checkPermissions)
     return result;
 }
 
-int128 nextval_internal_for_global_seq_cache(Oid relid)
+int128 nextval_internal_for_global_seq_cache(Oid relid, bool autoInc)
 {
     SeqTable elm = NULL;
     uint32 hashCode;
@@ -1926,7 +1937,7 @@ int128 nextval_internal_for_global_seq_cache(Oid relid)
     }
 
     /* If don't have cached value, we should fetch some. */
-    result = GetNextvalGlobalForSingleNode(elm);
+    result = GetNextvalGlobalForSingleNode(elm, autoInc);
 
     /* Record global sequence cache for currval function. */
     errno_t rc = memcpy_s(&currval_seqdata, sizeof(SeqTableData), elm, sizeof(SeqTableData));
