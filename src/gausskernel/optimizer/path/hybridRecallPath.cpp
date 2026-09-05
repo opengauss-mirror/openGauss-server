@@ -278,8 +278,16 @@ static void cost_hybrid_recall_path(HybridRecallPath* path, RelOptInfo* rel)
     Cost fusion_cost = candidate_rows *
         (u_sess->attr.attr_sql.cpu_tuple_cost + 2.0 * u_sess->attr.attr_sql.cpu_operator_cost) +
         candidate_rows * heap_levels * u_sess->attr.attr_sql.cpu_operator_cost;
+    /* Stream startup calibration (2026-09-05, 100k-row hybrid bench, release):
+     * the fixed per-query cost of one task-stream producer/consumer pair
+     * measured ~6 ms (serial off 3.6 ms vs force 9.5 ms at cand=100), while
+     * the model's serial_cost for that query is ~33 units -> 1 ms ~ 9 units,
+     * so the startup term must be ~54 units.  The old 150 * cpu_tuple_cost
+     * (~1.5 units) made auto pick parallel on small-candidate queries where
+     * it is 2.6x slower in practice.  Revisit after any stream-path cost
+     * fix (e.g. protocol handshaking), see OPT-2 half-force PoC notes. */
     Cost stream_startup_cost = u_sess->attr.attr_sql.random_page_cost +
-        150.0 * u_sess->attr.attr_sql.cpu_tuple_cost;
+        5000.0 * u_sess->attr.attr_sql.cpu_tuple_cost;
     Cost stream_transfer_cost = candidate_rows * u_sess->attr.attr_sql.cpu_tuple_cost * 0.5;
 
     Cost serial_cost = text_cost + vector_cost + fusion_cost;

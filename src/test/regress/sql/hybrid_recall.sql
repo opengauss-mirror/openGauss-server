@@ -294,7 +294,7 @@ WHERE tenant_id = 1
 ORDER BY hybrid_score DESC
 LIMIT 8;
 
-SET cpu_operator_cost = 0.1;
+SET cpu_operator_cost = 1.0;
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT id,
        ogai.hybrid_rrf_marker(

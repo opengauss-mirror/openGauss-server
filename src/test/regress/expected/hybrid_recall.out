@@ -454,7 +454,7 @@ auto-serial|125|.0131445047489824
 auto-serial|105|.0126262626262626
 auto-serial|1|.00819672131147541
 (8 rows)
-SET cpu_operator_cost = 0.1;
+SET cpu_operator_cost = 1.0;
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT id,
        ogai.hybrid_rrf_marker(
