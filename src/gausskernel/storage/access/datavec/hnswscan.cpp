@@ -90,7 +90,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
                         base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL, NULL, enablePQ, &pqinfo));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
+            w = HnswSearchLayer(base, q, ep, 8, lc, index, procinfo, collation, m, false, NULL,
                                 NULL, NULL, true, NULL, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
             ep = w;
         }
@@ -101,7 +101,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     } else {
         ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, so->enableRabitQ, so->rbqParams, NULL));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
+            w = HnswSearchLayer(base, q, ep, 8, lc, index, procinfo, collation, m, false, NULL,
                                 NULL, NULL, true, NULL, so->enableRabitQ, so->rbqParams, NULL, true);
             ep = w;
         }
