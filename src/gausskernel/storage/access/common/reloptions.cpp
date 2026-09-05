@@ -117,6 +117,8 @@ static relopt_bool boolRelOpts[] = {
      false },
     {{ "compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      false },
+     {{"vacuum_truncate", "Enables vacuum to truncate empty pages at the end of this table",
+     RELOPT_KIND_HEAP | RELOPT_KIND_TOAST}, true},
     /* list terminator */
     {{NULL}}
 };
@@ -2034,7 +2036,9 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
-        { "min_tuples", RELOPT_TYPE_REAL, offsetof(StdRdOptions, min_tuples) }
+        { "min_tuples", RELOPT_TYPE_REAL, offsetof(StdRdOptions, min_tuples) },
+        { "vacuum_truncate", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, vacuum_truncate),
+          offsetof(StdRdOptions, vacuum_truncate_set)},
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);

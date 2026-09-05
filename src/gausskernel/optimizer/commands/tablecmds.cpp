@@ -2738,6 +2738,8 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
+        
+        ForbidToSetOptionsForSegmentTbl(stmt->options);
     }
     
     /*
@@ -14872,6 +14874,10 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
                 }
             }
 
+            if (rel->storage_type == SEGMENT_PAGE) {
+                ForbidToSetOptionsForSegmentTbl(defList);
+            }
+            
             /* validate the values of ttl and period for partition manager */
             if (NULL != heapRelOpt) {
                 check_partion_policy_rel_option(defList, (StdRdOptions*)heapRelOpt);
