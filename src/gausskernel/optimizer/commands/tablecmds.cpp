@@ -2739,9 +2739,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
         
+    }
+    if (storage_type == SEGMENT_PAGE) {
         ForbidToSetOptionsForSegmentTbl(stmt->options);
     }
-    
     /*
      * Create the relation.  Inherited defaults and constraints are passed in
      * for immediate handling --- since they don't need parsing, they can be
