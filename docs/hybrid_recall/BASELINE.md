@@ -423,3 +423,31 @@ rescan 内存稳定性验证。
 
 **P3-7a 完成。** 下一步仅在确认需要扩大规模时执行 HNSW 100 万行标定；不启动
 DiskANN 或 1000 万行测试。
+
+## 14. 对标 Milvus 驱动的优化批次（2026-09-05，分支 fix/hybrid-recall-worker-guc-sync）
+
+依据 10 万行 hybrid 对标基准（`deliverables/hybrid_vs_milvus_bench/`，与 Milvus 2.6.22 同机同参数，
+完整报告见 `公共文档/两路召回对比Milvus/`）定位并修复四个问题，四个 commit：
+
+| commit | 修复 | 效果 |
+| --- | --- | --- |
+| `01fef232fd` | stream worker GUC 同步白名单缺 datavec 搜索参数（OPT-1：并行支路静默用默认 ef=40） | force 输出与 off 逐字节一致，recall@10 0.830→0.8834 |
+| `6c0886e8e2` | OPT-2 T1：vector 支路 fetcher 数据面（MinimalTuple 私有上下文 + 回放），供后续并行化复用 | 输出与串行 drain 逐字节一致（golden 不变） |
+| `17b1e06c97` | HNSW 上层下降 ef 1→8（OPT-3 根因：单路径贪心下降整簇走错，recall 按 0.75 平台/整簇量化跳变） | ef=100 recall@100 0.7495→0.9995；质量对齐档 ef400→ef100 |
+| `c96e7818c7` | auto 成本模型 stream 启动成本校准 150→5000×cpu_tuple_cost（实测固定开销 ~6ms≈54 单位，旧值让默认配置选 2.6x 次优并行） | auto 默认选串行（各档实测最优）；并行路径仍可达（cpu_operator_cost≥1.0） |
+
+优化后对标（质量对齐档：融合 recall@10 OG 0.8868 / MV 0.879）：
+
+| 指标 | 优化前 | 优化后 | Milvus 2.6.22 |
+| --- | --- | --- | --- |
+| 融合客户端 P50 | 5.0 ms | **3.5 ms** | 2.7 ms |
+| 向量单路 P50 | 2.01 ms | **1.45 ms** | 2.41 ms |
+| 并发8 QPS | 883 | **1146** | 977 |
+| 融合 recall@10 | 0.8834 | 0.8868 | 0.879 |
+
+附带结论：出厂 ef=40 修复后即满召回（recall@100=1.0）；EXPLAIN JSON 格式有 ~20x 计时 artifact（须用 TEXT）；
+半 force（单支路 stream）PoC 否决——LOCAL GATHER 协议固定成本 ~2.9ms > 支路重叠收益上限；
+OPT-2 并行 drain 主方案关闭（OPT-3 后收益上限缩水至 ~0.5ms）。evidence：
+`evidence/S2/smoke.log`、`evidence/S3/opt3_opt1_results_20260905.md`、OPT-2 设计文档 PoC 记录。
+
+回归：hybrid_recall 套件 exit=0 零 ERROR；hnsw_rabitq_vector PASS；hnsw_lsg_vector 与 S0-3 基线同构（负向断言 + 活实例伪影）。
