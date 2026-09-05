@@ -6106,7 +6106,10 @@ void heapDropPartition(Relation relation, Partition part)
         /*
          * Schedule unlinking of the relation's physical files at commit.
          */
-        RelationDropStorage(partRel);
+        if (OidIsValid(RelationGetRelFileNode(partRel))) {
+            RelationDropStorage(partRel);
+        }
+        
         releaseDummyRelation(&partRel);
     }
 
