@@ -1,5 +1,11 @@
 SET LOCAL d_format_behavior_compat_options = '';
 
+-- This function uses PostgreSQL array declarations and subscripts. Temporarily
+-- remove enable_sbr_identifier while preserving the default collation option;
+-- the caller's GUC value is restored automatically after each function call.
+ALTER FUNCTION sys.shark_conv_string_to_datetime2(TEXT, TEXT, NUMERIC)
+    SET d_format_behavior_compat_options TO 'default_collation';
+
 -- rebuild some views in verion before shark 3.0
 drop view if exists sys.sysobjects;
 drop view if exists sys.objects;
