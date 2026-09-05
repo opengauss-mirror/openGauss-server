@@ -612,6 +612,106 @@ static void hybrid_drain_branch(HybridRecallState* node, PlanState* branch, bool
     *row_counter = rank;
 }
 
+/* ----------------------------------------------------------------
+ * OPT-2: vector-branch fetcher.
+ *
+ * The serial drain executes the two independent branches strictly one
+ * after another (text first, then vector), so the shorter branch's
+ * wall time is pure additive overhead.  The fetcher decouples branch
+ * execution from candidate-hash upserts: rows are pulled from the
+ * vector branch and copied as minimal tuples into a fetcher-private
+ * memory context; after the fetch completes, the owning thread
+ * replays them through the existing upsert path.
+ *
+ * Invariants (design doc: OPT-2_支路并行执行详细设计.md §3/§6/§8):
+ * - the fetcher never writes any shared structure (single-writer
+ *   hash table / EXPLAIN counters stay on the driving thread);
+ * - rank is assigned in replay order == pull order, therefore the
+ *   fused output is byte-identical to the serial drain;
+ * - cap contract: cap_rows = vector_limit + 1 so a branch producing
+ *   more rows than its limit is rejected with the same error as the
+ *   serial path instead of being silently truncated.
+ * ---------------------------------------------------------------- */
+typedef struct HybridVectorFetcher {
+    PlanState* vector_state;      /* only the fetching thread touches this subtree */
+    MemoryContext fetch_cxt;      /* private AllocSet: tuple copies and array */
+    MinimalTuple* tuples;         /* fixed-size array in fetch_cxt */
+    int n_rows;
+    int cap_rows;                 /* vector_limit + 1 (overflow detection) */
+    volatile bool done;
+    volatile bool failed;
+    volatile bool cancel_requested;
+    instr_time started_at;
+} HybridVectorFetcher;
+
+static HybridVectorFetcher* hybrid_fetcher_create(HybridRecallState* node)
+{
+    EState* estate = node->ps.state;
+    HybridVectorFetcher* f = (HybridVectorFetcher*)MemoryContextAllocZero(estate->es_query_cxt, sizeof(HybridVectorFetcher));
+
+    f->vector_state = node->vector_state;
+    f->cap_rows = (int)node->vector_limit + 1;
+    f->fetch_cxt = AllocSetContextCreate(estate->es_query_cxt, "HybridVectorFetcher", ALLOCSET_DEFAULT_SIZES);
+    f->tuples = (MinimalTuple*)MemoryContextAllocZero(f->fetch_cxt, sizeof(MinimalTuple) * f->cap_rows);
+    return f;
+}
+
+/* Pull one row from the vector branch into the private array.
+ * Returns false on EOF or when the cap buffer is full. */
+static bool hybrid_fetcher_pull(HybridVectorFetcher* f)
+{
+    TupleTableSlot* slot = ExecProcNode(f->vector_state);
+
+    if (TupIsNull(slot))
+        return false;
+
+    MemoryContext old = MemoryContextSwitchTo(f->fetch_cxt);
+    ExecMaterializeSlot(slot);
+    f->tuples[f->n_rows++] = ExecCopySlotMinimalTuple(slot);
+    (void)MemoryContextSwitchTo(old);
+    return f->n_rows < f->cap_rows;
+}
+
+/* T1 data-plane vehicle: run the fetch loop on the calling thread. */
+static void hybrid_fetcher_run_serial(HybridVectorFetcher* f)
+{
+    INSTR_TIME_SET_CURRENT(f->started_at);
+    while (hybrid_fetcher_pull(f))
+        CHECK_FOR_INTERRUPTS();
+    f->done = true;
+}
+
+/* Replay fetched tuples through the regular upsert path.  Rank is
+ * 1..n_rows in pull order; the cap contract is enforced here so the
+ * error text matches the serial drain exactly. */
+static void hybrid_fetcher_replay(HybridRecallState* node, HybridVectorFetcher* f)
+{
+    TupleTableSlot* replay_slot = node->vector_state->ps_ResultTupleSlot;
+    int rank;
+
+    if (f->n_rows > (int)node->vector_limit)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("HybridRecall vector branch exceeded its candidate cap %ld",
+                        node->vector_limit)));
+
+    for (rank = 1; rank <= f->n_rows; rank++) {
+        ExecStoreMinimalTuple(f->tuples[rank - 1], replay_slot, false);
+        hybrid_upsert_candidate(node, replay_slot, false, (uint32)rank);
+        ResetExprContext(node->ps.ps_ExprContext);
+    }
+    node->vector_rows = (uint64)f->n_rows;
+}
+
+static void hybrid_fetcher_destroy(HybridVectorFetcher* f)
+{
+    if (f == NULL)
+        return;
+    if (f->fetch_cxt != NULL)
+        MemoryContextDelete(f->fetch_cxt);
+    pfree(f);
+}
+
 /*
  * Both local Stream producers are already running in separate task workers.
  * Draining one Stream to EOF before touching the other lets the second
@@ -838,9 +938,17 @@ static TupleTableSlot* ExecHybridRecall(PlanState* state)
             INSTR_TIME_SET_CURRENT(node->text_first_tuple);
             hybrid_drain_branch(node, node->text_state, true, &node->text_rows);
             INSTR_TIME_SET_CURRENT(node->text_end);
+            /* OPT-2 [T1]: vector branch through the fetcher (serial for
+             * data-plane verification; T3 replaces run_serial with the
+             * background thread).  Output must stay byte-identical. */
             INSTR_TIME_SET_CURRENT(node->vector_first_tuple);
-            hybrid_drain_branch(node, node->vector_state, false, &node->vector_rows);
-            INSTR_TIME_SET_CURRENT(node->vector_end);
+            {
+                HybridVectorFetcher* fetcher = hybrid_fetcher_create(node);
+                hybrid_fetcher_run_serial(fetcher);
+                INSTR_TIME_SET_CURRENT(node->vector_end);
+                hybrid_fetcher_replay(node, fetcher);
+                hybrid_fetcher_destroy(fetcher);
+            }
         }
         hybrid_fuse(node);
         INSTR_TIME_SET_CURRENT(node->fusion_time);
