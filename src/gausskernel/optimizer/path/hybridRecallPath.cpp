@@ -546,6 +546,10 @@ void TryAddHybridRecallPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* r
                 q_text_raw, q_vec_raw, common_quals, final_topk, &options, false, false));
             break;
         case HYBRID_RECALL_PARALLEL_FORCE:
+        case HYBRID_RECALL_PARALLEL_VECTOR:
+            /* VECTOR enumerates the parallel path exactly like FORCE; the
+             * flavour difference (text branch left inlined) is applied at
+             * create_hybrid_plan time from the session GUC. */
             add_path(root, rel, (Path*)make_hybrid_recall_path(rel,
                 rel->relid, id_var->varattno, text_var->varattno, vec_var->varattno,
                 q_text_raw, q_vec_raw, common_quals, final_topk, &options, true, true));

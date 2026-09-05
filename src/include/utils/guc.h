@@ -465,7 +465,12 @@ typedef enum {
 typedef enum {
     HYBRID_RECALL_PARALLEL_OFF = 0,
     HYBRID_RECALL_PARALLEL_AUTO,
-    HYBRID_RECALL_PARALLEL_FORCE
+    HYBRID_RECALL_PARALLEL_FORCE,
+    /* Vector-branch-only task stream ("half force"): the vector branch runs
+     * in a stream worker while the driving thread drains the inlined text
+     * branch, overlapping them without paying the second worker's cost.
+     * See OPT-2 真正并行 design doc. */
+    HYBRID_RECALL_PARALLEL_VECTOR
 } HybridRecallParallelMode;
 
 #define ENABLE_PRED_PUSH(root) \

@@ -1156,6 +1156,16 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
 
     Plan* text_input = best_path->parallel_branches ? make_hybrid_task_stream(text_branch, 0) : text_branch;
     Plan* vector_input = best_path->parallel_branches ? make_hybrid_task_stream(vector_branch, 1) : vector_branch;
+    /* VECTOR flavour (half force): stream only the vector branch.  The serial
+     * drain order (text first, vector second) then overlaps naturally - the
+     * vector producer starts during ExecInitStream and computes while the
+     * driving thread drains the inlined text branch.  Verified byte-identical
+     * output against serial by the OPT-2 PoC; batch delivery size comes from
+     * HYBRID_TASK_STREAM_BATCH. */
+    if (best_path->parallel_branches &&
+        u_sess->attr.attr_sql.hybrid_recall_parallel_mode == HYBRID_RECALL_PARALLEL_VECTOR) {
+        text_input = text_branch;
+    }
 
     /* Both branch queries emit (id, ...) - the score expr is consumed as
      * the index ORDER BY key, so the planner may drop it from the branch

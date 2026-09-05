@@ -370,6 +370,7 @@ static const struct config_enum_entry hybrid_recall_parallel_mode_options[] = {
     {"off", HYBRID_RECALL_PARALLEL_OFF, false},
     {"auto", HYBRID_RECALL_PARALLEL_AUTO, false},
     {"force", HYBRID_RECALL_PARALLEL_FORCE, false},
+    {"vector", HYBRID_RECALL_PARALLEL_VECTOR, false},
     {NULL, 0, false}
 };
 
@@ -3837,8 +3838,9 @@ static void InitSqlConfigureNamesEnum()
             NODE_ALL,
             QUERY_TUNING_METHOD,
             gettext_noop("Controls serial or parallel execution of HybridRecall branches."),
-            gettext_noop("Valid values are off, auto, and force. Off keeps HybridRecall serial; "
-                         "force requires two task streams; auto lets planner cost choose.")},
+            gettext_noop("Valid values are off, auto, force, and vector. Off keeps HybridRecall serial; "
+                         "force requires two task streams; vector streams only the vector branch "
+                         "(half force); auto lets planner cost choose.")},
             &u_sess->attr.attr_sql.hybrid_recall_parallel_mode,
             HYBRID_RECALL_PARALLEL_AUTO,
             hybrid_recall_parallel_mode_options,

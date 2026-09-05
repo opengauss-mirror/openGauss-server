@@ -1984,13 +1984,15 @@ void StreamProducer::initSharedContext()
                 New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, m_desc);
         }
     } else {
-        /* Init tuples. */
+        /* Init tuples: the producer-side batch buffer holds exactly one
+         * delivery batch (tupleBatchSize rows). */
         for (int i = 0; i < m_connNum; i++) {
             TupleVector* TupleVec = (TupleVector*)palloc0(sizeof(TupleVector));
-            TupleVec->tupleVector = (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * TupleVectorMaxSize);
+            int batch = m_sharedContext->tupleBatchSize;
+            TupleVec->tupleVector = (TupleTableSlot**)palloc(sizeof(TupleTableSlot*) * batch);
             m_sharedContext->sharedTuples[i][u_sess->stream_cxt.smp_id] = TupleVec;
 
-            for (int j = 0; j < TupleVectorMaxSize; j++) {
+            for (int j = 0; j < batch; j++) {
                 TupleVec->tupleVector[j] = MakeTupleTableSlot(false);
                 ExecSetSlotDescriptor(TupleVec->tupleVector[j], m_desc);
             }

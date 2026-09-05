@@ -58,6 +58,11 @@
 
 #define TupleVectorMaxSize 100
 
+/* Delivery batch size for is_task_parallel local streams (HybridRecall 1:1
+ * branch streams): small enough that the consumer wakes on the first few
+ * rows instead of waiting for the full candidate list. */
+#define HYBRID_TASK_STREAM_BATCH 16
+
 #define STREAM_DESC_HASH_NUMBER 256
 
 #define IS_STREAM_PORTAL (!StreamThreadAmI() && portal->streamInfo.streamGroup != NULL)
@@ -167,6 +172,14 @@ typedef struct StreamSharedContext {
     int* scanLoc;
     TcpStreamKey key_s;
     bool vectorized;
+    /* Delivery batch size for tuple (non-vectorized) streams: how many rows
+     * the producer accumulates before flipping DATA_READY and signalling the
+     * consumer.  Defaults to TupleVectorMaxSize (unchanged behaviour); the
+     * 1:1 HybridRecall task streams lower it (see buildLocalStreamContext)
+     * because their branches produce a bounded candidate list and waiting
+     * for a full 100-row batch defers first delivery until the whole
+     * branch finished. */
+    int tupleBatchSize;
     struct hash_entry** poll_entrys;
     struct hash_entry*** quota_entrys;
 } StreamSharedContext;

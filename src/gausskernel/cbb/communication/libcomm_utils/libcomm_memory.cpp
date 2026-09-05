@@ -256,7 +256,7 @@ void gs_memory_send(
         int n = tupleVec->tuplePointer;
         ExecCopySlot(tupleVec->tupleVector[n], tuple);
         tupleVec->tuplePointer++;
-        if (TupleVectorMaxSize == tupleVec->tuplePointer) {
+        if (sharedContext->tupleBatchSize == tupleVec->tuplePointer) {
             ready_to_send = true;
         }
     }

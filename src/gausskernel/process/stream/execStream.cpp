@@ -444,6 +444,13 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     }
 
     sharedContext->vectorized = IsA(&(streamNode->scan.plan), VecStream);
+    /* Task streams (1:1 local task parallelism, e.g. HybridRecall branches)
+     * deliver in small batches: their producers emit a bounded candidate
+     * list where full-batch (100-row) accumulation would postpone the first
+     * signal until the entire branch completed.  Everything else keeps the
+     * historical full-batch behaviour. */
+    sharedContext->tupleBatchSize =
+        streamNode->is_task_parallel ? HYBRID_TASK_STREAM_BATCH : TupleVectorMaxSize;
     sharedContext->localStreamMemoryCtx = localStreamMemoryCtx;
     sharedContext->sharedBatches = sharedBatches;
     sharedContext->sharedTuples = sharedTuples;
@@ -2374,6 +2381,9 @@ StreamState* ExecInitStream(Stream* node, EState* estate, int eflags)
         state->StreamScan = ScanMemoryStream;
         TupleDesc typeInfo = ExecTypeFromTL(node->scan.plan.targetlist, false);
 
+        /* Consumer receive buffer keeps the historical full capacity; small
+         * task-stream delivery batches only ever copy their own row count
+         * into it (gs_consume_memory_data copies tuplePointer rows). */
         state->tempTupleVec = (TupleVector*)palloc0(sizeof(TupleVector));
         state->tempTupleVec->tupleVector = (TupleTableSlot**)palloc0(sizeof(TupleTableSlot*) * (TupleVectorMaxSize));
 
