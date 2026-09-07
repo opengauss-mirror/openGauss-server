@@ -33,8 +33,10 @@
 #include "pgstat.h"
 #include "optimizer/clauses.h"
 #include "tcop/autonomoustransaction.h"
+#include "tcop/pquery.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/snapmgr.h"
 #include "utils/typcache.h"
 #include "instruments/instr_unique_sql.h"
 #include "commands/sqladvisor.h"
@@ -9902,6 +9904,9 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     /* Set flag or change context's place for keeping context not be deleted in transaction commit/rollback */
     stp_keep_context_subxact_exprcontext(0);
 #endif
+    uint32 activeSnapshotCount = GetActiveSnapshotCount();
+    /* Transaction control is rejected in nested portals, so this is the statement's active top portal. */
+    Portal topPortal = ActivePortal;
     // 4. Commit/rollback
     switch((PLpgSQL_stmt_types)stmt->cmd_type) {
         case PLPGSQL_STMT_COMMIT:
@@ -9926,6 +9931,25 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     // 7. Rebuild estate's context.
     u_sess->plsql_cxt.simple_eval_estate = NULL;
     u_sess->plsql_cxt.shared_simple_eval_resowner = NULL;
+
+    Snapshot snapshot = GetTransactionSnapshot();
+    if (topPortal != NULL && topPortal->queryDesc != NULL && topPortal->resowner != NULL &&
+        ResourceOwnerIsValid(topPortal->resowner)) {
+        QueryDesc* queryDesc = topPortal->queryDesc;
+
+        if (queryDesc->snapshot == InvalidSnapshot) {
+            queryDesc->snapshot = RegisterSnapshotOnOwner(snapshot, topPortal->resowner);
+        }
+        if (queryDesc->estate != NULL && queryDesc->estate->es_snapshot == InvalidSnapshot) {
+            queryDesc->estate->es_snapshot = RegisterSnapshotOnOwner(queryDesc->snapshot, topPortal->resowner);
+        }
+    }
+
+    /* Commit/rollback removes the complete active snapshot stack. */
+    while (activeSnapshotCount > 0) {
+        PushActiveSnapshot(snapshot);
+        activeSnapshotCount--;
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* Reset parent context to transaction's context after commit/rollback, but no need to
