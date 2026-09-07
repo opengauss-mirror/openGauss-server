@@ -395,6 +395,7 @@ HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, i
     element->deleted = 0;
     /* Start at one to make it easier to find issues */
     element->version = 1;
+    element->hash = 0;
 
     HnswInitNeighbors(base, element, m, allocator);
 
@@ -423,6 +424,11 @@ HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
 
     element->blkno = blkno;
     element->offno = offno;
+    element->neighborPage = InvalidBlockNumber;
+    element->neighborOffno = InvalidOffsetNumber;
+    element->heaptidsLength = 0;
+    element->version = 0;
+    element->hash = 0;
     HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)NULL);
     HnswPtrStore(base, element->value, (Pointer)NULL);
     element->fromMmap = false;
@@ -1024,6 +1030,74 @@ Datum HnswGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *inde
 }
 
 static inline void HnswScaleDistanceByIso(float *distance, Datum lhs, Datum rhs, FmgrInfo *procinfo, bool enableLsg);
+
+/*
+ * The built-in vector IP and cosine HNSW opclasses both use
+ * vector_negative_inner_product (IP_FUNC_OID).  During an index scan the
+ * query has already been detoasted/normalized by GetScanValue(), while HNSW
+ * stores the vector inline in HnswElementTupleData.  Distance-only callers do
+ * not request a copy of the visited vector (loadVec is false), so use that as
+ * the hot-path discriminator and avoid paying the fmgr and detoast checks
+ * once per visited element.
+ *
+ * Callers that need a vector copy, specialized encodings, LSG, and custom
+ * opclasses retain the generic path.
+ */
+static inline float HnswDirectVectorNegativeInnerProduct(Datum query, HnswElementTuple etup)
+{
+    Vector *queryVector = (Vector *)DatumGetPointer(query);
+    Vector *elementVector = &etup->data;
+
+    if (unlikely(queryVector->dim != elementVector->dim)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("different vector dimensions %d and %d", queryVector->dim, elementVector->dim)));
+    }
+
+    return -VectorInnerProduct(queryVector->dim, queryVector->x, elementVector->x);
+}
+
+/*
+ * Most unquantized vector element tuples are stored on the same page as
+ * their neighbor tuple.  HnswLoadElement already holds that page locked, so
+ * copy the compact TID array for candidates that survive the distance gate
+ * and avoid another ReadBuffer/lock when they are expanded later.  Keep this
+ * private representation out of HnswElementData to avoid changing the shared
+ * in-memory build layout.
+ */
+typedef struct HnswPrefetchedNeighborTids {
+    uint8 version;
+    uint16 count;
+    ItemPointerData indextids[FLEXIBLE_ARRAY_MEMBER];
+} HnswPrefetchedNeighborTids;
+
+#define HNSW_PREFETCHED_NEIGHBORS_MAGIC 0x48504E54U
+
+static inline void HnswPrefetchNeighborTids(HnswElement element, Page page)
+{
+    HnswNeighborTuple ntup =
+        (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
+
+    if (!HnswIsNeighborTuple(ntup) || ntup->version != element->version || ntup->count == 0 ||
+        ntup->count > (element->level + 2) * HNSW_MAX_M) {
+        return;
+    }
+
+    int expectedCount = ntup->count;
+    Size size = offsetof(HnswPrefetchedNeighborTids, indextids) +
+                expectedCount * sizeof(ItemPointerData);
+    HnswPrefetchedNeighborTids *prefetched = (HnswPrefetchedNeighborTids *)palloc(size);
+    prefetched->version = ntup->version;
+    prefetched->count = ntup->count;
+    errno_t rc = memcpy_s(prefetched->indextids, expectedCount * sizeof(ItemPointerData),
+                          ntup->indextids, expectedCount * sizeof(ItemPointerData));
+    securec_check(rc, "\0", "\0");
+
+    char *base = NULL;
+    HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)prefetched);
+    element->hash = HNSW_PREFETCHED_NEIGHBORS_MAGIC;
+}
+
 /*
  * Load an element and optionally get its distance from q
  */
@@ -1055,6 +1129,15 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
 
     Assert(HnswIsElementTuple(etup));
+
+    /*
+     * A rejected iterative-scan candidate can remain deliberately
+     * unmaterialized.  Preserve the tuple version so ResumeScanItems can
+     * reject a slot that vacuum deleted and reused between scan iterations.
+     */
+    if (maxDistance != NULL && !BlockNumberIsValid(element->neighborPage)) {
+        element->version = etup->version;
+    }
 
     if (enableRabitQ && HnswElementTupleIsDead(etup)) {
         if (distance != NULL) {
@@ -1109,6 +1192,8 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
         } else {
             if (DatumGetPointer(*q) == NULL) {
                 *distance = 0;
+            } else if (!loadVec && !enableLsg && procinfo->fn_oid == IP_FUNC_OID) {
+                *distance = HnswDirectVectorNegativeInnerProduct(*q, etup);
             } else {
                 *distance = (float)DatumGetFloat8(FunctionCall2Coll(
                             procinfo, collation, *q, PointerGetDatum(&etup->data)));
@@ -1132,6 +1217,10 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     /* Load element */
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
         HnswLoadElementFromTuple(element, etup, true, loadVec, eRbqDiskData);
+        if (!loadVec && !enablePQ && !enableRabitQ && !enableLsg &&
+            element->neighborPage == element->blkno && HnswPtrIsNull(NULL, element->neighbors)) {
+            HnswPrefetchNeighborTids(element, page);
+        }
         if (enablePQ) {
             params = &pqinfo->params;
             Vector *vd1 = &etup->data;
@@ -1364,17 +1453,30 @@ void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int 
     int start;
     ItemPointerData indextids[HNSW_MAX_M * 2];
 
-    buf = ReadBuffer(index, element->neighborPage);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    page = BufferGetPage(buf);
-
-    ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
     start = (element->level - lc) * m;
+    HnswPrefetchedNeighborTids *prefetched = NULL;
+    if (element->hash == HNSW_PREFETCHED_NEIGHBORS_MAGIC) {
+        prefetched = (HnswPrefetchedNeighborTids *)HnswPtrAccess(NULL, element->neighbors);
+    }
+    if (prefetched != NULL && prefetched->version == element->version &&
+        prefetched->count == (element->level + 2) * m) {
+        errno_t rc = memcpy_s(indextids, sizeof(indextids),
+                              prefetched->indextids + start, lm * sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+    } else {
+        buf = ReadBuffer(index, element->neighborPage);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
 
-    /* Copy to minimize lock time */
-    memcpy(&indextids, ntup->indextids + start, lm * sizeof(ItemPointerData));
+        ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
 
-    UnlockReleaseBuffer(buf);
+        /* Copy to minimize lock time */
+        errno_t rc = memcpy_s(indextids, sizeof(indextids),
+                              ntup->indextids + start, lm * sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+
+        UnlockReleaseBuffer(buf);
+    }
 
     *unvisitedLength = 0;
 
@@ -1454,6 +1556,17 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
     int threshold = u_sess->datavec_ctx.hnsw_earlystop_threshold;
     bool enableEarlyStop = threshold == INT32_MAX ? false : true;
     int candidateNum = 0;
+    /*
+     * Iterative scans traditionally materialize every discarded element so
+     * it is ready if the executor later asks for another batch.  Most
+     * unfiltered LIMIT queries never resume, making that metadata copy pure
+     * overhead.  For the plain buffer-managed representation, keep rejected
+     * elements as block/offset/version stubs and materialize them on demand
+     * in ResumeScanItems.  Specialized encodings and mmap retain the proven
+     * eager path until they have dedicated resume coverage.
+     */
+    bool lazyDiscarded = discarded != NULL && index != NULL && !enablePQ && !enableRabitQ &&
+                         !enableLsg && !CanUseMmap(index);
 
     if (v == NULL) {
         v = &vh;
@@ -1552,11 +1665,12 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 bool vacuumVisibility;
                 if (tryMmap) {
                     vacuumVisibility = MmapLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ, rbqParams,
+                                    alwaysAdd || (discarded != NULL && !lazyDiscarded) ? NULL : &f->distance,
+                                    enableRabitQ, rbqParams,
                                     rbqDiskParams, NULL, enablePQ, pqinfo);
                 } else {
                     vacuumVisibility = HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ,
+                                    alwaysAdd || (discarded != NULL && !lazyDiscarded) ? NULL : &f->distance, enableRabitQ,
                                     rbqParams, rbqDiskParams, NULL, enablePQ, pqinfo, enableLsg);
                 }
                 if (enableRabitQ && !vacuumVisibility) {
@@ -1593,7 +1707,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 if (CountElement(base, skipElement, eElement)) {
                     wlen++;
 
-                   /* No need to decrement wlen */
+                    /* No need to decrement wlen */
                     if (wlen > ef) {
                         HnswCandidate *d = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(W));
                         candidateNum--;

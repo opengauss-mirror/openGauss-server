@@ -115,6 +115,51 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 /*
  * Resume scan at ground level with discarded candidates
  */
+static bool MaterializeDiscardedElement(IndexScanDesc scan, HnswCandidate *candidate)
+{
+    char *base = NULL;
+    HnswElement element = (HnswElement)HnswPtrAccess(base, candidate->element);
+
+    /* Evictions from W were already materialized; only rejected candidates
+     * use the block/offset/version stub representation. */
+    if (BlockNumberIsValid(element->neighborPage)) {
+        return true;
+    }
+
+    Buffer buf = ReadBuffer(scan->indexRelation, element->blkno);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    HnswElementTuple etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
+
+    Assert(HnswIsElementTuple(etup));
+
+    /* The distance belongs to the old tuple occupying this index TID.  Do
+     * not resume through a slot vacuum deleted or reused between batches. */
+    if (etup->deleted || !ItemPointerIsValid(&etup->heaptids[0]) || etup->version != element->version) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+
+    HnswLoadElementFromTuple(element, etup, true, false, (Datum)0);
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+static HnswCandidate *PopMaterializedDiscarded(IndexScanDesc scan)
+{
+    HnswScanOpaque so = (HnswScanOpaque)scan->opaque;
+
+    while (!pairingheap_is_empty(so->discarded)) {
+        HnswCandidate *candidate = HnswGetPairingHeapCandidate(
+            w_node, pairingheap_remove_first(so->discarded));
+        if (MaterializeDiscardedElement(scan, candidate)) {
+            return candidate;
+        }
+    }
+
+    return NULL;
+}
+
 static List *ResumeScanItems(IndexScanDesc scan)
 {
     HnswScanOpaque so = (HnswScanOpaque) scan->opaque;
@@ -129,13 +174,9 @@ static List *ResumeScanItems(IndexScanDesc scan)
 
     /* Get next batch of candidates */
     for (int i = 0; i < batchSize; i++) {
-        HnswCandidate *hc;
-
-        if (pairingheap_is_empty(so->discarded)) {
+        HnswCandidate *hc = PopMaterializedDiscarded(scan);
+        if (hc == NULL)
             break;
-        }
-
-        hc = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(so->discarded));
         ep = lappend(ep, hc);
     }
 
@@ -365,13 +406,15 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
             /* Reached max number of tuples */
             if (u_sess->datavec_ctx.hnsw_max_scan_tuples > 0 &&
                 so->tuples >= u_sess->datavec_ctx.hnsw_max_scan_tuples) {
-                if (pairingheap_is_empty(so->discarded)) {
+                LockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+                HnswCandidate *hc = PopMaterializedDiscarded(scan);
+                UnlockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+                if (hc == NULL) {
                     break;
                 }
 
                 /* Return remaining tuples */
-                so->w = lcons(HnswGetPairingHeapCandidate(w_node,
-                    pairingheap_remove_first(so->discarded)), so->w);
+                so->w = lcons(hc, so->w);
             } else {
                 /*
                 * Locking ensures when neighbors are read, the elements they
