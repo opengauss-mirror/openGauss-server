@@ -15631,7 +15631,9 @@ funcname_is_call(const char* name, int location)
 
 static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 {
-    if (varno != -1 && is_function_with_plpgsql_language_and_outparam(funcoid)) {
+    if (varno >= 0 &&
+        varno < u_sess->plsql_cxt.curr_compile_context->plpgsql_nDatums &&
+        is_function_with_plpgsql_language_and_outparam(funcoid)) {
         int dtype = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[varno]->dtype;
         if (dtype == PLPGSQL_DTYPE_ROW) {
             *outparam = yylval.wdatum.dno;

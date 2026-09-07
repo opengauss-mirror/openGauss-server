@@ -5375,7 +5375,23 @@ static void plpgsql_set_outparam_value(PLpgSQL_execstate* estate, PLpgSQL_expr* 
         }
         tuple = heap_form_tuple(paramtupdesc, (values + 1), (nulls + 1));
     }
-    PLpgSQL_row* row = (PLpgSQL_row*)estate->datums[expr->out_param_dno];
+    /* The datum number belongs to the estate that owns this expression. */
+    if (estate->datums == NULL || expr->out_param_dno >= estate->ndatums) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmodule(MOD_PLSQL),
+             errmsg("OUT parameter datum number %d is out of range", expr->out_param_dno)));
+    }
+
+    PLpgSQL_datum* out_datum = estate->datums[expr->out_param_dno];
+    if (out_datum == NULL || out_datum->dtype != PLPGSQL_DTYPE_ROW) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmodule(MOD_PLSQL),
+             errmsg("OUT parameter datum %d is not a row datum", expr->out_param_dno)));
+    }
+
+    PLpgSQL_row* row = (PLpgSQL_row*)out_datum;
     exec_move_row(estate, NULL, row, tuple, paramtupdesc);
     heap_freetuple(tuple);
     pfree(values);
