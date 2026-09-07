@@ -94,6 +94,12 @@ static void ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
                             Oid relid, DeparsedCommandType cmdtype,
                             Size message_size, const char *message);
 
+static void stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr first_lsn);
+static void stream_stop_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr last_lsn);
+static void stream_abort_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr abort_lsn);
+static void stream_commit_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+static void stream_change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change);
+
 /* Checkout aurgments whether coming from ALTER SYSTEM SET*/
 bool QuoteCheckOut(char* newval)
 {
@@ -198,6 +204,22 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     ctx->reorder->apply_truncate = truncate_cb_wrapper;
     ctx->reorder->commit = commit_cb_wrapper;
     ctx->reorder->ddl = ddl_cb_wrapper;
+
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
+        ctx->streaming = false;
+    } else {
+        ctx->streaming = (ctx->callbacks.stream_start_cb != NULL) ||
+            (ctx->callbacks.stream_stop_cb != NULL) ||
+            (ctx->callbacks.stream_abort_cb != NULL) ||
+            (ctx->callbacks.stream_commit_cb != NULL) ||
+            (ctx->callbacks.stream_change_cb != NULL);
+    }
+
+    ctx->reorder->stream_start = stream_start_cb_wrapper;
+    ctx->reorder->stream_stop = stream_stop_cb_wrapper;
+    ctx->reorder->stream_abort = stream_abort_cb_wrapper;
+    ctx->reorder->stream_commit = stream_commit_cb_wrapper;
+    ctx->reorder->stream_change = stream_change_cb_wrapper;
 
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
@@ -1865,3 +1887,230 @@ template void LogicalDecodeReportLostChanges<ReorderBufferIterTXNState>(
 template void LogicalDecodeReportLostChanges<ParallelReorderBufferIterTXNState>(
     const ParallelReorderBufferIterTXNState *iterstate);
 
+static void stream_start_cb_wrapper(
+    ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr first_lsn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* We're only supposed to call this when streaming is supported. */
+    Assert(ctx->streaming);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "stream_start";
+    state.report_location = first_lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+
+    /*
+     * report this message's lsn so replies from clients can give an up2date
+     * answer. This won't ever be enough (and shouldn't be!) to confirm
+     * receipt of this transaction, but it might allow another transaction's
+     * commit to be confirmed with one message.
+     */
+    ctx->write_location = first_lsn;
+
+    /* in streaming mode, stream_start_cb is required */
+    if (ctx->callbacks.stream_start_cb == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("logical streaming requires a %s callback",
+                        "stream_start_cb")));
+
+    ctx->callbacks.stream_start_cb(ctx, txn);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void stream_stop_cb_wrapper(
+    ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr last_lsn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* We're only supposed to call this when streaming is supported. */
+    Assert(ctx->streaming);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "stream_stop";
+    state.report_location = last_lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+
+    /*
+     * report this message's lsn so replies from clients can give an up2date
+     * answer. This won't ever be enough (and shouldn't be!) to confirm
+     * receipt of this transaction, but it might allow another transaction's
+     * commit to be confirmed with one message.
+     */
+    ctx->write_location = last_lsn;
+
+    /* in streaming mode, stream_stop_cb is required */
+    if (ctx->callbacks.stream_stop_cb == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("logical streaming requires a %s callback",
+                        "stream_stop_cb")));
+
+    ctx->callbacks.stream_stop_cb(ctx, txn);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void stream_abort_cb_wrapper(
+    ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr abort_lsn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* We're only supposed to call this when streaming is supported. */
+    Assert(ctx->streaming);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "stream_abort";
+    state.report_location = abort_lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+    ctx->write_location = abort_lsn;
+
+    /* in streaming mode, stream_abort_cb is required */
+    if (ctx->callbacks.stream_abort_cb == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("logical streaming requires a %s callback",
+                        "stream_abort_cb")));
+
+    ctx->callbacks.stream_abort_cb(ctx, txn, abort_lsn);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void stream_commit_cb_wrapper(
+    ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* We're only supposed to call this when streaming is supported. */
+    Assert(ctx->streaming);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "stream_commit";
+    state.report_location = txn->final_lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+    ctx->write_location = txn->end_lsn;
+
+    /* in streaming mode, stream_commit_cb is required */
+    if (ctx->callbacks.stream_commit_cb == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("logical streaming requires a %s callback",
+                        "stream_commit_cb")));
+
+    ctx->callbacks.stream_commit_cb(ctx, txn, commit_lsn);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void stream_change_cb_wrapper(
+    ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* We're only supposed to call this when streaming is supported. */
+    Assert(ctx->streaming);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "stream_change";
+    state.report_location = change->lsn;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *) &state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    if (txn != NULL) {
+        ctx->write_xid = txn->xid;
+    }
+
+    /*
+     * report this change's lsn so replies from clients can give an up2date
+     * answer. This won't ever be enough (and shouldn't be!) to confirm
+     * receipt of this transaction, but it might allow another transaction's
+     * commit to be confirmed with one message.
+     */
+    ctx->write_location = change->lsn;
+
+    /* in streaming mode, stream_change_cb is required */
+    if (ctx->callbacks.stream_change_cb == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("logical streaming requires a %s callback",
+                        "stream_change_cb")));
+
+    ctx->callbacks.stream_change_cb(ctx, txn, relation, change);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+/*
+ * Clear logical streaming state during (sub)transaction abort.
+ */
+void ResetLogicalStreamingState(void)
+{
+    u_sess->utils_cxt.CheckXidAlive = InvalidTransactionId;
+    u_sess->utils_cxt.bsysscan = false;
+    u_sess->utils_cxt.sysscanlevel = 0;
+}

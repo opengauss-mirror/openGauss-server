@@ -26,6 +26,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -382,7 +383,39 @@ SysScanDesc systable_beginscan(Relation heap_relation, Oid index_id, bool index_
         sysscan->iscan = NULL;
     }
 
+    /*
+     * If CheckXidAlive is set then set a flag to indicate that system table
+     * scan is in-progress.  See detailed comments in knl_session.h where these
+     * variables are declared.
+     */
+    if (TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive)) {
+        if (!u_sess->utils_cxt.bsysscan) {
+            u_sess->utils_cxt.sysscanlevel = 1;
+            u_sess->utils_cxt.bsysscan = true;
+        }
+        else {
+            u_sess->utils_cxt.sysscanlevel++;
+        }
+    }
     return sysscan;
+}
+
+/*
+ * HandleConcurrentAbort - Handle concurrent abort of the CheckXidAlive.
+ *
+ * Error out, if CheckXidAlive is aborted. We can't directly use
+ * TransactionIdDidAbort as after crash such transaction might not have been
+ * marked as aborted.  See detailed comments in xact.c where the variable
+ * is declared.
+ */
+static inline void HandleConcurrentAbort()
+{
+    if (TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive) &&
+        !TransactionIdIsInProgress(u_sess->utils_cxt.CheckXidAlive) &&
+        !TransactionIdDidCommit(u_sess->utils_cxt.CheckXidAlive))
+        ereport(ERROR,
+                (errcode(ERRCODE_TRANSACTION_LOGICALDECODING_ROLLBACK),
+                 errmsg("transaction aborted during system catalog scan")));
 }
 
 /*
@@ -410,8 +443,15 @@ HeapTuple systable_getnext(SysScanDesc sysscan)
         if (htup && sysscan->iscan->xs_recheck)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("system catalog scans with lossy index conditions are not implemented")));
-    } else
+    } else {
         htup = heap_getnext((TableScanDesc) (sysscan->scan), ForwardScanDirection);
+    }
+
+    /*
+     * Handle the concurrent abort while fetching the catalog tuple during
+     * logical streaming of a transaction.
+     */
+    HandleConcurrentAbort();
 
     return htup;
 }
@@ -448,6 +488,13 @@ bool systable_recheck_tuple(SysScanDesc sysscan, HeapTuple tup)
         result = HeapTupleSatisfiesVisibility(tup, scan->rs_base.rs_snapshot, scan->rs_base.rs_cbuf);
         LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
     }
+
+    /*
+     * Handle the concurrent abort while fetching the catalog tuple during
+     * logical streaming of a transaction.
+     */
+    HandleConcurrentAbort();
+
     return result;
 }
 
@@ -461,9 +508,20 @@ void systable_endscan(SysScanDesc sysscan)
     if (sysscan->irel) {
         index_endscan(sysscan->iscan);
         index_close(sysscan->irel, AccessShareLock);
-    } else
+    } else {
         heap_endscan((TableScanDesc)(sysscan->scan));
+    }
 
+    /*
+     * Reset the bsysscan flag at the end of the systable scan.  See detailed
+     * comments in knl_session.h where these variables are declared.
+     */
+    if (TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive)) {
+        if (--u_sess->utils_cxt.sysscanlevel <= 0) {
+            u_sess->utils_cxt.sysscanlevel = 0;
+            u_sess->utils_cxt.bsysscan = false;
+        }
+    }
     pfree(sysscan);
 }
 
@@ -539,6 +597,12 @@ HeapTuple systable_getnext_ordered(SysScanDesc sysscan, ScanDirection direction)
     if (htup && sysscan->iscan->xs_recheck)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("system catalog scans with lossy index conditions are not implemented")));
+
+    /*
+     * Handle the concurrent abort while fetching the catalog tuple during
+     * logical streaming of a transaction.
+     */
+    HandleConcurrentAbort();
 
     return htup;
 }

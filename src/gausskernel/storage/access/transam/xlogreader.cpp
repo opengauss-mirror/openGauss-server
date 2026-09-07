@@ -1005,6 +1005,7 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
 
     state->decoded_record = record;
     state->record_origin = InvalidRepOriginId;
+    state->toplevel_xid = InvalidTransactionId;
 
     ptr = (char *)record;
     ptr += SizeOfXLogRecord;
@@ -1047,7 +1048,12 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             state->record_origin = *(RepOriginId *)ptr;
             ptr += sizeof(RepOriginId);
             remaining -= sizeof(RepOriginId);
-
+        } else if (block_id == XLR_BLOCK_ID_TOPLEVEL_XID) {
+            if (remaining < sizeof(TransactionId))
+                goto shortdata_err;
+            state->toplevel_xid = *(TransactionId*)ptr;
+            ptr += sizeof(TransactionId);
+            remaining -= sizeof(TransactionId);
         } else if (BKID_GET_BKID(block_id) <= XLR_MAX_BLOCK_ID) {
             /* XLogRecordBlockHeader */
             DecodedBkpBlock *blk = NULL;

@@ -101,5 +101,6 @@ extern void InvalidateSessionSystemCaches(void);
 extern void InvalidateThreadSystemCaches(void);
 extern void CacheInvalidateRelcacheAll(void);
 extern void reset_invalidation_cache();
+extern void LogLogicalInvalidations(void);
 
 #endif /* INVAL_H */

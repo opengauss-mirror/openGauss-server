@@ -697,6 +697,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->max_rdatas = 0;
     xlog_cxt->begininsert_called = false;
     xlog_cxt->include_origin = false;
+    xlog_cxt->include_topxid = false;
     xlog_cxt->xloginsert_cxt = NULL;
     xlog_cxt->invalid_page_tab = NULL;
     xlog_cxt->remain_segs = NULL;

@@ -14,6 +14,7 @@
 #define REORDERBUFFER_H
 
 #include "lib/ilist.h"
+#include "lib/pairingheap.h"
 
 #include "storage/sinval.h"
 #include "replication/ddlmessage.h"
@@ -69,6 +70,7 @@ enum ReorderBufferChangeType {
     REORDER_BUFFER_CHANGE_INSERT,
     REORDER_BUFFER_CHANGE_UPDATE,
     REORDER_BUFFER_CHANGE_DELETE,
+    REORDER_BUFFER_CHANGE_INVALIDATION,
     REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT,
     REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID,
     REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID,
@@ -174,6 +176,12 @@ typedef struct ReorderBufferChange {
             CommandId cmax;
             CommandId combocid;
         } tuplecid;
+
+        /* Invalidation. */
+        struct {
+            uint32 ninvalidations; /* Number of messages */
+            SharedInvalidationMessage *invalidations;	/* invalidation message */
+        } inval;
     } data;
 
     /*
@@ -183,18 +191,124 @@ typedef struct ReorderBufferChange {
     dlist_node node;
 } ReorderBufferChange;
 
+/* ReorderBufferTXN txn_flags */
+#define RBTXN_HAS_CATALOG_CHANGES 	0x0001
+#define RBTXN_IS_SUBXACT          	0x0002
+#define RBTXN_IS_SERIALIZED       	0x0004
+#define RBTXN_IS_SERIALIZED_CLEAR 	0x0008
+#define RBTXN_IS_STREAMED         	0x0010
+#define RBTXN_HAS_PARTIAL_CHANGE  	0x0020
+#define RBTXN_PREPARE             	0x0040    /* not used now */
+#define RBTXN_SKIPPED_PREPARE	  	0x0080    /* not used now */
+#define RBTXN_HAS_STREAMABLE_CHANGE	0x0100
+#define RBTXN_SENT_PREPARE			0x0200    /* not used now */
+#define RBTXN_IS_COMMITTED			0x0400
+#define RBTXN_IS_ABORTED			0x0800
+
+/* Does the transaction have catalog changes? */
+#define rbtxn_has_catalog_changes(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_HAS_CATALOG_CHANGES) != 0 \
+)
+
+/* Is the transaction known as a subxact? */
+#define rbtxn_is_known_subxact(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_SUBXACT) != 0 \
+)
+
+/* Has this transaction been spilled to disk? */
+#define rbtxn_is_serialized(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_SERIALIZED) != 0 \
+)
+
+/* Has this transaction ever been spilled to disk? */
+#define rbtxn_is_serialized_clear(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_SERIALIZED_CLEAR) != 0 \
+)
+
+/* Has this transaction contains partial changes? */
+#define rbtxn_has_partial_change(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_HAS_PARTIAL_CHANGE) != 0 \
+)
+
+/* Does this transaction contain streamable changes? */
+#define rbtxn_has_streamable_change(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_HAS_STREAMABLE_CHANGE) != 0 \
+)
+
+/* Has a prepare or stream_prepare already been sent? */
+#define rbtxn_sent_prepare(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_SENT_PREPARE) != 0 \
+)
+
+/* Is this transaction committed? */
+#define rbtxn_is_committed(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_COMMITTED) != 0 \
+)
+
+/* Is this transaction aborted? */
+#define rbtxn_is_aborted(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_ABORTED) != 0 \
+)
+
+/*
+ * Has this transaction been streamed to downstream?
+ *
+ * (It's not possible to deduce this from nentries and nentries_mem for
+ * various reasons. For example, all changes may be in subtransactions in
+ * which case we'd have nentries==0 for the toplevel one, which would say
+ * nothing about the streaming. So we maintain this flag, but only for the
+ * toplevel transaction.)
+ */
+#define rbtxn_is_streamed(txn) \
+( \
+    ((txn)->txn_flags & RBTXN_IS_STREAMED) != 0 \
+)
+
+#define IsInsertOrUpdate(action) \
+( \
+    (((action) == REORDER_BUFFER_CHANGE_INSERT) || \
+    ((action) == REORDER_BUFFER_CHANGE_UPDATE) || \
+    ((action) == REORDER_BUFFER_CHANGE_UINSERT) || \
+    ((action) == REORDER_BUFFER_CHANGE_UUPDATE)) \
+)
+
+/* Is this a top-level transaction? */
+#define rbtxn_is_toptxn(txn) \
+( \
+    (txn)->toptxn == NULL \
+)
+
+/* Is this a subtransaction? */
+#define rbtxn_is_subtxn(txn) \
+( \
+    (txn)->toptxn != NULL \
+)
+
+/* Get the top-level transaction of this (sub)transaction. */
+#define rbtxn_get_toptxn(txn) \
+( \
+    rbtxn_is_subtxn(txn) ? (txn)->toptxn : (txn) \
+)
+
 typedef struct ReorderBufferTXN {
+    /* See above */
+    bits32 txn_flags;
+
     /*
      * The transactions transaction id, can be a toplevel or sub xid.
      */
     TransactionId xid;
 
-    /* did the TX have catalog changes */
-    bool has_catalog_changes;
-
-    /* Do we know this is a subxact?  Xid of top-level txn if so */
-    bool is_known_as_subxact;
-
+    /* Xid of top-level transaction, if known */
     TransactionId toplevel_xid;
 
     /*
@@ -221,6 +335,9 @@ typedef struct ReorderBufferTXN {
      * LSN pointing to the end of the commit record + 1.
      */
     XLogRecPtr end_lsn;
+
+    /* Toplevel transaction for this subxact (NULL for top-level). */
+    struct ReorderBufferTXN *toptxn;
 
     /*
      * LSN of the last lsn at which snapshot information reside, so we can
@@ -252,6 +369,13 @@ typedef struct ReorderBufferTXN {
     dlist_node base_snapshot_node; /* link in txns_by_base_snapshot_lsn */
 
     /*
+     * Snapshot/CID from the previous streaming run. Only valid for already
+     * streamed transactions (NULL/InvalidCommandId otherwise).
+     */
+    Snapshot    snapshot_now;
+    CommandId   command_id;
+
+    /*
      * How many ReorderBufferChange's do we have in this txn.
      *
      * Changes in subtransactions are *not* included but tracked separately.
@@ -263,15 +387,6 @@ typedef struct ReorderBufferTXN {
      * spilled to disk.
      */
     uint64 nentries_mem;
-
-    /*
-     * Has this transaction been spilled to disk?  It's not always possible to
-     * deduce that fact by comparing nentries with nentries_mem, because
-     * e.g. subtransactions of a large transaction might get serialized
-     * together with the parent - if they're restored to memory they'd have
-     * nentries_mem == nentries.
-     */
-    bool serialized;
 
     /*
      * List of ReorderBufferChange structs, including new Snapshots and new
@@ -323,6 +438,16 @@ typedef struct ReorderBufferTXN {
     Size size;
 
     /*
+     * A node in txn_heap
+     */
+    pairingheap_node txn_node;
+
+    /* Size of top-transaction including sub-transactions. */
+    Size total_size;
+    TransactionId *subtxn_commit;
+    uint32 nr_subtxn_commit;
+
+    /*
      * Private data pointer of the output plugin.
      */
     void *output_plugin_private;
@@ -359,6 +484,21 @@ typedef void (*ReorderBufferAbortCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
 /* prepare callback signature */
 typedef void (*ReorderBufferPrepareCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
 
+/* start streaming transaction callback signature */
+typedef void (*ReorderBufferStreamStartCB)(ReorderBuffer *rb, ReorderBufferTXN *txn, XLogRecPtr first_lsn);
+
+/* stop streaming transaction callback signature */
+typedef void (*ReorderBufferStreamStopCB)(ReorderBuffer *rb, ReorderBufferTXN *txn, XLogRecPtr last_lsn);
+
+/* discard streamed transaction callback signature */
+typedef void (*ReorderBufferStreamAbortCB)(ReorderBuffer *rb, ReorderBufferTXN *txn, XLogRecPtr abort_lsn);
+
+/* commit streamed transaction callback signature */
+typedef void (*ReorderBufferStreamCommitCB)(ReorderBuffer *rb, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+
+/* stream change callback signature */
+typedef void (*ReorderBufferStreamChangeCB)(
+    ReorderBuffer *rb, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change);
 
 struct ReorderBuffer {
     /*
@@ -398,6 +538,15 @@ struct ReorderBuffer {
     ReorderBufferAbortCB abort;
     ReorderBufferPrepareCB prepare;
     ReorderBufferDDLMessageCB ddl;
+
+    /*
+     * Callbacks to be called when streaming a transaction.
+     */
+    ReorderBufferStreamStartCB stream_start;
+    ReorderBufferStreamStopCB stream_stop;
+    ReorderBufferStreamAbortCB stream_abort;
+    ReorderBufferStreamCommitCB stream_commit;
+    ReorderBufferStreamChangeCB stream_change;
 
     /*
      * Pointer that will be passed untouched to the callbacks.
@@ -444,6 +593,32 @@ struct ReorderBuffer {
     Size outbufsize;
 
     Size size;
+
+    /* Max-heap for sizes of all top-level and sub transactions */
+    pairingheap *txn_heap;
+
+    /*
+     * Statistics about transactions spilled to disk.
+     *
+     * A single transaction may be spilled repeatedly, which is why we keep
+     * two different counters. For spilling, the transaction counter includes
+     * both toplevel transactions and subtransactions.
+     */
+    int64       spillTxns;      /* number of transactions spilled to disk */
+    int64       spillCount;     /* spill-to-disk invocation counter */
+    int64       spillBytes;     /* amount of data spilled to disk */
+
+    /* Statistics about transactions streamed to the decoding output plugin */
+    int64       streamTxns;     /* number of transactions streamed */
+    int64       streamCount;    /* streaming invocation counter */
+    int64       streamBytes;    /* amount of data decoded */
+
+    /*
+     * Statistics about all the transactions sent to the decoding output
+     * plugin
+     */
+    int64       totalTxns;      /* total number of transactions sent */
+    int64       totalBytes;     /* total amount of data decoded */
 };
 
 /* entry for a hash table we use to map from xid to our transaction state */
@@ -506,13 +681,13 @@ void ReorderBufferFree(ReorderBuffer*);
 ReorderBufferTupleBuf* ReorderBufferGetTupleBuf(ReorderBuffer*, Size tuple_len);
 void ReorderBufferReturnTupleBuf(ReorderBuffer*, ReorderBufferTupleBuf* tuple);
 ReorderBufferChange* ReorderBufferGetChange(ReorderBuffer*);
-void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*);
+void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*, bool upd_mem = true);
 ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer*, Size tuple_len);
 
-void ReorderBufferQueueChange(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*);
+void ReorderBufferQueueChange(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*, bool toast_insert = false);
 void ReorderBufferRemoveChangeForUpsert(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn);
-void ReorderBufferCommit(ReorderBuffer*, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-    RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time);
+void ReorderBufferCommit(ReorderBuffer*, TransactionId, int nsubxacts, TransactionId *sub_xids, XLogRecPtr commit_lsn,
+    XLogRecPtr end_lsn, RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time);
 void ReorderBufferAssignChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn);
 void ReorderBufferCommitChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn);
 void ReorderBufferAbort(ReorderBuffer*, TransactionId, XLogRecPtr lsn);
@@ -525,7 +700,9 @@ void ReorderBufferAddNewCommandId(LogicalDecodingContext*, TransactionId, XLogRe
 void ReorderBufferAddNewTupleCids(ReorderBuffer*, TransactionId, XLogRecPtr lsn, const RelFileNode& node,
     const ItemPointerData& pt, CommandId cmin, CommandId cmax, CommandId combocid);
 void ReorderBufferAddInvalidations(
-    ReorderBuffer*, TransactionId, XLogRecPtr lsn, Size nmsgs, SharedInvalidationMessage* msgs);
+    LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, Size nmsgs, SharedInvalidationMessage* msgs);
+void ReorderBufferImmediateInvalidation(
+    ReorderBuffer *rb, uint32 ninvalidations, SharedInvalidationMessage *invalidations);
 TransactionId ReorderBufferGetOldestXmin(ReorderBuffer* rb);
 
 void ReorderBufferProcessXid(ReorderBuffer*, TransactionId xid, XLogRecPtr lsn);

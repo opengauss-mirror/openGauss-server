@@ -86,6 +86,7 @@ extern bool DecodeXLogRecord(XLogReaderState* state, XLogRecord* record, char** 
 #define XLogRecHasBlockRef(decoder, block_id) ((decoder)->blocks[block_id].in_use)
 #define XLogRecHasBlockImage(decoder, block_id) ((decoder)->blocks[block_id].has_image)
 #define XLogRecHasCSN(decoder) ((decoder)->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+#define XLogRecGetTopXid(decoder) ((decoder)->toplevel_xid)
 
 extern void RestoreBlockImage(const char* bkp_image, uint16 hole_offset, uint16 hole_length, char* page);
 extern char* XLogRecGetBlockData(XLogReaderState* record, uint8 block_id, Size* len);

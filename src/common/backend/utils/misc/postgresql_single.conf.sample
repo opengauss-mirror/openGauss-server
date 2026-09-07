@@ -160,6 +160,7 @@ max_prepared_transactions = 200		# zero disables the feature
 # actively intend to use prepared transactions.
 #work_mem = 64MB				# min 64kB
 #maintenance_work_mem = 16MB		# min 1MB
+#logical_decoding_work_mem = 64MB   # min 64kB
 #max_stack_depth = 2MB			# min 100kB
 
 cstore_buffers = 512MB         #min 16MB

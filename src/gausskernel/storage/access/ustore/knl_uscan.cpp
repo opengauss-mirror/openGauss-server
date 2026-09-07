@@ -1235,6 +1235,7 @@ UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir, bool* has_cur_xa
     UHeapScanDesc scan = (UHeapScanDesc)sscan;
     UHeapTuple uhtup = NULL;
 
+    CheckConcurrentAbortOnLogicalDecoding("UHeapGetNext");
     /*
      * The key will be passed only for catalog table scans and catalog tables
      * are always a heap table!. So in case of uheap it should be set to NULL.

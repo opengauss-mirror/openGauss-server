@@ -24,6 +24,7 @@
 #endif
 #include "nodes/pg_list.h"
 #include "storage/smgr/relfilenode.h"
+#include "storage/sinval.h"
 #include "utils/datetime.h"
 #include "utils/hsearch.h"
 #include "utils/snapshot.h"
@@ -147,12 +148,20 @@ typedef enum {
 #define XLOG_XACT_ASSIGNMENT 0x50
 #define XLOG_XACT_COMMIT_COMPACT 0x60
 #define XLOG_XACT_ABORT_WITH_XID 0x70
+#define XLOG_XACT_INVALIDATIONS 0x80
 
 typedef struct xl_xact_assignment {
     TransactionId xtop;    /* assigned XID's top-level XID */
     int nsubxacts;         /* number of subtransaction XIDs */
     TransactionId xsub[1]; /* assigned subxids */
 } xl_xact_assignment;
+
+typedef struct xl_xact_invals
+{
+    int nmsgs;             /* number of shared inval msgs */
+    SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
+} xl_xact_invals;
+#define MinSizeOfXactInvals offsetof(xl_xact_invals, msgs)
 
 typedef struct xl_xact_origin {
     XLogRecPtr  origin_lsn;
@@ -370,6 +379,7 @@ struct TransactionStateData {
     bool prevXactReadOnly;               /* entry-time xact r/o state */
     bool startedInRecovery;              /* did we start in recovery? */
     bool didLogXid;                      /* has xid been included in WAL record? */
+    bool assigned;                       /* assigned to top-level XID */
     struct TransactionStateData* parent; /* back link to parent */
     TransactionTryCatchContext* trycatchContext; /* NULL for not in try catch block */
 
@@ -602,6 +612,8 @@ extern void SetTxnInfoForSSLibpqsw(TransactionId xid, CommandId cid);
 extern void ClearTxnInfoForSSLibpqsw();
 extern bool IsTransactionInProgressState();
 extern void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay_ddl = false);
+extern bool IsSubTransactionAssignmentPending(void);
+extern void MarkSubTransactionAssigned(void);
 void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn);
 void TransactionBeginTry();
 void TransactionEndTryBeginCatch();

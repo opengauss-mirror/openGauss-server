@@ -87,6 +87,7 @@ TableScanDesc InitSampleScanDesc(ScanState* scanstate, Relation currentRelation)
 }
 static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
 {
+    CheckConcurrentAbortOnLogicalDecoding("SampleFetchNextTuple");
     TableScanDesc tableScanDesc = GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation);
     tableScanDesc->rs_ss_accessor = node->ss_scanaccessor;
 
@@ -101,6 +102,7 @@ static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
 
 static inline UHeapTuple USampleFetchNextTuple(SeqScanState* node)
 {
+    CheckConcurrentAbortOnLogicalDecoding("USampleFetchNextTuple");
     UHeapScanDesc uheapScanDesc = (UHeapScanDesc)node->ss_currentScanDesc;
     uheapScanDesc->rs_base.rs_ss_accessor = node->ss_scanaccessor;
 

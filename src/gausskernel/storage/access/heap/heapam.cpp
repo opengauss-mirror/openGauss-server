@@ -2410,6 +2410,7 @@ HeapTuple heap_getnext(TableScanDesc sscan, ScanDirection direction, bool* has_c
     /* Note: no locking manipulations needed */
     HEAPDEBUG_1; /* heap_getnext( info ) */
 
+    CheckConcurrentAbortOnLogicalDecoding("heap_getnext");
     if (scan->rs_base.rs_pageatatime) {
         heapgettup_pagemode(scan, direction, scan->rs_base.rs_nkeys, scan->rs_base.rs_key, has_cur_xact_write);
     } else {
@@ -2435,6 +2436,7 @@ HeapTuple heap_getnext(TableScanDesc sscan, ScanDirection direction, bool* has_c
 
 bool HeapamGetNextBatchMode(TableScanDesc sscan, ScanDirection direction)
 {
+    CheckConcurrentAbortOnLogicalDecoding("HeapamGetNextBatchMode");
     /* Note: no locking manipulations needed */
     HeapScanDesc scan = (HeapScanDesc)sscan;
     bool finished = false;

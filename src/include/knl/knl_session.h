@@ -659,6 +659,20 @@ typedef struct knl_u_utils_context {
     /* recent global catalog xmin, consider replication slot catalog xmin */
     TransactionId RecentGlobalCatalogXmin;
 
+    /*
+     * CheckXidAlive is a xid value pointing to a possibly ongoing (sub)
+     * transaction.  Currently, it is used in logical decoding.  It's possible
+     * that such transactions can get aborted while the decoding is ongoing in
+     * which case we skip decoding that particular transaction.  To ensure that we
+     * check whether the CheckXidAlive is aborted after fetching the tuple from
+     * system tables.  We also ensure that during logical decoding we never
+     * directly access the tableam or heap APIs because we are checking for the
+     * concurrent aborts only in systable_* APIs.
+     */
+    TransactionId CheckXidAlive;
+    int sysscanlevel;
+    bool bsysscan;
+
     /* Global snapshot data */
     bool cn_xc_maintain_mode;
     int snapshot_source;

@@ -21,6 +21,7 @@
 #include "access/twophase.h"
 #include "catalog/catalog.h"
 #include "storage/sinval.h"
+#include "storage/standby.h"
 #include "utils/timestamp.h"
 #include "securec.h"
 
@@ -255,6 +256,8 @@ const char *xact_type_name(uint8 subtype)
         return "abort_prepared";
     } else if (info == XLOG_XACT_ASSIGNMENT) {
         return "assignment";
+    } else if (info == XLOG_XACT_INVALIDATIONS) {
+        return "invalidations";
     } else {
         return "unkown_type";
     }
@@ -307,6 +310,11 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
          * xids are being reported here.
          */
         appendStringInfo(buf, "xid assignment xtop " XID_FMT ": ", xlrec->xtop);
+    } else if (info == XLOG_XACT_INVALIDATIONS) {
+        xl_xact_invals *xlrec = (xl_xact_invals *) rec;
+
+        standby_desc_invalidations(buf, xlrec->nmsgs, xlrec->msgs, InvalidOid,
+                                   InvalidOid, false);
     } else
         appendStringInfo(buf, "UNKNOWN");
 }

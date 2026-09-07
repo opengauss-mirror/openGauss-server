@@ -173,6 +173,7 @@ static THR_LOCAL TransactionStateData TopTransactionStateData = {
     false,              /* entry-time xact r/o state */
     false,              /* startedInRecovery */
     false,              /* didLogXid */
+    false,              /* assigned to top-level XID */
 #ifdef ENABLE_MOT
     NULL,               /* link to parent state block */
     NULL,               /* NULL stand for not in try catch block */
@@ -1472,6 +1473,16 @@ static TransactionId RecordTransactionCommit(void)
     bool isExecCN = (IS_PGXC_COORDINATOR && !IsConnFromCoord());
     XLogRecPtr globalDelayDDLLSN = InvalidXLogRecPtr;
     XLogRecPtr commitRecLSN = InvalidXLogRecPtr;
+
+    /*
+     * Log pending invalidations for logical decoding of in-progress
+     * transactions.  Normally for DDLs, we log this at each command end,
+     * however, for certain cases where we directly update the system table
+     * without a transaction block, the invalidations are not logged till this
+     * time.
+     */
+    if (XLogLogicalInfoActive())
+        LogLogicalInvalidations();
 
     /* Get data needed for commit record */
     nrels = smgrGetPendingDeletes(true, &rels, false, &temp_nrels);
@@ -3956,6 +3967,9 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
 
     /* reset flag is_delete_function */
     u_sess->plsql_cxt.is_delete_function = false;
+
+    /* Reset logical streaming state. */
+    ResetLogicalStreamingState();
 
     list_free_ext(u_sess->plsql_cxt.CursorRecordTypeList);
 
@@ -6666,6 +6680,9 @@ void AbortSubTransaction(bool STP_rollback)
     SetUserIdAndSecContext(s->prevUser, s->prevSecContext);
     u_sess->exec_cxt.is_exec_trigger_func = false;
 
+    /* Reset logical streaming state. */
+    ResetLogicalStreamingState();
+
     /*
      * We can skip all this stuff if the subxact failed before creating a
      * ResourceOwner...
@@ -6842,6 +6859,7 @@ static void PushTransaction(void)
     s->prevXactReadOnly = u_sess->attr.attr_common.XactReadOnly;
     (void)pg_atomic_fetch_add_u64(&t_thrd.undo_cxt.curSequence, 1);
     s->curSequence = pg_atomic_read_u64(&t_thrd.undo_cxt.curSequence);
+    s->assigned = false;
 
     CurrentTransactionState = s;
 
@@ -7860,6 +7878,11 @@ void xact_redo(XLogReaderState *record)
         }
         TWOPAHSE_LWLOCK_RELEASE(xlrec->xid);
     } else if (info == XLOG_XACT_ASSIGNMENT) {
+    } else if (info == XLOG_XACT_INVALIDATIONS) {
+        /*
+         * XXX we do ignore this for now, what matters are invalidations
+         * written into the commit record.
+         */
     } else {
         ereport(PANIC,
                 (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("xact_redo: unknown op code %u", (uint32)info)));
@@ -7879,6 +7902,7 @@ bool xact_has_invalid_msg_or_delete_file(XLogReaderState *record)
         case XLOG_XACT_COMMIT_COMPACT:
         case XLOG_XACT_PREPARE:
         case XLOG_XACT_ASSIGNMENT:
+        case XLOG_XACT_INVALIDATIONS:
             break;
         case XLOG_XACT_COMMIT:
             commit = (xl_xact_commit *)XLogRecGetData(record);
@@ -7919,6 +7943,7 @@ void XactGetRelFiles(XLogReaderState *record, ColFileNode **xnodesPtr, int *nrel
         case XLOG_XACT_COMMIT_COMPACT:
         case XLOG_XACT_PREPARE:
         case XLOG_XACT_ASSIGNMENT:
+        case XLOG_XACT_INVALIDATIONS:
             break;
         case XLOG_XACT_COMMIT:
             commit = (xl_xact_commit *)XLogRecGetData(record);
@@ -9081,4 +9106,62 @@ void FinishSQLInTryCatch()
     StartTransactionCommand();
     ReleaseTryCatchSavePoint(trycatchContext);
     CommitTransactionCommand();
+}
+
+/*
+ * IsSubTransactionAssignmentPending
+ *
+ * This is used to decide whether we need to WAL log the top-level XID for
+ * operation in a subtransaction.  We require that for logical decoding, see
+ * LogicalDecodingProcessRecord.
+ *
+ * This returns true if wal_level >= logical and we are inside a valid
+ * subtransaction, for which the assignment was not yet written to any WAL
+ * record.
+ */
+bool IsSubTransactionAssignmentPending(void)
+{
+    TransactionState s = CurrentTransactionState;
+
+    if (NULL == s)
+        return false;
+
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION)
+        return false;
+
+    /* wal_level has to be logical */
+    if (!XLogLogicalInfoActive())
+        return false;
+
+    /* we need to be in a transaction state */
+    if (!IsTransactionState())
+        return false;
+
+    /* it has to be a subtransaction */
+    if (!IsSubTransaction())
+        return false;
+
+    /* the subtransaction has to have a XID assigned */
+    if (!TransactionIdIsValid(GetCurrentTransactionIdIfAny()))
+        return false;
+
+    /* and it should not be already 'assigned' */
+    return !s->assigned;
+}
+
+/*
+ * MarkSubTransactionAssigned
+ *
+ * Mark the subtransaction assignment as completed.
+ */
+void MarkSubTransactionAssigned(void)
+{
+    TransactionState s = CurrentTransactionState;
+
+    if (NULL == s)
+        return;
+
+    Assert(IsSubTransactionAssignmentPending());
+
+    s->assigned = true;
 }

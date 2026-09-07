@@ -253,6 +253,8 @@ XLogRecParseState *xact_redo_parse_to_block(XLogReaderState *record, uint32 *blo
         const uint32 rightShiftSize = 32;
         ereport(WARNING, (errmsg("xact_redo_parse_to_block: XLOG_XACT_ASSIGNMENT log(%X/%X) could not be here!!",
                                  (uint32)(record->EndRecPtr >> rightShiftSize), (uint32)(record->EndRecPtr))));
+    } else if (info == XLOG_XACT_INVALIDATIONS) {
+        /* do nothing here */
     } else
         ereport(PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                         errmsg("xact_redo_parse_to_block: unknown op code %u", info)));

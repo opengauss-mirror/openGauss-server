@@ -96,6 +96,9 @@ typedef struct {
     List        *filter_msg_prefixes;    /* filter by message prefixes */
     List        *add_msg_prefixes;    /* add only messages with these prefixes */
 
+    bool        support_streaming; /* support streaming api */
+    bool        current_streaming; /* current transaction is streaming */
+
     int            format_version;        /* support different formats */
 
     /*
@@ -140,6 +143,12 @@ static void pg_decode_change(LogicalDecodingContext *ctx,
     ReorderBufferTXN *txn, Relation rel,
     ReorderBufferChange *change);
 static bool pg_filter_by_origin(LogicalDecodingContext *ctx, RepOriginId origin_id);
+static void pg_decode_stream_start(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
+static void pg_decode_stream_stop(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
+static void pg_decode_stream_abort(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr abort_lsn);
+static void pg_decode_stream_commit(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+static void pg_decode_stream_change(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn, Relation relation,
+                                    ReorderBufferChange *change);
 
 static void pg_decode_message(LogicalDecodingContext *ctx,
     ReorderBufferTXN *txn, XLogRecPtr lsn,
@@ -230,6 +239,11 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
     cb->prepare_cb = pg_decode_prepare_txn;
     cb->shutdown_cb = pg_decode_shutdown;
     cb->filter_by_origin_cb = pg_filter_by_origin;
+    cb->stream_start_cb = pg_decode_stream_start;
+    cb->stream_stop_cb = pg_decode_stream_stop;
+    cb->stream_abort_cb = pg_decode_stream_abort;
+    cb->stream_commit_cb = pg_decode_stream_commit;
+    cb->stream_change_cb = pg_decode_stream_change;
 }
 
 /* Initialize this plugin */
@@ -265,6 +279,8 @@ static void pg_decode_startup(LogicalDecodingContext *ctx, OutputPluginOptions *
     data->filter_tables = NIL;
     data->filter_msg_prefixes = NIL;
     data->add_msg_prefixes = NIL;
+    data->support_streaming = false;
+    data->current_streaming = false;
 
     data->format_version = 1;
 
@@ -616,6 +632,16 @@ static void pg_decode_startup(LogicalDecodingContext *ctx, OutputPluginOptions *
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                          errmsg("client sent format_version=%d but we only support format %d or higher",
                              data->format_version, WAL2JSON_FORMAT_MIN_VERSION)));
+        } else if (strcmp(elem->defname, "support-streaming") == 0) {
+            if (elem->arg == NULL) {
+                elog(DEBUG1, "support-streaming argument is null");
+                data->support_streaming = false;
+            }
+            else if (!parse_bool(strVal(elem->arg), &data->support_streaming))
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("could not parse value \"%s\" for parameter \"%s\"",
+                             strVal(elem->arg), elem->defname)));
         } else {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -625,6 +651,7 @@ static void pg_decode_startup(LogicalDecodingContext *ctx, OutputPluginOptions *
         }
     }
 
+    ctx->streaming = data->support_streaming;
     elog(DEBUG2, "format version: %d", data->format_version);
 }
 
@@ -732,11 +759,7 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *
 {
     JsonDecodingData *data = (JsonDecodingData*)ctx->output_plugin_private;
 
-#if PG_VERSION_NUM >= 130000
     if (rbtxn_has_catalog_changes(txn))
-#else
-    if (txn->has_catalog_changes)
-#endif
         elog(DEBUG2, "txn has catalog changes: yes");
     else
         elog(DEBUG2, "txn has catalog changes: no");
@@ -782,7 +805,7 @@ static void pg_decode_commit_txn_v2(LogicalDecodingContext *ctx, ReorderBufferTX
 
     OutputPluginPrepareWrite(ctx, true);
     appendStringInfoString(ctx->out, "{\"action\":\"C\"");
-    if (data->include_xids)
+    if (data->include_xids || data->current_streaming)
         appendStringInfo(ctx->out, ",\"xid\":%lu", txn->xid);
     if (data->include_timestamp)
             appendStringInfo(ctx->out, ",\"timestamp\":\"%s\"", timestamptz_to_str(txn->commit_time));
@@ -2903,4 +2926,133 @@ static bool pg_filter_by_origin(LogicalDecodingContext *ctx, RepOriginId origin_
      * the filter list hence forward to all subscribers.
      */
     return false;
+}
+
+/* ==========================================================
+ *                 Streaming API Callbacks
+ * ========================================================== */
+
+static void pg_decode_stream_start(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+    JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
+    data->current_streaming = true;
+    OutputPluginPrepareWrite(ctx, true);
+
+    if (data->format_version == format_version_1) {
+        appendStringInfo(ctx->out, "{%s", data->nl);
+        appendStringInfo(ctx->out, "%s\"action\":%s\"S\",%s", data->ht, data->sp, data->nl);
+        appendStringInfo(ctx->out, "%s\"xid\":%s%lu,%s", data->ht, data->sp, txn->xid, data->nl);
+        appendStringInfo(ctx->out, "%s\"change\":%s[", data->ht, data->sp);
+        data->nr_changes = 0;
+    } else if (data->format_version == format_version_2) {
+        appendStringInfoString(ctx->out, "{\"action\":\"S\"");
+        appendStringInfo(ctx->out, ",\"xid\":%lu", txn->xid);
+        if (data->include_timestamp)
+            appendStringInfo(ctx->out, ",\"timestamp\":\"%s\"", timestamptz_to_str(txn->commit_time));
+        if (data->include_origin)
+            appendStringInfo(ctx->out, ",\"origin\":%u", txn->origin_id);
+        if (data->include_lsn) {
+            char *lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->final_lsn)));
+            appendStringInfo(ctx->out, ",\"lsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+
+            lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->end_lsn)));
+            appendStringInfo(ctx->out, ",\"nextlsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+        }
+        appendStringInfoChar(ctx->out, '}');
+    }
+
+    OutputPluginWrite(ctx, true);
+}
+
+static void pg_decode_stream_stop(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+    JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
+
+    OutputPluginPrepareWrite(ctx, true);
+
+    if (data->format_version == format_version_1) {
+        appendStringInfo(ctx->out, "%s]%s}", data->ht, data->nl);
+    } else if (data->format_version == format_version_2) {
+        appendStringInfoString(ctx->out, "{\"action\":\"X\"");
+        appendStringInfo(ctx->out, ",\"xid\":%lu", txn->xid);
+        if (data->include_timestamp)
+            appendStringInfo(ctx->out, ",\"timestamp\":\"%s\"", timestamptz_to_str(txn->commit_time));
+        if (data->include_origin)
+            appendStringInfo(ctx->out, ",\"origin\":%u", txn->origin_id);
+        if (data->include_lsn) {
+            char *lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(InvalidXLogRecPtr)));
+            appendStringInfo(ctx->out, ",\"lsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+
+            lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->end_lsn)));
+            appendStringInfo(ctx->out, ",\"nextlsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+        }
+        appendStringInfoChar(ctx->out, '}');
+    }
+
+    OutputPluginWrite(ctx, true);
+    data->current_streaming = false;
+}
+
+static void pg_decode_stream_abort(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr abort_lsn)
+{
+    JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
+    data->current_streaming = true;
+    OutputPluginPrepareWrite(ctx, true);
+
+    if (data->format_version == format_version_1) {
+        appendStringInfo(ctx->out, "{%s", data->nl);
+        appendStringInfo(ctx->out, "%s\"action\":%s\"R\",%s", data->ht, data->sp, data->nl);
+        appendStringInfo(ctx->out, "%s\"xid\":%s%lu%s", data->ht, data->sp, txn->xid, data->nl);
+        appendStringInfo(ctx->out, "}");
+    } else if (data->format_version == format_version_2) {
+        appendStringInfoString(ctx->out, "{\"action\":\"R\"");
+        appendStringInfo(ctx->out, ",\"xid\":%lu", txn->xid);
+        if (data->include_timestamp)
+            appendStringInfo(ctx->out, ",\"timestamp\":\"%s\"", timestamptz_to_str(txn->commit_time));
+        if (data->include_origin)
+            appendStringInfo(ctx->out, ",\"origin\":%u", txn->origin_id);
+        if (data->include_lsn) {
+            char *lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(InvalidXLogRecPtr)));
+            appendStringInfo(ctx->out, ",\"lsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+
+            lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->end_lsn)));
+            appendStringInfo(ctx->out, ",\"nextlsn\":\"%s\"", lsn_str);
+            pfree(lsn_str);
+        }
+        appendStringInfoChar(ctx->out, '}');
+    }
+
+    OutputPluginWrite(ctx, true);
+    data->current_streaming = false;
+}
+
+static void pg_decode_stream_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr commit_lsn)
+{
+    JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
+    data->current_streaming = true;
+
+    if (data->format_version == format_version_1) {
+        OutputPluginPrepareWrite(ctx, true);
+        appendStringInfo(ctx->out, "{%s", data->nl);
+        appendStringInfo(ctx->out, "%s\"action\":%s\"C\",%s", data->ht, data->sp, data->nl);
+        appendStringInfo(ctx->out, "%s\"xid\":%s%lu%s", data->ht, data->sp, txn->xid, data->nl);
+        appendStringInfo(ctx->out, "}");
+        OutputPluginWrite(ctx, true);
+    } else {
+        pg_decode_commit_txn(ctx, txn, commit_lsn);
+    }
+
+    data->current_streaming = false;
+}
+
+static void pg_decode_stream_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change)
+{
+    JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
+    data->current_streaming = true;
+    pg_decode_change(ctx, txn, relation, change);
 }

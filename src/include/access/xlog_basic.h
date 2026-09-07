@@ -135,6 +135,7 @@
 #define XLR_BLOCK_ID_DATA_SHORT 255
 #define XLR_BLOCK_ID_DATA_LONG 254
 #define XLR_BLOCK_ID_ORIGIN 253
+#define XLR_BLOCK_ID_TOPLEVEL_XID 252
 
 /*
  * The fork number fits in the lower 4 bits in the fork_flags field. The upper
@@ -374,6 +375,7 @@ struct XLogReaderState {
     XLogRecPtr EndRecPtr;  /* end+1 of last record read */
 
     RepOriginId record_origin;
+    TransactionId toplevel_xid; /* XID of top-level transaction */
 
     /* ----------------------------------------
      * Decoded representation of current record

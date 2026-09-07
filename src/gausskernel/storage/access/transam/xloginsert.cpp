@@ -191,6 +191,11 @@ static void XLogResetLogicalPage(void)
         regbuf->seg_file_no = 0;
     }
 
+    /* reset the subxact assignment flag (if needed) */
+    if (t_thrd.xlog_cxt.include_topxid) {
+        MarkSubTransactionAssigned();
+        t_thrd.xlog_cxt.include_topxid = false;
+    }
     t_thrd.xlog_cxt.num_rdatas = 0;
     t_thrd.xlog_cxt.max_registered_block_id = 0;
     t_thrd.xlog_cxt.mainrdata_len = 0;
@@ -213,6 +218,11 @@ void XLogResetInsertion(void)
         rbuf->seg_file_no = 0;
     }
 
+    /* reset the subxact assignment flag (if needed) */
+    if (t_thrd.xlog_cxt.include_topxid) {
+        MarkSubTransactionAssigned();
+        t_thrd.xlog_cxt.include_topxid = false;
+    }
     t_thrd.xlog_cxt.num_rdatas = 0;
     t_thrd.xlog_cxt.max_registered_block_id = 0;
     t_thrd.xlog_cxt.mainrdata_len = 0;
@@ -982,6 +992,17 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
             m_session_id = (int)((uint32)(m_session_id) | TOAST_FLAG);
         }
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(m_session_id), &m_session_id, remained_size);
+    }
+
+    /* followed by toplevel XID, if not already included in previous record */
+    if (IsSubTransactionAssignmentPending()) {
+        Assert(remained_size > 0);
+        TransactionId xid = GetTopTransactionIdIfAny();
+        *(scratch++) = (char) XLR_BLOCK_ID_TOPLEVEL_XID;
+        remained_size--;
+        XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(TransactionId), &xid, remained_size);
+        /* update the flag (later used by XLogResetInsertion) */
+        t_thrd.xlog_cxt.include_topxid = true;
     }
 
     /* followed by main data, if any */
