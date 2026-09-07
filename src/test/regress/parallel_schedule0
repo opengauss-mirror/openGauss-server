@@ -421,6 +421,8 @@ test: gpi_hw_partition_vacuum_full_01
 test: gpi_alter_partition
 test: gpi_alter_partition_with_update
 # test: gpi_merge_partitions
+test: gpi_merge_upsert_concurrent
+test: gpi_merge_upsert_subpartition
 
 # global temporary table tests
 test: gtt_stats
