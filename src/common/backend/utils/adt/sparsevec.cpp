@@ -224,7 +224,7 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
             long index;
             float value;
 
-            if (nnz == maxNnz) {
+            if (nnz == Min(maxNnz, SPARSEVEC_MAX_NNZ)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("the current nnz value of %d ran out of buffer: \"%s\"", nnz, lit)));
