@@ -10124,6 +10124,24 @@ static bool has_pcr_idx_in_relation(Relation rel)
     return ans;
 }
 
+bool check_ctid_redis_stream(Plan* plan)
+{
+    if (!IsA(plan, Stream)) {
+        return false;
+    }
+
+    ListCell* tlist = NULL;
+    Var *distri_var = NULL;
+    List* distribute_keys = ((Stream*)plan)->distribute_keys;
+    foreach(tlist, distribute_keys) {
+        distri_var = (Var *)lfirst(tlist);
+        if (distri_var->varattno == SelfItemPointerAttributeNumber) {
+            return true;
+        }
+    }
+
+    return false;
+}
 #ifndef ENABLE_MULTIPLE_NODES
 static bool is_partition_autoextend_table(Relation rel)
 {
@@ -10136,7 +10154,7 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         return false;
     }
     bool unsupport_tabletype = false;
-    Index reidx = (Index)linitial_int((List*)linitial(resultRelations));
+    Index reidx = (Index)linitial_int(resultRelations);
     RangeTblEntry *rte = root->simple_rte_array[reidx];
     Relation rel = relation_open(rte->relid, NoLock);
     if (RELATION_IS_GLOBAL_TEMP(rel) || rte->orientation == REL_COL_ORIENTED ||
@@ -10145,13 +10163,40 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         /* ubtree pcr index not support smp insert */
         (rte->is_ustore && has_pcr_idx_in_relation(rel)) ||
         /* ustore's sub xact id for smp only supported after upgrade committed. */
-        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM && IsSubTransaction()) ||
+        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM) ||
         /* for ledger table, we cannot accumulate total hash from producer threads */
         rel->rd_isblockchain) {
         unsupport_tabletype = true;
     }
     relation_close(rel, NoLock);
     return unsupport_tabletype;
+}
+
+void check_support_smp_dml_scenario(PlannerInfo *root, Path* path, RedistributeContext *redis_ctx)
+{
+    Query* parse = root->parse;
+    List *resultRelations = parse->resultRelations;
+    List *returningLists = parse->returningList;
+    UpsertExpr *upsertClause = parse->upsertClause;
+    bool is_replace = parse->isReplace;
+
+    bool unuse_vec_engine = false;
+    bool unsupport_tabletype = false;
+
+    if (resultRelations != NULL) {
+        unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
+    }
+
+    /* Check if smp dml is supported and if stream redistribute path need to be added. */
+    Index reidx = (Index)linitial_int(root->parse->resultRelations);
+    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
+    optplan_join_path_walker(path, dml_rel, redis_ctx);
+
+    unuse_vec_engine = !u_sess->attr.attr_sql.enable_force_vector_engine &&
+                        u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE;
+
+    root->support_smp_dml_scenario =
+        upsertClause == NULL && returningLists == NIL && unuse_vec_engine && !unsupport_tabletype && !is_replace;
 }
 #endif
 /*
@@ -10188,11 +10233,6 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     bool is_dml_smp = false;
     int dml_dop = OPTPLAN_DEFAULT_DOP;
 #endif
-#ifndef ENABLE_MULTIPLE_NODES
-    bool enable_smp = false;
-
-    bool unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
-#endif
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -10209,16 +10249,14 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     total_size = 0;
 
 #ifndef ENABLE_MULTIPLE_NODES
-    enable_smp = u_sess->attr.attr_sql.enable_force_smp;
+    bool enable_smp = u_sess->attr.attr_sql.enable_force_smp;
 
     /*
      * Modify table only support parallel iud operation.
      * If the subplan already parallelize, add local gather on modifytable node.
 
      */
-    if (u_sess->attr.attr_sql.enable_smp_dml &&
-        (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) &&
-        upsertClause == NULL && returningLists == NIL && !unsupport_tabletype) {
+    if (u_sess->attr.attr_sql.enable_smp_dml && IS_CMDTYPE_DML(operation) && root->support_smp_dml_scenario) {
         if (u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP || enable_smp) {
             if (list_length(subplans) == 1) {
                 Plan* subplan = (Plan*)linitial(subplans);

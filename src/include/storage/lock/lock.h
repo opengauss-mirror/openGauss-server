@@ -287,7 +287,7 @@ typedef struct LOCKTAG {
 #define SET_LOCKTAG_SUBTRANSACTION(locktag, xid, subxid) \
             ((locktag).locktag_field1 = (uint32)((xid)&0xFFFFFFFF), \
              (locktag).locktag_field2 = (uint32)((xid) >> 32), \
-             (locktag).locktag_field3 = subxid, \
+             (locktag).locktag_field3 = (uint32)((subxid)&0xFFFFFFFF), \
              (locktag).locktag_field4 = 0, \
              (locktag).locktag_field5 = 0, \
              (locktag).locktag_type = LOCKTAG_SUBTRANSACTION, \

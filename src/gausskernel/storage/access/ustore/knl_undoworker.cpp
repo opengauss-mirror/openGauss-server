@@ -153,7 +153,7 @@ static void UndoPerformWork(UndoWorkInfo undowork)
             undowork->startUndoPtr, undowork->endUndoPtr);
         ExecuteUndoActions(undowork->xid, undowork->startUndoPtr, /* last undorecord created in the txn */
             undowork->endUndoPtr,                                 /* first undorecord created in the txn */
-            undowork->slotPtr, true, UNDO_PERSISTENT_BUTT, true, NULL);
+            undowork->slotPtr, true, UNDO_PERSISTENT_BUTT, true, NULL, false);
     }
     PG_CATCH();
     {
@@ -220,7 +220,8 @@ static bool AsyncRollbackWorkerGetWorkFromHashTable(UndoWorkInfo work)
     }
 
     for (int i = 0; i < actualUndoWorkers; i++) {
-        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid) {
+        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid &&
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr == entry->startUndoPtr) {
             return false;
         }
     }

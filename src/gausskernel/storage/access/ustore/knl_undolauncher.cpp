@@ -108,6 +108,7 @@ static bool UndoLauncherGetWork(UndoWorkInfo work)
             work->statusIdx = i;
             changeFlag = true;
         }
+        /* The roolback request has been registered before */
         if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid &&
             t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr == entry->startUndoPtr) {
             return false;

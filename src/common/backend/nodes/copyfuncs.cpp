@@ -8000,6 +8000,9 @@ static PlannerInfo *_copyPartialPlannerInfo(const PlannerInfo *from)
     COPY_SCALAR_FIELD(hasPseudoConstantQuals);
     COPY_SCALAR_FIELD(hasRecursion);
     COPY_SCALAR_FIELD(wt_param_id);
+#ifndef ENABLE_MULTIPLE_NODES
+    COPY_SCALAR_FIELD(support_smp_dml_scenario);
+#endif
     return newnode;
 }
 

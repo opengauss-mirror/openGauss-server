@@ -357,6 +357,17 @@ public:
     StreamUndoZoneData* m_producer_undozone;
     knl_session_context* sess_ptr;
 
+    /* ustore iud operation need to copy producer undozone data back to stream */
+    inline void set_need_copyback_undozone()
+    {
+        m_need_copyback_undozone = true;
+    }
+
+    inline bool get_need_copyback_undozone() const
+    {
+        return m_need_copyback_undozone;
+    }
+
 private:
     /* Set distribute Idx. */
     void setDistributeIdx();
@@ -545,6 +556,8 @@ private:
 
     /* global session id */
     GlobalSessionId m_globalSessionId;
+
+    bool m_need_copyback_undozone;
 
     bool m_hasExprKey;
     List* m_exprkeystate;

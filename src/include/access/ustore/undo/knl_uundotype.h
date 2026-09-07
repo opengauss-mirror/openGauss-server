@@ -275,6 +275,8 @@ typedef struct MiniSlot {
 #define UNDODEBUGSTR "[%s:%d]"
 #define UNDOFORMAT(f) UNDODEBUGSTR f UNDODEBUGINFO
 
+#define SUBXID_BITS 32
+
 extern const int UNDO_FILE_MAXSIZE;
 extern const int UNDO_FILE_BLOCKS;
 

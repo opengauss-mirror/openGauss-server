@@ -389,9 +389,13 @@ StreamNodeGroup::StreamNodeGroup()
         group_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
         for (int i = 0; i < MAX_QUERY_DOP; i++) {
             group_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
+            for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+                group_undozone_array[i]->undo_cxt.zids[j] = -1;
+            }
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
+    m_producer_dop = 1;
     m_proc_array = NULL;
     m_proc_cnt = (uint32)0;
     PthreadRwLockInit(&combid_lock, NULL);
@@ -1081,10 +1085,25 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* Destroy the stream node group. */
     if (u_sess->stream_cxt.global_obj != NULL) {
-        if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone() && t_thrd.xact_cxt.m_undozone_array != NULL) {
-            for (int i = 0; i < MAX_QUERY_DOP; i++) {
-                StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
-                init_stream_undozone_data_from(m_undozone, u_sess->stream_cxt.global_obj->group_undozone_array[i]);
+        if (u_sess->stream_cxt.global_obj->get_need_copyback_undozone()
+            && unlikely(t_thrd.ustore_cxt.m_undozone_array != NULL)) {
+            for (int i = 0; i < u_sess->stream_cxt.global_obj->m_producer_dop; i++) {
+                StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array))[i];
+                if (m_undozone == NULL) {
+                    continue;
+                }
+                StreamUndoZoneData *nodegroup_undozone = u_sess->stream_cxt.global_obj->group_undozone_array[i];
+                knl_t_undo_context *undo_cxt = &(nodegroup_undozone->undo_cxt);
+                if (undo_cxt->zids[UNDO_PERMANENT] != INVALID_ZONE_ID) {
+                    Assert(undo_cxt->zids[UNDO_UNLOGGED] != INVALID_ZONE_ID);
+                    Assert(undo_cxt->zids[UNDO_TEMP] != INVALID_ZONE_ID);
+                    init_stream_undozone_data_from(m_undozone, nodegroup_undozone);
+                }
+                for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+                    if (m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_REC_PTR) {
+                        t_thrd.ustore_cxt.used_smp = true;
+                    }
+                }
             }
         }
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1119,6 +1138,33 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
  */
 void StreamNodeGroup::syncQuit(StreamObjStatus status)
 {
+    if (!IsInitdb && status == STREAM_ERROR) {
+        StreamProducer* producer = u_sess->stream_cxt.producer_obj;
+        StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
+        if (stream_node_group != NULL && producer != NULL && producer->get_need_copyback_undozone() && (
+            t_thrd.undo_cxt.zids[UNDO_PERMANENT] != INVALID_ZONE_ID ||
+            t_thrd.undo_cxt.zids[UNDO_UNLOGGED] != INVALID_ZONE_ID ||
+            t_thrd.undo_cxt.zids[UNDO_TEMP] != INVALID_ZONE_ID)) {
+            TransactionState s = GetCurrentTransactionState();
+            /* producer copy undozone data to streamnodegroup */
+            int rc = memcpy_s(&producer->m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context),
+                &t_thrd.undo_cxt, sizeof(knl_t_undo_context));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&producer->m_producer_undozone->trans_mgr_ptr, sizeof(TransactionStateData),
+                s, sizeof(TransactionStateData));
+            securec_check(rc, "\0", "\0");
+            stream_node_group->stream_return_undo(producer->m_producer_undozone, u_sess->stream_cxt.smp_id);
+            for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+                t_thrd.undo_cxt.zids[i] = INVALID_ZONE_ID;
+                t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
+                t_thrd.undo_cxt.slots[i] = NULL;
+                t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+            }
+            t_thrd.undo_cxt.transUndoSize = 0;
+            t_thrd.undo_cxt.fetchRecord = false;
+            pg_atomic_write_u64(&(t_thrd.undo_cxt.curSequence), 1);
+        }
+    }
     /* Only stream thread or top consumer need sync quit */
     if (IS_PGXC_COORDINATOR || (StreamTopConsumerAmI() == false && StreamThreadAmI() == false) ||
         u_sess->stream_cxt.enter_sync_point == true)
@@ -2161,7 +2207,6 @@ void StreamNodeGroup::stream_return_undo(StreamUndoZoneData* producer_undozone_d
     StreamUndoZoneData** m_undozone_array = stream_node_group->group_undozone_array;
     Assert(m_undozone_array != NULL);
     StreamUndoZoneData* m_stream_undozone = m_undozone_array[smp_id];
-
     init_stream_undozone_data_from(m_stream_undozone, producer_undozone_data);
 }
 #endif

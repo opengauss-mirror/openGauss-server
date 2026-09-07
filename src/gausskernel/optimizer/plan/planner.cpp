@@ -786,6 +786,13 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     if (u_sess->opt_cxt.query_dop > 1) {
         List* subplan_list = NIL;
         (void)has_subplan(top_plan, NULL, NULL, true, &subplan_list, true);
+        /* Delete useless top-level local stream node. */
+        if (top_plan != NULL && (IsA(top_plan, Stream) || IsA(top_plan, VecStream))) {
+            Stream* stream = (Stream*)top_plan;
+            if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1 && !stream->is_recursive_local) {
+                remove_local_plan(top_plan, NULL, NULL, true);
+            }
+        }
     }
     confirm_parallel_info(top_plan, 1);
 
@@ -1318,21 +1325,16 @@ static inline bool contain_placeholdervar(Node *var_list)
     return result;
 }
 
-typedef struct {
-    bool need_redistribute;
-    bool upper_stream;
-} RedistributeContext;
-
 #ifndef ENABLE_MULTIPLE_NODES
-static void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context)
+void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context)
 {
-    if (NULL == path || context->need_redistribute) {
+    if (NULL == path) {
         return;
     }
 
     // smp indexscan or smp indexonlyscan
     if ((T_IndexScan == path->pathtype || T_IndexOnlyScan == path->pathtype)
-        && path->parent->relid == dml_rel->relid) {
+        && dml_rel != NULL && path->parent->relid == dml_rel->relid) {
         context->need_redistribute = true;
         return;
     }
@@ -1348,7 +1350,7 @@ static void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, Redistribu
         } break;
 
         case T_SeqScan: {
-            if (context->upper_stream && path->parent->relid == dml_rel->relid) {
+            if (context->upper_stream && dml_rel != NULL && path->parent->relid == dml_rel->relid) {
                 context->need_redistribute = true;
                 return;
             }
@@ -1418,18 +1420,7 @@ Path* optplan_add_redis_ctid_if_necessary(PlannerInfo* root, Path* path, List* t
         return NULL;
     }
 
-    /* 2. check whether to add stream redistribute path */
-    RedistributeContext redis_ctx;
-    redis_ctx.need_redistribute = false;
-    redis_ctx.upper_stream = false;
-    Index reidx = (Index)linitial_int(root->parse->resultRelations);
-    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
-    optplan_join_path_walker(path, dml_rel, &redis_ctx);
-    if (!redis_ctx.need_redistribute) {
-        return NULL;
-    }
-
-    /* 3. add stream redistribute path */
+    /* 2. add stream redistribute path */
     ParallelDesc* smp_desc = (ParallelDesc*)palloc0(sizeof(ParallelDesc));
     smp_desc->distriType = LOCAL_DISTRIBUTE;
     smp_desc->consumerDop = path->dop;
@@ -3085,6 +3076,32 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static Path* check_smp_dml_and_add_redis_ctid_if_necessary(PlannerInfo* root, Path* best_path, Query* parse)
+{
+    RedistributeContext *redis_ctx = (RedistributeContext*)palloc0(sizeof(RedistributeContext));
+    redis_ctx->need_redistribute = false;
+    redis_ctx->upper_stream = false;
+    redis_ctx->use_imcvscan = false;
+
+    if (u_sess->attr.attr_sql.enable_smp_dml && u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP &&
+            best_path->dop > OPTPLAN_DEFAULT_DOP && IS_CMDTYPE_DML(root->parse->commandType)) {
+        /*
+         * Check if smp dml scenario is currently supported and mark it in PlannerInfo.
+         * And if stream redistribute path need to be added.
+         */
+        check_support_smp_dml_scenario(root, best_path, redis_ctx);
+
+        if (parse->targetList != NULL && root->support_smp_dml_scenario && redis_ctx->need_redistribute &&
+            root->parse->commandType != CMD_INSERT) {
+            Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
+            best_path = new_best_path != NULL ? new_best_path : best_path;
+        }
+    }
+    return best_path;
+}
+#endif
+
 /*
  * check_distinct_redundant_by_unique:
  *   Check whether the DISTINCT clause on the query is redundant because
@@ -3850,15 +3867,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                                     root, cheapest_path, sorted_path);
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (u_sess->attr.attr_sql.enable_smp_dml && parse->targetList != NULL &&
-            u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP && best_path->dop > OPTPLAN_DEFAULT_DOP &&
-            (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE ||
-            root->parse->commandType == CMD_MERGE)) {
-            Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
-            if (new_best_path != NULL) {
-                best_path = new_best_path;
-            }
-        }
+        best_path = check_smp_dml_and_add_redis_ctid_if_necessary(root, best_path, parse);
 #endif
         (void)MemoryContextSwitchTo(PlanGenerateContext);
 
@@ -3993,7 +4002,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                             result_plan->lefttree->targetlist = result_plan->targetlist;
                         }
                     }
-                } else if (!is_projection_capable_plan(result_plan) ||
+                } else if ((!is_projection_capable_plan(result_plan) && !check_ctid_redis_stream(result_plan)) ||
                     (is_vector_scan(result_plan) && vector_engine_unsupport_expression_walker((Node*)sub_tlist))) {
                     result_plan = (Plan*)make_result(root, sub_tlist, NULL, result_plan);
                 } else {
@@ -4002,17 +4011,29 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * the desired tlist.
                      * but with the user var, we cannot push down into subtree in b format
                      */
+                    Plan* plan_need_replace_tlist = result_plan;
+
                     if (parse->sortClause)
                         pullup_userset_before_sort = need_pullup_userset_before_sort(sub_tlist);
-                    if (!pullup_userset_before_sort)
+                    if (!pullup_userset_before_sort) {
+                        /*
+                         * Check if the result_plan is a stream node redistributed based on ctid.
+                         * This type of stream node is designed to resolve page lock conflicts during smp iud.
+                         */
+                        if (check_ctid_redis_stream(result_plan)) {
+                            plan_need_replace_tlist->targetlist = sub_tlist;
+                            plan_need_replace_tlist = result_plan->lefttree;
+                        }
+                        plan_need_replace_tlist->targetlist = sub_tlist;
                         result_plan->targetlist = sub_tlist;
 
-                    if (IsA(result_plan, PartIterator)) {
-                        /*
-                         * If is a PartIterator + Scan, push the PartIterator's
-                         * tlist to Scan.
-                         */
-                        result_plan->lefttree->targetlist = sub_tlist;
+                        if (IsA(plan_need_replace_tlist, PartIterator) || IsA(plan_need_replace_tlist, VecPartIterator)) {
+                            /*
+                             * If is a PartIterator + Scan, push the PartIterator's
+                             * tlist to Scan.
+                             */
+                            plan_need_replace_tlist->lefttree->targetlist = sub_tlist;
+                        }
                     }
 #ifdef PGXC
                     /*
@@ -10451,10 +10472,21 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         case T_Stream: {
             check_rescan = false;
             Stream* sj = (Stream*)result_plan;
+#ifndef ENABLE_MULTIPLE_NODES
+            bool record_has_stream_upper = planContext->has_stream_upper;
+            planContext->has_stream_upper =  true;
+            /* smp dml does not support vectorized plan */
+            if (check_ctid_redis_stream(result_plan)) {
+                return true;
+            }
+#endif
             if (vector_engine_unsupport_expression_walker((Node*)sj->distribute_keys, planContext))
                 return true;
             if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
+#ifndef ENABLE_MULTIPLE_NODES
+            planContext->has_stream_upper = record_has_stream_upper;
+#endif
         } break;
         case T_Limit: {
             Limit* lm = (Limit*)result_plan;
@@ -10623,6 +10655,12 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         } break;
 
         case T_ModifyTable: {
+#ifndef ENABLE_MULTIPLE_NODES
+            /* smp dml does not support vectorized */
+            if (planContext->has_stream_upper) {
+                return true;
+            }
+#endif
             ModifyTable* mt = (ModifyTable*)result_plan;
             ListCell* lc = NULL;
             foreach (lc, mt->plans) {
@@ -10671,6 +10709,9 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
     planContext.currentExprIsFilter = false;
     planContext.rowCost = 0.0;
     planContext.vecCost = 0.0;
+#ifndef ENABLE_MULTIPLE_NODES
+    planContext.has_stream_upper = false;
+#endif
 
     /* for OPT_VECTOR_ENGINE, we treat plan can be transformed to vectorized plan,
      * and if the plan not satisfied rules to vectorize, will return false later.
