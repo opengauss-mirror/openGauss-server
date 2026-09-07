@@ -339,6 +339,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->skew_strategy_opt = SKEW_OPT_OFF;
     opt_cxt->op_work_mem = 1024;
     opt_cxt->ft_context = NULL;
+    opt_cxt->geqo_backup_context = NULL;
     opt_cxt->is_under_append_plan = false;
     opt_cxt->xact_modify_sql_patch = false;
     opt_cxt->out_plan_stat = true;

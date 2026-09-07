@@ -50,6 +50,7 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
 {
     MemoryContext mycontext;
     MemoryContext oldcxt;
+    MemoryContext old_geqo_backup_context;
     RelOptInfo* joinrel = NULL;
     Cost fitness;
     int savelength;
@@ -90,7 +91,21 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
     root->join_rel_hash = NULL;
 
     /* construct the best path for the given combination of relations */
-    joinrel = gimme_tree(root, tour, num_gene);
+    old_geqo_backup_context = u_sess->opt_cxt.geqo_backup_context;
+    u_sess->opt_cxt.geqo_backup_context = root->planner_cxt;
+    PG_TRY();
+    {
+        joinrel = gimme_tree(root, tour, num_gene);
+    }
+    PG_CATCH();
+    {
+        u_sess->opt_cxt.geqo_backup_context = old_geqo_backup_context;
+        (void)MemoryContextSwitchTo(oldcxt);
+        MemoryContextDelete(mycontext);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    u_sess->opt_cxt.geqo_backup_context = old_geqo_backup_context;
 
     /*
      * compute fitness
