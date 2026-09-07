@@ -2738,8 +2738,11 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
+        
     }
-    
+    if (storage_type == SEGMENT_PAGE) {
+        ForbidToSetOptionsForSegmentTbl(stmt->options);
+    }
     /*
      * Create the relation.  Inherited defaults and constraints are passed in
      * for immediate handling --- since they don't need parsing, they can be
@@ -14872,6 +14875,10 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
                 }
             }
 
+            if (rel->storage_type == SEGMENT_PAGE) {
+                ForbidToSetOptionsForSegmentTbl(defList);
+            }
+            
             /* validate the values of ttl and period for partition manager */
             if (NULL != heapRelOpt) {
                 check_partion_policy_rel_option(defList, (StdRdOptions*)heapRelOpt);
@@ -27663,3 +27670,4 @@ void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relnam
     }
     DropErrorMsgWrongType(relname, relKind, expectedRelKind);
 }
+

@@ -2097,7 +2097,7 @@ RETRY:
     t_thrd.pgxact->xmin = InvalidTransactionId;
 RETRY_GET:
     if (snapshot->takenDuringRecovery && !StreamThreadAmI() && !IS_EXRTO_READ &&
-        !u_sess->proc_cxt.clientIsCMAgent) {
+        !u_sess->proc_cxt.clientIsCMAgent && !forHSFeedBack) {
         if (InterruptPending) {
             (void)pgstat_report_waitstatus(oldStatus);
         }
@@ -2152,15 +2152,6 @@ RETRY_GET:
                 t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin) &&
                 (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn > redoEndLsn) &&
                 parallel_recovery::in_full_sync_dispatch()) {
-                LWLockRelease(ProcArrayLock);
-                retry_get = true;
-                goto RETRY_GET;
-            }
-        } else if (forHSFeedBack) {
-            LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-            if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin
-                <= t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin)
-                && (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn > redoEndLsn)) {
                 LWLockRelease(ProcArrayLock);
                 retry_get = true;
                 goto RETRY_GET;
