@@ -588,7 +588,16 @@ set_min_recovery_point(pgFile *file, const char *fullpath,
     FIN_CRC32C(ControlFile.crc);
 
     /* overwrite pg_control */
-    writeControlFile(&ControlFile, fullpath, FIO_LOCAL_HOST);
+    writeControlFile(&ControlFile, fullpath, FIO_BACKUP_HOST);
+
+    /*
+     * writeControlFile() goes through a raw descriptor, so it replaced the
+     * container written by copy_pgcontrol_file() with plaintext. Encrypt it
+     * again, the same way that path does.
+     */
+    if (!EncEncryptFileInplace(fullpath)) {
+        elog(ERROR, "Cannot encrypt \"%s\"", fullpath);
+    }
 
     /* Update pg_control checksum in backup_list */
     file->crc = ControlFile.crc;
