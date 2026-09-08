@@ -165,8 +165,8 @@ CREATE OR REPLACE VIEW columns AS
                     ELSE 'USER-DEFINED' END
              END
              AS character_data)
-             AS COLUMN_TYPE,
-            CAST(d.description AS information_schema.character_data) AS COLUMN_COMMENT,
+             AS column_type,
+            CAST(d.description AS information_schema.character_data) AS column_comment,
             CAST(
                CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'AUTO_INCREMENT' 
                ELSE
@@ -174,7 +174,7 @@ CREATE OR REPLACE VIEW columns AS
                   ELSE null
                   END
                END 
-               AS character_data) AS EXTRA,
+               AS character_data) AS extra,
             CAST(array_to_string(ARRAY[
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'SELECT') THEN 'select' END,
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'INSERT') THEN 'insert' END,
