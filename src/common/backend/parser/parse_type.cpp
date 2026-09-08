@@ -777,13 +777,20 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
     return colloid;
 }
 
-Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
-    bool is_bin_type, Oid rel_coll_oid)
+Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation, bool is_bin_type,
+                                      Oid rel_coll_oid)
 {
-    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) &&
-        !targetissqlvariant(typeOid) && !type_is_enum(typeOid) && !type_is_set(typeOid)) {
-        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("type %s not support set charset", format_type_be(typeOid))));
+    if (DB_IS_CMPT(D_FORMAT)) {
+        if (coldef->typname->charset != PG_INVALID_ENCODING && !IsDSupportCharsetType(typeOid)) {
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("type %s not support set charset", format_type_be(typeOid))));
+        }
+    } else {
+        if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) &&
+            !type_is_enum(typeOid) && !type_is_set(typeOid)) {
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("type %s not support set charset", format_type_be(typeOid))));
+        }
     }
 
     Oid result = InvalidOid;

@@ -38,5 +38,6 @@ test: temp_table_special_prefix
 test: sharksysfunction
 test: alter_sequence
 test: target_alias
+test: test_collation
 
 test: pg_identity pg_identity_dump_restore
