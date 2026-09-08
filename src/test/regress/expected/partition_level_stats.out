@@ -9,7 +9,7 @@ partition by range (id) (
 );
 insert into only_first_part select generate_series(1, 5000), 'Alice';
 analyze only_first_part;
--- preview, no statistic for partition
+-- preview, no column statistic for partition
 select relname, relpages, reltuples from pg_class where relname = 'only_first_part';
      relname     | relpages | reltuples 
 -----------------+----------+-----------
@@ -19,9 +19,9 @@ select relname, relpages, reltuples from pg_class where relname = 'only_first_pa
 select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3');
       relname       | relpages | reltuples 
 --------------------+----------+-----------
- only_first_part_p1 |        0 |         0
- only_first_part_p2 |        0 |         0
- only_first_part_p3 |        0 |         0
+ only_first_part_p1 |        6 |       999
+ only_first_part_p2 |        6 |      1000
+ only_first_part_p3 |       17 |      3001
 (3 rows)
 
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
@@ -204,7 +204,7 @@ insert into only_first_part_two select generate_series(1, 10), 2;
 insert into only_first_part_two select generate_series(1, 100), 4;
 insert into only_first_part_two select generate_series(1, 10), 6;
 analyze only_first_part_two;
--- preview, no statistic for partition
+-- preview, no column statistic for partition
 select relname, relpages, reltuples from pg_class where relname = 'only_first_part_two';
        relname       | relpages | reltuples 
 ---------------------+----------+-----------
@@ -214,8 +214,8 @@ select relname, relpages, reltuples from pg_class where relname = 'only_first_pa
 select relname, relpages, reltuples from pg_partition where relname in ('list_p1', 'list_p2');
  relname | relpages | reltuples 
 ---------+----------+-----------
- list_p1 |        0 |         0
- list_p2 |        0 |         0
+ list_p1 |        5 |      1000
+ list_p2 |        1 |       120
 (2 rows)
 
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
