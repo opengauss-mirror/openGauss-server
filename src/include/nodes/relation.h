@@ -1475,6 +1475,19 @@ typedef struct MaterialPath {
     bool materialize_all; /* true for materialize above streamed subplan */
     OpMemInfo mem_info;   /* Memory info for materialize */
 } MaterialPath;
+
+/*
+ * PrefixSortPath uses an ordered input prefix to bound the tuples read by
+ * an ordinary Sort for ORDER BY ... LIMIT.
+ */
+typedef struct PrefixSortPath {
+    Path path;
+    Path* subpath;
+    int nPresortedCols;
+    double limitTuples;
+    OpMemInfo memInfo;
+} PrefixSortPath;
+
 /*
  * MemoizePath represents a Memoize plan node, i.e., a cache that caches
  * tuples from parameterized paths to save the underlying node from having to

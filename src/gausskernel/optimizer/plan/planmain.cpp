@@ -38,6 +38,8 @@
 
 /* Local functions */
 static void debug_print_log(PlannerInfo* root, Path* sortedpath, int debug_log_level);
+static Path* get_cheapest_prefix_sort_path(
+    PlannerInfo* root, RelOptInfo* finalRel, double tupleFraction, double limitTuples);
 
 /*
  * query_planner
@@ -545,6 +547,55 @@ void update_tuple_fraction(PlannerInfo* root,
     root->limit_tuples = limit_tuples;
 }
 
+static bool prefix_sort_input_supported(Path* inputPath)
+{
+    return (inputPath->pathtype == T_IndexScan || inputPath->pathtype == T_IndexOnlyScan) &&
+        inputPath->param_info == NULL && inputPath->dop <= 1;
+}
+
+static Path* get_cheapest_prefix_sort_path(
+    PlannerInfo* root, RelOptInfo* finalRel, double tupleFraction, double limitTuples)
+{
+    Path* bestPath = NULL;
+    ListCell* pathCell = NULL;
+
+    /* Keep the first implementation deliberately scoped to local row-store index scans. */
+    if (!prefix_sort_supported(root, finalRel)) {
+        return NULL;
+    }
+
+    /* Volatile sort keys need the final projection, which is built after scan planning. */
+    foreach (pathCell, root->query_pathkeys) {
+        PathKey* pathkey = (PathKey*)lfirst(pathCell);
+        if (pathkey->pk_eclass->ec_has_volatile) {
+            return NULL;
+        }
+    }
+
+    foreach (pathCell, finalRel->pathlist) {
+        Path* inputPath = (Path*)lfirst(pathCell);
+        PrefixSortPath* candidate = NULL;
+        int presortedKeys = 0;
+
+        if (!prefix_sort_input_supported(inputPath)) {
+            continue;
+        }
+
+        if (pathkeys_count_contained_in(root->query_pathkeys, inputPath->pathkeys, &presortedKeys) ||
+            presortedKeys == 0) {
+            continue;
+        }
+
+        candidate = create_prefix_sort_path(root, inputPath, root->query_pathkeys, presortedKeys, limitTuples);
+        if (bestPath == NULL ||
+            compare_fractional_path_costs((Path*)candidate, bestPath, tupleFraction) < 0) {
+            bestPath = (Path*)candidate;
+        }
+    }
+
+    return bestPath;
+}
+
 /*
  * generate_cheapest_and_sorted_path
  *	  Generate the best unsorted and presorted paths for this Query.
@@ -596,11 +647,20 @@ void generate_cheapest_and_sorted_path(PlannerInfo* root,
      */
     if (OPTIMIZE_PLAN != u_sess->attr.attr_sql.plan_mode_seed ||
         (root->parent_root != NULL && root->parent_root->plan_params != NIL) ||
-        cheapestpath != linitial(final_rel->cheapest_total_path))
+        cheapestpath != linitial(final_rel->cheapest_total_path)) {
         sortedpath = NULL;
-    else
+    } else {
         sortedpath = get_cheapest_fractional_path_for_pathkeys(
             final_rel->pathlist, root->query_pathkeys, NULL, tuple_fraction, (has_groupby && has_limit));
+
+        Path* prefixSortPath =
+            get_cheapest_prefix_sort_path(root, final_rel, tuple_fraction, limit_tuples);
+        if (prefixSortPath != NULL &&
+            (sortedpath == NULL ||
+                compare_fractional_path_costs(prefixSortPath, sortedpath, tuple_fraction) < 0)) {
+            sortedpath = prefixSortPath;
+        }
+    }
 
     /* Don't return same path in both guises; just wastes effort */
     if (sortedpath == NULL || sortedpath == cheapestpath || sortedpath->hint_value < cheapestpath->hint_value) {

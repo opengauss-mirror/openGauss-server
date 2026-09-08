@@ -1504,6 +1504,7 @@ static Sort* _copySort(const Sort* from)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
 
     COPY_SCALAR_FIELD(numCols);
+    COPY_SCALAR_FIELD(nPresortedCols);
     if (from->numCols > 0) {
         COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
         COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));

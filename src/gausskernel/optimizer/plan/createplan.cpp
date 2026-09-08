@@ -98,6 +98,7 @@ static void adjust_scan_targetlist(ResultPath* best_path, Plan* subplan);
 static Plan* create_projection_plan(PlannerInfo* root, ProjectionPath* best_path);
 static ProjectSet* create_project_set_plan(PlannerInfo* root, ProjectSetPath* best_path);
 static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path);
+static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath);
 static Memoize* create_memoize_plan(PlannerInfo *root, MemoizePath *best_path);//, int flags);
 static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path);
 static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -487,6 +488,15 @@ static void scan_func_rescache_recurse(Path *path, FuncRetCacheWalkerContext *wc
 
             break;
         }
+        case T_Sort:
+        {
+            if (nodeTag(path) == T_PREFIX_SORT_PATH) {
+                PrefixSortPath* spath = (PrefixSortPath*)path;
+                scan_func_rescache_recurse(spath->subpath, wcxt);
+            }
+
+            break;
+        }
         case T_Append:
         {
             AppendPath *apath = (AppendPath *)path;
@@ -670,6 +680,14 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_c
             break;
         case T_Material:
             plan = (Plan*)create_material_plan(root, (MaterialPath*)best_path);
+            break;
+        case T_Sort:
+            if (nodeTag(best_path) != T_PREFIX_SORT_PATH) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("create_plan_recurse: unrecognized sort path type: %d", (int)nodeTag(best_path))));
+            }
+            plan = (Plan*)create_prefix_sort_plan(root, (PrefixSortPath*)best_path);
             break;
         case T_Unique:
             plan = create_unique_plan(root, (UniquePath*)best_path);
@@ -1975,6 +1993,28 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
 
     return plan;
 }
+
+/*
+ * create_prefix_sort_plan
+ *      Build a Sort node that consumes input ordered by a leading prefix.
+ */
+static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath)
+{
+    Plan* subplan = create_plan_recurse(root, bestPath->subpath);
+
+    /* Do not carry unused physical columns into the tuplesort. */
+    disuse_physical_tlist(root, subplan, bestPath->subpath);
+
+    Sort* plan = make_sort_from_pathkeys(
+        root, subplan, bestPath->path.pathkeys, bestPath->limitTuples);
+
+    plan->nPresortedCols = bestPath->nPresortedCols;
+    copy_path_costsize(&plan->plan, (Path*)bestPath);
+    copy_mem_info(&plan->mem_info, &bestPath->memInfo);
+
+    return plan;
+}
+
 /*
  * create_memoize_plan
  *      Create a Memoize plan for 'best_path' and (recursively) plans for its
@@ -8067,6 +8107,7 @@ Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sort
     plan->hasUniqueResults = lefttree->hasUniqueResults;
     plan->dop = lefttree->dop;
     node->numCols = numCols;
+    node->nPresortedCols = 0;
     node->sortColIdx = sortColIdx;
     node->sortOperators = sortOperators;
     node->collations = collations;

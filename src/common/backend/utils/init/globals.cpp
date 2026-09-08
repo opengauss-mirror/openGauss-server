@@ -78,12 +78,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93153;
+const uint32 GRAND_VERSION_NUM = 93154;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 PREFIX_SORT_VERSION_NUM = 93154;
 const uint32 PG_IDENTITY_VERSION_NUM = 93101;
 const uint32 SMP_VERSION_NUM = 93098;
 const uint32 LOCKS_WAITSTART_VERSION_NUM = 93097;

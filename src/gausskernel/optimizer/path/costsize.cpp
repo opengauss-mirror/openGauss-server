@@ -88,6 +88,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/tlist.h"
+#include "optimizer/var.h"
 #include "parser/parse_hint.h"
 #include "parser/parsetree.h"
 #include "utils/dynahash.h"
@@ -2588,6 +2589,61 @@ void cost_sort(Path* path, List* pathkeys, Cost input_cost, double tuples, int w
     if (!u_sess->attr.attr_sql.enable_sort)
         path->total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
+}
+
+/* Estimate the complete prefix group containing LIMIT + OFFSET, plus lookahead. */
+void cost_prefix_sort(PlannerInfo* root, PrefixSortPath* path)
+{
+    Path* input = path->subpath;
+    double inputTuples = clamp_row_est(PATH_LOCAL_ROWS(input));
+    double inputGroups = Min(inputTuples, (double)DEFAULT_NUM_DISTINCT);
+    List* presortedExprs = NIL;
+    ListCell* pathCell = NULL;
+    bool unknownVarNo = false;
+    int keyNo = 0;
+
+    foreach (pathCell, path->path.pathkeys) {
+        PathKey* pathkey = (PathKey*)lfirst(pathCell);
+        EquivalenceMember* member = (EquivalenceMember*)linitial(pathkey->pk_eclass->ec_members);
+        Relids varNos = pull_varnos((Node*)member->em_expr);
+        unknownVarNo = bms_is_member(0, varNos);
+        bms_free_ext(varNos);
+        if (unknownVarNo) {
+            break;
+        }
+        presortedExprs = lappend(presortedExprs, member->em_expr);
+        if (++keyNo >= path->nPresortedCols) {
+            break;
+        }
+    }
+    if (!unknownVarNo) {
+        inputGroups = estimate_num_groups(root, presortedExprs, inputTuples, 1, STATS_TYPE_LOCAL);
+    }
+    list_free_ext(presortedExprs);
+    inputGroups = clamp_row_est(Min(inputGroups, inputTuples));
+
+    double groupTuples = inputTuples;
+    if (inputGroups > 0.0) {
+        groupTuples /= inputGroups;
+    }
+    double sortTuples = inputTuples;
+    if (groupTuples > 0.0) {
+        sortTuples = Min(inputTuples, ceil(path->limitTuples / groupTuples) * groupTuples + 1.0);
+    }
+    /* Qualifying rows need not be uniform in index order, even for index quals. */
+    Cost inputCost = input->total_cost;
+    if (input->parent->baserestrictinfo == NIL && inputTuples > 0.0) {
+        inputCost = input->startup_cost +
+            (input->total_cost - input->startup_cost) * (sortTuples / inputTuples);
+    }
+    Cost comparisonCost = u_sess->attr.attr_sql.cpu_operator_cost * path->nPresortedCols;
+
+    /* No output is available until this one bounded sort has finished. */
+    cost_sort(&path->path, path->path.pathkeys, inputCost + comparisonCost * sortTuples,
+        sortTuples, input->pathtarget->width, 0.0, u_sess->opt_cxt.op_work_mem,
+        path->limitTuples, false, 1, &path->memInfo);
+    /* The upper LIMIT prorates run cost using the original input row count. */
+    path->path.total_cost += u_sess->attr.attr_sql.cpu_operator_cost * (inputTuples - sortTuples);
 }
 
 /*
