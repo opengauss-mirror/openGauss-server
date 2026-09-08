@@ -1413,10 +1413,13 @@ Oid shark_binary_need_transform_typeid(Oid typeoid, Oid* collation)
         /* string type need to transform to binary type */
         if (typeoid == TEXTOID) {
             new_typid = BLOBOID;
+            *collation = InvalidOid;
         } else if (typeoid == BPCHAROID || typeoid == VARCHAROID) {
             new_typid = varbinaryoid;
+            *collation = InvalidOid;
         } else if (typeoid == BLOBOID || typeoid == BYTEAOID || typeoid == varbinaryoid) {
             /* binary string type no need to transform */
+            *collation = InvalidOid;
         } else {
             ereport(WARNING, (errmsg("this type can't set to binary collation. default value set")));
             *collation = DEFAULT_COLLATION_OID;
