@@ -1,31 +1,31 @@
-FROM openeuler/openeuler:22.03-lts
+FROM openeuler/openeuler:24.03-lts
 
 ARG VERSION=7.0.0
 
-COPY openGauss-Lite-${VERSION}-openEuler22.03-x86_64.tar.gz .
+COPY openGauss-Lite-${VERSION}-openEuler24.03-x86_64.tar.gz .
 COPY gosu-amd64 /usr/local/bin/gosu
 COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_x86_64.repo
 # remove all lines containing scws if do no want to chparser#
 COPY scws.tar.gz .
 
-ENV LANG en_US.utf8
-
-#RUN yum install -y epel-release
+ENV LANG=en_US.UTF-8
 
 RUN set -eux; \
-    yum install -y bzip2 curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel openblas-devel&& \
-    groupadd -g 70 omm; \
-    useradd -u 70 -g omm -d /home/omm omm; \
+    yum install -y bzip2 util-linux curl libatomic libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel openblas-devel glibc-locale-source glibc-langpack-en && \
+    rm -f /usr/lib/locale/locale-archive && \
+    localedef -i en_US -f UTF-8 en_US.UTF-8 && \
+    groupadd -g 70 omm && \
+    useradd -u 70 -g omm -d /home/omm omm && \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    tar -xf openGauss-Lite-${VERSION}-openEuler22.03-x86_64.tar.gz -C /usr/local/opengauss && \
-    tar -xf /usr/local/opengauss/openGauss-Lite-${VERSION}-openEuler22.03-x86_64.bin -C /usr/local/opengauss && \
+    tar -xf openGauss-Lite-${VERSION}-openEuler24.03-x86_64.tar.gz -C /usr/local/opengauss && \
+    tar -xf /usr/local/opengauss/openGauss-Lite-${VERSION}-openEuler24.03-x86_64.bin -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-Lite-${VERSION}-openEuler22.03-x86_64.tar.gz && \
-    rm -rf openGauss-Lite-${VERSION}-openEuler22.03-x86_64.bin && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler24.03-x86_64.tar.gz && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler24.03-x86_64.bin && \
     tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
     chmod 1777 /tmp && \
     yum clean all

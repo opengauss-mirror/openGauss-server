@@ -84,7 +84,7 @@ check_docker_version() {
 ##############
 
 # Parameters
-VERSION="5.0.0"
+VERSION="7.0.0"
 SKIPCHECKSUM=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION_MAJOR="17"
@@ -126,11 +126,18 @@ while getopts "hesxiv:o:m:" optname; do
   esac
 done
 
+PKG_VERSION=24.03
+
+# openGauss Database Image Name
+IMAGE_NAME="opengauss:$VERSION"
+
 if [ "$MODE" = "lite" ]; then
     mode="lite_"
+	IMAGE_NAME="opengauss-lite:$VERSION"
 else
     mode=""
 fi
+
 if [ "${arch}" = "amd64" ]; then
     file_arch="x86_64"
     if [ -f "/etc/openEuler-release" ];then
@@ -143,11 +150,20 @@ else
     DOCKERFILE="dockerfile_${mode}arm"
 fi
 
+if [ "$MODE" = "ubuntu" ]; then
+	echo "build docker image with ubuntu base image"
+	if [ "${arch}" = "amd64" ]; then
+		DOCKERFILE="dockerfile_x86_ubuntu"
+	else
+		DOCKERFILE="dockerfile_arm_ubuntu"
+	fi
+	IMAGE_NAME="opengauss-ubuntu:$VERSION"
+	PKG_VERSION=24.03
+fi
+
 check_docker_version
 
 
-# openGauss Database Image Name
-IMAGE_NAME="opengauss:$VERSION"
 
 # Go into version folder
 cd "$VERSION" || {
@@ -196,27 +212,27 @@ echo "Building image '$IMAGE_NAME' ..."
 BUILD_START=$(date '+%s')
 if [ "$MODE" != "lite" ]; then
     if [ -f "/etc/openEuler-release" ];then
-        opengauss_files_tar=(openGauss-Server-*-openEuler22.03-${file_arch}.tar.bz2)
+        opengauss_files_tar=(openGauss-Server-*-openEuler${PKG_VERSION}-${file_arch}.tar.bz2)
         if [[ ${#opengauss_files_tar[@]} -ne 1 || ! -f "${opengauss_files_tar[0]}" ]]; then
           echo "ERROR: unable to choose server pkg"
           echo "${opengauss_files_tar[0]}"
           exit 1
         fi
         opengauss_tar="${opengauss_files_tar[0]}"
-        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Server-\(.*\)-openEuler22.03-${file_arch}.tar.bz2/\1/")
+        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Server-\(.*\)-openEuler${PKG_VERSION}-${file_arch}.tar.bz2/\1/")
     else
         opengauss_version=""
     fi
 else
     if [ -f "/etc/openEuler-release" ];then
-        opengauss_files_tar=(openGauss-Lite-*-openEuler22.03-${file_arch}.tar.gz)
+        opengauss_files_tar=(openGauss-Lite-*-openEuler${PKG_VERSION}-${file_arch}.tar.gz)
         if [[ ${#opengauss_files_tar[@]} -ne 1 || ! -f "${opengauss_files_tar[0]}" ]]; then
           echo "ERROR: unable to choose server pkg"
           echo "${opengauss_files_tar[0]}"
           exit 1
         fi
         opengauss_tar="${opengauss_files_tar[0]}"
-        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Lite-\(.*\)-openEuler22.03-${file_arch}.tar.gz/\1/")
+        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Lite-\(.*\)-openEuler${PKG_VERSION}-${file_arch}.tar.gz/\1/")
     else
         opengauss_version=""
     fi
