@@ -1167,7 +1167,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 }
 
 template<typename T_Form>
-static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart)
+static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart, bool isAutoInc)
 {
     T_Form seq = NULL;
     Buffer buf;
@@ -1193,10 +1193,8 @@ static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart
      * action in AlterSequence)
      */
     seq = (T_Form)GETSTRUCT(result);
-    bool isdentityForD = DB_IS_CMPT(D_FORMAT) &&
-                         StrEndWith(RelationGetRelationName(seq_rel), "_seq_identity");
     /* if restart, set a valid last_value */
-    seq->last_value = restart ? (isdentityForD ? seq->start_value : seq->min_value) : -1;
+    seq->last_value = restart ? ((DB_IS_CMPT(B_FORMAT) && isAutoInc) ? seq->min_value : seq->start_value) : -1;
     seq->is_called = false;
     seq->log_cnt = 0;
 
@@ -1215,7 +1213,7 @@ static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart
  * which must not be released until end of transaction.  Caller is also
  * responsible for permissions checking.
  */
-void ResetSequence(Oid seq_relid, bool restart)
+void ResetSequence(Oid seq_relid, bool restart, bool isAutoInc)
 {
     Relation seq_rel;
     SeqTable elm = NULL;
@@ -1247,9 +1245,9 @@ void ResetSequence(Oid seq_relid, bool restart)
 
     char relkind = RelationGetRelkind(seq_rel);
     if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
-        tuple = ResetSequenceTuple<Form_pg_sequence>(seq_rel, elm, restart);
+        tuple = ResetSequenceTuple<Form_pg_sequence>(seq_rel, elm, restart, isAutoInc);
     } else {
-        tuple = ResetSequenceTuple<Form_pg_large_sequence>(seq_rel, elm, restart);
+        tuple = ResetSequenceTuple<Form_pg_large_sequence>(seq_rel, elm, restart, isAutoInc);
     }
 
     /*

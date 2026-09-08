@@ -5043,12 +5043,12 @@ void ExecuteTruncateGuts(
     foreach (cell, seq_relids) {
         Oid seq_relid = lfirst_oid(cell);
 
-        ResetSequence(seq_relid, true);
+        ResetSequence(seq_relid, true, false);
     }
     foreach (cell, autoinc_seqoids) {
         Oid seq_relid = lfirst_oid(cell);
 
-        ResetSequence(seq_relid, true);
+        ResetSequence(seq_relid, true, true);
     }
 
     /*

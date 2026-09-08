@@ -168,6 +168,31 @@ DROP TABLE truncate_a cascade;
 DROP SEQUENCE IF EXISTS seq_not_own;
 DROP SEQUENCE IF EXISTS seq_own;
 NOTICE:  sequence "seq_own" does not exist, skipping
+CREATE SEQUENCE r1_s1 START WITH 100;
+CREATE SEQUENCE r1_s2 INCREMENT BY -1 START WITH -1 MINVALUE -10 MAXVALUE -1;
+CREATE TABLE r1_t(
+  id1 int DEFAULT nextval('r1_s1'),
+  id2 int DEFAULT nextval('r1_s2'),
+  c text);
+ALTER SEQUENCE r1_s1 OWNED BY r1_t.id1;
+ALTER SEQUENCE r1_s2 OWNED BY r1_t.id2;
+INSERT INTO r1_t(c) VALUES('a'),('b');
+SELECT * FROM r1_t;
+ id1 | id2 | c 
+-----+-----+---
+ 100 |  -1 | a
+ 101 |  -2 | b
+(2 rows)
+
+TRUNCATE r1_t RESTART IDENTITY;
+INSERT INTO r1_t(c) VALUES('c');
+SELECT * FROM r1_t;
+ id1 | id2 | c 
+-----+-----+---
+ 100 |  -1 | c
+(1 row)
+
+DROP TABLE r1_t CASCADE;
 CREATE DATABASE b_test_truncate DBCOMPATIBILITY='B';
 \c b_test_truncate
 CREATE TABLE truncate_a(
