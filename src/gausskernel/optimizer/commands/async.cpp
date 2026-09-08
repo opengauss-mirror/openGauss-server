@@ -402,7 +402,7 @@ void CheckAsyncNotifySupported(const char* cmd)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
              errmsg("%s is not supported in thread pool mode.", cmd)));
     }
-    PreventCommandDuringRecovery("LISTEN");
+    PreventCommandDuringRecovery(cmd);
 }
 
 /*
