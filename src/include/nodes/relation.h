@@ -522,6 +522,11 @@ typedef struct PlannerInfo {
     List *origin_tlist;
     struct PlannerTargets *planner_targets;
     bool ru_is_under_start_with;
+    /*
+     * A parent UNION ALL query has physically compacted its private Query
+     * tree. Descendant base scans must retain the compact PathTarget.
+     */
+    bool union_all_required_columns_pruned;
 } PlannerInfo;
 
 /*

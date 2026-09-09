@@ -58,6 +58,22 @@ typedef struct DiskAnnTopKPreparedLeaf {
     Query *rewrittenQuery;       /* Rewritten copy with ORDER BY + LIMIT */
 } DiskAnnTopKPreparedLeaf;
 
+typedef struct RequiredColumnVarMapContext {
+    Index unionRti;
+    int oldNcols;
+    AttrNumber *oldToNew;
+    bool failed;
+} RequiredColumnVarMapContext;
+
+typedef struct UnionAllOrderKey {
+    Index sortRef;
+    List *leafExprs;
+    Oid type;
+    int32 typmod;
+    Oid collation;
+    AttrNumber newAttno;
+} UnionAllOrderKey;
+
 /* Forward declarations */
 static bool diskann_topk_outer_query_is_safe(Query *query);
 static bool is_diskann_vector_order_expr(Expr *expr, Oid *opfamilyOut);
@@ -79,6 +95,1092 @@ static bool check_outer_qual_pushdown_safe(Query *outer, Index unionRti, RangeTb
 static Expr *map_outer_qual_to_leaf(Query *outer, Index unionRti, RangeTblEntry *unionRte,
                                       Query *leaf, Expr *outerQual);
 static bool append_outer_qual_to_leaf(Query *leafCopy, Expr *mappedQual);
+static bool required_columns_outer_query_is_safe(Query *query);
+static int count_visible_tlist_entries(List *targetList);
+static bool add_required_columns_from_expr(Node *expr, Index unionRti, int oldNcols,
+                                           Bitmapset **required);
+static bool collect_required_output_columns(Query *outer, Index unionRti, int oldNcols,
+                                             Bitmapset **required);
+static void preserve_semantically_required_outputs(List *leaves, int oldNcols, Bitmapset **required);
+static bool validate_required_column_shape(Query *unionQuery, List *leaves, int oldNcols);
+static bool prepare_outer_where_pushdown(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                         List *leaves);
+static List *compact_name_list(List *names, AttrNumber *oldToNew, int oldNcols, bool *ok);
+static List *compact_leaf_targetlist(List *targetList, AttrNumber *oldToNew, int oldNcols, bool *ok);
+static List *compact_union_targetlist(List *targetList, AttrNumber *oldToNew, int oldNcols, bool *ok);
+static bool compact_setop_metadata(Node *node, AttrNumber *oldToNew, int oldNcols);
+static Node *required_column_var_mutator(Node *node, void *context);
+static bool remap_outer_query_vars(Query *outer, Index unionRti, AttrNumber *oldToNew, int oldNcols);
+static bool compact_union_all_query(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                    List *leaves, Bitmapset *required, int oldNcols);
+static bool validate_order_projection_shape(Query *unionQuery, List *leaves, int oldNcols);
+static UnionAllOrderKey *find_union_all_order_key(List *keys, Index sortRef);
+static bool prepare_union_all_order_keys(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                                         List *leaves, List **keys);
+static bool collect_order_projection_raw_columns(Query *outer, Index unionRti, int oldNcols,
+                                                 List *keys, Bitmapset **required);
+static bool leaf_expr_is_order_key(Expr *expr, List *keys, int leafIndex);
+static bool rewrite_leaf_order_projection(RangeTblEntry *leafRte, AttrNumber *oldToNew,
+                                          int oldNcols, List *keys, int leafIndex);
+static void append_setop_order_key_metadata(Node *node, List *keys);
+static bool rewrite_outer_order_projection(Query *outer, Index unionRti,
+                                           AttrNumber *oldToNew, int oldNcols, List *keys);
+static bool rewrite_union_order_projection(Query *outer, Index unionRti,
+                                           RangeTblEntry *unionRte, List *leaves,
+                                           Bitmapset *rawRequired, List *keys, int oldNcols);
+
+/*
+ * preprocess_union_all_required_columns
+ *     Push a safe mandatory outer WHERE into every pure UNION ALL leaf and
+ *     physically compact the set-operation output to columns needed above it.
+ *
+ * The rewrite is performed on a private copy of the outer Query.  The copied
+ * rtable/targetlist/jointree pointers are installed only after all positional
+ * targetlist and type metadata checks succeed.
+ */
+void
+preprocess_union_all_required_columns(PlannerInfo *root)
+{
+    Query *outer = root->parse;
+    Query *work = NULL;
+    RangeTblEntry *unionRte = NULL;
+    Index unionRti = 0;
+    List *leaves = NIL;
+    Bitmapset *required = NULL;
+    int oldNcols = 0;
+    int newNcols = 0;
+    bool wherePushed = false;
+
+    if (!u_sess->attr.attr_sql.enable_union_all_required_columns_pushdown)
+        return;
+
+    if (!required_columns_outer_query_is_safe(outer)) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=outer_query_shape");
+        return;
+    }
+
+    /*
+     * Work on a complete copy so that a late validation failure cannot leave
+     * only some UNION ALL leaves rewritten.
+     */
+    work = (Query *)copyObject(outer);
+    unionRte = get_single_union_subquery_rte(work, &unionRti);
+    if (unionRte == NULL || unionRte->security_barrier || unionRte->lateral) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=unsafe_union_rte");
+        return;
+    }
+
+    if (!collect_pure_union_all_leaves(unionRte->subquery, &leaves)) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=non_union_all");
+        return;
+    }
+
+    oldNcols = count_visible_tlist_entries(unionRte->subquery->targetList);
+    if (oldNcols <= 0 || !validate_required_column_shape(unionRte->subquery, leaves, oldNcols)) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=inconsistent_output_shape");
+        return;
+    }
+
+    /*
+     * Mapping must happen before column numbers are compacted.  If every leaf
+     * accepts the exact predicate, remove the redundant outer recheck so that
+     * columns used only by WHERE stop at the leaf.
+     */
+    wherePushed = prepare_outer_where_pushdown(work, unionRti, unionRte, leaves);
+
+    if (!collect_required_output_columns(work, unionRti, oldNcols, &required)) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=unsupported_outer_reference");
+        return;
+    }
+
+    preserve_semantically_required_outputs(leaves, oldNcols, &required);
+
+    /*
+     * An empty set-operation tuple is poorly supported by several legacy plan
+     * paths.  Keep the first column as a harmless carrier for SELECT constants.
+     */
+    if (bms_is_empty(required))
+        required = bms_add_member(required, 1);
+
+    newNcols = bms_num_members(required);
+    if (!compact_union_all_query(work, unionRti, unionRte, leaves, required, oldNcols)) {
+        elog(DEBUG1, "union_all_required_columns: skipped reason=compact_validation_failed");
+        return;
+    }
+
+    /*
+     * No planner structures referring to these fields have been built yet.
+     * Installing the copied fields keeps root->parse and the caller's Query
+     * object identity stable.
+     */
+    outer->targetList = work->targetList;
+    outer->jointree = work->jointree;
+    outer->rtable = work->rtable;
+    root->union_all_required_columns_pruned = true;
+
+    elog(DEBUG1,
+         "union_all_required_columns: old=%d new=%d where_pushed=%s outer_recheck=%s",
+         oldNcols,
+         newNcols,
+         wherePushed ? "true" : "false",
+         wherePushed ? "false" : "true");
+}
+
+/*
+ * Keep the first implementation deliberately narrow: it covers the target
+ * SELECT-over-one-UNION-view shape, while declining constructs whose row or
+ * evaluation semantics need more than positional output pruning.
+ */
+static bool
+required_columns_outer_query_is_safe(Query *query)
+{
+    FromExpr *fromExpr = NULL;
+
+    if (query == NULL || query->commandType != CMD_SELECT)
+        return false;
+
+    if (query->jointree == NULL || query->jointree->quals == NULL)
+        return false; /* WHERE is mandatory for the initial feature contract */
+
+    if (query->setOperations != NULL || query->hasAggs || query->groupClause != NIL ||
+        query->havingQual != NULL || query->distinctClause != NIL ||
+        query->hasWindowFuncs || query->windowClause != NIL || query->cteList != NIL ||
+        query->hasForUpdate || query->hasTargetSRFs || query->hasSubLinks ||
+        query->hasRecursive || query->hasModifyingCTE || query->hasRowSecurity ||
+        query->limitOffset != NULL || query->limitIsPercent || query->limitWithTies)
+        return false;
+
+    if (list_length(query->rtable) != 1 || !IsA(query->jointree, FromExpr))
+        return false;
+
+    fromExpr = (FromExpr *)query->jointree;
+    if (list_length(fromExpr->fromlist) != 1 ||
+        !IsA(linitial(fromExpr->fromlist), RangeTblRef))
+        return false;
+
+    return ((RangeTblRef *)linitial(fromExpr->fromlist))->rtindex == 1;
+}
+
+static int
+count_visible_tlist_entries(List *targetList)
+{
+    ListCell *lc = NULL;
+    int count = 0;
+
+    foreach (lc, targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        if (!tle->resjunk)
+            count++;
+    }
+    return count;
+}
+
+static bool
+add_required_columns_from_expr(Node *expr, Index unionRti, int oldNcols,
+                               Bitmapset **required)
+{
+    List *vars = NIL;
+    ListCell *lc = NULL;
+
+    if (expr == NULL)
+        return true;
+
+    vars = pull_vars_of_level(expr, 0);
+    foreach (lc, vars) {
+        Node *node = (Node *)lfirst(lc);
+        Var *var = NULL;
+
+        if (!IsA(node, Var)) {
+            list_free_ext(vars);
+            return false;
+        }
+
+        var = (Var *)node;
+        if (var->varlevelsup != 0 || var->varno != unionRti ||
+            var->varattno <= 0 || var->varattno > oldNcols) {
+            list_free_ext(vars);
+            return false;
+        }
+        *required = bms_add_member(*required, var->varattno);
+    }
+
+    list_free_ext(vars);
+    return true;
+}
+
+static bool
+collect_required_output_columns(Query *outer, Index unionRti, int oldNcols,
+                                Bitmapset **required)
+{
+    ListCell *lc = NULL;
+
+    foreach (lc, outer->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        if (!add_required_columns_from_expr((Node *)tle->expr, unionRti, oldNcols, required))
+            return false;
+    }
+
+    if (outer->jointree != NULL &&
+        !add_required_columns_from_expr((Node *)outer->jointree->quals,
+                                        unionRti, oldNcols, required))
+        return false;
+
+    if (!add_required_columns_from_expr(outer->limitCount, unionRti, oldNcols, required) ||
+        !add_required_columns_from_expr(outer->limitOffset, unionRti, oldNcols, required))
+        return false;
+
+    return true;
+}
+
+/*
+ * Dropping an unused volatile/SRF output can alter observable evaluation or
+ * row multiplicity.  Since UNION ALL columns are positional, preserve that
+ * output position in every leaf when any leaf requires it.
+ */
+static void
+preserve_semantically_required_outputs(List *leaves, int oldNcols, Bitmapset **required)
+{
+    ListCell *leafCell = NULL;
+
+    foreach (leafCell, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(leafCell);
+        Query *leaf = leafRte->subquery;
+        ListCell *lc = NULL;
+        int pos = 0;
+
+        foreach (lc, leaf->targetList) {
+            TargetEntry *tle = (TargetEntry *)lfirst(lc);
+            if (tle->resjunk)
+                continue;
+
+            pos++;
+            if (pos > oldNcols)
+                break;
+
+            if (tle->ressortgroupref != 0 ||
+                expression_returns_set((Node *)tle->expr) ||
+                contain_volatile_functions((Node *)tle->expr) ||
+                checkExprHasSubLink((Node *)tle->expr))
+                *required = bms_add_member(*required, pos);
+        }
+    }
+}
+
+static bool
+validate_required_column_shape(Query *unionQuery, List *leaves, int oldNcols)
+{
+    SetOperationStmt *topop = NULL;
+    ListCell *lc = NULL;
+
+    if (unionQuery == NULL || unionQuery->setOperations == NULL ||
+        unionQuery->commandType != CMD_SELECT || unionQuery->sortClause != NIL ||
+        unionQuery->limitCount != NULL || unionQuery->limitOffset != NULL ||
+        unionQuery->hasAggs || unionQuery->groupClause != NIL ||
+        unionQuery->havingQual != NULL || unionQuery->distinctClause != NIL ||
+        unionQuery->hasWindowFuncs || unionQuery->windowClause != NIL ||
+        unionQuery->cteList != NIL || unionQuery->hasForUpdate ||
+        unionQuery->hasTargetSRFs || unionQuery->hasRecursive ||
+        unionQuery->hasModifyingCTE || unionQuery->hasRowSecurity)
+        return false;
+
+    foreach (lc, unionQuery->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        if (tle->resjunk)
+            return false;
+    }
+
+    topop = (SetOperationStmt *)unionQuery->setOperations;
+    if (!IsA(topop, SetOperationStmt) ||
+        list_length(topop->colTypes) != oldNcols ||
+        list_length(topop->colTypmods) != oldNcols ||
+        list_length(topop->colCollations) != oldNcols)
+        return false;
+
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        Query *leaf = leafRte->subquery;
+
+        if (leafRte->security_barrier || leafRte->lateral ||
+            !leaf_query_is_safe(leaf) || leaf->hasTargetSRFs ||
+            count_visible_tlist_entries(leaf->targetList) != oldNcols)
+            return false;
+
+        if (leafRte->eref == NULL ||
+            list_length(leafRte->eref->colnames) != oldNcols)
+            return false;
+    }
+
+    return true;
+}
+
+static bool
+prepare_outer_where_pushdown(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                             List *leaves)
+{
+    Node *outerQual = outer->jointree != NULL ? outer->jointree->quals : NULL;
+    List *mappedQuals = NIL;
+    ListCell *lc = NULL;
+    ListCell *mq = NULL;
+
+    if (outerQual == NULL ||
+        !check_outer_qual_pushdown_safe(outer, unionRti, unionRte, leaves))
+        return false;
+
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        Expr *mapped = map_outer_qual_to_leaf(outer, unionRti, unionRte,
+                                             leafRte->subquery, (Expr *)outerQual);
+        if (mapped == NULL)
+            return false;
+        mappedQuals = lappend(mappedQuals, mapped);
+    }
+
+    forboth(lc, leaves, mq, mappedQuals) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        if (!append_outer_qual_to_leaf(leafRte->subquery, (Expr *)lfirst(mq)))
+            return false;
+    }
+
+    outer->jointree->quals = NULL;
+    return true;
+}
+
+static List *
+compact_name_list(List *names, AttrNumber *oldToNew, int oldNcols, bool *ok)
+{
+    List *result = NIL;
+    ListCell *lc = NULL;
+    int pos = 0;
+
+    if (names == NIL || list_length(names) != oldNcols) {
+        *ok = false;
+        return NIL;
+    }
+
+    foreach (lc, names) {
+        pos++;
+        if (oldToNew[pos] > 0)
+            result = lappend(result, copyObject(lfirst(lc)));
+    }
+    return result;
+}
+
+static List *
+compact_leaf_targetlist(List *targetList, AttrNumber *oldToNew, int oldNcols, bool *ok)
+{
+    List *result = NIL;
+    ListCell *lc = NULL;
+    int oldPos = 0;
+    int nextResno = 1;
+
+    foreach (lc, targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        TargetEntry *copy = NULL;
+
+        if (tle->resjunk)
+            continue;
+
+        oldPos++;
+        if (oldPos > oldNcols) {
+            *ok = false;
+            return NIL;
+        }
+
+        if (oldToNew[oldPos] == 0)
+            continue;
+
+        copy = (TargetEntry *)copyObject(tle);
+        copy->resno = (AttrNumber)nextResno++;
+        result = lappend(result, copy);
+    }
+
+    if (oldPos != oldNcols) {
+        *ok = false;
+        return NIL;
+    }
+
+    /* Resjunk items are internal to the leaf and remain after visible output. */
+    foreach (lc, targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        TargetEntry *copy = NULL;
+
+        if (!tle->resjunk)
+            continue;
+        copy = (TargetEntry *)copyObject(tle);
+        copy->resno = (AttrNumber)nextResno++;
+        result = lappend(result, copy);
+    }
+
+    return result;
+}
+
+static List *
+compact_union_targetlist(List *targetList, AttrNumber *oldToNew, int oldNcols, bool *ok)
+{
+    List *result = NIL;
+    ListCell *lc = NULL;
+    int oldPos = 0;
+
+    foreach (lc, targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        TargetEntry *copy = NULL;
+        Var *var = NULL;
+
+        if (tle->resjunk) {
+            *ok = false;
+            return NIL;
+        }
+
+        oldPos++;
+        if (oldPos > oldNcols) {
+            *ok = false;
+            return NIL;
+        }
+        if (oldToNew[oldPos] == 0)
+            continue;
+
+        /*
+         * A set-operation Query targetlist references the leftmost leaf
+         * output.  Keep this restriction explicit so unexpected parse shapes
+         * safely fall back instead of silently remapping the wrong Var.
+         */
+        if (!IsA(tle->expr, Var)) {
+            *ok = false;
+            return NIL;
+        }
+        var = (Var *)tle->expr;
+        if (var->varlevelsup != 0 || var->varattno != oldPos) {
+            *ok = false;
+            return NIL;
+        }
+
+        copy = (TargetEntry *)copyObject(tle);
+        copy->resno = oldToNew[oldPos];
+        var = (Var *)copy->expr;
+        var->varattno = oldToNew[oldPos];
+        if (var->varoattno == oldPos)
+            var->varoattno = oldToNew[oldPos];
+        result = lappend(result, copy);
+    }
+
+    if (oldPos != oldNcols)
+        *ok = false;
+    return result;
+}
+
+static bool
+compact_setop_metadata(Node *node, AttrNumber *oldToNew, int oldNcols)
+{
+    SetOperationStmt *op = NULL;
+    List *types = NIL;
+    List *typmods = NIL;
+    List *collations = NIL;
+    int pos = 0;
+
+    if (node == NULL)
+        return false;
+    if (IsA(node, RangeTblRef))
+        return true;
+    if (!IsA(node, SetOperationStmt))
+        return false;
+
+    op = (SetOperationStmt *)node;
+    if (op->op != SETOP_UNION || !op->all || op->groupClauses != NIL ||
+        list_length(op->colTypes) != oldNcols ||
+        list_length(op->colTypmods) != oldNcols ||
+        list_length(op->colCollations) != oldNcols)
+        return false;
+
+    for (pos = 1; pos <= oldNcols; pos++) {
+        if (oldToNew[pos] == 0)
+            continue;
+        types = lappend_oid(types, list_nth_oid(op->colTypes, pos - 1));
+        typmods = lappend_int(typmods, list_nth_int(op->colTypmods, pos - 1));
+        collations = lappend_oid(collations, list_nth_oid(op->colCollations, pos - 1));
+    }
+
+    if (!compact_setop_metadata(op->larg, oldToNew, oldNcols) ||
+        !compact_setop_metadata(op->rarg, oldToNew, oldNcols))
+        return false;
+
+    op->colTypes = types;
+    op->colTypmods = typmods;
+    op->colCollations = collations;
+    return true;
+}
+
+static Node *
+required_column_var_mutator(Node *node, void *context)
+{
+    RequiredColumnVarMapContext *ctx = (RequiredColumnVarMapContext *)context;
+
+    if (node == NULL)
+        return NULL;
+
+    if (IsA(node, Var)) {
+        Var *oldVar = (Var *)node;
+        Var *newVar = NULL;
+        AttrNumber newAttno = 0;
+
+        if (oldVar->varlevelsup != 0 || oldVar->varno != ctx->unionRti)
+            return (Node *)copyObject(oldVar);
+
+        if (oldVar->varattno <= 0 || oldVar->varattno > ctx->oldNcols) {
+            ctx->failed = true;
+            return (Node *)copyObject(oldVar);
+        }
+
+        newAttno = ctx->oldToNew[oldVar->varattno];
+        if (newAttno <= 0) {
+            ctx->failed = true;
+            return (Node *)copyObject(oldVar);
+        }
+
+        newVar = (Var *)copyObject(oldVar);
+        newVar->varattno = newAttno;
+        if (newVar->varnoold == ctx->unionRti &&
+            newVar->varoattno == oldVar->varattno)
+            newVar->varoattno = newAttno;
+        return (Node *)newVar;
+    }
+
+    return expression_tree_mutator(node, required_column_var_mutator, context);
+}
+
+static bool
+remap_outer_query_vars(Query *outer, Index unionRti, AttrNumber *oldToNew, int oldNcols)
+{
+    RequiredColumnVarMapContext ctx;
+    ListCell *lc = NULL;
+
+    ctx.unionRti = unionRti;
+    ctx.oldNcols = oldNcols;
+    ctx.oldToNew = oldToNew;
+    ctx.failed = false;
+
+    foreach (lc, outer->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        tle->expr = (Expr *)required_column_var_mutator((Node *)tle->expr, &ctx);
+    }
+
+    if (outer->jointree != NULL)
+        outer->jointree->quals = required_column_var_mutator(
+            (Node *)outer->jointree->quals, &ctx);
+    outer->limitCount = required_column_var_mutator(outer->limitCount, &ctx);
+    outer->limitOffset = required_column_var_mutator(outer->limitOffset, &ctx);
+
+    return !ctx.failed;
+}
+
+static bool
+compact_union_all_query(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                        List *leaves, Bitmapset *required, int oldNcols)
+{
+    Query *unionQuery = unionRte->subquery;
+    AttrNumber *oldToNew = NULL;
+    ListCell *lc = NULL;
+    int pos = 0;
+    int nextAttno = 1;
+    bool ok = true;
+
+    oldToNew = (AttrNumber *)palloc0((oldNcols + 1) * sizeof(AttrNumber));
+    for (pos = 1; pos <= oldNcols; pos++) {
+        if (bms_is_member(pos, required))
+            oldToNew[pos] = (AttrNumber)nextAttno++;
+    }
+
+    if (!remap_outer_query_vars(outer, unionRti, oldToNew, oldNcols))
+        return false;
+
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        leafRte->subquery->targetList = compact_leaf_targetlist(
+            leafRte->subquery->targetList, oldToNew, oldNcols, &ok);
+        if (!ok)
+            return false;
+
+        leafRte->eref->colnames = compact_name_list(
+            leafRte->eref->colnames, oldToNew, oldNcols, &ok);
+        if (!ok)
+            return false;
+    }
+
+    unionQuery->targetList = compact_union_targetlist(
+        unionQuery->targetList, oldToNew, oldNcols, &ok);
+    if (!ok || !compact_setop_metadata(unionQuery->setOperations, oldToNew, oldNcols))
+        return false;
+
+    if (unionRte->eref == NULL)
+        return false;
+    unionRte->eref->colnames = compact_name_list(
+        unionRte->eref->colnames, oldToNew, oldNcols, &ok);
+
+    return ok;
+}
+
+/*
+ * preprocess_union_all_order_key_projection
+ *     Materialize non-Var ORDER BY expressions in each UNION ALL leaf.
+ *
+ * This runs after optional Top-K rewriting, because Top-K eligibility must be
+ * checked while the outer expression is still the original DiskANN operator.
+ * The outer query subsequently sorts a compact scalar key rather than carrying
+ * the key's wide inputs (notably vector) through Append.
+ */
+void
+preprocess_union_all_order_key_projection(PlannerInfo *root)
+{
+    Query *outer = root->parse;
+    Query *work = NULL;
+    RangeTblEntry *unionRte = NULL;
+    Index unionRti = 0;
+    List *leaves = NIL;
+    List *keys = NIL;
+    Bitmapset *rawRequired = NULL;
+    int oldNcols = 0;
+
+    if (!u_sess->attr.attr_sql.enable_union_all_required_columns_pushdown ||
+        !root->union_all_required_columns_pruned || outer->sortClause == NIL)
+        return;
+
+    work = (Query *)copyObject(outer);
+    unionRte = get_single_union_subquery_rte(work, &unionRti);
+    if (unionRte == NULL || unionRte->security_barrier || unionRte->lateral ||
+        !collect_pure_union_all_leaves(unionRte->subquery, &leaves))
+        return;
+
+    oldNcols = count_visible_tlist_entries(unionRte->subquery->targetList);
+    if (oldNcols <= 0 ||
+        !validate_order_projection_shape(unionRte->subquery, leaves, oldNcols))
+        return;
+
+    if (!prepare_union_all_order_keys(work, unionRti, unionRte, leaves, &keys) ||
+        keys == NIL)
+        return;
+
+    if (!collect_order_projection_raw_columns(work, unionRti, oldNcols,
+                                              keys, &rawRequired))
+        return;
+    preserve_semantically_required_outputs(leaves, oldNcols, &rawRequired);
+
+    if (!rewrite_union_order_projection(work, unionRti, unionRte, leaves,
+                                        rawRequired, keys, oldNcols)) {
+        elog(DEBUG1, "union_all_required_columns: order projection skipped reason=rewrite_failed");
+        return;
+    }
+
+    outer->targetList = work->targetList;
+    outer->jointree = work->jointree;
+    outer->rtable = work->rtable;
+
+    elog(DEBUG1,
+         "union_all_required_columns: order_keys=%d raw_columns=%d materialized=true",
+         list_length(keys),
+         bms_num_members(rawRequired));
+}
+
+static UnionAllOrderKey *
+find_union_all_order_key(List *keys, Index sortRef)
+{
+    ListCell *lc = NULL;
+
+    if (sortRef == 0)
+        return NULL;
+
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        if (key->sortRef == sortRef)
+            return key;
+    }
+    return NULL;
+}
+
+/*
+ * Direct Vars are already compact and are useful as tie-break keys, so only
+ * derived expressions need a synthetic scalar output.
+ */
+static bool
+prepare_union_all_order_keys(Query *outer, Index unionRti, RangeTblEntry *unionRte,
+                             List *leaves, List **keys)
+{
+    ListCell *scCell = NULL;
+
+    foreach (scCell, outer->sortClause) {
+        SortGroupClause *sc = (SortGroupClause *)lfirst(scCell);
+        TargetEntry *outerTle = get_sortgroupclause_tle(sc, outer->targetList);
+        UnionAllOrderKey *key = NULL;
+        List *vars = NIL;
+        ListCell *lc = NULL;
+
+        if (outerTle == NULL || outerTle->ressortgroupref == 0)
+            return false;
+
+        if (IsA(outerTle->expr, Var))
+            continue;
+
+        vars = pull_vars_of_level((Node *)outerTle->expr, 0);
+        if (vars == NIL)
+            continue; /* A constant ordering key needs no branch output. */
+
+        foreach (lc, vars) {
+            Node *node = (Node *)lfirst(lc);
+            Var *var = NULL;
+
+            if (!IsA(node, Var)) {
+                list_free_ext(vars);
+                return false;
+            }
+            var = (Var *)node;
+            if (var->varlevelsup != 0 || var->varno != unionRti ||
+                var->varattno <= 0) {
+                list_free_ext(vars);
+                return false;
+            }
+        }
+        list_free_ext(vars);
+
+        key = (UnionAllOrderKey *)palloc0(sizeof(UnionAllOrderKey));
+        key->sortRef = outerTle->ressortgroupref;
+        key->type = exprType((Node *)outerTle->expr);
+        key->typmod = exprTypmod((Node *)outerTle->expr);
+        key->collation = exprCollation((Node *)outerTle->expr);
+
+        foreach (lc, leaves) {
+            RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+            Expr *mapped = map_sort_expr_to_leaf(outer, unionRti, unionRte,
+                                                 leafRte->subquery,
+                                                 (Expr *)outerTle->expr);
+            if (mapped == NULL ||
+                exprType((Node *)mapped) != key->type ||
+                exprTypmod((Node *)mapped) != key->typmod ||
+                exprCollation((Node *)mapped) != key->collation)
+                return false;
+            key->leafExprs = lappend(key->leafExprs, mapped);
+        }
+
+        *keys = lappend(*keys, key);
+    }
+
+    return true;
+}
+
+static bool
+validate_order_projection_shape(Query *unionQuery, List *leaves, int oldNcols)
+{
+    SetOperationStmt *topop = NULL;
+    ListCell *lc = NULL;
+
+    if (unionQuery == NULL || unionQuery->setOperations == NULL ||
+        count_visible_tlist_entries(unionQuery->targetList) != oldNcols)
+        return false;
+
+    foreach (lc, unionQuery->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        if (tle->resjunk)
+            return false;
+    }
+
+    topop = (SetOperationStmt *)unionQuery->setOperations;
+    if (!IsA(topop, SetOperationStmt) ||
+        list_length(topop->colTypes) != oldNcols ||
+        list_length(topop->colTypmods) != oldNcols ||
+        list_length(topop->colCollations) != oldNcols)
+        return false;
+
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        if (leafRte->security_barrier || leafRte->lateral ||
+            leafRte->eref == NULL ||
+            list_length(leafRte->eref->colnames) != oldNcols ||
+            count_visible_tlist_entries(leafRte->subquery->targetList) != oldNcols)
+            return false;
+    }
+
+    return true;
+}
+
+static bool
+collect_order_projection_raw_columns(Query *outer, Index unionRti, int oldNcols,
+                                     List *keys, Bitmapset **required)
+{
+    ListCell *lc = NULL;
+
+    foreach (lc, outer->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+
+        /*
+         * The expression is replaced by its synthetic leaf output even when
+         * it is a user-visible SELECT item, so its raw Vars are not needed.
+         */
+        if (find_union_all_order_key(keys, tle->ressortgroupref) != NULL)
+            continue;
+
+        if (!add_required_columns_from_expr((Node *)tle->expr,
+                                            unionRti, oldNcols, required))
+            return false;
+    }
+
+    if (outer->jointree != NULL &&
+        !add_required_columns_from_expr((Node *)outer->jointree->quals,
+                                        unionRti, oldNcols, required))
+        return false;
+
+    if (!add_required_columns_from_expr(outer->limitCount, unionRti, oldNcols, required) ||
+        !add_required_columns_from_expr(outer->limitOffset, unionRti, oldNcols, required))
+        return false;
+
+    return true;
+}
+
+static bool
+leaf_expr_is_order_key(Expr *expr, List *keys, int leafIndex)
+{
+    ListCell *lc = NULL;
+
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        Expr *keyExpr = (Expr *)list_nth(key->leafExprs, leafIndex);
+        if (equal(expr, keyExpr))
+            return true;
+    }
+    return false;
+}
+
+static bool
+rewrite_leaf_order_projection(RangeTblEntry *leafRte, AttrNumber *oldToNew,
+                              int oldNcols, List *keys, int leafIndex)
+{
+    Query *leaf = leafRte->subquery;
+    List *oldTarget = leaf->targetList;
+    List *newTarget = NIL;
+    List *newNames = NIL;
+    ListCell *lc = NULL;
+    int oldPos = 0;
+    int nextResno = 1;
+    int keyNumber = 0;
+    bool ok = true;
+
+    newNames = compact_name_list(leafRte->eref->colnames,
+                                 oldToNew, oldNcols, &ok);
+    if (!ok)
+        return false;
+
+    foreach (lc, oldTarget) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        TargetEntry *copy = NULL;
+
+        if (tle->resjunk)
+            continue;
+        oldPos++;
+        if (oldPos > oldNcols)
+            return false;
+        if (oldToNew[oldPos] == 0)
+            continue;
+
+        copy = (TargetEntry *)copyObject(tle);
+        copy->resno = (AttrNumber)nextResno++;
+        newTarget = lappend(newTarget, copy);
+    }
+    if (oldPos != oldNcols)
+        return false;
+
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        Expr *mapped = (Expr *)list_nth(key->leafExprs, leafIndex);
+        TargetEntry *oldTle = tlist_member((Node *)mapped, oldTarget);
+        TargetEntry *newTle = NULL;
+        char name[NAMEDATALEN];
+        errno_t rc;
+
+        keyNumber++;
+        rc = snprintf_s(name, NAMEDATALEN, NAMEDATALEN - 1,
+                        "__ua_order_%d", keyNumber);
+        securec_check_ss(rc, "\0", "\0");
+
+        newTle = makeTargetEntry((Expr *)copyObject(mapped),
+                                 (AttrNumber)nextResno++,
+                                 pstrdup(name),
+                                 false);
+        if (oldTle != NULL)
+            newTle->ressortgroupref = oldTle->ressortgroupref;
+        newTarget = lappend(newTarget, newTle);
+        newNames = lappend(newNames, makeString(pstrdup(name)));
+    }
+
+    /*
+     * Keep unrelated leaf-internal junk entries, but remove the old resjunk
+     * copy of a key that has just become a visible UNION output.
+     */
+    foreach (lc, oldTarget) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        TargetEntry *copy = NULL;
+
+        if (!tle->resjunk || leaf_expr_is_order_key(tle->expr, keys, leafIndex))
+            continue;
+        copy = (TargetEntry *)copyObject(tle);
+        copy->resno = (AttrNumber)nextResno++;
+        newTarget = lappend(newTarget, copy);
+    }
+
+    leaf->targetList = newTarget;
+    leafRte->eref->colnames = newNames;
+    return true;
+}
+
+static void
+append_setop_order_key_metadata(Node *node, List *keys)
+{
+    SetOperationStmt *op = NULL;
+    ListCell *lc = NULL;
+
+    if (node == NULL || IsA(node, RangeTblRef))
+        return;
+
+    Assert(IsA(node, SetOperationStmt));
+    op = (SetOperationStmt *)node;
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        op->colTypes = lappend_oid(op->colTypes, key->type);
+        op->colTypmods = lappend_int(op->colTypmods, key->typmod);
+        op->colCollations = lappend_oid(op->colCollations, key->collation);
+    }
+
+    append_setop_order_key_metadata(op->larg, keys);
+    append_setop_order_key_metadata(op->rarg, keys);
+}
+
+static bool
+rewrite_outer_order_projection(Query *outer, Index unionRti,
+                               AttrNumber *oldToNew, int oldNcols, List *keys)
+{
+    RequiredColumnVarMapContext ctx;
+    ListCell *lc = NULL;
+
+    ctx.unionRti = unionRti;
+    ctx.oldNcols = oldNcols;
+    ctx.oldToNew = oldToNew;
+    ctx.failed = false;
+
+    foreach (lc, outer->targetList) {
+        TargetEntry *tle = (TargetEntry *)lfirst(lc);
+        UnionAllOrderKey *key =
+            find_union_all_order_key(keys, tle->ressortgroupref);
+
+        if (key != NULL) {
+            tle->expr = (Expr *)makeVar(unionRti,
+                                       key->newAttno,
+                                       key->type,
+                                       key->typmod,
+                                       key->collation,
+                                       0);
+        } else {
+            tle->expr = (Expr *)required_column_var_mutator(
+                (Node *)tle->expr, &ctx);
+        }
+    }
+
+    if (outer->jointree != NULL)
+        outer->jointree->quals = required_column_var_mutator(
+            (Node *)outer->jointree->quals, &ctx);
+    outer->limitCount = required_column_var_mutator(outer->limitCount, &ctx);
+    outer->limitOffset = required_column_var_mutator(outer->limitOffset, &ctx);
+
+    return !ctx.failed;
+}
+
+static bool
+rewrite_union_order_projection(Query *outer, Index unionRti,
+                               RangeTblEntry *unionRte, List *leaves,
+                               Bitmapset *rawRequired, List *keys, int oldNcols)
+{
+    Query *unionQuery = unionRte->subquery;
+    AttrNumber *oldToNew = NULL;
+    List *unionTarget = NIL;
+    List *unionNames = NIL;
+    ListCell *lc = NULL;
+    Var *leftmostVar = NULL;
+    Index leftmostRti = 0;
+    int pos = 0;
+    int nextAttno = 1;
+    int leafIndex = 0;
+    int keyNumber = 0;
+    bool ok = true;
+
+    if (unionQuery->targetList == NIL ||
+        !IsA(((TargetEntry *)linitial(unionQuery->targetList))->expr, Var))
+        return false;
+    leftmostVar = (Var *)((TargetEntry *)linitial(unionQuery->targetList))->expr;
+    leftmostRti = leftmostVar->varno;
+
+    oldToNew = (AttrNumber *)palloc0((oldNcols + 1) * sizeof(AttrNumber));
+    for (pos = 1; pos <= oldNcols; pos++) {
+        if (bms_is_member(pos, rawRequired))
+            oldToNew[pos] = (AttrNumber)nextAttno++;
+    }
+
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        key->newAttno = (AttrNumber)nextAttno++;
+    }
+
+    if (!rewrite_outer_order_projection(outer, unionRti,
+                                        oldToNew, oldNcols, keys))
+        return false;
+
+    foreach (lc, leaves) {
+        RangeTblEntry *leafRte = (RangeTblEntry *)lfirst(lc);
+        if (!rewrite_leaf_order_projection(leafRte, oldToNew,
+                                           oldNcols, keys, leafIndex++))
+            return false;
+    }
+
+    unionTarget = compact_union_targetlist(unionQuery->targetList,
+                                           oldToNew, oldNcols, &ok);
+    if (!ok)
+        return false;
+
+    unionNames = compact_name_list(unionRte->eref->colnames,
+                                   oldToNew, oldNcols, &ok);
+    if (!ok)
+        return false;
+
+    foreach (lc, keys) {
+        UnionAllOrderKey *key = (UnionAllOrderKey *)lfirst(lc);
+        TargetEntry *tle = NULL;
+        Var *var = NULL;
+        char name[NAMEDATALEN];
+        errno_t rc;
+
+        keyNumber++;
+        rc = snprintf_s(name, NAMEDATALEN, NAMEDATALEN - 1,
+                        "__ua_order_%d", keyNumber);
+        securec_check_ss(rc, "\0", "\0");
+
+        var = makeVar(leftmostRti,
+                      key->newAttno,
+                      key->type,
+                      key->typmod,
+                      key->collation,
+                      0);
+        tle = makeTargetEntry((Expr *)var,
+                              key->newAttno,
+                              pstrdup(name),
+                              false);
+        unionTarget = lappend(unionTarget, tle);
+        unionNames = lappend(unionNames, makeString(pstrdup(name)));
+    }
+
+    unionQuery->targetList = unionTarget;
+    unionRte->eref->colnames = unionNames;
+
+    if (!compact_setop_metadata(unionQuery->setOperations,
+                                oldToNew, oldNcols))
+        return false;
+    append_setop_order_key_metadata(unionQuery->setOperations, keys);
+
+    return true;
+}
+
 
 /*
  * preprocess_union_all_diskann_topk
@@ -457,7 +1559,8 @@ leaf_query_is_safe(Query *leaf)
     /* Must not have aggregation, grouping, DISTINCT, window, CTE, row locks, SRF */
     if (leaf->hasAggs || leaf->groupClause || leaf->havingQual ||
         leaf->distinctClause || leaf->hasWindowFuncs || leaf->cteList ||
-        leaf->hasForUpdate)
+        leaf->hasForUpdate || leaf->hasTargetSRFs || leaf->hasRecursive ||
+        leaf->hasModifyingCTE || leaf->hasRowSecurity)
         return false;
 
     return true;

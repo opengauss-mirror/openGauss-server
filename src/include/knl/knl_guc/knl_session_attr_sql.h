@@ -68,6 +68,7 @@ typedef struct knl_session_attr_sql {
     bool enable_indexonlyscan_prefetch;
 #endif
     bool enable_bitmapscan;
+    bool enable_union_all_required_columns_pushdown;
     bool enable_union_all_diskann_topk_pushdown;
     bool force_bitmapand;
     #ifdef ENABLE_HTAP

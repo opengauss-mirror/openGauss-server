@@ -1566,6 +1566,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     root->subquery_type = options;
     root->param_upper = NULL;
 	root->hasRownumQual = false;
+    root->union_all_required_columns_pruned =
+        parent_root != NULL && parent_root->union_all_required_columns_pruned;
 
     /*
      * Apply memory context for query rewrite in optimizer.
@@ -1702,9 +1704,26 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     DEBUG_QRW("After preprocess rownum");
 #endif
 
+    /*
+     * Push safe outer WHERE clauses into pure UNION ALL leaves, and compact
+     * the set-operation output to columns that are actually needed above it.
+     * This must run before Top-K rewriting while column numbers still describe
+     * the original view output.
+     */
+    preprocess_union_all_required_columns(root);
+    DEBUG_QRW("After union all required-column pushdown");
+
     /* Push ORDER BY + LIMIT to UNION ALL leaves for DiskANN vector TopK */
     preprocess_union_all_diskann_topk(root);
     DEBUG_QRW("After union all diskann top-k pushdown");
+
+    /*
+     * Top-K recognition above needs the original ORDER BY expression.  Once
+     * that decision is made, replace wide ordering inputs crossing UNION ALL
+     * with branch-local scalar keys.
+     */
+    preprocess_union_all_order_key_projection(root);
+    DEBUG_QRW("After union all order-key projection");
 
     /*
      * Check to see if any subqueries in the jointree can be merged into this
