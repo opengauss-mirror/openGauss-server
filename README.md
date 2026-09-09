@@ -2,7 +2,7 @@
 
 [English](./README.en.md) | 简体中文
 
-- [什么是openGauss](#什么是openGauss)
+- [什么是openGauss](#什么是opengauss)
 - [安装](#安装)
   - [创建配置文件](#创建配置文件)
   - [初始化安装环境](#初始化安装环境)
@@ -16,8 +16,8 @@
   - [下载openGauss](#下载opengauss)
   - [编译第三方软件](#编译第三方软件)
   - [代码编译](#代码编译)
-      - [使用build.sh编译代码](#使用buildsh编译代码)
-      - [使用命令编译代码](#使用命令编译代码)
+    - [使用build.sh编译代码](#使用buildsh编译代码)
+    - [使用命令编译代码](#使用命令编译代码)
   - [编译安装包](#编译安装包)
   - [运行Fastcheck](#运行fastcheck)
 - [快速入门](#快速入门)
@@ -230,7 +230,7 @@ openGauss通过机器学习方法自动调整数据库参数，提高调参效�
     ./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
     ```
 
-   omm为数据库管理员用户（即运行openGauss的操作系统用户）,dbgrp为运行openGauss的操作系统用户的组名，/opt/software/ openGauss/clusterconfig.xml为openGauss的配置文件路径。执行过程中需要根据提示选择建立互信，并输入root或openGauss用户的密码。
+   omm为数据库管理员用户（即运行openGauss的操作系统用户）,dbgrp为运行openGauss的操作系统用户的组名，/opt/software/openGauss/clusterconfig.xml为openGauss的配置文件路径。执行过程中需要根据提示选择建立互信，并输入root或openGauss用户的密码。
 
 ### 执行安装
 
