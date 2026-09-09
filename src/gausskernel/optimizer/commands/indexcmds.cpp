@@ -851,7 +851,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         if (strcmp(stmt->accessMethod, "btree") == 0) {
             elog(ERROR, "btree index is not supported for ustore, please use ubtree instead");
         }
-        if (strcmp(stmt->accessMethod, "ubtree") != 0 && strcmp(stmt->accessMethod, "hnsw") != 0 &&
+        if (strcmp(stmt->accessMethod, "ubtree") != 0 &&
             strcmp(stmt->accessMethod, "gv_graph") != 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
         }
