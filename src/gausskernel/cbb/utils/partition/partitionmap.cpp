@@ -2736,6 +2736,10 @@ int getNumberOfPartitions(Relation rel)
                 errmsg("CAN NOT get number of partition against NON-PARTITIONED relation")));
     }
 
+    if (rel->partMap == NULL) {
+        return ranges;
+    }
+
     if (rel->partMap->type == PART_TYPE_LIST) {
         ranges = getNumberOfListPartitions(rel);
     } else if (rel->partMap->type == PART_TYPE_HASH) {

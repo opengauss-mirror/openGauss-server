@@ -196,6 +196,10 @@ static void processError(CreateFunctionStmt* stmt, enum FunctionErrorType ErrorT
 
 void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status)
 {
+    if (g_instance.status != NoShutdown ||
+        t_thrd.proc_cxt.proc_exit_inprogress) {
+        return;
+    }
     bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 ||
         OidIsValid(u_sess->cmd_cxt.CurrentExtensionObject) ||
         IsSystemNamespace(nspid) || IsToastNamespace(nspid) ||

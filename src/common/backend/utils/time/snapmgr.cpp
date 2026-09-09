@@ -1023,6 +1023,21 @@ bool ActiveSnapshotSet(void)
 }
 
 /*
+ * GetActiveSnapshotCount
+ *      Return the number of snapshots in the active snapshot stack.
+ */
+uint32 GetActiveSnapshotCount(void)
+{
+    uint32 count = 0;
+
+    for (ActiveSnapshotElt* active = u_sess->utils_cxt.ActiveSnapshot; active != NULL; active = active->as_next) {
+        count++;
+    }
+
+    return count;
+}
+
+/*
  * RegisterSnapshot
  *		Register a snapshot as being in use by the current resource owner
  *
