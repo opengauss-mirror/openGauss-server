@@ -1217,10 +1217,12 @@ ObjectAddress CreateExtension(CreateExtensionStmt* stmt)
     } else if (pg_strcasecmp(stmt->extname, "shark") == 0 && !DB_IS_CMPT(D_FORMAT)) {
         ereport(ERROR,
             (errmsg("extension \"%s\" is only supported in D type database", stmt->extname)));
-    } else if (pg_strcasecmp(stmt->extname, "shark") == 0 && u_sess->attr.attr_common.upgrade_mode != 0) {
+    } else if ((pg_strcasecmp(stmt->extname, "shark") == 0 || pg_strcasecmp(stmt->extname, "dolphin") == 0)
+        && u_sess->attr.attr_common.upgrade_mode != 0) {
         /*
          * shark is allowed to be created manually, and disallowed to be dropped,
          * so prohibit creation during upgrade, avoid deletion during rollback.
+         * Similarly, the dolphin is not allowed to be created manually during upgrade.
          */
         ereport(ERROR,
             (errmsg("create extension \"%s\" is not supported during upgrade", stmt->extname)));
