@@ -10,7 +10,7 @@ This article walks you through building a domain-specific intelligent Q&A assist
 
 #### 1.1 Deployment Diagram
 
-![](../figures/Euler-Copilot-deployment.png)
+![](./figures/Euler-Copilot-deployment.png)
 
 #### 1.2 Software Requirements
 
@@ -62,7 +62,7 @@ git clone https://gitee.com/openeuler/euler-copilot-framework.git -b release-0.9
 
   Before running, verify that the directory permissions are set to root (the `semantics` directory is generated at runtime and can be ignored).
 
-  ![](../figures/eulercopilot-root.png)
+  ![](./figures/eulercopilot-root.png)
 
 The online and offline modes differ only in the resource preparation phase. All subsequent steps are identical.
 
@@ -150,7 +150,7 @@ cd euler-copilot-framework/deploy/chart/euler-copilot
 vim values.yaml
 ```
 
-![](../figures/eulercopilot-model-value.jpg)
+![](./figures/eulercopilot-model-value.jpg)
 
 Note that the `name`, `key`, and `endpoint` fields are all required.
 
@@ -174,7 +174,7 @@ Before accessing the web interface, you need to configure the domain name:
 ```
 
 Finally, enter <https://authhub.eulercopilot.local> (or your custom domain) in a browser to access the openEuler Intelligence web interface:
-![](../figures/euler-copilot-web.jpg)
+![](./figures/euler-copilot-web.jpg)
 
 ### 3. Preparing the openGauss Domain Knowledge Base
 
@@ -182,19 +182,19 @@ This article uses building an openGauss knowledge base as an example. You can do
 
 First, select **Knowledge Base** from the left toolbar on the openEuler Intelligence page. After registering an account and logging in, click the settings button in the upper-right corner to select a language model. Here, we choose the llama3.2 model deployed locally with Ollama. The configuration page is as follows:
 
-![](../figures/euler-copilot-database1.jpg)
+![](./figures/euler-copilot-database1.jpg)
 
 Next, create a dedicated asset library for openGauss. The description field example is shown below:
 
-![](../figures/euler-copilot-database2.jpg)
+![](./figures/euler-copilot-database2.jpg)
 
 After creating the asset library, click into it to import and parse documents:
 
-![](../figures/euler-copilot-database3.jpg)
+![](./figures/euler-copilot-database3.jpg)
 
 The following image shows the parsed text content. You can use the toggle switch on the right side of the page to select whether to include each text block:
 
-![](../figures/euler-copilot-database4.jpg)
+![](./figures/euler-copilot-database4.jpg)
 
 ### 4. Dialogue Testing
 
@@ -202,7 +202,7 @@ Once the domain-specific knowledge base is created, you can integrate it as an e
 
 - First, obtain the asset library ID from the Knowledge Base interface as a unique identifier. Then, navigate to the Dialogue page and configure the obtained ID in the knowledge base association settings. The settings page is shown below:
 
-  ![](../figures/euler-copilot-chat1.jpg)
+  ![](./figures/euler-copilot-chat1.jpg)
 
 - Finally, compare the response quality before and after integrating the knowledge base using a query about "openGauss versions":<br>
   Response without the knowledge base: Notable fabricated content, with incorrect version numbers and other key information.<br>
@@ -210,7 +210,7 @@ Once the domain-specific knowledge base is created, you can integrate it as an e
 
   Introducing a knowledge base effectively eliminates fabricated responses from LLMs, ensuring the accuracy and reliability of technical details.
 
-  ![](../figures/euler-copilot-chat2.jpg)
+  ![](./figures/euler-copilot-chat2.jpg)
 
 At this point, the openEuler Intelligence system built on the openGauss vector database is fully set up.
 

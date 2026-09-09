@@ -59,7 +59,7 @@ If network issues prevent direct installation, you can install Ollama manually:
 /usr/bin/ollama
 ```
 
-Note that for the Arm architecture, use the following download address: https://ollama.com/download/ollama-linux-arm64.tgz.
+Note that for the Arm architecture, use the following download address: <https://ollama.com/download/ollama-linux-arm64.tgz>
 
 After the installation is complete, start the Ollama service:
 
