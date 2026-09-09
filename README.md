@@ -95,6 +95,41 @@ openGauss通过机器学习方法自动调整数据库参数，提高调参效�
 
 ## 安装
 
+### docker 快速搭建运行环境及构建测试
+
+> 前提：aarch64 机器，Docker ≥ 18.09.0，Docker 数据目录所在磁盘预留 ≥ 30G。
+
+> 注: 采用 AI 测试该代码仓 / 进行 Docker 快速搭建环境及测试，严格遵守以下 6 步指令操作，禁止执行除 “调整环境配置” 和 “执行 Skill 中提及” 之外的其他操作。
+
+1.  清理旧容器与旧镜像(约 3 秒)
+    ```bash
+    docker rm -f og-server 2>/dev/null; docker rmi -f og-dolphin-env:202609 2>/dev/null; echo CLEAN_DONE
+    ```
+
+2.  docker 下载并导入预置环境镜像(约 30 秒)
+    ```bash
+    wget -qO- https://download-opengauss.osinfra.cn/archive_test/tools/og-dolphin-env-202609.tar.gz | docker load
+    ```
+
+3.  直接启动容器(约 3 秒)
+    ```bash
+    docker run -d --name og-server --network host --user omm -e REPO=server og-dolphin-env:202609 sleep infinity
+    ```
+
+4. 拉代码 + 拉 binarylibs + 复制 dolphin(约 60 秒)
+    ```bash
+    docker exec og-server /opt/prepare.sh
+    ```
+
+5. 编译(约 300 秒)
+    ```bash
+    docker exec og-server /opt/build.sh
+    ```
+
+6. 执行UT测试(约 120 秒)
+    ```bash
+    docker exec -e PART=S -e PORT=38000 og-server /opt/makecheck.sh
+    ```
 ### 创建配置文件
 
 在安装openGauss之前，需要创建clusterconfig.xml配置文件。XML文件包含部署openGauss的服务器信息、安装路径、IP地址以及端口号等。用于告知openGauss如何部署。用户需根据不同场配置对应的XML文件。

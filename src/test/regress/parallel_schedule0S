@@ -1,0 +1,19 @@
+
+# ----------
+# src/test/regress/parallel_schedule
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+
+# This test case is used to monitor GUC parameter information.
+# If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
+#test: recovery_2pc_tools recovery_2pc_tools02
+#test: recovery_2pc_tools
+# --------------------------
+# usecases for improving coverage 
+# these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+# --------------------------
+test: analytic_funcs accept_float_str_as_int
+test: timecapsule_partition_ustore_test_1
+test: timecapsule_partition_ustore_test_2
