@@ -294,7 +294,9 @@ void MemoryContextResetChildren(MemoryContext context)
 static inline void TopMemCxtUnSeal()
 {
     /* Enable memory opeation on top memory context. */
-    MemoryContextUnSeal(t_thrd.top_mem_cxt);
+    if (t_thrd.top_mem_cxt != NULL) {
+        MemoryContextUnSeal(t_thrd.top_mem_cxt);
+    }
     if (u_sess != NULL && u_sess->top_mem_cxt != NULL) {
         MemoryContextUnSeal(u_sess->top_mem_cxt);
     }
@@ -303,7 +305,9 @@ static inline void TopMemCxtUnSeal()
 static inline void TopMemCxtSeal()
 {
     /* Prevent memory opeation on top memory context. */
-    MemoryContextSeal(t_thrd.top_mem_cxt);
+    if (t_thrd.top_mem_cxt != NULL) {
+        MemoryContextSeal(t_thrd.top_mem_cxt);
+    }
     if (u_sess != NULL && u_sess->top_mem_cxt != NULL) {
         MemoryContextSeal(u_sess->top_mem_cxt);
     }
