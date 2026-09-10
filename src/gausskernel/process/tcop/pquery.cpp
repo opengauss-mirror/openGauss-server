@@ -2347,10 +2347,20 @@ static long DoPortalRunFetch(Portal portal, FetchDirection fdirection, long coun
  */
 static void DoPortalRewind(Portal portal)
 {
+    if (portal->atStart && !portal->atEnd) {
+        return;
+    }
+
 #ifdef ENABLE_MULTIPLE_NODES
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_EXECUTOR), errmsg("Cursor rewind are not supported.")));
 #endif
+
+    if (portal->cursorOptions & CURSOR_OPT_NO_SCROLL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("Cursor can only scan forward")));
+    }
+
     if (portal->holdStore) {
         MemoryContext oldcontext;
 

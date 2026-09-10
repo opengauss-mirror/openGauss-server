@@ -1777,8 +1777,15 @@ static void dump_fors(PLpgSQL_stmt_fors* stmt)
 
 static void dump_forc(PLpgSQL_stmt_forc* stmt)
 {
+    const char* refname = "<unknown>";
+    if (stmt->rec != NULL) {
+        refname = stmt->rec->refname;
+    } else if (stmt->row != NULL) {
+        refname = stmt->row->refname;
+    }
+
     dump_ind();
-    printf("FORC %s ", stmt->rec->refname);
+    printf("FORC %s ", refname);
     printf("curvar=%d\n", stmt->curvar);
 
     u_sess->plsql_cxt.dump_indent += 2;

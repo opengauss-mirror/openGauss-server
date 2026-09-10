@@ -60,6 +60,7 @@
 #include "executor/node/nodeProjectSet.h"
 #include "executor/node/nodeSortGroup.h"
 #include "nodes/nodeFuncs.h"
+#include "optimizer/clauses.h"
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodevectorow.h"
 #include "utils/rel.h"
@@ -601,7 +602,10 @@ bool ExecSupportsBackwardScan(Plan* node)
     switch (nodeTag(node)) {
         case T_BaseResult:
             if (outerPlan(node) != NULL) {
-                return ExecSupportsBackwardScan(outerPlan(node)) && target_list_supports_backward_scan(node->targetlist);
+                return ExecSupportsBackwardScan(outerPlan(node)) &&
+                       target_list_supports_backward_scan(node->targetlist) &&
+                       !contain_volatile_functions((Node*)node->qual) &&
+                       !contain_volatile_functions(((BaseResult*)node)->resconstantqual);
             } else {
                 return false;
             }
@@ -626,26 +630,45 @@ bool ExecSupportsBackwardScan(Plan* node)
             /* fall through */
         case T_TidScan:
         case T_TidRangeScan:
-        case T_FunctionScan:
-        case T_ValuesScan:
         case T_CteScan:
-            return target_list_supports_backward_scan(node->targetlist);
+            return target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual);
+
+        case T_FunctionScan:
+            return target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual) &&
+                   !contain_volatile_functions(((FunctionScan*)node)->funcexpr);
+
+        case T_ValuesScan:
+            return target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual) &&
+                   !contain_volatile_functions((Node*)((ValuesScan*)node)->values_lists);
 
         case T_IndexScan:
             return index_supports_backward_scan(((IndexScan*)node)->indexid) &&
-                   target_list_supports_backward_scan(node->targetlist);
+                   target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual) &&
+                   !contain_volatile_functions((Node*)((IndexScan*)node)->indexqual) &&
+                   !contain_volatile_functions((Node*)((IndexScan*)node)->indexorderby);
 
         case T_IndexOnlyScan:
             return index_supports_backward_scan(((IndexOnlyScan*)node)->indexid) &&
-                   target_list_supports_backward_scan(node->targetlist);
+                   target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual) &&
+                   !contain_volatile_functions((Node*)((IndexOnlyScan*)node)->indexqual) &&
+                   !contain_volatile_functions((Node*)((IndexOnlyScan*)node)->indexorderby);
 
         case T_AnnIndexScan:
             return index_supports_backward_scan(((AnnIndexScan*)node)->indexid) &&
-                   target_list_supports_backward_scan(node->targetlist);
+                   target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual) &&
+                   !contain_volatile_functions((Node*)((AnnIndexScan*)node)->indexqual) &&
+                   !contain_volatile_functions((Node*)((AnnIndexScan*)node)->indexorderby);
 
         case T_SubqueryScan:
             return ExecSupportsBackwardScan(((SubqueryScan*)node)->subplan) &&
-                   target_list_supports_backward_scan(node->targetlist);
+                   target_list_supports_backward_scan(node->targetlist) &&
+                   !contain_volatile_functions((Node*)node->qual);
 
         case T_ExtensiblePlan:
             return ((ExtensiblePlan *)node)->flags & EXTENSIBLEPATH_SUPPORT_BACKWARD_SCAN;
@@ -662,9 +685,13 @@ bool ExecSupportsBackwardScan(Plan* node)
             return true;
 
         case T_LockRows:
-        case T_Limit:
             /* these don't evaluate tlist */
             return ExecSupportsBackwardScan(outerPlan(node));
+
+        case T_Limit:
+            return ExecSupportsBackwardScan(outerPlan(node)) &&
+                   !contain_volatile_functions(((Limit*)node)->limitOffset) &&
+                   !contain_volatile_functions(((Limit*)node)->limitCount);
 
         default:
             return false;
@@ -678,6 +705,9 @@ bool ExecSupportsBackwardScan(Plan* node)
 static bool target_list_supports_backward_scan(List* targetlist)
 {
     if (expression_returns_set((Node*)targetlist)) {
+        return false;
+    }
+    if (contain_volatile_functions((Node*)targetlist)) {
         return false;
     }
     return true;

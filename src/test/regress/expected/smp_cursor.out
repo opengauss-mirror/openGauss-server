@@ -316,7 +316,7 @@ NOTICE:
 (1 row)
 
 fetch absolute 9 xc;
-ERROR:  cursor with stream plan do not support scan backward.
+ERROR:  Cursor can only scan forward
 end;
 -- test cursor other operate
 begin;
