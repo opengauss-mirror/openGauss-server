@@ -22,7 +22,7 @@
 
 ## 特性约束<a name="section06531946143616"></a>
 
-- 部分GUC参数是节点保留参数，不进行同步。在传统主备的保留参数基础上，将资源池化新增的以下参数列为保留参数：ss_enable_dss，ss_enable_dms，ss_enable_catalog_centralized，ss_instance_id，ss_dss_vg_name，ss_dss_conn_path，ss_rdma_work_config，ss_ock_log_path，ss_scrlock_server_port，ss_enable_ondemand_recovery，ss_enable_ondemand_realtime_build，ss_disaster_mode。
+- 部分GUC参数是节点保留参数，不进行同步。在传统主备的保留参数基础上，将资源池化新增的以下参数列为保留参数：ss_enable_dss，ss_enable_dms，ss_enable_catalog_centralized，ss_instance_id，ss_dss_conn_path，ss_rdma_work_config，ss_ock_log_path，ss_scrlock_server_port，ss_enable_ondemand_recovery，ss_enable_ondemand_realtime_build，ss_disaster_mode。
 - 本特性支持的参数同步必须依赖postgresql.conf文件或pg_hba.conf文件。
 - 加载配置文件时，遵守参数类型的加载规则，postmaster类型的参数必须重启节点才能生效。
 - 本特性仅支持SIGHUP级别的动态参数加载，对于postmaster类型的参数，只能通过同步流程将参数同步到备机的配置文件中，无法加载。比如：直接修改配置文件中某个postmaster类型的非保留参数值，使主备配置文件中该参数的值不一致后，重启整个集群，主备配置文件中该参数的值会被同步一致，而备机加载到的参数还是原来配置文件中的值；直接在备机的配置文件里修改postmaster类型的非保留参数后，立刻重启备机，修改后的值会被加载，备机的配置文件中该参数的值会被同步覆盖。
