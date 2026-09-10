@@ -9565,6 +9565,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 set_ps_display("idle in transaction", false);
                 pgstat_report_activity(STATE_IDLEINTRANSACTION, NULL);
             } else {
+                if (notifyInterruptPending) {
+                    ProcessNotifyInterrupt();
+                }
                 ProcessCompletedNotifies();
                 pgstat_report_stat(false);
 
