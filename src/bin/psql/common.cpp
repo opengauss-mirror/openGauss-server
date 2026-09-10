@@ -1152,6 +1152,7 @@ bool QueryRetryController(const char* query)
         }
     }
 
+    ResetGsetPrefix();
     return success;
 }
 
@@ -1194,11 +1195,18 @@ void ResetGsetPrefix(void)
     }
 }
 
+static void ResetGsetPrefixWithParam(bool reset)
+{
+    if (reset) {
+        ResetGsetPrefix();
+    }
+}
+
 static void SendqueryCleanup()
 {
     ResetCancelConn();
     /* reset \gset trigger */
-    ResetGsetPrefix();
+    ResetGsetPrefixWithParam(!pset.retry_on);
 }
 
 /*
@@ -1232,6 +1240,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
     if (NULL == pset.db) {
         psql_error("You are currently not connected to a database.\n");
         SendqueryCleanup();
+        ResetGsetPrefixWithParam(pset.retry_on);
         return false;
     }
 
@@ -1246,6 +1255,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         if (fgets(buf, sizeof(buf), stdin) != NULL)
             if (buf[0] == 'x') {
                 SendqueryCleanup();
+                ResetGsetPrefixWithParam(pset.retry_on);
                 return false;
             }
     } else if (pset.echo == PSQL_ECHO_QUERIES) {
@@ -1272,6 +1282,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
             psql_error("%s", PQerrorMessage(pset.db));
             PQclear(results);
             SendqueryCleanup();
+            ResetGsetPrefixWithParam(pset.retry_on);
             return false;
         }
         PQclear(results);
@@ -1292,6 +1303,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
                 psql_error("%s", PQerrorMessage(pset.db));
                 PQclear(results);
                 SendqueryCleanup();
+                ResetGsetPrefixWithParam(pset.retry_on);
                 return false;
             }
             PQclear(results);
@@ -1416,6 +1428,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
 
                 PQclear(results);
                 SendqueryCleanup();
+                ResetGsetPrefixWithParam(pset.retry_on);
                 return false;
             }
             PQclear(svptres);
