@@ -11,7 +11,7 @@ sparsevec[(d)] | 1~1,000,000,000<br>最大非零元素数:16,000 | 稀疏向量�
 halfvec[(d)]|1~16000|半精度浮点向量，可指定维度d
 
 >[!NOTE]说明
->上述维度限制只限于`Toast表`的向量数据存储以及向量计算，并不包含非TOAST表（设置列储存模式为`plain`）和向量索引的维度限制，具体维度信息请参考[向量索引](./vector_index.md)。
+>上述维度限制只限于`TOAST`表的向量数据存储以及向量计算，不包含非`TOAST`表（设置列存储模式为`plain`）和向量索引的维度限制。非`TOAST`表的具体维度限制请参考下表，向量索引的维度限制请参考[向量索引](./vector_index.md)。
 
 非Toast表存储空间及维度限制：
 
@@ -82,7 +82,7 @@ Sparse的最大非零元素数为`16,000`，最大维度为`1,000,000,000`。
 {INDEX:NON-ZERO, INDEX:NON-ZERO}/<DIMENSION>::sparsevec
 ```
 
-- INDEX - 非零元素下标，需小于指定维度DIMENSION
+- INDEX - 非零元素下标，从1开始且不超过指定维度DIMENSION
 - NON-ZERO - 非零元素
 - DIMENSION - 维度
 
@@ -161,7 +161,7 @@ CREATE TABLE
 openGauss=# INSERT INTO test2 (val) VALUES ('1');
 INSERT 0 1
 openGauss=# INSERT INTO test2 (val) VALUES ('101');
-ERROR:  bit string length 4 does not match type bit(1)
+ERROR:  bit string length 3 does not match type bit(1)
 CONTEXT:  referenced column: val
 ```
 

@@ -11,7 +11,7 @@ The DataVec vector engine supports the following vector data types.
 | `halfvec[(d)]` | 1–16,000 | A half-precision floating-point vector with an optional dimension `d`. |
 
 > [!NOTE]  
-> The dimension limits above apply only to vector data storage and vector computation in `TOAST` tables. They do not include the dimension limits for non-TOAST tables (with the column storage mode set to `plain`) or vector indexes. For details about the dimension limits, see [Vector Indexes](./vector_index.md).
+> The dimension limits above apply only to vector data storage and vector computation in `TOAST` tables. They do not include the dimension limits for non-`TOAST` tables (with the column storage mode set to `plain`) or vector indexes. See the table below for the specific dimension limits of non-`TOAST` tables, and see [Vector Indexes](./vector_index.md) for the dimension limits of vector indexes.
 >
 > Storage space and dimension limits for non-TOAST tables:
 >
