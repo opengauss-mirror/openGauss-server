@@ -107,6 +107,7 @@ extern char *g_newEncryptKeyFile;
 
 /* option handling */
 extern void EncryptScrubArgv(int argc, char **argv);
+extern char **EncryptScrubbedArgvCopy(int argc, char **argv);
 extern void EncryptValidateOptions(const char *commandName);
 
 /* per-backup key material lifecycle */
