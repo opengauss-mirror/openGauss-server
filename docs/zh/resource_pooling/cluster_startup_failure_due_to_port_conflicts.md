@@ -40,7 +40,7 @@
     2024-09-29 16:37:21.437 tid=3554057  DEBUG1: connect to cmserver success, remotehost is bbb.bbb.bbb.bbb:xxx.
     ```
 
-   从上述日志可以确认，连接 cmserver 成功，连接的 ip 为 bbb.bbb.bbb.bbb，连接的端口号为 xxx，同时可以发现日志内没有主节点 cmsever 连接成功的信息。
+   从上述日志可以确认，连接 cmserver 成功，连接的 ip 为 bbb.bbb.bbb.bbb，连接的端口号为 xxx，同时可以发现日志内没有主节点 cmserver 连接成功的信息。
 
 通过上述方法，可以确认问题现象1的集群`CMServer State`中某个节点的`state`为`Down`是由该节点 CM 端口冲突导致的。
 
