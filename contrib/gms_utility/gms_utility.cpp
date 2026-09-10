@@ -1470,7 +1470,7 @@ static Oid SearchSeqOidByName(Oid namespaceId, char* seqName, NameResolveVar* va
     }
     Form_pg_class classForm = (Form_pg_class) GETSTRUCT(seqTuple);
     char relkind = classForm->relkind;
-    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_VIEW)) {
+    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_VIEW || RELKIND_IS_SEQUENCE(relkind))) {
         ReleaseSysCache(seqTuple);
         return InvalidOid;
     }
