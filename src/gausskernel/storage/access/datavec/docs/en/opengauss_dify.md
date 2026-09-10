@@ -9,9 +9,9 @@ This article focuses on how to deploy Dify and use the openGauss DataVec vector 
 
 To begin deploying Dify, first obtain its source code from <https://github.com/langgenius/dify/releases/tag/1.1.3>. Dify has supported openGauss since version 1.1.0, and version 1.1.3 introduced product quantization (PQ) support. Therefore, this article uses Dify 1.1.0 as an example.
 
-![](../figures/SupportOpenGauss.png)
+![](./figures/SupportOpenGauss.png)
 
-![](../figures/SupportOpenGaussPQ.png)
+![](./figures/SupportOpenGaussPQ.png)
 
 ### Configuring Parameters
 
@@ -30,7 +30,7 @@ cp .env.example .env
 vim .env
 ```
 
-![](../figures/ENV.png)
+![](./figures/ENV.png)
 
 ### Starting the Containers
 
@@ -42,7 +42,7 @@ docker-compose up -d
 
 After the containers have started, run the `docker ps` command to verify that all services are running properly. If everything goes well, you should see a status similar to the following figure:
 
-![](../figures/Docker.png)
+![](./figures/Docker.png)
 
 ## AI Service Integration
 
@@ -56,44 +56,44 @@ http://your_server_ip
 
 On this page, you can create an administrator user. Simply enter a valid email address and a custom password to create the account and log in:
 
-![](../figures/LoginDify.jpg)
+![](./figures/LoginDify.jpg)
 
 ### Connecting an LLM
 
 On the main page, click the username in the upper-right corner, then click "Settings" to enter the settings page. Click "Model Providers", select "OpenAI", and click the "Install" button. (For LLM and embedding model deployment using the Ascend s  olution, refer to [MindIE-DeepSeek-R1-Distill-Qwen-7B Model Deployment](https://modelers.cn/models/MindIE/DeepSeek-R1-Distill-Qwen-7B) and [mis-tei-embedding Deployment](https://www.hiascend.com/developer/ascendhub/detail/07a016975cc341f3a5ae131f2b52399d).)
 
-![](../figures/OpenAIPlugin.jpg)
+![](./figures/OpenAIPlugin.jpg)
 
 After installation, on the Add Model page, select "LLM" as the model type and configure it as follows:
 
-![](../figures/LLMDify.jpg)
+![](./figures/LLMDify.jpg)
 
 Then select "Text Embedding" and configure it as follows:
 
-![](../figures/EmbedDify.jpg)
+![](./figures/EmbedDify.jpg)
 
 ### Importing the Corpus
 
 This article uses the openGauss corpus knowledge as an example to demonstrate how to import a corpus. On the page, click the "Knowledge" tab and select "Import Existing Text" to import your locally prepared corpus into the system:
 
-![](../figures/Corpus.jpg)
+![](./figures/Corpus.jpg)
 
 When importing, select the previously configured embedding model, then click "Save and Process":
 
-![](../figures/SaveCorpus.jpg)
+![](./figures/SaveCorpus.jpg)
 
 At this point, the system will automatically process the corpus and store it in the openGauss vector database. Simply wait for the processing to complete. When you see a prompt similar to the following figure, the corpus has been successfully stored:
 
-![](../figures/SaveCorpusDone.jpg)
+![](./figures/SaveCorpusDone.jpg)
 
 ### Chatting
 
 After completing all the preceding settings, open the chat window to start a conversation test. Enter a question in the chat window and wait for the system to respond:
 
-![](../figures/ChatDify.jpg)
+![](./figures/ChatDify.jpg)
 
 From the first response, you can see that the answer quality is low and the description is not accurate. Next, introduce the previously imported openGauss corpus as context and ask the question again:
 
-![](../figures/ChatDify2.jpg)
+![](./figures/ChatDify2.jpg)
 
 It is clearly evident that with the help of the openGauss corpus, the system provides much more accurate answers. At this point, the setup of the Dify RAG engine based on the openGauss vector database is successfully completed.
