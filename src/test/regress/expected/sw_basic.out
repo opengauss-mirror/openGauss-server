@@ -499,7 +499,7 @@ CONNECT BY id = PRIOR fatherid;
 LOG:  Accept a other Const val when evaluate FakeConst to rownum/level
 WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:11) -> HashJoin(tlist_len:11) -> RecursiveUnion(tlist_len:11)]
 WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:10)]
- id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | array_key_3 |              array_path_0              | array_root_0 
+ id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | array_key_3 |              array_path_2              | array_root_4 
 ----+--------+----------+-----------+-------+-----------------+----------------------------+-------------+----------------------------------------+--------------
  14 | 耒阳市 |       13 | Leiyang   |     1 | Leiyang         | /耒阳市                    |             | \x07耒阳市                             | Leiyang
  13 | 衡阳市 |        2 | Hengyang  |     2 | Leiyang         | /耒阳市/衡阳市             |             | \x07耒阳市\x07衡阳市                   | Leiyang
@@ -555,7 +555,7 @@ WARNING:  Good we got siblings sort key under RU.
 WARNING:  Good we got siblings sort key under RU.
 WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:12) -> HashJoin(tlist_len:12) -> Sort(tlist_len:12) -> RecursiveUnion(tlist_len:12)]
 WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:11)]
- id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | array_key_1 |              array_path_0              | array_root_0 | array_siblings 
+ id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | array_key_1 |              array_path_2              | array_root_4 | array_siblings 
 ----+--------+----------+-----------+-------+-----------------+----------------------------+-------------+----------------------------------------+--------------+----------------
   1 | 中国   |        0 | China     |     1 | China           | /中国                      |             | \x07中国                               | China        | 
   2 | 湖南省 |        1 | Hunan     |     2 | China           | /中国/湖南省               |             | \x07中国\x07湖南省                     | China        | 

@@ -1690,9 +1690,16 @@ Bitmapset* ng_convert_to_nodeids(List* nodeid_list)
     Bitmapset* bms_nodeids = NULL;
 
     ListCell* lc = NULL;
+    MemoryContext old_context = NULL;
+    if (u_sess->opt_cxt.geqo_backup_context != NULL) {
+        old_context = MemoryContextSwitchTo(u_sess->opt_cxt.geqo_backup_context);
+    }
     foreach (lc, nodeid_list) {
         int nodeid = lfirst_int(lc);
         bms_nodeids = bms_add_member(bms_nodeids, nodeid);
+    }
+    if (old_context != NULL) {
+        MemoryContextSwitchTo(old_context);
     }
 
     return bms_nodeids;

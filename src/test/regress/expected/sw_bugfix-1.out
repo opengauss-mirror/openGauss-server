@@ -1594,6 +1594,21 @@ select * from (select 'test111' col from sys_dummy) connect by rownum < length(t
 select test1.a, cast (min(1) OVER (PARTITION BY test1.a ORDER BY test1.b) as integer) from test1 where test1.b is NULL connect by exists(select test2.id from test2 where false limit 40) order siblings by test1.ctid;
 ERROR:  Siblings sort entry not found
 DETAIL:  Column ctid not found or not allowed here
+-- test window targetlist does not discard Start With internal arrays
+create table test_for_sysfunc_under_ops(a int,b int,c int);
+insert into test_for_sysfunc_under_ops values(1,1,1),(1,2,1),(2,3,1),(3,4,1),(1,4,1);
+select _root from (select connect_by_root(a) _root, level,
+                          max(level) over (partition by 1) mlv
+                   from test_for_sysfunc_under_ops t1
+                   start with t1.a=t1.b
+                   connect by nocycle prior b=a)
+where level = mlv;
+ _root 
+-------
+ 1
+(1 row)
+
+drop table test_for_sysfunc_under_ops;
 --test swcb func with aggregate
 create table test3(id text, name text, parentid text);
 insert into test3 values('001', 'root', '0');
@@ -1633,8 +1648,11 @@ explain(verbose on, costs off) select sys_connect_by_path(min(name || 'hahaha'),
 (20 rows)
 
 select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
-ERROR:  Internal array_path/array_root for origVarAttno:2 related internal array is not found
-CONTEXT:  referenced column: sys_connect_by_path
+ sys_connect_by_path 
+---------------------
+ /root
+(1 row)
+
 explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
                                                    QUERY PLAN                                                    
 -----------------------------------------------------------------------------------------------------------------
@@ -1661,7 +1679,11 @@ explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from t
 (20 rows)
 
 select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
-ERROR:  Internal array_path/array_root for origVarAttno:2 related internal array is not found
+    max     
+------------
+ /root/c/c1
+(1 row)
+
 explain(verbose on, costs off) select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
                                                    QUERY PLAN                                                    
 -----------------------------------------------------------------------------------------------------------------

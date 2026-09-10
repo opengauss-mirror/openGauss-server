@@ -36,6 +36,7 @@
 #include "utils/guc.h"
 #include "utils/guc_tables.h"
 #include "mb/pg_wchar.h"
+#include "storage/lock/lock.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -521,6 +522,7 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
          */
         baseTypeMod = targetTypeMod;
         baseTypeId = getBaseTypeAndTypmod(targetTypeId, &baseTypeMod);
+        lock_normal_type_relation_by_typeid(baseTypeId, AccessShareLock);
 
         /*
          * For most types we pass typmod -1 to the input routine, because
