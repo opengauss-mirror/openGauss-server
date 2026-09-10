@@ -752,7 +752,8 @@ static int do_actual_operate()
             res = do_validate_operate();
             break;
         case SHOW_CMD:
-            return do_show(instance_name, current.backup_id, show_archive);
+            res = do_show(instance_name, current.backup_id, show_archive);
+            break;
         case DELETE_CMD:
             do_delete_operate();
             break;
