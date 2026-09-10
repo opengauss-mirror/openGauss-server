@@ -1053,3 +1053,6 @@ RETURNS timestamp with time zone
 language c
 immutable strict NOT FENCED NOT SHIPPABLE
 AS '$libdir/shark', $function$dateaddtimetz$function$;
+
+ALTER FUNCTION sys.shark_conv_string_to_datetime2(TEXT, TEXT, NUMERIC)
+    RESET d_format_behavior_compat_options;
