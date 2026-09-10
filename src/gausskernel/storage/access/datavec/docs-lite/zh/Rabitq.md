@@ -108,7 +108,7 @@ halfvec_cosine_ops | halfvec类型-余弦距离
 #### GUC参数
 
 - `hnsw_ef_search`  - 使用HNSW索引扫描时的动态候选集大小。参见[DataVec向量引擎参数](https://docs.opengauss.org/zh/docs/latest-lite/database_reference/datavec_vector_engine_parameters.html)。
-- `rbq_sample_rows` - 如果是先构建索引再插入数据的场景，可以通过该参数设置触发延迟索引的数据行数。由于rabitq算法构建索引时需要一定的数据进行训练，如果无数据创建索引会影响向量查询召回率，可以通过该参数调整延迟索引的阈值条件。如果是先插入数据再构建索引则无需设置。默认1000，范围[1000-20,0000,0000]
+- `rbq_sample_rows` - 如果是先构建索引再插入数据的场景，可以通过该参数设置触发延迟索引的数据行数。由于rabitq算法构建索引时需要一定的数据进行训练，如果无数据创建索引会影响向量查询召回率，可以通过该参数调整延迟索引的阈值条件。如果是先插入数据再构建索引则无需设置。默认1000，范围[1000-2,000,000,000]
 
     **示例：** 使用L2距离计算创建HNSW-RABITQ索引并设置`m = 16, ef_construction = 64`，并设置`rbq_sample_rows`为2000。
 
@@ -125,7 +125,7 @@ halfvec_cosine_ops | halfvec类型-余弦距离
     ```
     openGauss=# SET rbq_query_bits = 8;
     openGauss=# SET rbq_refinek = 10;
-    openGauss=# SELECT id FROM itrms ORDER BY val <-> '[1,2,3,4,5]';
+    openGauss=# SELECT id FROM items ORDER BY val <-> '[1,2,3,4,5]';
     ```
 
 ### IVF-RABITQ
@@ -194,7 +194,7 @@ vector_cosine_ops|<=>|余弦距离
     openGauss=# SET ivfflat_probes = 10;
     ```
 
-- `rbq_sample_rows` - 如果是先构建索引再插入数据的场景，可以通过该参数设置触发延迟索引的数据行数。由于rabitq算法构建索引时需要一定的数据进行训练，如果无数据创建索引会影响向量查询召回率，可以通过该参数调整延迟索引的阈值条件。如果是先插入数据再构建索引则无需设置。默认1000，范围[1000-20,0000,0000]
+- `rbq_sample_rows` - 如果是先构建索引再插入数据的场景，可以通过该参数设置触发延迟索引的数据行数。由于rabitq算法构建索引时需要一定的数据进行训练，如果无数据创建索引会影响向量查询召回率，可以通过该参数调整延迟索引的阈值条件。如果是先插入数据再构建索引则无需设置。默认1000，范围[1000-2,000,000,000]
 
     **示例：** 使用L2距离计算创建IVFFLAT-RABITQ索引并设置`lists=200`，并设置`rbq_sample_rows`为2000。
 
@@ -211,5 +211,5 @@ vector_cosine_ops|<=>|余弦距离
     ```
     openGauss=# SET rbq_query_bits = 8;
     openGauss=# SET rbq_refinek = 10;
-    openGauss=# SELECT id FROM itrms ORDER BY val <-> '[1,2,3,4,5]';
+    openGauss=# SELECT id FROM items ORDER BY val <-> '[1,2,3,4,5]';
     ```
