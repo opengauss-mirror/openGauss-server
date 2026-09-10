@@ -197,3 +197,10 @@ SELECT array_position(string_to_array('3 5 4'::int2vector::TEXT, ' '), '66');
                
 (1 row)
 
+-- DTS21: incomplete multibyte characters at the end of array values
+SELECT E'{\302}'::text[] IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x7d
+SELECT E'{"\302"}'::text[] IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x22
+SELECT format('%s', ARRAY[E'\302 '::text]) IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x20

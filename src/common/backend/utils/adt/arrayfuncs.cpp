@@ -436,6 +436,7 @@ static int ArrayCount(const char* str, int* dim, char typdelim)
     }
 
     ptr = str;
+    const char* endPtr = str + strlen(str);
     while (!eoArray) {
         bool itemdone = false;
 
@@ -589,11 +590,13 @@ static int ArrayCount(const char* str, int* dim, char typdelim)
                     }
                     break;
             }
-            if (!itemdone)
-                ptr += pg_mblen(ptr);
+            if (!itemdone) {
+                int remainingLength = (int)(endPtr - ptr);
+                ptr += GetSafeMbCharLength(ptr, remainingLength);
+            }
         }
         temp[ndim - 1]++;
-        ptr += pg_mblen(ptr);
+        ptr += GetSafeMbCharLength(ptr, (int)(endPtr - ptr));
     }
 
     /* only whitespace is allowed after the closing brace */
@@ -675,8 +678,9 @@ static void ReadArrayStr(char* arrayStr, const char* origStr, int nitems, int nd
      *
      * The error checking in this routine is mostly pro-forma, since we expect
      * that ArrayCount() already validated the string.
-     */
+    */
     srcptr = arrayStr;
+    const char* srcEnd = srcptr + strlen(srcptr);
     while (!eoArray) {
         bool itemdone = false;
         bool leadingspace = true;
@@ -756,7 +760,7 @@ static void ReadArrayStr(char* arrayStr, const char* origStr, int nitems, int nd
                     break;
                 default:
                     if (in_quotes) {
-                        int charlen = pg_mblen(srcptr);
+                        int charlen = GetSafeMbCharLength(srcptr, (int)(srcEnd - srcptr));
                         for (int i = 0; i < charlen; i++)
                             *dstptr++ = *srcptr++;
                     }
@@ -777,7 +781,7 @@ static void ReadArrayStr(char* arrayStr, const char* origStr, int nitems, int nd
                         else
                             *dstptr++ = *srcptr++;
                     } else {
-                        int charlen = pg_mblen(srcptr);
+                        int charlen = GetSafeMbCharLength(srcptr, (int)(srcEnd - srcptr));
                         for (int i = 0; i < charlen; i++)
                             *dstptr++ = *srcptr++;
                         leadingspace = false;
@@ -1055,10 +1059,11 @@ Datum array_out(PG_FUNCTION_ARGS)
                 needquote = false;
 
             tmp = values[i];
+            char* valueEnd = tmp + strlen(tmp);
             while (*tmp != '\0') {
                 char ch = *tmp;
 
-                charlen = pg_mblen(tmp);
+                charlen = GetSafeMbCharLength(tmp, (int)(valueEnd - tmp));
                 overall_length += charlen;
                 if (ch == '"' || ch == '\\') {
                     needquote = true;
@@ -1135,11 +1140,12 @@ Datum array_out(PG_FUNCTION_ARGS)
         if (needquotes[k]) {
             APPENDCHAR('"');
             tmp = values[k];
+            char* valueEnd = tmp + strlen(tmp);
             int charlen;
             char ch;
             while (*tmp != '\0') {
                 ch = *tmp;
-                charlen = pg_mblen(tmp);
+                charlen = GetSafeMbCharLength(tmp, (int)(valueEnd - tmp));
 
                 if (ch == '"' || ch == '\\')
                     *p++ = '\\';
@@ -2432,6 +2438,7 @@ Datum array_integer_deleteidx(PG_FUNCTION_ARGS)
     pthread_rwlock_unlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
     PG_RETURN_ARRAYTYPE_P(array);
 }
+
 
 static ArrayType* array_integer_deleteidx_db_a_inner(ArrayType* v, Datum index_datum)
 {
@@ -6985,4 +6992,3 @@ Datum array_replace(PG_FUNCTION_ARGS)
                                    fcinfo);
     PG_RETURN_ARRAYTYPE_P(array);
 }
-

@@ -1153,7 +1153,14 @@ void FreeRelationLocInfo(RelationLocInfo* relationLocInfo)
 
 Distribution* NewDistribution()
 {
+    MemoryContext oldMemContext = NULL;
+    if (u_sess->opt_cxt.mmgr_geqo_backup_context != NULL) {
+        oldMemContext = MemoryContextSwitchTo(u_sess->opt_cxt.mmgr_geqo_backup_context);
+    }
     Distribution* distribution = (Distribution*)palloc0(sizeof(Distribution));
+    if (oldMemContext != NULL) {
+        MemoryContextSwitchTo(oldMemContext);
+    }
 
     if (distribution == NULL) {
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Could not alloc new memory.")));

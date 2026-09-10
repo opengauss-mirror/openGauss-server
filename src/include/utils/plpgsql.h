@@ -1944,6 +1944,8 @@ extern PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLp
 extern bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgsql_func);
 extern void plpgsql_HashTableDeleteAll();
 extern void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId);
+extern void gsplsql_record_nested_compile_invalid_package(Oid pkgOid);
+extern void GsplsqlCleanupNestedCompileInvalidPackages(bool isRollback);
 extern void delete_package_and_check_invalid_item(Oid pkgOid);
 extern void saveCallFromFuncOid(Oid funcOid);
 extern void plpgsql_hashtable_clear_invalid_obj(bool need_clear = false);
