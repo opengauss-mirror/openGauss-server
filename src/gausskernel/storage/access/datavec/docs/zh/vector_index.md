@@ -225,7 +225,7 @@ WITH (index_size = <INDEX_SIZE>)
 - `TABLE_NAME` - 表名
 - `COLUMN_NAME` - 向量数据列名
 - TABLESPACE - 指定索引的表空间，与[CREATE INDEX](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_index.html)相同
-- COMMENT text - 指定索引的注释，与[CREATEI NDEX](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_index.html)相同
+- COMMENT text - 指定索引的注释，与[CREATE INDEX](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_index.html)相同
 - VISIBLE|INVISIBLE - 指定索引是否可见，与[CREATE INDEX](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_index.html)相同
 - WHERE predicate - 创建一个部分索引，与[CREATE INDEX](https://docs.opengauss.org/zh/docs/latest/sql_reference/create_index.html)相同
 
