@@ -129,10 +129,14 @@ NOTICE:  CREATE TABLE will create implicit sequence "test_create_autoinc_err_id_
 ERROR:  check constraint cannot refer to an auto_increment column
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key DEFAULT 100, name varchar(200),a int);
 NOTICE:  CREATE TABLE will create implicit sequence "test_create_autoinc_err_id_seq" for serial column "test_create_autoinc_err.id"
-ERROR:  multiple default values specified for column "id" of table "test_create_autoinc_err"
+ERROR:  both default and AUTO INCREMENT specified for column "id" of table "test_create_autoinc_err"
+LINE 1: ...ate_autoinc_err(id int auto_increment primary key DEFAULT 10...
+                                                             ^
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key GENERATED ALWAYS AS (a+1) STORED, name varchar(200),a int);
 NOTICE:  CREATE TABLE will create implicit sequence "test_create_autoinc_err_id_seq" for serial column "test_create_autoinc_err.id"
-ERROR:  both default and generation expression specified for column "id" of table "test_create_autoinc_err"
+ERROR:  both generation expression and AUTO INCREMENT specified for column "id" of table "test_create_autoinc_err"
+LINE 1: ...ate_autoinc_err(id int auto_increment primary key GENERATED ...
+                                                             ^
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int GENERATED ALWAYS AS (id+1) STORED);
 NOTICE:  CREATE TABLE will create implicit sequence "test_create_autoinc_err_id_seq" for serial column "test_create_autoinc_err.id"
 ERROR:  generated column cannot refer to auto_increment column
@@ -5724,22 +5728,78 @@ select nextval('t_auto_nextval_test_b_seq'); -- error
 ERROR:  cannot change sequence owned by auto_increment column
 CONTEXT:  referenced column: nextval
 drop table t_auto_nextval_test;
--- error cases
+-- all error cases
 CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_increment, b text);
 NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
-ERROR:  multiple default values specified for column "a" of table "test_t1"
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  both identity and AUTO INCREMENT specified for column "a" of table "test_t1"
 LINE 1: ...TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_incre...
                                                              ^
 CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
 ERROR:  Identity column 'a' data type invalid.
-CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+ERROR:  Identity column 'a' data type invalid.
+CREATE TABLE test_t1 (a timestamptz ON UPDATE current_timestamp auto_increment, b text);
 NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
-ERROR:  column "a" is of type integer but default expression is of type timestamp with time zone
-HINT:  You will need to rewrite or cast the expression.
-CREATE TABLE test_t1 (a int ON UPDATE current_timestamp auto_increment, b text);
-ERROR:  multiple default values specified for column "a" of table "test_t1"
-LINE 1: ... TABLE test_t1 (a int ON UPDATE current_timestamp auto_incre...
+ERROR:  both default and AUTO INCREMENT specified for column "a" of table "test_t1"
+LINE 1: ...est_t1 (a timestamptz ON UPDATE current_timestamp auto_incre...
                                                              ^
+CREATE TABLE test_t1 (a timestamptz NOT NULL UNIQUE AUTO_INCREMENT ON UPDATE current_timestamp, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  both default and AUTO INCREMENT specified for column "a" of table "test_t1"
+LINE 1: ..._t1 (a timestamptz NOT NULL UNIQUE AUTO_INCREMENT ON UPDATE ...
+                                                             ^
+CREATE TABLE test_t1 (a INT AUTO_INCREMENT AUTO_INCREMENT, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  multiple AUTO INCREMENT specifications for column "a" of table "test_t1"
+LINE 1: CREATE TABLE test_t1 (a INT AUTO_INCREMENT AUTO_INCREMENT, b...
+                                                   ^
+CREATE TABLE test_t1 (a INT AUTO_INCREMENT DEFAULT 5, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  both default and AUTO INCREMENT specified for column "a" of table "test_t1"
+LINE 1: CREATE TABLE test_t1 (a INT AUTO_INCREMENT DEFAULT 5, b text...
+                                                   ^
+CREATE TABLE test_t1 (a INT DEFAULT 5 AUTO_INCREMENT, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  both default and AUTO INCREMENT specified for column "a" of table "test_t1"
+LINE 1: CREATE TABLE test_t1 (a INT DEFAULT 5 AUTO_INCREMENT, b text...
+                                              ^
+CREATE TABLE test_t1 (a INT DEFAULT 5 DEFAULT 6, b text);
+CREATE TABLE test_t1 (a serial auto_increment, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  The datatype of column 'a' does not support auto_increment
+CREATE TABLE test_t1 (a serial DEFAULT 5, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  multiple default values specified for column "a" of table "test_t1"
+-- success
+CREATE TABLE test_dump_autoinc_null1(col1 int null auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_null1_col1_seq" for serial column "test_dump_autoinc_null1.col1"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_null1_col1_key" for table "test_dump_autoinc_null1"
+CREATE TABLE test_dump_autoinc_null2(col1 int auto_increment null UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_null2_col1_seq" for serial column "test_dump_autoinc_null2.col1"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_null2_col1_key" for table "test_dump_autoinc_null2"
+CREATE TABLE test_t5 (a timestamp DEFAULT 5 ON UPDATE current_timestamp, b text);
+ERROR:  column "a" is of type timestamp without time zone but default expression is of type integer
+HINT:  You will need to rewrite or cast the expression.
+CREATE TABLE test_t6 (a timestamp ON UPDATE current_timestamp DEFAULT 5, b text);
+ERROR:  column "a" is of type timestamp without time zone but default expression is of type integer
+HINT:  You will need to rewrite or cast the expression.
+-- default on update check, all success
+CREATE TABLE test_at1 (a timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at2 (a timestamp ON UPDATE current_timestamp default current_timestamp, b text);
+CREATE TABLE test_at3 (a timestamp ON UPDATE current_timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at4 (a timestamp ON UPDATE current_timestamp default current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at5 (a timestamp ON UPDATE current_timestamp default '2026-09-09' ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at6 (a timestamp default current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at7 (a timestamp default current_timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at8 (a timestamp default current_timestamp ON UPDATE current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at9 (a timestamp default current_timestamp default '2026-09-09' ON UPDATE current_timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at10 (a serial);
+NOTICE:  CREATE TABLE will create implicit sequence "test_at10_a_seq" for serial column "test_at10.a"
+-- default on update check, with serial
+CREATE TABLE test_t1 (a serial ON UPDATE current_timestamp, b text);
+NOTICE:  CREATE TABLE will create implicit sequence "test_t1_a_seq" for serial column "test_t1.a"
+ERROR:  multiple default values specified for column "a" of table "test_t1"
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;
