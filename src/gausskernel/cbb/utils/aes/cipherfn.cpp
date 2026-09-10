@@ -871,7 +871,14 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
      * Decode cipher file, if not given SOURCE cipher file, we use SERVER mode
      */
     if (file_exists(cipherfile)) {
-        decode_cipher_files(mode, NULL, cipherdir, plainkey);
+        if (!decode_cipher_files(mode, NULL, cipherdir, plainkey)) {
+            ret = memset_s(plainkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
+            securec_check(ret, "\0", "\0");
+            pfree_ext(plainkey);
+            ereport(ERROR,
+                (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                 errmsg("Failed to read or decrypt %s key files.", cipherPrefix)));
+        }
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FILE),
