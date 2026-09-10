@@ -1814,6 +1814,7 @@ static TransactionId RecordTransactionCommit(void)
                 }
 #endif
                 SyncRepWaitForLSN(commitRecLSN, !markXidCommitted);
+                t_thrd.proc->syncSetConfirmedLSN = InvalidXLogRecPtr;
                 g_instance.comm_cxt.localinfo_cxt.set_term = true;
             }
         }
