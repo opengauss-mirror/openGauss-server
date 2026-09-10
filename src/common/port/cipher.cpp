@@ -343,7 +343,8 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
         /* Note: Data Source use initdb key file by default (datasource.key.* not given) */
         global_rand_file = &g_rand_file_content[INITDB_NOCLOUDOBS_TYPE];
         global_cipher_file = &g_cipher_file_content[INITDB_NOCLOUDOBS_TYPE];
-    } else if (mode == SOURCE_MODE || mode == HADR_MODE|| mode == USER_MAPPING_MODE || mode == SUBSCRIPTION_MODE) {
+    } else if (mode == SOURCE_MODE || mode == HADR_MODE|| mode == USER_MAPPING_MODE ||
+        mode == SUBSCRIPTION_MODE || mode == OGAI_MODE) {
         /*
          * For Data Source:
          * read key from file (datasource.key.*): we do not cache these keys here
@@ -474,7 +475,7 @@ static bool isModeExists(KeyMode mode)
         mode != SERVER_ENC_MODE && mode != CLIENT_ENC_MODE && 
 #endif
         mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE &&
-        mode != USER_MAPPING_MODE && mode != SUBSCRIPTION_MODE) {
+        mode != USER_MAPPING_MODE && mode != SUBSCRIPTION_MODE && mode != OGAI_MODE) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("AK/SK encrypt/decrypt encounters invalid key mode.\n"));
         return false;
@@ -795,8 +796,8 @@ void gen_cipher_rand_files(
     }
 }
 
-/* decrypt the cipher text to plain text via the stored files */
-void decode_cipher_files(
+/* Decrypt the key from the stored files; return false if reading or decryption fails. */
+bool decode_cipher_files(
     KeyMode mode, const char* user_name, const char* datadir, GS_UCHAR* plainpwd, bool obsnormal_or_initdb)
 {
     GS_UINT32 plainlen = 0;
@@ -809,12 +810,12 @@ void decode_cipher_files(
     if (!isModeExists(mode)) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("invalid key mode.\n"));
-        return;
+        return false;
 #endif
     }
     if (datadir == NULL) {
         (void)fprintf(stderr, _("invalid data dir,recheck it please!\n"));
-        return;
+        return false;
     }
 
     /* in server_mode,read the files begin with server% */
@@ -849,6 +850,11 @@ void decode_cipher_files(
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/subscription%s", datadir, CIPHER_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/subscription%s", datadir, RAN_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+    } else if (mode == OGAI_MODE) {
+        ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/ogai%s", datadir, CIPHER_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/ogai%s", datadir, RAN_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
     } else if (mode == HADR_MODE) {
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/hadr%s", datadir, CIPHER_KEY_FILE);
@@ -896,16 +902,18 @@ void decode_cipher_files(
         ClearCipherKeyFile(&cipher_file_content);
         ClearRandKeyFile(&rand_file_content);
         (void)fprintf(stderr, _("read cipher file or random parameter file failed.\n"));
-        return;
+        return false;
     }
 
-    if (!DecryptInputKey(cipher_file_content.cipherkey, CIPHER_LEN, rand_file_content.randkey,
-            cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen)) {
+    bool decrypted = DecryptInputKey(cipher_file_content.cipherkey, CIPHER_LEN, rand_file_content.randkey,
+        cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen);
+    if (!decrypted) {
         (void)fprintf(stderr, _("decrypt key failed.\n"));
     }
 
     ClearCipherKeyFile(&cipher_file_content);
     ClearRandKeyFile(&rand_file_content);
+    return decrypted;
 }
 
 /* check whether the character is special characters */
