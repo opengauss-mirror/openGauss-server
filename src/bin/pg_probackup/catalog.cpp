@@ -3453,9 +3453,9 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
     DIR *data_dir = NULL;
     struct dirent *data_ent = NULL;
     uint key_len = 0;
-    uint hmac_len = MAX_HMAC_LEN;
+    size_t hmac_len = MAX_HMAC_LEN;
     uint dec_buffer_len = 0;
-    uint out_buffer_len = MAX_CRYPTO_MODULE_LEN;
+    size_t out_buffer_len = MAX_CRYPTO_MODULE_LEN;
     long int enc_file_pos = 0;
     long int enc_file_len = 0;
     char* key = NULL;
@@ -3562,7 +3562,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                     }
 
                     rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
-                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer,
+                                &out_buffer_len, NULL);
                     if(rc != 1) {
                         crypto_get_errmsg_use(NULL, errmsg);
                         pg_free(key);
@@ -3590,7 +3591,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                     }
 
                     rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
-                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer,
+                                &out_buffer_len, NULL);
                     if(rc != 1) {
                         pg_free(key);
                         crypto_get_errmsg_use(NULL, errmsg);
@@ -3598,7 +3600,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                         elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
                     }
 
-                    rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len, hmac_cal_buffer, (size_t*)&hmac_len);
+                    rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len,
+                        hmac_cal_buffer, &hmac_len);
                     if(rc != 1) {
                         pg_free(key);
                         crypto_get_errmsg_use(NULL, errmsg);
