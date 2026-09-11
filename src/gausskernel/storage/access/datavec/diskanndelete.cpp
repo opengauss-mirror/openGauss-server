@@ -160,6 +160,10 @@ void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
     if (rel == NULL || CheckIndexBuilding(rel)) {
         return;
     }
+    if (DiskAnnPeekFormatVersion(rel) == DISKANN_VERSION_V2) {
+        /* RaBitQ format: DELETE only touches the heap, VACUUM removes the index entry (no upgrade gate here) */
+        return;
+    }
 
     IndexScanDesc scanDesc = diskannbeginscan_internal(rel, 0, 1);
     Datum dest = PointerGetDatum(PG_DETOAST_DATUM(values[0]));

@@ -926,13 +926,68 @@ void FreeDiskPQParams(DiskPQParams *params)
     }
 }
 
+/*
+ * Validate the RaBitQ format options (enable_rabitq / pca_dim / rabitq_bits)
+ * against each other, the PQ option and the indexed column. Must be called
+ * before any large allocation. reltuples < 0 means the row count is not yet
+ * known (the training-sample check is then deferred to the caller).
+ */
+void DiskAnnValidateRabitqOptions(Relation index, int dim, double reltuples)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    bool enableRabitq = DiskAnnEnableRabitq(index);
+    bool enablePQ = DiskAnnEnablePQ(index);
+    int pcaDim = DiskAnnGetPcaDim(index);
+    int rabitqBits = DiskAnnGetRabitqBits(index);
+    bool rabitqBitsSet = opts ? opts->rabitqBitsSet : false;
+
+    if (enableRabitq && enablePQ) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("enable_pq and enable_rabitq cannot both be on for diskann")));
+    }
+
+    if (!enableRabitq) {
+        if (pcaDim != DISKANN_DEFAULT_PCA_DIM || rabitqBitsSet) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("pca_dim and rabitq_bits require enable_rabitq = on")));
+        }
+        return;
+    }
+
+    /* grayscale upgrade: the version 2 format is only built once the whole cluster can read it */
+    DiskAnnCheckRabitqVersion();
+
+    if (rabitqBits < DISKANN_MIN_RABITQ_BITS || rabitqBits > DISKANN_MAX_RABITQ_BITS) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("rabitq_bits must be %d or %d", DISKANN_MIN_RABITQ_BITS, DISKANN_MAX_RABITQ_BITS)));
+    }
+
+    if (pcaDim != 0) {
+        if (dim > 0 && (pcaDim < DISKANN_PCA_MIN_OUT_DIM || pcaDim >= dim)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("pca_dim must be 0 or between %d and %d (vector dimension - 1)",
+                                   DISKANN_PCA_MIN_OUT_DIM, dim - 1)));
+        }
+        if (reltuples >= 0 && reltuples < DISKANN_PCA_MIN_TRAIN_ROWS) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                            errmsg("pca_dim requires at least %d rows for training, %.0f available",
+                                   DISKANN_PCA_MIN_TRAIN_ROWS, reltuples),
+                            errhint("Load more rows first or leave pca_dim at 0 (no reduction).")));
+        }
+    }
+}
+
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo)
 {
     IndexBuildResult* result;
     DiskAnnBuildState buildstate;
+    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+
+    /* option combination check comes first, before any large allocation */
+    DiskAnnValidateRabitqOptions(index, dim, -1);
 
     if (DiskAnnEnableRabitq(index)) {
-        /* RaBitQ format (version 2) */
+        /* RaBitQ format (version 2); the row-count check for pca_dim runs after the heap scan */
         return DiskAnnV2BuildIndex(heap, index, indexInfo);
     }
 
@@ -949,6 +1004,9 @@ void diskannbuildempty_internal(Relation index)
 {
     IndexInfo* indexInfo = BuildIndexInfo(index);
     DiskAnnBuildState buildstate;
+    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+
+    DiskAnnValidateRabitqOptions(index, dim, -1);
 
     if (DiskAnnEnableRabitq(index)) {
         DiskAnnV2BuildEmptyIndex(index);

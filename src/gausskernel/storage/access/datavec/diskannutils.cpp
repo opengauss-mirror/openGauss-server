@@ -26,6 +26,7 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include "postgres.h"
+#include "miscadmin.h"
 #include "access/datavec/diskann.h"
 #include "access/datavec/hnsw.h"
 #include "access/generic_xlog.h"
@@ -151,8 +152,25 @@ Page DiskAnnInitRegisterPage(Relation index, Buffer buf)
     return page;
 }
 
-/* magic / version sanity check shared by every meta page reader */
-static void DiskAnnCheckMetaHeader(Relation index, uint32 magic, uint32 version)
+/*
+ * Grayscale-upgrade gate of the RaBitQ format (same scheme as HNSW / IVF
+ * RaBitQ): while the cluster still runs at a working version below
+ * DISKANN_RABITQ_VERSION_NUM, version 2 indexes are neither built nor opened.
+ * Called from the option validation (build) and from the meta page header
+ * check that every version-dispatching callback goes through (open); the
+ * DELETE mark-dead path peeks at the version without the gate.
+ */
+void DiskAnnCheckRabitqVersion(void)
+{
+    if (t_thrd.proc->workingVersionNum < DISKANN_RABITQ_VERSION_NUM) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Before DISKANN_RABITQ_VERSION_NUM VERSION NUM %u, we do not support diskann rabitq.",
+                               DISKANN_RABITQ_VERSION_NUM)));
+    }
+}
+
+/* magic / version sanity check shared by every meta page reader; upgradeGate applies the RaBitQ gate to version 2 */
+static void DiskAnnCheckMetaHeader(Relation index, uint32 magic, uint32 version, bool upgradeGate)
 {
     if (unlikely(magic != DISKANN_MAGIC_NUMBER)) {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
@@ -162,6 +180,9 @@ static void DiskAnnCheckMetaHeader(Relation index, uint32 magic, uint32 version)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("diskann index \"%s\" has unsupported format version %u, REINDEX it",
                                RelationGetRelationName(index), version)));
+    }
+    if (upgradeGate && version == DISKANN_VERSION_V2) {
+        DiskAnnCheckRabitqVersion();
     }
 }
 
@@ -181,15 +202,11 @@ void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta)
         securec_check(rc, "\0", "\0");
     }
     UnlockReleaseBuffer(buf);
-    DiskAnnCheckMetaHeader(index, meta->magicNumber, meta->version);
+    DiskAnnCheckMetaHeader(index, meta->magicNumber, meta->version, true);
     return;
 }
 
-/*
- * Format version stored in the meta page (1 = page format, 2 = RaBitQ). Callbacks
- * dispatch on this value, never on reloptions: the two may disagree.
- */
-uint32 DiskAnnGetFormatVersion(Relation index)
+static uint32 DiskAnnReadFormatVersion(Relation index, bool upgradeGate)
 {
     Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -198,8 +215,28 @@ uint32 DiskAnnGetFormatVersion(Relation index)
     uint32 magic = metapage->magicNumber;
     uint32 version = metapage->version;
     UnlockReleaseBuffer(buf);
-    DiskAnnCheckMetaHeader(index, magic, version);
+    DiskAnnCheckMetaHeader(index, magic, version, upgradeGate);
     return version;
+}
+
+/*
+ * Format version stored in the meta page (1 = page format, 2 = RaBitQ). Callbacks
+ * dispatch on this value, never on reloptions: the two may disagree. Opening
+ * a version 2 index passes the upgrade gate.
+ */
+uint32 DiskAnnGetFormatVersion(Relation index)
+{
+    return DiskAnnReadFormatVersion(index, true);
+}
+
+/*
+ * Same without the upgrade gate: for callers that only need to know whether
+ * the version 1 code applies and leave a version 2 index alone (DELETE mark-dead),
+ * so DELETE / DROP INDEX still work below DISKANN_RABITQ_VERSION_NUM.
+ */
+uint32 DiskAnnPeekFormatVersion(Relation index)
+{
+    return DiskAnnReadFormatVersion(index, false);
 }
 
 void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const

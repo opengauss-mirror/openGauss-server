@@ -26,6 +26,7 @@
 #include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/spgist.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_ts_parser.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -136,7 +137,8 @@ static relopt_bool boolRelOpts[] = {
      GENERIC_DEFAULT_ENABLE_PQ},
     {{"use_mmap", "Whether to enable use mmap during hnsw search", RELOPT_KIND_HNSW }, GENERIC_DEFAULT_USE_MMAP },
     {{"by_residual", "Whether to use residual during IVFPQ", RELOPT_KIND_IVFFLAT}, IVFPQ_DEFAULT_RESIDUAL},
-    {{"enable_rabitq", "Whether to enable RabitQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT}, GENERIC_DEFAULT_ENABLE_RABITQ},
+    {{"enable_rabitq", "Whether to enable RabitQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT | RELOPT_KIND_DISKANN},
+     GENERIC_DEFAULT_ENABLE_RABITQ},
     {{"rabitq_fht", "Whether to use fht transform in RabitQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT}, GENERIC_DEFAULT_USE_FHT},
     {{"pad_index", "pad_index", RELOPT_KIND_D_INDEX}, false},
     {{"ignore_dup_key", "ignore_dup_key", RELOPT_KIND_D_INDEX}, false},
@@ -314,6 +316,14 @@ static relopt_int intRelOpts[] = {
      DISKANN_DEFAULT_INDEX_SIZE,
      DISKANN_MIN_INDEX_SIZE,
      DISKANN_MAX_INDEX_SIZE},
+    {{ "pca_dim", "PCA output dimension for diskann rabitq format (0 = no reduction)", RELOPT_KIND_DISKANN },
+     DISKANN_DEFAULT_PCA_DIM,
+     DISKANN_MIN_PCA_DIM,
+     DISKANN_MAX_PCA_DIM},
+    {{ "rabitq_bits", "RaBitQ bits per dimension for diskann rabitq format (1 or 2)", RELOPT_KIND_DISKANN },
+     DISKANN_DEFAULT_RABITQ_BITS,
+     DISKANN_MIN_RABITQ_BITS,
+     DISKANN_MAX_RABITQ_BITS},
     {{NULL}}
 };
 
@@ -3058,6 +3068,16 @@ void ForbidUserToSetDefinedIndexOptions(Relation rel, List *options)
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
                  errdetail("Option \"%s\" is not supported for indexes on partition table", deduplicate_opt[pos])));
+    }
+
+    /* diskann format options are fixed at CREATE INDEX: the on-disk layout depends on them */
+    static const char *diskannFormatOpt[] = {"enable_rabitq", "pca_dim", "rabitq_bits"};
+    if (rel->rd_rel->relam == DISKANN_AM_OID &&
+        FindInvalidOption(options, diskannFormatOpt, lengthof(diskannFormatOpt), &pos)) {
+        Assert(pos >= 0 && pos < (int)lengthof(diskannFormatOpt));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot change %s of an existing diskann index, drop and recreate it",
+                               diskannFormatOpt[pos])));
     }
 }
 

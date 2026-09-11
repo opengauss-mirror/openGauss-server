@@ -38,6 +38,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 DISKANN_RABITQ_VERSION_NUM;
 extern const uint32 PG_IDENTITY_VERSION_NUM;
 extern const uint32 LSG_VERSION_NUM;
 extern const uint32 RABITQ_VERSION_NUM;

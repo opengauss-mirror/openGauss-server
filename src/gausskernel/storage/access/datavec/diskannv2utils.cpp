@@ -41,8 +41,12 @@
 
 /* ------------------------------------------------------------ heap access */
 
-/* same arithmetic as l2_normalize: bitwise-equal results for duplicate checks */
-static bool DiskAnnV2FillNormalized(const float* src, int dim, float* out)
+/*
+ * The one L2 normalization every vector source shares, bitwise-equal to the
+ * opclass norm proc (l2_normalize), so the duplicate check may compare
+ * preprocessed vectors byte by byte. False for a zero vector (no direction).
+ */
+bool DiskAnnV2NormalizeVector(const float* src, int dim, float* out)
 {
     double sq = 0;
     for (int i = 0; i < dim; i++) {
@@ -67,7 +71,7 @@ static bool DiskAnnV2FillVector(const Vector* v, bool normalize, int dim, float*
         return false;
     }
     if (normalize) {
-        return DiskAnnV2FillNormalized(v->x, dim, out);
+        return DiskAnnV2NormalizeVector(v->x, dim, out);
     }
     errno_t rc = memcpy_s(out, sizeof(float) * (Size)dim, v->x, sizeof(float) * (Size)dim);
     if (rc != EOK) {
