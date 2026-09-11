@@ -77,6 +77,7 @@
 #include "utils/relcache.h"
 #include "utils/selfuncs.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "vecexecutor/vecfunc.h"
@@ -191,6 +192,7 @@ static void init_optimizer_context(PlannerGlobal* glob);
 static void deinit_optimizer_context(PlannerGlobal* glob);
 static void check_index_column();
 static bool check_sort_for_upsert(PlannerInfo* root);
+bool check_distinct_redundant_by_unique(PlannerInfo* root);
 
 extern void PushDownFullPseudoTargetlist(PlannerInfo *root, Plan *topNode, Plan *botNode,
             List *fullEntryList);
@@ -3083,6 +3085,197 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
     }
 }
 
+/*
+ * check_distinct_redundant_by_unique:
+ *   Check whether the DISTINCT clause on the query is redundant because
+ *   the SELECT target list already includes all columns of a primary key
+ *   or unique index of the base table.
+ *
+ *   When a query like "SELECT DISTINCT pk_col, other_col FROM table"
+ *   includes all key columns of a unique index in its target list, the
+ *   result rows are guaranteed to be unique (since the PK/UK itself
+ *   enforces row uniqueness), making the DISTINCT operation unnecessary.
+ *
+ *   Returns true if the DISTINCT clause can be safely removed.
+ */
+bool check_distinct_redundant_by_unique(PlannerInfo* root)
+{
+    Query* parse = root->parse;
+    ListCell* lc = NULL;
+    RangeTblEntry* rte = NULL;
+    RelOptInfo* rel = NULL;
+    Relation relation = NULL;
+    TupleDesc tupdesc = NULL;
+    Oid primaryIndexOid = InvalidOid;
+    Node* jtnode = NULL;
+    Index rti = 0;
+
+    /* Only applicable to SELECT DISTINCT, not DISTINCT ON */
+    if (parse->hasDistinctOn) {
+        return false;
+    }
+
+    /* Not applicable when aggregates or GROUP BY are present */
+    if (parse->hasAggs || parse->groupClause || parse->groupingSets) {
+        return false;
+    }
+
+    /* Not applicable for set operations (UNION/INTERSECT/EXCEPT) */
+    if (parse->setOperations != NULL) {
+        return false;
+    }
+
+    /* Not applicable when window functions are present */
+    if (parse->hasWindowFuncs) {
+        return false;
+    }
+
+    /* Set-returning functions could produce duplicate rows */
+    if (parse->hasTargetSRFs || expression_returns_set((Node*)parse->targetList)) {
+        return false;
+    }
+
+    /*
+     * Only a plain single base table is eligible.  The FROM list must
+     * contain exactly one RangeTblRef pointing to a base relation.  Reject
+     * JOINs, subqueries, VALUES, functions and any other row-producing RTE,
+     * since they can multiply the base rows or otherwise break uniqueness.
+     */
+    if (parse->jointree == NULL || list_length(parse->jointree->fromlist) != 1) {
+        return false;
+    }
+
+    jtnode = (Node*)linitial(parse->jointree->fromlist);
+    if (!IsA(jtnode, RangeTblRef)) {
+        return false;
+    }
+
+    rti = ((RangeTblRef*)jtnode)->rtindex;
+    if (rti == 0 || rti > (Index)list_length(parse->rtable)) {
+        return false;
+    }
+
+    rte = rt_fetch(rti, parse->rtable);
+    if (rte->rtekind != RTE_RELATION) {
+        return false;
+    }
+
+    /* Get the RelOptInfo for the base table */
+    if (rti >= (Index)root->simple_rel_array_size) {
+        return false;
+    }
+
+    rel = root->simple_rel_array[rti];
+    if (rel == NULL || rel->reloptkind != RELOPT_BASEREL) {
+        return false;
+    }
+
+    /* This optimization is only enabled for A-format and B-format databases. */
+    if (!DB_IS_CMPT(A_FORMAT) && !DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+
+    /* Open the relation to verify NOT NULL constraints on key columns */
+    relation = heap_open(rte->relid, NoLock);
+    tupdesc = RelationGetDescr(relation);
+    primaryIndexOid = RelationGetPrimaryKeyIndex(relation);
+
+    /* Ordinary inheritance can multiply rows, while partitioned tables are safe to inspect. */
+    if (rte->inh && !RELATION_IS_PARTITIONED(relation)) {
+        heap_close(relation, NoLock);
+        return false;
+    }
+
+    /* Iterate over all indexes of the base relation */
+    foreach (lc, rel->indexlist) {
+        IndexOptInfo* indexInfo = (IndexOptInfo*)lfirst(lc);
+        int i;
+        bool allColsFound = true;
+        bool isPrimary = primaryIndexOid == indexInfo->indexoid;
+
+        /*
+         * Only a unique, immediately enforced, non-partial index can prove
+         * whole-table uniqueness.  Global partition indexes are not used for
+         * this optimization.  A local primary-key index includes the
+         * partition key and can prove uniqueness across all partitions.
+         */
+        if (!indexInfo->unique || !indexInfo->immediate) {
+            continue;
+        }
+        /* B-format non-primary-key unique constraints can contain duplicate keys. */
+        if (DB_IS_CMPT(B_FORMAT) && !isPrimary) {
+            continue;
+        }
+        if (indexInfo->indpred != NIL) {
+            continue;
+        }
+        if (indexInfo->isGlobal) {
+            continue;
+        }
+
+        /*
+         * Every key column must be a plain column reference present in the
+         * DISTINCT clause, must be NOT NULL (a UNIQUE index allows multiple
+         * NULLs, but DISTINCT collapses them), and the DISTINCT equality
+         * operator must agree with the index opfamily semantics.
+         */
+        for (i = 0; i < indexInfo->nkeycolumns; i++) {
+            AttrNumber keyAttno = indexInfo->indexkeys[i];
+            ListCell* tlc = NULL;
+            bool found = false;
+
+            /* Expression index column cannot be matched to a plain Var */
+            if (keyAttno <= 0 || keyAttno > tupdesc->natts) {
+                allColsFound = false;
+                break;
+            }
+
+            /* NULL-able key columns break the DISTINCT-equivalence proof */
+            if (!tupdesc->attrs[keyAttno - 1].attnotnull) {
+                allColsFound = false;
+                break;
+            }
+
+            /* Find a DISTINCT clause entry matching this key column */
+            foreach (tlc, parse->distinctClause) {
+                SortGroupClause* sgc = (SortGroupClause*)lfirst(tlc);
+                TargetEntry* tle = get_sortgroupclause_tle(sgc, parse->targetList);
+
+                if (tle->resjunk) {
+                    continue;
+                }
+
+                if (IsA(tle->expr, Var)) {
+                    Var* var = (Var*)tle->expr;
+
+                    if (var->varno == rti && var->varlevelsup == 0 && var->varattno == keyAttno &&
+                        op_in_opfamily(sgc->eqop, indexInfo->opfamily[i]) &&
+                        (indexInfo->indexcollations[i] == InvalidOid ||
+                         indexInfo->indexcollations[i] == exprCollation((Node*)tle->expr))) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                allColsFound = false;
+                break;
+            }
+        }
+
+        /* If all key columns of this unique index are covered, the DISTINCT
+         * is redundant and can be safely removed. */
+        if (allColsFound) {
+            heap_close(relation, NoLock);
+            return true;
+        }
+    }
+
+    heap_close(relation, NoLock);
+    return false;
+}
+
 /* --------------------
  * internal_grouping_planner
  *	  Perform planning steps related to grouping, aggregation, etc.
@@ -4806,6 +4999,19 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
      */
     bool next_is_second_level_distinct = false; /* flag for DISTINCT agg */
     bool contain_sets_expression = expression_returns_set((Node*)tlist);
+
+    if (parse->distinctClause) {
+        /*
+         * If the SELECT target list already includes all columns of a
+         * primary key or unique index, the result is guaranteed to be
+         * unique and the DISTINCT operation can be skipped entirely.
+         */
+        if (!parse->hasDistinctOn &&
+            check_distinct_redundant_by_unique(root)) {
+            list_free_deep(parse->distinctClause);
+            parse->distinctClause = NIL;
+        }
+    }
 
     if (parse->distinctClause) {
         double dNumDistinctRows[2];
