@@ -554,6 +554,14 @@ void FreeTransformer(VectorTransform *vt)
     if (vt == NULL) {
         return;
     }
+    if (vt->type == PCA_ORTHOGONAL) {
+        /* mean + matrix share one block; PcaDeserialize places it right behind the struct */
+        if (vt->mean != NULL && vt->mean != (float *)(vt + 1)) {
+            pfree(vt->mean);
+        }
+        pfree(vt);
+        return;
+    }
     if (vt->matrix != NULL) {
         pfree(vt->matrix);
     }
@@ -561,4 +569,205 @@ void FreeTransformer(VectorTransform *vt)
         pfree(vt->fastRotation);
     }
     pfree(vt);
+}
+
+/* ------------------------------------------------------------ PCA_ORTHOGONAL */
+
+#define PCA_COV_CHUNK 2048 /* rows converted to f64 per dgemm call */
+#define PCA_MIN_EXTRA_SAMPLES 8
+
+static void PcaBindStorage(VectorTransform *vtrans, float *block, int dimIn, int dimOut)
+{
+    vtrans->type = PCA_ORTHOGONAL;
+    vtrans->dim = dimIn;
+    vtrans->dimIn = dimIn;
+    vtrans->dimOut = dimOut;
+    vtrans->fastRotation = NULL;
+    vtrans->mean = block;
+    vtrans->matrix = block + dimIn;
+}
+
+static void PcaFlipRowSign(float *projRow, int d)
+{
+    for (int c = 0; c < d; c++) {
+        if (fabsf(projRow[c]) <= 1e-6f) {
+            continue;
+        }
+        if (projRow[c] < 0) {
+            for (int k = 0; k < d; k++) {
+                projRow[k] = -projRow[k];
+            }
+        }
+        break;
+    }
+}
+
+/*
+ * proj[dimOut][dimIn] = top principal components of the centered samples:
+ * covariance accumulated in f64 chunk by chunk, dsyev, largest eigenvalues
+ * first, each row sign-normalized (first non-negligible entry positive) so
+ * the result is reproducible across LAPACK builds.
+ */
+static void PcaComponents(const float *samples, int nSamples, const VectorTransform *vtrans, float *proj)
+{
+    int d = vtrans->dimIn;
+    int dimOut = vtrans->dimOut;
+    const float *mean = vtrans->mean;
+    double *cov = (double *)palloc0(sizeof(double) * (Size)d * d);
+    double *chunk = (double *)palloc(sizeof(double) * (Size)PCA_COV_CHUNK * d);
+    int pos = 0;
+    while (pos < nSamples) {
+        int m = Min(PCA_COV_CHUNK, nSamples - pos);
+        for (int i = 0; i < m; i++) {
+            const float *x = samples + (Size)(pos + i) * d;
+            double *row = chunk + (Size)i * d;
+            for (int c = 0; c < d; c++) {
+                float xc = x[c] - mean[c];
+                row[c] = (double)xc;
+            }
+        }
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, d, d, m, 1.0, chunk, d, chunk, d, 1.0, cov, d);
+        pos += m;
+    }
+    pfree(chunk);
+
+    double *eigval = (double *)palloc(sizeof(double) * (Size)d);
+    int info = LAPACKE_dsyev(LAPACK_ROW_MAJOR, 'V', 'U', d, cov, d, eigval);
+    if (info != 0) {
+        ereport(ERROR, (errmsg("PCA eigen-decomposition failed (dsyev info=%d)", info)));
+    }
+
+    for (int r = 0; r < dimOut; r++) {
+        int col = d - 1 - r;
+        float *projRow = proj + (Size)r * d;
+        for (int c = 0; c < d; c++) {
+            projRow[c] = (float)cov[(Size)c * d + col];
+        }
+        PcaFlipRowSign(projRow, d);
+    }
+    pfree(eigval);
+    pfree(cov);
+}
+
+void PcaTrain(VectorTransform *vtrans, const float *samples, int nSamples, const float *mean)
+{
+    int dimIn = vtrans->dimIn;
+    int dimOut = vtrans->dimOut;
+    if (dimOut < 1 || dimOut > dimIn) {
+        ereport(ERROR, (errmsg("PCA output dimension %d must lie in [1, %d]", dimOut, dimIn)));
+    }
+    if (dimOut < dimIn && nSamples < dimOut + PCA_MIN_EXTRA_SAMPLES) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("%d sample rows are too few to train a %d-dimension PCA", nSamples, dimOut)));
+    }
+
+    float *block = (float *)palloc0(PcaSerializeSize(dimIn, dimOut));
+    PcaBindStorage(vtrans, block, dimIn, dimOut);
+
+    if (mean != NULL) {
+        errno_t rc = memcpy_s(vtrans->mean, sizeof(float) * (Size)dimIn, mean, sizeof(float) * (Size)dimIn);
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+    } else if (nSamples > 0) {
+        double *acc = (double *)palloc0(sizeof(double) * (Size)dimIn);
+        for (int i = 0; i < nSamples; i++) {
+            const float *x = samples + (Size)i * dimIn;
+            for (int c = 0; c < dimIn; c++) {
+                acc[c] += x[c];
+            }
+        }
+        for (int c = 0; c < dimIn; c++) {
+            vtrans->mean[c] = (float)(acc[c] / nSamples);
+        }
+        pfree(acc);
+    }
+
+    VectorTransform rot;
+    rot.type = RANDOM_ORTHOGONAL;
+    rot.dim = dimOut;
+    rot.matrix = NULL;
+    rot.fastRotation = NULL;
+    RomTrain(&rot);
+
+    if (dimOut == dimIn) {
+        errno_t rc = memcpy_s(vtrans->matrix, sizeof(float) * (Size)dimOut * dimIn, rot.matrix,
+                              sizeof(float) * (Size)dimOut * dimIn);
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+        pfree(rot.matrix);
+        return;
+    }
+
+    float *proj = (float *)palloc(sizeof(float) * (Size)dimOut * dimIn);
+    PcaComponents(samples, nSamples, vtrans, proj);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, dimOut, dimIn, dimOut, 1.0f, rot.matrix, dimOut, proj, dimIn,
+                0.0f, vtrans->matrix, dimIn);
+    pfree(rot.matrix);
+    pfree(proj);
+}
+
+void PcaTransform(const VectorTransform *vtrans, const float *vec, float *transvec)
+{
+    int dimIn = vtrans->dimIn;
+    float *xc = (float *)palloc(sizeof(float) * (Size)dimIn);
+    for (int c = 0; c < dimIn; c++) {
+        xc[c] = vec[c] - vtrans->mean[c];
+    }
+    cblas_sgemv(CblasRowMajor, CblasNoTrans, vtrans->dimOut, dimIn, 1.0f, vtrans->matrix, dimIn, xc, 1, 0.0f,
+                transvec, 1);
+    pfree(xc);
+}
+
+void VtTransform(VectorTransform *vtrans, const float *vec, float *transvec)
+{
+    switch (vtrans->type) {
+        case RANDOM_ORTHOGONAL:
+            RomTransform(vtrans, vec, transvec);
+            break;
+        case FAST_HTRANSFORM:
+            FhtTransform(vtrans, vec, transvec);
+            break;
+        case PCA_ORTHOGONAL:
+            PcaTransform(vtrans, vec, transvec);
+            break;
+        default:
+            ereport(ERROR, (errmsg("unknown vector transform type %d", (int)vtrans->type)));
+    }
+}
+
+size_t PcaSerializeSize(int dimIn, int dimOut)
+{
+    return sizeof(float) * ((size_t)dimIn + (size_t)dimOut * dimIn);
+}
+
+void PcaSerialize(const VectorTransform *vtrans, char *out, size_t outSize)
+{
+    size_t meanBytes = sizeof(float) * (size_t)vtrans->dimIn;
+    size_t mBytes = sizeof(float) * (size_t)vtrans->dimOut * vtrans->dimIn;
+    if (outSize < meanBytes + mBytes) {
+        ereport(ERROR, (errmsg("PCA transform serialization buffer too small")));
+    }
+    errno_t rc = memcpy_s(out, outSize, vtrans->mean, meanBytes);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    rc = memcpy_s(out + meanBytes, outSize - meanBytes, vtrans->matrix, mBytes);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+}
+
+VectorTransform *PcaDeserialize(int dimIn, int dimOut, const char *bytes)
+{
+    size_t payload = PcaSerializeSize(dimIn, dimOut);
+    VectorTransform *vt = (VectorTransform *)palloc(sizeof(VectorTransform) + payload);
+    float *block = (float *)(vt + 1);
+    PcaBindStorage(vt, block, dimIn, dimOut);
+    errno_t rc = memcpy_s(block, payload, bytes, payload);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    return vt;
 }
