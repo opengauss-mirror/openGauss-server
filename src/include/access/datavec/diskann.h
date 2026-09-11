@@ -55,6 +55,9 @@
 #define DISKANN_MAX_DEGREE 96
 #define DISKANN_MAX_PQM 192
 
+/* RaBitQ format: meta page version */
+#define DISKANN_VERSION_V2 2
+
 #define FROZEN_POINT_SIZE 1
 #define DISKANN_DISTANCE_THRESHOLD (1e-9)
 #define INDEXINGMAXC 500
@@ -705,6 +708,8 @@ float ComputeL2DistanceFast(const float* u, const double su, const float* v, con
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
+uint32 DiskAnnGetFormatVersion(Relation index);
+
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
 void diskannbuildempty_internal(Relation index);
 bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, ItemPointer heap_tid, Relation heap,
