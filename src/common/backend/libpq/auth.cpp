@@ -921,9 +921,36 @@ static
 #else        
     if (IsDSorHaWalSender() && is_node_internal_connection(port) && !AM_WAL_HADR_SENDER) {
 #endif        
-        stored_method = SHA256_PASSWORD;
-        if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
-            stored_method = SM3_PASSWORD;
+        /*
+         * Internal HA/DS WalSender used to force trust, so a placeholder
+         * stored_method was enough for AUTH_REQ_OK / GSS / PAM, etc.
+         * After check_hba_replication honors password HBA rules, sha256/sm3/md5
+         * must load real password material; otherwise the client authenticates
+         * against an empty salt/key and fails with "Invalid username/password".
+         */
+        if (port->hba->auth_method == uaSHA256 || port->hba->auth_method == uaSM3 ||
+            port->hba->auth_method == uaMD5) {
+            if (!IsRoleExist(port->user_name)) {
+                if (!GsGenerateFakeEncryptString(encryptString, port, ENCRYPTED_STRING_LENGTH + 1)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                            errmsg("Failed to Generate Encrypt String")));
+                }
+                if (port->hba->auth_method == uaSM3 ||
+                    u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
+                    stored_method = SM3_PASSWORD;
+                } else {
+                    stored_method = SHA256_PASSWORD;
+                }
+            } else {
+                stored_method = get_password_stored_method(port->user_name, encryptString,
+                    ENCRYPTED_STRING_LENGTH + 1);
+            }
+        } else {
+            stored_method = SHA256_PASSWORD;
+            if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
+                stored_method = SM3_PASSWORD;
+            }
         }
     } else {
         if (!IsRoleExist(port->user_name)) {
