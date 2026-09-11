@@ -1,0 +1,26 @@
+--
+-- Test: replication=standbywrite from a non-internal IP must not bypass
+-- the remote trust prohibition.
+--
+-- Create a test user with a known password.
+create user test_standbywrite_sec password 'Test@1234';
+-- Back up pg_hba.conf.
+\! /usr/bin/cp @abs_srcdir@/tmp_check/datanode1/pg_hba.conf @abs_srcdir@/tmp_check/datanode1/pg_hba_bk.conf
+-- Add a remote trust rule for replication from 127.0.0.2. This address is not
+-- configured in replconninfo, so a SW_SENDER connection sourced from it must
+-- not be treated as an internal node connection.
+\! echo 'host replication test_standbywrite_sec 127.0.0.2/32 trust' >> @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! @abs_bindir@/gs_ctl reload -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 3
+-- The helper binds its client socket to 127.0.0.2 and connects to the HA port
+-- (PostPortNumber + 1) on 127.0.0.1. The server sees remote=127.0.0.2 /
+-- local=127.0.0.1, which is NOT a node-internal connection. With the DB-04
+-- fix this falls back to the normal check_hba() path and the remote trust
+-- rule is rejected.
+\! python3 @abs_srcdir@/input/replication_standbywrite_security.py @portstring@
+-- Restore pg_hba.conf.
+\! /usr/bin/mv -f @abs_srcdir@/tmp_check/datanode1/pg_hba_bk.conf @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! @abs_bindir@/gs_ctl reload -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 2
+-- Clean up.
+drop user test_standbywrite_sec;

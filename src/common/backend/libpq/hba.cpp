@@ -424,8 +424,8 @@ static bool check_db(const char* dbname, const char* role, Oid roleid, List* tok
 
     foreach (cell, tokens) {
         tok = (HbaToken*)lfirst(cell);
-        if (AM_WAL_SENDER) {
-            /* walsender connections can only match replication keyword */
+        if (AM_WAL_SENDER || t_thrd.role == SW_SENDER) {
+            /* walsender (including standbywrite) connections can only match replication keyword */
             if (token_is_keyword(tok, "replication"))
                 return true;
         } else if (token_is_keyword(tok, "all"))
@@ -2292,10 +2292,10 @@ void hba_getauthmethod(hbaPort* port)
      * In this case, we still need to use check_hba_replication for compatibility.
      */
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IsDSorHaWalSender() ) {
-#else        
-    if ((IsDSorHaWalSender() && is_node_internal_connection(port)) || AM_WAL_HADR_SENDER || (t_thrd.role == SW_SENDER)) {
-#endif        
+    if (IsDSorHaWalSender()) {
+#else
+    if ((IsDSorHaWalSender() || (t_thrd.role == SW_SENDER)) && is_node_internal_connection(port)) {
+#endif
         check_hba_replication(port);
     } else {
         check_hba(port);
