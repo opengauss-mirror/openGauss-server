@@ -66,19 +66,29 @@ DELETE [/*+ plan_hint */]
 
 ## table_hint子句示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
 
-```
-create table t1 (c1 int);
-
-delete from t1 with (nolock) where c1 = 5;
+```sql
+openGauss=# create database testd dbcompatibility = 'D';
+CREATE DATABASE
+openGauss=# \c testd
+Non-SSL connection (SSL connection is recommended when requiring high-security)
+You are now connected to database "testd" as user "omm".
+testd=# create extension shark;
+CREATE EXTENSION
+testd=# create table t1 (c1 int);
+CREATE TABLE
+testd=# delete from t1 with (nolock) where c1 = 5;
 NOTICE:  The nolock option is currently ignored
-
-delete from t1 with (nolock, nowait) where c1 = 5;
+DELETE 0
+testd=# delete from t1 with (nolock, nowait) where c1 = 5;
 NOTICE:  The nolock option is currently ignored
 NOTICE:  The nowait option is currently ignored
-
-delete from t1 with (nolock nowait) where c1 = 5;
+DELETE 0
+testd=# delete from t1 with (nolock nowait) where c1 = 5;
 NOTICE:  The nolock option is currently ignored
 NOTICE:  The nowait option is currently ignored
+DELETE 0
+testd=# drop table t1;
+DROP TABLE
 ```
 
 ## 相关链接<a name="section156744489391"></a>
