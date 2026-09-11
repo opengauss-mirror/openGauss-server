@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include "access/datavec/diskann.h"
+#include "access/datavec/diskannv2.h"
 #include "utils/memutils.h"
 
 static Datum GetScanValue(IndexScanDesc scan)
@@ -50,6 +51,11 @@ static Datum GetScanValue(IndexScanDesc scan)
 
 void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys)
 {
+    if (DiskAnnScanFormatVersion(scan) == DISKANN_VERSION_V2) {
+        DiskAnnV2Rescan(scan, keys, nkeys, orderbys, norderbys);
+        return;
+    }
+
     errno_t rc = 0;
     if (keys && scan->numberOfKeys > 0) {
         size_t keySize = (uint32_t)scan->numberOfKeys * sizeof(ScanKeyData);
@@ -71,10 +77,15 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     DiskAnnScanOpaque so;
     DiskAnnMetaPageData metapage;
 
+    if (DiskAnnGetFormatVersion(index) == DISKANN_VERSION_V2) {
+        return DiskAnnV2BeginScan(index, nkeys, norderbys);
+    }
+
     DiskANNGetMetaPageInfo(index, &metapage);
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
     so = (DiskAnnScanOpaque)palloc(sizeof(DiskAnnScanOpaqueData));
+    so->formatVersion = DISKANN_VERSION;
     so->rel = index;
     so->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "DiskANN scan temporary context", ALLOCSET_DEFAULT_SIZES);
     so->nodeSize = metapage.nodeSize;
@@ -114,6 +125,11 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
 
 void diskannendscan_internal(IndexScanDesc scan)
 {
+    if (DiskAnnScanFormatVersion(scan) == DISKANN_VERSION_V2) {
+        DiskAnnV2EndScan(scan);
+        return;
+    }
+
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
     so->candidates.clear();
     so->frozenBlks.clear();
@@ -127,6 +143,10 @@ void diskannendscan_internal(IndexScanDesc scan)
 */
 bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
 {
+    if (DiskAnnScanFormatVersion(scan) == DISKANN_VERSION_V2) {
+        return DiskAnnV2GetTuple(scan, dir);
+    }
+
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
     MemoryContext oldCtx = MemoryContextSwitchTo(so->tmpCtx);
 

@@ -70,6 +70,17 @@
 
 /* query quantization width used by INSERT (scans take rbq_query_bits) */
 #define DISKANN_V2_INSERT_QUERY_BITS 8
+#define DISKANN_V2_QUERY_BITS_MIN 1
+#define DISKANN_V2_QUERY_BITS_MAX 8
+#define DISKANN_V2_HITLIST_GROW 2
+#define DISKANN_V2_HITLIST_MIN_CAP 64
+#define DISKANN_V2_VISITED_BASE_CAP 4096
+#define DISKANN_V2_VISITED_LSIZE_MULT 16
+#define DISKANN_V2_VISITED_CAP_MAX 0x40000000u
+#define DISKANN_V2_VISITED_SHRINK_MULT 4
+#define DISKANN_V2_VISITED_GROW 2
+#define DISKANN_V2_VISITED_LIMIT_SHIFT 2 /* load factor 3/4: cap - (cap >> shift) */
+#define DISKANN_V2_VISITED_HASH_MUL 0x9E3779B1u
 
 /* usable payload bytes per code / graph page */
 #define DISKANN_V2_PAGE_USABLE \
@@ -234,6 +245,83 @@ static inline float DiskAnnV2ExactL2(const float* a, const float* b, int dim)
     return (float)acc;
 }
 
+/* shared greedy traversal (scan + INSERT); key = ComputeRbqDistanceBits(...) */
+typedef struct DiskAnnV2SearchCand {
+    uint32 id;
+    float dist; /* estimated ordering key (squared L2, or -<q,x> for IP) */
+    bool expanded;
+    int32 hit; /* index into DiskAnnV2HitList, -1 = graph slot not read */
+} DiskAnnV2SearchCand;
+
+typedef struct DiskAnnV2NodeHit {
+    uint8 ntids;
+    ItemPointerData tids[DISKANN_HEAPTIDS];
+} DiskAnnV2NodeHit;
+
+typedef struct DiskAnnV2HitList {
+    DiskAnnV2NodeHit* items;
+    int n;
+    int cap;
+} DiskAnnV2HitList;
+
+typedef struct DiskAnnV2SearchEnv {
+    Relation index;
+    const DiskAnnV2Meta* meta;
+    const QueryRabitqVector* query; /* SetRBQQueryBits output, queryBits planes */
+    int queryBits;
+    int keyType; /* DIS_IP: order by -<q,x> (IP scan); anything else: estimated squared L2 */
+} DiskAnnV2SearchEnv;
+
+/* open-addressing visited set; empty slot = DISKANN_V2_INVALID_NODE */
+typedef struct DiskAnnV2Visited {
+    uint32* slots;
+    uint32 mask;  /* capacity - 1, capacity is a power of two */
+    uint32 count;
+    uint32 limit; /* grow when count exceeds this (3/4 capacity) */
+    uint32 baseCap;
+} DiskAnnV2Visited;
+
+/* sized so the typical traversal (~beam x degree touches, deduplicated) fits without growth */
+static inline uint32 DiskAnnV2VisitedCapacityFor(int lsize)
+{
+    uint32 cap = DISKANN_V2_VISITED_BASE_CAP;
+    while (cap < (uint32)lsize * DISKANN_V2_VISITED_LSIZE_MULT && cap < DISKANN_V2_VISITED_CAP_MAX) {
+        cap <<= 1;
+    }
+    return cap;
+}
+
+static inline void DiskAnnV2VisitedAlloc(DiskAnnV2Visited* vt, uint32 cap)
+{
+    vt->slots = (uint32*)palloc(sizeof(uint32) * (Size)cap);
+    errno_t rc = memset_s(vt->slots, sizeof(uint32) * (Size)cap, 0xFF, sizeof(uint32) * (Size)cap);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    vt->mask = cap - 1;
+    vt->count = 0;
+    vt->limit = cap - (cap >> DISKANN_V2_VISITED_LIMIT_SHIFT);
+}
+
+static inline void DiskAnnV2VisitedInit(DiskAnnV2Visited* vt, uint32 cap)
+{
+    vt->baseCap = cap;
+    DiskAnnV2VisitedAlloc(vt, cap);
+}
+
+static inline void DiskAnnV2VisitedFree(DiskAnnV2Visited* vt)
+{
+    if (vt->slots != NULL) {
+        pfree(vt->slots);
+        vt->slots = NULL;
+    }
+}
+
+static inline uint32 DiskAnnV2VisitedHash(uint32 id, uint32 mask)
+{
+    return (id * DISKANN_V2_VISITED_HASH_MUL) & mask;
+}
+
 /* ------------------------------------------------------------ shared utils (diskannv2utils.cpp) */
 
 typedef struct DiskAnnV2CreateMetaArgs {
@@ -284,11 +372,24 @@ uint32 DiskAnnV2AllocateNodeId(Relation index, uint32* tailChunkCount);
 uint32 DiskAnnV2PublishFirstNode(Relation index, uint32 nodeId);
 void DiskAnnV2EnsureNodeCapacity(Relation index, uint64 requiredSlots);
 uint32 DiskAnnV2GraphSlotsOnPage(const DiskAnnV2Meta* meta, uint32 nodeId);
-
 bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args);
 
 /* build (diskannv2build.cpp) */
 IndexBuildResult* DiskAnnV2BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo);
 void DiskAnnV2BuildEmptyIndex(Relation index);
+
+/* shared traversal pieces (diskannv2scan.cpp) */
+VectorTransform* DiskAnnV2GetCachedTransform(Relation index, const DiskAnnV2Meta* meta);
+void DiskAnnV2VisitedReset(DiskAnnV2Visited* vt);
+void DiskAnnV2VisitedGrow(DiskAnnV2Visited* vt);
+bool DiskAnnV2VisitedTestAndSet(DiskAnnV2Visited* vt, uint32 id);
+int DiskAnnV2GreedySearch(const DiskAnnV2SearchEnv* env, DiskAnnV2SearchCand* cands, int lsize,
+                          DiskAnnV2HitList* hits);
+
+/* scan (diskannv2scan.cpp), reached from the diskann* callbacks when the meta page says version 2 */
+IndexScanDesc DiskAnnV2BeginScan(Relation index, int nkeys, int norderbys);
+void DiskAnnV2Rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);
+bool DiskAnnV2GetTuple(IndexScanDesc scan, ScanDirection dir);
+void DiskAnnV2EndScan(IndexScanDesc scan);
 
 #endif /* DISKANNV2_H */

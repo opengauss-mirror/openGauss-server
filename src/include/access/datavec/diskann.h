@@ -581,7 +581,22 @@ struct DiskAnnCandidatesData {
     }
 };
 
+/*
+ * Every diskann scan opaque (v1 below, v2 in diskannv2scan.cpp) starts with
+ * the meta page format version so rescan/gettuple/endscan can dispatch
+ * without re-reading the meta page.
+ */
+typedef struct DiskAnnScanHeader {
+    uint32 formatVersion; /* DISKANN_VERSION or DISKANN_VERSION_V2 */
+} DiskAnnScanHeader;
+
+static inline uint32 DiskAnnScanFormatVersion(IndexScanDesc scan)
+{
+    return ((DiskAnnScanHeader*)scan->opaque)->formatVersion;
+}
+
 struct DiskAnnScanOpaqueData {
+    uint32 formatVersion; /* DISKANN_VERSION, must stay first (DiskAnnScanHeader) */
     Relation rel;
     MemoryContext tmpCtx;
     uint32_t nodeSize;
