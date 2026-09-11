@@ -8,7 +8,8 @@
 >DISKANN暂时仅支持vector数据类型，在其他向量数据类型会导致执行失败，最高维度支持1536维。<br>
 >DISKANN暂时仅兼容A\B\C\PG库。<br>
 >DISKANN支持普通行存表，临时表，Toast表，Unlogged，段页式表等的向量数据存储。<br>
->DISKANN支持PQ量化压缩及并行构建。<br>
+>DISKANN支持PQ量化压缩、超低内存磁盘检索及并行构建。PQ与超低内存磁盘检索互斥。<br>
+>超低内存磁盘检索的使用见[超低内存磁盘检索](./low_memory_disk_retrieval.md)。<br>
 
 ## 2.索引构建
 

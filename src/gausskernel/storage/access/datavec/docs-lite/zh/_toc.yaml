@@ -29,6 +29,8 @@ sections:
         href: ./ivfflat_npu.md
       - label: DISKANN
         href: ./diskann.md
+      - label: 超低内存磁盘检索
+        href: ./low_memory_disk_retrieval.md
       - label: LSG
         href: ./lsg.md
   - label: 全文检索索引

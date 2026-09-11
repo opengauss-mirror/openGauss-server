@@ -50,6 +50,8 @@ DataVec架构与特性实现详情可参考[向量存储引擎](datavec_architec
 - [HNSW](./vector_index.md#hnsw)  图索引
 - [HNSW-PQ](./pq.md)  PQ量化压缩图索引
 - [HNSW-RabitQ](./Rabitq.md)  RabitQ量化压缩图索引
+- [DISKANN](./diskann.md)  磁盘图索引
+- [超低内存磁盘检索](./low_memory_disk_retrieval.md)  超低内存磁盘检索
 
 ## 生态对接
 

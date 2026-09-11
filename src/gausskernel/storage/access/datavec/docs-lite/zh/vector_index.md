@@ -260,11 +260,20 @@ vector_cosine_ops | 余弦距离
 - `index_size` - 索引构建参数，影响召回精度与构建时间，取值范围为16~1000（默认值为100），百万规模数据集建议设置为50
 - `enable_pq` - 量化压缩参数，控制是否开启PQ，默认关闭
 - `pq_m` - 量化压缩参数，取值范围为1~2000（默认值为8），建议设置为```dim / 8```
+- `enable_rabitq` - 控制是否启用超低内存磁盘检索，默认关闭；不能与`enable_pq`同时开启。详见[超低内存磁盘检索](./low_memory_disk_retrieval.md)
+- `pca_dim` - 超低内存磁盘检索参数，PCA降维后的维度，取值为0（不降维，默认值）或8~维度-1，需先开启`enable_rabitq`
+- `rabitq_bits` - 超低内存磁盘检索参数，每维量化位数，取值为1或2（默认值为1），需先开启`enable_rabitq`
 
 **示例7：** 使用L2距离计算创建DISKANN索引并设置index_size = 50。
 
 ```sql
 openGauss=# CREATE INDEX ON items USING diskann (embedding vector_l2_ops) WITH (index_size = 50);
+```
+
+**示例：** 使用余弦距离创建超低内存磁盘检索索引。
+
+```sql
+openGauss=# CREATE INDEX ON items USING diskann (embedding vector_cosine_ops) WITH (enable_rabitq = on, pca_dim = 448, rabitq_bits = 2);
 ```
 
 >[!NOTE]说明
