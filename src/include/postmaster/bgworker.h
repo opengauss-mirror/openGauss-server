@@ -107,6 +107,7 @@ extern bool IsBgWorkerProcess(void);
 extern bool IsDMSWorkerProcess(void);
 extern void BgworkerListSyncQuit();
 extern void BgworkerListWaitFinish(int *nparticipants);
+extern void BgworkerListRecycleFinished();
 extern void InitBgworkerGlobal(void);
 extern void ShutdownAllBgWorker();
 extern bool BgWorkerNeedResetXact();

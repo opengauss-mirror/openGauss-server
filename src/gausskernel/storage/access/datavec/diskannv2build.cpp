@@ -33,6 +33,7 @@
  *                  InterInsert
  *          Write   transform / code / graph regions sequentially, full-page
  *                  WAL afterwards, meta page (version 2) last
+ *        Encode and graph run on bgworkers when the planner grants workers.
  *        Vector source (GUC diskann_build_in_memory):
  *          on   the heap scan copies every (normalized) vector into a chunked
  *               instance-memory array; encode and graph read the array
@@ -47,10 +48,11 @@
  *               check on a hash hit also re-reads the candidate node's vector.
  *               The graph search reads one vector per distance; a prune
  *               materializes its pool once (DiskAnnGraphStore::PrefetchPool
- *               -> per-store cache of <= INDEXINGMAXC + degree + 1 vectors)
+ *               -> per-worker cache of <= INDEXINGMAXC + degree + 1 vectors)
  *               and pairs it from there.
- *        One DiskAnnGraph (scratch lists, candidate queue) and one store
- *        (generation-stamped visited array, pool cache) serve every Link.
+ *        Per worker one DiskAnnGraph (scratch lists, candidate queue) and one
+ *        store (generation-stamped visited array, pool cache) serve every
+ *        Link of the worker.
  *
  * IDENTIFICATION
  *        src/gausskernel/storage/access/datavec/diskannv2build.cpp
@@ -69,7 +71,10 @@
 #include "catalog/pg_type.h"
 #include "knl/knl_session.h"
 #include "miscadmin.h"
+#include "postmaster/bgworker.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/spin.h"
+#include "utils/atomic.h"
 #include "utils/memutils.h"
 #include "access/datavec/utils.h"
 #include "access/datavec/vector.h"
@@ -77,8 +82,11 @@
 
 #define DISKANN_V2_GRAPH_ROUNDS 2
 
-/* encode work chunk (CHECK_FOR_INTERRUPTS granularity) */
+/* parallel build (bgworker) phases and work chunk sizes */
+#define DISKANN_V2_PHASE_ENCODE 1
+#define DISKANN_V2_PHASE_GRAPH 2
 #define DISKANN_V2_ENCODE_CHUNK 256
+#define DISKANN_V2_GRAPH_CHUNK 16
 
 /* buffer-pool source: per-store cache of the prune pool vectors (PrefetchPool):
  * a Link pool holds <= INDEXINGMAXC + 1 nodes, an InterInsert re-prune pool <= degree + 2 */
@@ -274,11 +282,12 @@ typedef struct DiskAnnV2BuildState {
     /* transform: PCA_ORTHOGONAL {mean, M = W * P}, trained once, read-only afterwards */
     VectorTransform* vt;
 
-    /* in-memory code + graph arrays (instance memory) */
+    /* in-memory code + graph arrays (instance memory, shared with workers) */
     char* codes;
     uint16 codeSlotSize;
     uint32* graph;  /* nnodes x DISKANN_V2_DEGREE */
     uint16* gcount; /* nnodes */
+    slock_t* locks; /* per-node adjacency locks (parallel build only, else NULL) */
     uint32 frozen;
 
     /* graph construction through DiskAnnGraph::Link */
@@ -615,7 +624,8 @@ static bool GraphContains(const uint32* nbrs, int cnt, uint32 id)
  * through PrefetchPool into a per-store cache that GetDistance consults, so
  * the O(pool^2) pair distances cost no heap reads. Distances are exact L2 for
  * every opclass (like the version 1 build), adjacency lives in graph/gcount and is
- * snapshotted or replaced as a whole. Edge distances are not stored (v2 slots keep ids only;
+ * snapshotted or replaced under the per-node spinlock with no distance work
+ * inside the lock. Edge distances are not stored (v2 slots keep ids only;
  * DiskAnnGraph never reads them back). Bitwise duplicates were merged during
  * the heap scan, so a zero distance here is a distinct node and
  * MergeDuplicate declines.
@@ -744,17 +754,21 @@ public:
     {
         int cnt = Min((int)edge->count, DISKANN_V2_DEGREE);
         uint32* nbrs = m_state->graph + (Size)id * DISKANN_V2_DEGREE;
+        Lock(id);
         errno_t rc = memcpy_s(nbrs, sizeof(uint32) * (Size)DISKANN_V2_DEGREE, edge->nexts, sizeof(uint32) * (Size)cnt);
+        m_state->gcount[id] = (uint16)cnt;
+        Unlock(id);
         if (rc != EOK) {
             securec_check(rc, "\0", "\0");
         }
-        m_state->gcount[id] = (uint16)cnt;
     }
 
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const override
     {
         const uint32* nbrs = m_state->graph + (Size)src * DISKANN_V2_DEGREE;
+        Lock(src);
         bool found = GraphContains(nbrs, m_state->gcount[src], blk);
+        Unlock(src);
         return found;
     }
 
@@ -814,11 +828,27 @@ public:
     {}
 
 private:
+    inline void Lock(uint32 id) const
+    {
+        if (m_state->locks != NULL) {
+            SpinLockAcquire(&m_state->locks[id]);
+        }
+    }
+
+    inline void Unlock(uint32 id) const
+    {
+        if (m_state->locks != NULL) {
+            SpinLockRelease(&m_state->locks[id]);
+        }
+    }
+
     int Snapshot(uint32 id, uint32* out) const
     {
         const uint32* nbrs = m_state->graph + (Size)id * DISKANN_V2_DEGREE;
+        Lock(id);
         int cnt = m_state->gcount[id];
         errno_t rc = memcpy_s(out, sizeof(uint32) * (Size)DISKANN_V2_DEGREE, nbrs, sizeof(uint32) * (Size)cnt);
+        Unlock(id);
         if (rc != EOK) {
             securec_check(rc, "\0", "\0");
         }
@@ -956,6 +986,243 @@ static void GraphLoop(DiskAnnV2BuildState* state)
     for (int round = 0; round < DISKANN_V2_GRAPH_ROUNDS; round++) {
         LinkRange(&graph, state, 0, state->nnodes);
     }
+}
+
+/* --------------------------------------------------------- parallel build
+ *
+ * Encode and graph run on bgworkers: openGauss backends are threads, so the
+ * leader's arrays are directly visible to workers. Work is dealt in chunks
+ * off an atomic cursor. Workers never touch the relation. Each phase is one
+ * LaunchBackgroundWorkers round; finished worker slots are recycled between
+ * rounds.
+ */
+
+typedef struct DiskAnnV2BuildShared {
+    int phase; /* DISKANN_V2_PHASE_* */
+
+    uint32 nnodes;
+    int dimIn;
+    int dimOut;
+    int lsize;
+    int funcType;
+    uint16 codeSlotSize;
+    uint8 bits;
+    uint32 frozen;
+
+    VectorTransform* vt; /* read-only during the encode phase */
+    DiskAnnV2VecStore vecs;
+    char* codes;
+    uint32* graph;
+    uint16* gcount;
+    slock_t* locks;
+    double* norms;
+    float* invNorms;
+
+    /* buffer-pool vector source: workers open the heap themselves (a Relation is not shared across threads) */
+    bool inMemory;
+    bool normalize;
+    AttrNumber attno;
+    Oid heapOid;
+    ItemPointerData* tids;
+
+    /* entry-point reduction (encode phase) */
+    slock_t medoidLock;
+    uint32 bestId;
+    float bestDist;
+
+    pg_atomic_uint32 cursor;
+} DiskAnnV2BuildShared;
+
+static void WorkerInitState(DiskAnnV2BuildState* st, DiskAnnV2BuildShared* shared)
+{
+    errno_t rc = memset_s(st, sizeof(DiskAnnV2BuildState), 0, sizeof(DiskAnnV2BuildState));
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    st->dimIn = shared->dimIn;
+    st->dimOut = shared->dimOut;
+    st->lsize = shared->lsize;
+    st->funcType = shared->funcType;
+    st->nnodes = shared->nnodes;
+    st->frozen = shared->frozen;
+    st->codeSlotSize = shared->codeSlotSize;
+    st->bits = shared->bits;
+    st->vt = shared->vt;
+    st->vecs = shared->vecs;
+    st->codes = shared->codes;
+    st->graph = shared->graph;
+    st->gcount = shared->gcount;
+    st->locks = shared->locks;
+    st->norms = shared->norms;
+    st->invNorms = shared->invNorms;
+    st->inMemory = shared->inMemory;
+    st->normalize = shared->normalize;
+    st->attno = shared->attno;
+    st->tids = shared->tids;
+    if (!st->inMemory) {
+        st->heap = heap_open(shared->heapOid, NoLock); /* the leader holds the ShareLock */
+    }
+}
+
+static void WorkerFreeState(DiskAnnV2BuildState* st)
+{
+    if (st->heap != NULL) {
+        heap_close(st->heap, NoLock);
+        st->heap = NULL;
+    }
+}
+
+static void ParallelEncode(DiskAnnV2BuildState* st, DiskAnnV2BuildShared* shared)
+{
+    float* y = (float*)palloc(sizeof(float) * (Size)st->dimOut);
+    float* xbuf = (float*)palloc(sizeof(float) * (Size)st->dimIn);
+    uint32 bestId = 0;
+    float bestDist = FLT_MAX;
+
+    uint32 start = pg_atomic_fetch_add_u32(&shared->cursor, DISKANN_V2_ENCODE_CHUNK);
+    while (start < shared->nnodes) {
+        DiskAnnV2EncodeRange range;
+        range.state = st;
+        range.from = start;
+        range.to = Min(start + DISKANN_V2_ENCODE_CHUNK, shared->nnodes);
+        range.y = y;
+        range.xbuf = xbuf;
+        range.bestId = &bestId;
+        range.bestDist = &bestDist;
+        EncodeRange(&range);
+        CHECK_FOR_INTERRUPTS();
+        start = pg_atomic_fetch_add_u32(&shared->cursor, DISKANN_V2_ENCODE_CHUNK);
+    }
+
+    SpinLockAcquire(&shared->medoidLock);
+    if (bestDist < shared->bestDist || (bestDist == shared->bestDist && bestId < shared->bestId)) {
+        shared->bestDist = bestDist;
+        shared->bestId = bestId;
+    }
+    SpinLockRelease(&shared->medoidLock);
+
+    pfree(xbuf);
+    pfree(y);
+}
+
+static void ParallelGraph(DiskAnnV2BuildState* st, DiskAnnV2BuildShared* shared)
+{
+    DiskAnnV2MemGraphStore store(st);
+    DiskAnnGraph graph(NULL, (double)st->dimIn, st->frozen, &store);
+    uint32 start = pg_atomic_fetch_add_u32(&shared->cursor, DISKANN_V2_GRAPH_CHUNK);
+    while (start < shared->nnodes) {
+        LinkRange(&graph, st, start, Min(start + DISKANN_V2_GRAPH_CHUNK, shared->nnodes));
+        CHECK_FOR_INTERRUPTS();
+        start = pg_atomic_fetch_add_u32(&shared->cursor, DISKANN_V2_GRAPH_CHUNK);
+    }
+}
+
+static void ParallelBuildMain(const BgWorkerContext* bwc)
+{
+    DiskAnnV2BuildShared* shared = (DiskAnnV2BuildShared*)bwc->bgshared;
+    DiskAnnV2BuildState st;
+    WorkerInitState(&st, shared);
+
+    if (shared->phase == DISKANN_V2_PHASE_ENCODE) {
+        ParallelEncode(&st, shared);
+    } else {
+        ParallelGraph(&st, shared);
+    }
+    WorkerFreeState(&st);
+}
+
+/* one bgworker round; false when no worker could be launched */
+static bool RunPhase(DiskAnnV2BuildShared* shared, int request, int phase)
+{
+    shared->phase = phase;
+    pg_atomic_write_u32(&shared->cursor, 0);
+    pg_memory_barrier();
+
+    int launched = LaunchBackgroundWorkers(request, shared, ParallelBuildMain, NULL);
+    if (launched == 0) {
+        BgworkerListRecycleFinished(); /* nothing ran: just drop the launch context */
+        return false;
+    }
+    BgworkerListWaitFinish(&launched);
+    BgworkerListRecycleFinished();
+    pg_memory_barrier();
+    return true;
+}
+
+static void FillShared(DiskAnnV2BuildShared* shared, const DiskAnnV2BuildState* state)
+{
+    shared->nnodes = state->nnodes;
+    shared->dimIn = state->dimIn;
+    shared->dimOut = state->dimOut;
+    shared->lsize = state->lsize;
+    shared->funcType = state->funcType;
+    shared->codeSlotSize = state->codeSlotSize;
+    shared->bits = state->bits;
+    shared->frozen = DISKANN_V2_INVALID_NODE;
+    shared->vt = state->vt;
+    shared->vecs = state->vecs;
+    shared->codes = state->codes;
+    shared->graph = state->graph;
+    shared->gcount = state->gcount;
+    shared->norms = state->norms;
+    shared->invNorms = state->invNorms;
+    shared->inMemory = state->inMemory;
+    shared->normalize = state->normalize;
+    shared->attno = state->attno;
+    shared->heapOid = RelationGetRelid(state->heap);
+    shared->tids = state->tids;
+}
+
+/*
+ * Encode + graph on bgworkers. Returns false (nothing done) when the first
+ * round could not launch a single worker, in which case the caller runs the
+ * serial path.
+ */
+static bool BuildParallel(DiskAnnV2BuildState* state, int request)
+{
+    MemoryContext instCtx = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+    uint32 n = state->nnodes;
+
+    /* the shared struct lives in the build context (freed with it on error;
+     * the framework's SyncQuit may pfree it first); the lock array is
+     * instance memory like the other shared arrays and is freed explicitly */
+    DiskAnnV2BuildShared* shared =
+        (DiskAnnV2BuildShared*)MemoryContextAllocZero(state->buildCtx, sizeof(DiskAnnV2BuildShared));
+    FillShared(shared, state);
+    state->locks = (slock_t*)palloc_huge(instCtx, sizeof(slock_t) * (Size)n);
+    for (uint32 i = 0; i < n; i++) {
+        SpinLockInit(&state->locks[i]);
+    }
+    shared->locks = state->locks;
+    SpinLockInit(&shared->medoidLock);
+    shared->bestId = 0;
+    shared->bestDist = FLT_MAX;
+    pg_atomic_init_u32(&shared->cursor, 0);
+
+    if (!RunPhase(shared, request, DISKANN_V2_PHASE_ENCODE)) {
+        pfree_ext(state->locks);
+        pfree(shared);
+        return false;
+    }
+    state->frozen = shared->bestId;
+    shared->frozen = state->frozen;
+
+    /*
+     * Two graph rounds (see GraphLoop). If a worker round cannot be launched,
+     * the leader finishes both rounds serially (Link is idempotent per node).
+     */
+    for (int round = 0; round < DISKANN_V2_GRAPH_ROUNDS; round++) {
+        if (!RunPhase(shared, request, DISKANN_V2_PHASE_GRAPH)) {
+            slock_t* locks = state->locks;
+            state->locks = NULL;
+            GraphLoop(state);
+            state->locks = locks;
+            break;
+        }
+    }
+    pfree_ext(state->locks);
+    pfree(shared);
+    return true;
 }
 
 /* ----------------------------------------------------------- region IO */
@@ -1140,6 +1407,7 @@ static void FreeSharedArrays(DiskAnnV2BuildState* state)
     pfree_ext(state->codes);
     pfree_ext(state->graph);
     pfree_ext(state->gcount);
+    pfree_ext(state->locks);
     pfree_ext(state->norms);
     pfree_ext(state->invNorms);
 }
@@ -1173,6 +1441,27 @@ static void PrepareScan(DiskAnnV2BuildState* state)
     }
 }
 
+static int PlanWorkers(const DiskAnnV2BuildState* state)
+{
+    Relation heap = state->heap;
+    Relation index = state->index;
+    int pworkers = 0;
+    if (heap != NULL) {
+        pworkers = PlanCreateIndexWorkers(heap, state->indexInfo);
+    }
+    if ((heap != NULL && OidIsValid(heap->grandparentId)) || OidIsValid(index->grandparentId)) {
+        pworkers = 0; /* subpartition builds stay serial (hnsw does the same) */
+    }
+    if (!state->inMemory && heap != NULL && OidIsValid(heap->parentId)) {
+        pworkers = 0; /* buffer-pool source: workers heap_open() by OID, which a partition relation has none of */
+    }
+    /* same rule as the version 1 build: fewer rows than workers * index_size -> serial */
+    if (pworkers > 1 && (double)state->nnodes <= (double)pworkers * state->lsize) {
+        pworkers = 0;
+    }
+    return pworkers;
+}
+
 static void EncodeAndWrite(DiskAnnV2BuildState* state, const DiskAnnV2Meta* meta, DiskAnnV2Extent* codeExt,
                            DiskAnnV2Extent* graphExt)
 {
@@ -1185,18 +1474,24 @@ static void EncodeAndWrite(DiskAnnV2BuildState* state, const DiskAnnV2Meta* meta
     state->graph = (uint32*)palloc_huge(instCtx, graphBytes);
     state->gcount = (uint16*)palloc0_huge(instCtx, sizeof(uint16) * (Size)n);
 
+    int pworkers = PlanWorkers(state);
     ComputeNorms(state);
-    EncodeAll(state);
-    GraphLoop(state);
+    bool parallelUsed = (pworkers > 0) && BuildParallel(state, pworkers);
+    if (!parallelUsed) {
+        EncodeAll(state);
+        state->locks = NULL;
+        GraphLoop(state);
+    }
 
     uint64 sumOut = 0;
     for (uint32 i = 0; i < n; i++) {
         sumOut += state->gcount[i];
     }
     ereport(LOG, (errmsg("diskann: rabitq index \"%s\" graph built, %u nodes (%.0f rows), dim %d -> %d, %u bit, "
-                         "avg out-degree %.1f, entry %u, L=%d, vectors %s",
+                         "avg out-degree %.1f, entry %u, %s, L=%d, vectors %s",
                          RelationGetRelationName(state->index), n, state->reltuples, state->dimIn, state->dimOut,
-                         (unsigned)state->bits, (double)sumOut / n, state->frozen, state->lsize,
+                         (unsigned)state->bits, (double)sumOut / n, state->frozen,
+                         parallelUsed ? "parallel" : "serial", state->lsize,
                          state->inMemory ? "in memory" : "from the buffer pool")));
 
     VecStoreFree(&state->vecs);
@@ -1251,6 +1546,8 @@ static double GuardedBuildCore(DiskAnnV2BuildState* state, const DiskAnnV2Meta* 
     }
     PG_CATCH();
     {
+        /* stop workers before their arrays disappear; the framework frees bgshared */
+        BgworkerListSyncQuit();
         FreeSharedArrays(st);
         PG_RE_THROW();
     }
