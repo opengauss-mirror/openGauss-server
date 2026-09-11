@@ -447,5 +447,47 @@ END;
 /
 CALL fetch_rows_with_ties_procedure();
 
+-- issue 8465 regression: keep output compact and deterministic
+\pset format unaligned
+\pset tuples_only on
+
+DROP TABLE IF EXISTS frwt_setop_case;
+
+CREATE TABLE frwt_setop_case(id int, grp int);
+
+INSERT INTO frwt_setop_case VALUES
+(1, 1),
+(2, 1),
+(3, 2),
+(4, 2),
+(5, 3);
+
+SELECT count(*)
+FROM (
+    SELECT id FROM frwt_setop_case
+    UNION ALL
+    SELECT id FROM frwt_setop_case
+    FETCH FIRST 20 PERCENT ROWS ONLY
+) s;
+
+SELECT count(*)
+FROM (
+    SELECT id, grp
+    FROM frwt_setop_case
+
+    UNION ALL
+
+    SELECT id, grp
+    FROM frwt_setop_case
+
+    ORDER BY grp
+    FETCH FIRST 1 ROW WITH TIES
+) s;
+
+DROP TABLE IF EXISTS frwt_setop_case;
+
+\pset tuples_only off
+\pset format aligned
+
 \c postgres
 DROP DATABASE frwt_db;
