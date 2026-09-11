@@ -13,7 +13,7 @@ analyze only_first_part;
 
 -- preview, no column statistic for partition
 select relname, relpages, reltuples from pg_class where relname = 'only_first_part';
-select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3');
+select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3') order by reltuples;
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
 (select oid from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3')) order by starelid, staattnum;
 
@@ -23,7 +23,7 @@ analyze only_first_part partition (only_first_part_p2);
 analyze only_first_part partition (only_first_part_p3);
 
 -- check partiiton statistic
-select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3');
+select relname, relpages, reltuples from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3') order by reltuples;
 select stadistinct, stanumbers1, stanumbers2, stanumbers3, stanumbers4, stanumbers5 from pg_statistic where starelkind = 'p' and starelid in
 (select oid from pg_partition where relname in ('only_first_part_p1', 'only_first_part_p2', 'only_first_part_p3')) order by starelid, staattnum;
 
