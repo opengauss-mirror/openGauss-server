@@ -42,8 +42,8 @@ COMMENT ON FUNCTION pg_catalog.gs_catalog_attribute_records(
 -- Restore information_schema.columns and information_schema.sequences views to their
 -- pre-attidentity definitions: identity columns revert to constant NULL/'NO', the
 -- pg_depend/seq JOIN is removed from columns, and the NOT EXISTS filter is removed
--- from sequences. The output column structure is unchanged, so CREATE OR REPLACE VIEW
--- suffices without cascading dependent views.
+-- from sequences. Preserve the historical spelling of the compatibility-sensitive
+-- columns while replacing the view, so dependent views are not cascaded.
 SET search_path TO information_schema;
 
 SET skip_new_column_for_ruledef = true;
@@ -51,6 +51,10 @@ SET skip_new_column_for_ruledef = true;
 DO $$
 DECLARE
     function_exists BOOLEAN;
+    column_type_name text;
+    column_comment_name text;
+    extra_name text;
+    columns_view_definition text;
 BEGIN
     SELECT EXISTS (
         SELECT 1
@@ -66,6 +70,31 @@ BEGIN
     -- identity-aware columns view has not been installed either, so keep the
     -- existing view instead of referencing a catalog function that is absent.
     IF function_exists THEN
+        SELECT max(CASE WHEN lower(a.attname) = 'column_type' THEN a.attname::text END),
+               max(CASE WHEN lower(a.attname) = 'column_comment' THEN a.attname::text END),
+               max(CASE WHEN lower(a.attname) = 'extra' THEN a.attname::text END)
+          INTO column_type_name, column_comment_name, extra_name
+          FROM pg_catalog.pg_attribute a
+          JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'information_schema'
+           AND c.relname = 'columns'
+           AND NOT a.attisdropped;
+
+        IF column_type_name IS NULL THEN
+            column_type_name := CASE WHEN pg_catalog.current_setting('sql_compatibility') = 'B'
+                                     THEN 'COLUMN_TYPE' ELSE 'column_type' END;
+        END IF;
+        IF column_comment_name IS NULL THEN
+            column_comment_name := CASE WHEN pg_catalog.current_setting('sql_compatibility') = 'B'
+                                        THEN 'COLUMN_COMMENT' ELSE 'column_comment' END;
+        END IF;
+        IF extra_name IS NULL THEN
+            extra_name := CASE WHEN pg_catalog.current_setting('sql_compatibility') = 'B'
+                               THEN 'EXTRA' ELSE 'extra' END;
+        END IF;
+
+        columns_view_definition := $columns_view_definition$
         CREATE OR REPLACE VIEW columns AS
             SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
                   CAST(nc.nspname AS sql_identifier) AS table_schema,
@@ -178,8 +207,8 @@ BEGIN
                             ELSE 'USER-DEFINED' END
                     END
                     AS character_data)
-                    AS column_type,
-                    CAST(d.description AS information_schema.character_data) AS column_comment,
+                    AS __COLUMN_TYPE__,
+                    CAST(d.description AS information_schema.character_data) AS __COLUMN_COMMENT__,
                     CAST(
                       CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'AUTO_INCREMENT'
                       ELSE
@@ -188,7 +217,7 @@ BEGIN
                           END
                       END
                       AS character_data)
-                    AS extra,
+                    AS __EXTRA__,
                     CAST(array_to_string(ARRAY[
                         CASE WHEN has_column_privilege(c.oid, a.attnum, 'SELECT') THEN 'select' END,
                         CASE WHEN has_column_privilege(c.oid, a.attnum, 'INSERT') THEN 'insert' END,
@@ -216,6 +245,12 @@ BEGIN
                   AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
                       OR pg_catalog.has_column_privilege(c.oid, a.attnum,
                                               'SELECT, INSERT, UPDATE, REFERENCES'));
+
+$columns_view_definition$;
+        columns_view_definition := pg_catalog.replace(columns_view_definition, '__COLUMN_TYPE__', pg_catalog.quote_ident(column_type_name));
+        columns_view_definition := pg_catalog.replace(columns_view_definition, '__COLUMN_COMMENT__', pg_catalog.quote_ident(column_comment_name));
+        columns_view_definition := pg_catalog.replace(columns_view_definition, '__EXTRA__', pg_catalog.quote_ident(extra_name));
+        EXECUTE columns_view_definition;
         GRANT SELECT ON columns TO PUBLIC;
     END IF;
 END $$;
