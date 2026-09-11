@@ -8,18 +8,31 @@
 
 示例：
 
-```
-openGauss=# select n'abc';
+```sql
+openGauss=# create database testd dbcompatibility = 'D';
+CREATE DATABASE
+openGauss=# \c testd
+Non-SSL connection (SSL connection is recommended when requiring high-security)
+You are now connected to database "testd" as user "omm".
+testd=# create extension shark;
+CREATE EXTENSION
+testd=# show d_format_behavior_compat_options;
+     d_format_behavior_compat_options
+------------------------------------------
+ enable_sbr_identifier, default_collation
+(1 row)
+
+testd=# set d_format_behavior_compat_options = '';
+SET
+testd=# select n'abc';
  nvarchar2
 -----------
  abc
 (1 row)
 
-
-
-openGauss=# create table test1(col1 nvarchar(max), col2 nvarchar(50), col3 nvarchar(1), col4 nvarchar);
+testd=# create table test1(col1 nvarchar(max), col2 nvarchar(50), col3 nvarchar(1), col4 nvarchar);
 CREATE TABLE
-openGauss=# \d+ test1
+testd=# \d+ test1
                             Table "public.test1"
  Column |      Type      | Modifiers | Storage  | Stats target | Description
 --------+----------------+-----------+----------+--------------+-------------
@@ -30,9 +43,9 @@ openGauss=# \d+ test1
 Has OIDs: no
 Options: orientation=row, compression=no
 
-openGauss=# create table test2(col1 nvarchar2(max), col2 nvarchar2(50), col3 nvarchar2(1), col4 nvarchar2);
+testd=# create table test2(col1 nvarchar2(max), col2 nvarchar2(50), col3 nvarchar2(1), col4 nvarchar2);
 CREATE TABLE
-openGauss=# \d+ test2
+testd=# \d+ test2
                             Table "public.test2"
  Column |      Type      | Modifiers | Storage  | Stats target | Description
 --------+----------------+-----------+----------+--------------+-------------
@@ -43,9 +56,13 @@ openGauss=# \d+ test2
 Has OIDs: no
 Options: orientation=row, compression=no
 
-openGauss=# insert into test2 values('abcd', 'abcd', 'a', 'a');
+testd=# insert into test2 values('abcd', 'abcd', 'a', 'a');
 INSERT 0 1
-openGauss=# insert into test2(col4) values('abcd');
+testd=# insert into test2(col4) values('abcd');
 ERROR:  value too long for type nvarchar2(1)
 CONTEXT:  referenced column: col4
+testd=# drop table test1;
+DROP TABLE
+testd=# drop table test2;
+DROP TABLE
 ```

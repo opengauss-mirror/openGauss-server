@@ -48,17 +48,27 @@
 ## 示例<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s985289833081489e9d77c485755bd362"></a>
 
 ```sql
-openGauss=# create table t1 (a int);
+openGauss=# create database testd dbcompatibility = 'D';
+CREATE DATABASE
+openGauss=# \c testd
+Non-SSL connection (SSL connection is recommended when requiring high-security)
+You are now connected to database "testd" as user "omm".
+testd=# create extension shark;
+CREATE EXTENSION
+testd=# create table t1 (a int);
 CREATE TABLE
-openGauss=# create columnstore index on t1 (a);
+testd=# create columnstore index on t1 (a);
 NOTICE:  The COLUMNSTORE option is currently ignored
 CREATE INDEX
-
-openGauss=# create table t1 (a int);
+testd=# drop table t1;
+DROP TABLE
+testd=# create table t1 (a int);
 CREATE TABLE
-openGauss=# create clustered index on t1 (a);
-NOTICE:  The COLUMNSTORE option is currently ignored
+testd=# create clustered index on t1 (a);
+NOTICE:  The CLUSTERED option is currently ignored
 CREATE INDEX
+testd=# drop table t1;
+DROP TABLE
 ```
 
 ## 相关链接<a name="section156744489391"></a>
