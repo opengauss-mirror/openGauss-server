@@ -119,7 +119,7 @@ typedef enum {
 
 extern void gen_cipher_rand_files(
     KeyMode mode, const char* plain_key, const char* user_name, const char* datadir, const char* preStr);
-extern void decode_cipher_files(
+extern bool decode_cipher_files(
     KeyMode mode, const char* user_name, const char* datadir, GS_UCHAR* plainpwd, bool obs_server_mode = false);
 extern bool check_input_password(const char* password, int maxlen = MAX_KEY_LEN);
 extern bool EncryptInputKey(GS_UCHAR* pucPlainText, GS_UCHAR* initrand, GS_UCHAR* keySaltVector,
