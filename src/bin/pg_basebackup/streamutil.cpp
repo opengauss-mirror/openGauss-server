@@ -120,7 +120,8 @@ char* inc_dbport(const char* db_port)
 void ClearAndFreePasswd(void)
 {
     if (dbpassword != nullptr) {
-        errno_t errorno = memset_s(dbpassword, sizeof(dbpassword), '\0', sizeof(dbpassword));
+        const size_t passwordLen = strlen(dbpassword) + 1;
+        errno_t errorno = memset_s(dbpassword, passwordLen, '\0', passwordLen);
         securec_check_c(errorno, "\0", "\0");
         free(dbpassword);
         dbpassword = nullptr;
