@@ -17,16 +17,36 @@ openGauss在shark中支持sql_variant类型，sql_variant类型可以保存非�
 
 ## 示例
 
+**前置 SQL**
+```auto
+-- 创建 UTF-8 编码的 D 兼容数据库
+CREATE DATABASE test_sql_variant
+WITH
+    DBCOMPATIBILITY = 'D'
+    ENCODING = 'UTF8'
+    LC_COLLATE = 'C.UTF-8'
+    LC_CTYPE = 'C.UTF-8'
+    TEMPLATE = template0;
+
+-- 切换到 D 兼容数据库
+\c test_sql_variant
+
+-- 安装 shark 插件
+create extension shark;
+```
 **示例1：** 在系统表中查找sql_variant类型。
 
 ```auto
-\x    --列式展示查询结果
+\x    --开启列式展示查询结果(设置为 on)
+
 select * from pg_type where typname='sql_variant';
 ```
 
 结果显示为：
 
 ```auto
+Expanded display is on.
+
 -[ RECORD 1 ]--+----------------
 typname        | sql_variant
 typnamespace   | 16388
@@ -63,11 +83,15 @@ typacl         |
 **示例2：** 字符类型强制转换为sql_variant类型。
 
 ```auto
+\x    --取消列式展示查询结果(设置为 off)
+
 select 'aa'::char::sql_variant;
 select '圈圈圆圆圈圈天天'::char(20)::sql_variant;
 ```
 
 ```auto
+Expanded display is off.
+
 sql_variant
 ---------------
  a
