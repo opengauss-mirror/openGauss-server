@@ -197,14 +197,15 @@ void _bt_get_inskey_scankey_without_rowheader(ScanKey cur, Relation bt_rel, int 
             RegProcedure cmp_proc;
             cmp_proc =
                 get_opfamily_proc(bt_rel->rd_opfamily[i], bt_rel->rd_opcintype[i], cur->sk_subtype, BTORDER_PROC);
-            if (SECUREC_UNLIKELY(!RegProcedureIsValid(cmp_proc)))
-                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("missing support function %d(%u,%u) for attribute %d of index \"%s\"",
-                                       BTORDER_PROC, bt_rel->rd_opcintype[i], cur->sk_subtype, cur->sk_attno,
-                                       RelationGetRelationName(bt_rel))));
-            ScanKeyEntryInitialize(inskey->scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy, cur->sk_subtype,
-                                   cur->sk_collation, cmp_proc, cur->sk_argument);
         }
+
+        if (SECUREC_UNLIKELY(!RegProcedureIsValid(cmp_proc)))
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("missing support function %d(%u,%u) for attribute %d of index \"%s\"",
+                                   BTORDER_PROC, bt_rel->rd_opcintype[i], cur->sk_subtype, cur->sk_attno,
+                                   RelationGetRelationName(bt_rel))));
+        ScanKeyEntryInitialize(inskey->scankeys + i, cur->sk_flags, cur->sk_attno, InvalidStrategy, cur->sk_subtype,
+                               cur->sk_collation, cmp_proc, cur->sk_argument);
     }
     return;
 }
