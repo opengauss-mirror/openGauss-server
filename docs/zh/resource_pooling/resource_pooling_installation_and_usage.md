@@ -79,16 +79,16 @@
         dd if=/dev/zero bs=2048 count=100000 of=/dev/tpcc_data
         dd if=/dev/zero bs=2048 count=100000 of=/dev/tpcc_log
         # 创建VG
-        dsscmd cv -g data -v /dev/tpcc_data -s 2048 -D /data/ss_test/dss_home
-        dsscmd cv -g log  -v /dev/tpcc_log -s 65536 -D /data/ss_test/dss_home
+        dsscmd cv -g data -v /dev/tpcc_data -s 2048 -D /data/test/dss_home
+        dsscmd cv -g log  -v /dev/tpcc_log -s 65536 -D /data/test/dss_home
         # 拉起dssserver
-        dssserver -D /data/ss_test/dss_home &
+        dssserver -D /data/test/dss_home &
         ```
 
     5. <a name="li23296624419"></a>通过gs\_initdb建立资源池化库。
 
         ```
-        gs_initdb -D /data/ss_test/dn_primary --nodename=single_node -w ****** --vgname="+data,+log" --enable-dss --dms_url="0:127.0.0.1:1611,1:127.0.0.1:1711" -I 0 --socketpath="UDS:/data/ss_test/dss_home/.dss_unix_d_socket"
+        gs_initdb -D /data/test/dn_primary --nodename=single_node -w ****** --vgname="+data,+log" --enable-dss --dms_url="0:127.0.0.1:1611,1:127.0.0.1:1711" -I 0 --socketpath="UDS:/data/test/dss_home/.dss_unix_d_socket"
         ```
 
         其中新增5个相关参数：
@@ -102,7 +102,7 @@
     6. 建资源池化库成功，通过gs\_ctl start命令拉取数据库进程。
 
         ```
-        gs_ctl start -D /data/ss_test/dn_primary
+        gs_ctl start -D /data/test/dn_primary
         ```
 
     7. 按照上述步骤再重新执行安装备机。
