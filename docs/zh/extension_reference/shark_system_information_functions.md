@@ -62,6 +62,8 @@
 
     ```
     openGauss=# CREATE TABLE TZ(Z_id INT IDENTITY PRIMARY KEY, Z_name VARCHAR(20) NOT NULL);
+    NOTICE:  CREATE TABLE will create implicit sequence "tz_z_id_seq_identity" for serial column "tz.z_id"
+    NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tz_pkey" for table "tz"
     CREATE TABLE
     openGauss=# INSERT INTO TZ(Z_NAME) VALUES('Lisa');
     INSERT 0 1
@@ -148,23 +150,25 @@
     示例：
 
     ```
-    CREATE TABLE sys.students (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        age INT DEFAULT 0,
-        grade DECIMAL(5, 2)
+    CREATE TABLE public.students (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT DEFAULT 0,
+    grade DECIMAL(5, 2)
     );
-    set search_path = 'sys';
+
+    SET search_path TO public;
+
     select object_id('students');
     object_id 
     -----------
-    16666
+    20154
     (1 row)
 
     select object_id('sys.students', 'U');
     object_id 
     -----------
-    16666
+    20154
     (1 row)
     ```
 
