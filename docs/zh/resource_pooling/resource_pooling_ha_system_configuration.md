@@ -51,7 +51,7 @@
 | 回放模式                | 开启参数                                                     | 回放速度 | 对内存消耗 | 适用场景                                                     |
 | ----------------------- | ------------------------------------------------------------ | -------- | ---------- | ------------------------------------------------------------ |
 | 串行回放                | recovery_max_workers = 1                                     | 慢       | 低         | 不推荐使用                                                   |
-| 并行回放                | recovery_max_workers > 1, recovery_parse_workers = 1         | 较慢     | 适中       | 不推荐适用                                                   |
+| 并行回放                | recovery_max_workers > 1, recovery_parse_workers = 1         | 较慢     | 适中       | 不推荐使用                                                   |
 | 极致RTO回放             | ss_enable_ondemand_recovery = off, recovery_parse_workers > 1, recovery_redo_workers >= 1 | 适中     | 适中       | 在一般系统中使用，当REDO GAP较大或RTO不敏感场景下推荐使用    |
 | 极致RTO按需回放         | ss_enable_ondemand_recovery = on, ss_enable_ondemand_realtime_build = off, recovery_parse_workers > 1, recovery_redo_workers >= 1 | 较快     | 较高       | 在RTO敏感系统使用，需要控制REDO GAP不能过大                  |
 | 极致RTO按需回放实时构建 | ss_enable_ondemand_recovery = on, ss_enable_ondemand_realtime_build = on, recovery_parse_workers > 1, recovery_redo_workers >= 1 | 最快     | 较高       | 在RTO敏感系统使用，需要控制REDO GAP不能过大，且备机未发生故障时也会消耗CPU和IO |
