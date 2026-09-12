@@ -585,9 +585,12 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
 
     bool need_alloc_zone_for_stream =
         IsUnderPostmaster && !RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery && StreamThreadAmI();
+    undo::UndoZone *uzone = nullptr;
     if (need_alloc_zone_for_stream) {
-        TransactionId fxid = GetCurrentTransactionId();
+        TransactionId fxid = GetTopTransactionId();
         undo::AllocateUndoZone(fxid);
+        uzone = undo::UndoZoneGroup::GetUndoZone(t_thrd.undo_cxt.zids[upersistence], true);
+        uzone->set_max_xid(fxid);
         pg_memory_barrier();
     }
 

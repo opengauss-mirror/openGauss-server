@@ -415,6 +415,8 @@ public:
 
     bool m_is_dml;
 
+    int m_producer_dop;
+
     /* MPP with-recursive support */
     static void SyncConsumerNextPlanStep(int controller_plannodeid, int step);
     static void SyncProducerNextPlanStep(int controller_plannodeid, int producer_plannodeid, int step, int tuple_count,

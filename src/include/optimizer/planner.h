@@ -141,6 +141,9 @@ typedef struct VectorPlanContext {
     bool currentExprIsFilter;
     Cost rowCost;
     Cost vecCost;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool has_stream_upper;
+#endif
 } VectorPlanContext;
 
 typedef struct VectorExprContext {

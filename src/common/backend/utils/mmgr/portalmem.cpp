@@ -919,7 +919,22 @@ void AtAbort_Portals(bool STP_rollback)
             (*portal->cleanup)(portal);
             portal->cleanup = NULL;
         }
-
+#ifndef ENABLE_MULTIPLE_NODES
+        bool need_clean = false;
+        if (portal->status != PORTAL_ACTIVE ||
+            (t_thrd.proc_cxt.proc_exit_inprogress && portal->streamInfo.streamGroup != NULL)) {
+            /*
+             * estate is under the queryDesc, and stream threads use it.
+             * we should wait all stream threads exit to cleanup queryDesc.
+             */
+            if (IS_STREAM_PORTAL) {
+                portal->streamInfo.AttachToSession();
+                StreamNodeGroup::ReleaseStreamGroup(true, STREAM_ERROR);
+                portal->streamInfo.Reset();
+            }
+            need_clean = true;
+        }
+#endif
         /* Drop cached plan reference, if any.
          * When we deal with STP_rollback cases,
          * we are supposed to release the cachedplan context only if the portal is from current SPI
@@ -951,21 +966,11 @@ void AtAbort_Portals(bool STP_rollback)
 #ifdef ENABLE_MULTIPLE_NODES
         if(portal->status != PORTAL_ACTIVE) {
 #else
-        if (portal->status != PORTAL_ACTIVE ||
-            (t_thrd.proc_cxt.proc_exit_inprogress && portal->streamInfo.streamGroup != NULL)) {
+        if (portal->status != PORTAL_ACTIVE || need_clean) {
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
             if (!STP_rollback) {
                 GsplsqlResetContextInAbout();
-            }
-            /*
-             * estate is under the queryDesc, and stream threads use it.
-             * we should wait all stream threads exit to cleanup queryDesc.
-             */
-            if (IS_STREAM_PORTAL) {
-                portal->streamInfo.AttachToSession();
-                StreamNodeGroup::ReleaseStreamGroup(true, STREAM_ERROR);
-                portal->streamInfo.Reset();
             }
 #endif
             MemoryContextDeleteChildren(PortalGetHeapMemory(portal), NULL);

@@ -439,7 +439,6 @@ typedef struct knl_t_xact_context {
     Oid ActiveLobRelid;
     bool isSelectInto;
     bool callPrint;
-    void **m_undozone_array;
 } knl_t_xact_context;
 
 typedef struct RepairBlockKey RepairBlockKey;
@@ -1014,12 +1013,16 @@ typedef struct knl_t_undo_context {
     uint64 slotPtr[UNDO_PERSISTENCE_LEVELS];
     uint64 transUndoSize;
     bool fetchRecord;
+    uint64 curSequence;
 } knl_t_undo_context;
 
 typedef struct knl_u_ustore_context {
 #define MAX_UNDORECORDS_PER_OPERATION 2 /* multi-insert may need special handling */
     class URecVector *urecvec;
     class UndoRecord *undo_records[MAX_UNDORECORDS_PER_OPERATION];
+    void **m_undozone_array;
+    MemoryContext smp_mem_cxt;
+    bool used_smp;
 
 /*
  * Caching several undo buffers.
