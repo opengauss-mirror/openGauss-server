@@ -5783,7 +5783,7 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column)
      * default typmod for varbinary is 1
      */
     if (TSQL_HAS_VARBINARY && typeTypeId(ctype)==TSQL_VARBINARY_OID &&
-        column->typname && !column->typname->typmods) {
+        column->typname && !column->typname->typmods && column->typname->typemod == -1) {
         column->typname->typmods = list_make1(makeAConst(makeInteger(1), -1));
     }
 
