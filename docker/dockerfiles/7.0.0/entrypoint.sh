@@ -264,6 +264,8 @@ opengauss_setup_hba_conf() {
                 echo "host all all 0.0.0.0/0 $GS_HOST_AUTH_METHOD"
                 echo "host replication gaussdb 0.0.0.0/0 md5"
                 if [ -n "$SERVER_MODE" ]; then
+                    # physical HA streams as user omm; host all does not cover database=replication
+                    echo "host replication omm $OG_SUBNET trust"
                     echo "host replication repuser $OG_SUBNET trust"
                 fi
         } >> "$PGDATA/pg_hba.conf"

@@ -732,6 +732,47 @@ function start_dbnode() {
   ${start_cmd} "$start_option" >>"${GAUSS_LOG_FILE}" 2>&1
 }
 
+# Ensure physical replication HBA for peer nodes (user omm).
+# Fresh docker images may only have host all omm / host replication repuser;
+# host all does not match database=replication, so standbys cannot connect after upgrade.
+function ensure_omm_replication_hba() {
+  local hba_file="${GAUSSDATA}/pg_hba.conf"
+  local conf_file="${GAUSSDATA}/postgresql.conf"
+  if [[ ! -f "$hba_file" ]] || [[ ! -f "$conf_file" ]]; then
+    log "Skip ensure_omm_replication_hba: conf or hba missing"
+    return 0
+  fi
+
+  local remote_hosts
+  remote_hosts=$(grep -E "^[[:space:]]*replconninfo[0-9]+" "$conf_file" 2>/dev/null |
+    grep -oE 'remotehost[= ]+[^[:space:]]+' |
+    awk -F'[= ]+' '{print $NF}' |
+    sort -u)
+
+  if [[ -z "$remote_hosts" ]]; then
+    log "No remotehost found in replconninfo; skip ensure_omm_replication_hba"
+    return 0
+  fi
+
+  local added=0
+  local ip
+  for ip in $remote_hosts; do
+    if [[ -z "$ip" ]]; then
+      continue
+    fi
+    if grep -Fq "host replication omm ${ip}/32 trust" "$hba_file"; then
+      continue
+    fi
+    if ! echo "host replication omm ${ip}/32 trust" >>"$hba_file"; then
+      die "Append host replication omm ${ip}/32 trust to pg_hba.conf failed" ${err_upgrade_bin}
+    fi
+    added=$((added + 1))
+    log "Appended host replication omm ${ip}/32 trust to pg_hba.conf"
+  done
+
+  log "ensure_omm_replication_hba done, added=${added}"
+}
+
 function query_dn_role() {
   if [ -f "$GAUSS_TMP_PATH/temp_dn_role" ]; then
     dn_role=$(grep local_role "${GAUSS_TMP_PATH}/temp_dn_role" | head -1 | awk '{print $3}')
@@ -1081,6 +1122,8 @@ function upgrade_bin_step4() {
   if [[ X"$old_cfg" == X ]]; then
     old_cfg=$(grep old_cfg "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
   fi
+  # Fix missing host replication omm rules before starting new binary (HA cluster).
+  ensure_omm_replication_hba
   if [[ "$big_cfg" == "True" ]]; then
     if ! echo " -u $old_cfg" > "$GAUSSHOME"/bin/start_flag;then
       die "Create $GAUSSHOME/bin/start_flag file failed" ${err_upgrade_bin}
