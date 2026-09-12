@@ -147,7 +147,7 @@ sections:
         sections:
           - label: 因hostname文件权限异常导致设置参数失败的问题
             href: ./failure_to_set_parameters_due_to_abnormal_hostname_file_permissions.md
-          - label: 因 pg_hba.confg 中参数配置问题导致启动或重启集群失败的问题
+          - label: 因 pg_hba.conf 中参数配置问题导致启动或重启集群失败的问题
             href: ./cluster_startup_failure_due_to_incorrect_parameters_in_pg_hba_conf.md
           - label: 因postgres.conf中参数不符合标准导致启动或重启集群失败的问题
             href: ./cluster_startup_failure_due_to_incorrect_parameters_in_postgres_conf.md
