@@ -214,3 +214,7 @@ select(conn, cursor, "test_table1", [[1, 2, 2], [3, 5, 1]], 2)
 drop_table(conn, cursor, "test_table1")
 close_connection(conn, cursor)
 ```
+
+## OpenSearch 风格接口
+
+若业务已使用 OpenSearch 风格的索引/文档/搜索 API，可使用连接器中的兼容层，将 DSL 转换为 openGauss SQL。该接口不是 `opensearch-py` 的零修改替换，安装与限制见 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。

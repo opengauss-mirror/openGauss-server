@@ -860,4 +860,6 @@ model = create_model("my_provider", api_key="xxx")
 
 当 `fallback_to_rrf=True`（默认开启）时，重排序失败会自动回退到 RRF 融合策略，确保检索服务可用性。
 
+若业务已有 OpenSearch DSL（`indices.create` / `search` / `knn_search`），可改用连接器中的兼容层，见 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。无 OpenSearch 包袱时，优先使用本文的 `MultiRetrieverClient`。
+
 [更多示例和源码参考](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)

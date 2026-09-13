@@ -2,6 +2,8 @@
 
 本文档详细介绍 OpenSearch 至 openGauss 数据迁移工具的使用方法及核心迁移规则，帮助用户高效、准确地完成数据迁移工作。
 
+数据迁入之后，若希望继续用 OpenSearch 风格的查询 API 访问 openGauss，请参考 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。本文只覆盖数据导出/导入，不提供查询兼容层。
+
 ## 环境准备
 
 ### 版本限制
