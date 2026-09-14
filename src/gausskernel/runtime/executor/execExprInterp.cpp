@@ -1392,6 +1392,15 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 					ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
 						 errmsg("ANN ORDER BY distance publication does not match the planned reference")));
+				if (scanstate->iss_AnnOrderByHeapRecheck) {
+					if (runtime->quality != ANN_ORDERBY_DISTANCE_EXACT_L2)
+						ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+							errmsg("only exact L2 supports an ANN heap distance recheck")));
+					scanstate->iss_AnnOrderByValue = ExecEvalExpr(runtime->fallback, econtext,
+						&scanstate->iss_AnnOrderByIsNull, NULL);
+					scanstate->iss_AnnOrderByHeapRecheck = false;
+					scanstate->iss_AnnOrderByFallbacks++;
+				}
 				*op->resvalue = scanstate->iss_AnnOrderByValue;
 				*op->resnull = scanstate->iss_AnnOrderByIsNull;
 				scanstate->iss_AnnOrderByReads++;

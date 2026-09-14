@@ -46,6 +46,8 @@ typedef struct AnnOrderByDistanceChannel {
     int requested_mode;
     bool valid;
     bool isnull;
+    /* L2 only: a merged TID need not own the node's stored vector. */
+    bool heap_recheck;
     Datum value;
     AnnOrderByDistanceQuality quality;
     uint64 scan_epoch;

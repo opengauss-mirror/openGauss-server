@@ -32,6 +32,7 @@ static void DiskAnnInvalidateOrderByDistance(IndexScanDesc scan)
 {
     scan->xs_ann_orderby.valid = false;
     scan->xs_ann_orderby.isnull = true;
+    scan->xs_ann_orderby.heap_recheck = false;
     scan->xs_ann_orderby.value = (Datum)0;
     scan->xs_ann_orderby.quality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
     scan->xs_ann_orderby.row_token = 0;
@@ -232,7 +233,12 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
         scan->xs_recheck = false;
         /* [P1-7] exact distance for ORDER BY consumers (non-lossy rerank) */
         if (scan->numberOfOrderBys > 0) {
-            if (cand->outputDistanceReady &&
+            if (cand->outputDistanceReady && cand->heapRecheck) {
+                /* No exact value or lower bound is known for this merged
+                 * TID until the visible heap row has been evaluated. */
+                scan->xs_orderbyvals[0] = (Datum)0;
+                scan->xs_orderbynulls[0] = true;
+            } else if (cand->outputDistanceReady &&
                 cand->outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2) {
                 scan->xs_orderbyvals[0] = Float8GetDatum(cand->outputDistance);
                 scan->xs_orderbynulls[0] = false;
@@ -261,6 +267,7 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
         if (scan->xs_ann_orderby.requested) {
             if (cand->distanceSource != DISKANN_DISTANCE_FULL_INTERNAL ||
                 cand->outputEpoch != so->scanEpoch ||
+                (cand->heapRecheck && cand->outputQuality != ANN_ORDERBY_DISTANCE_EXACT_L2) ||
                 (cand->outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2 &&
                  (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_L2) == 0) ||
                 (cand->outputQuality == ANN_ORDERBY_DISTANCE_APPROX_COSINE &&
@@ -273,6 +280,7 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
             scan->xs_ann_orderby.isnull = false;
             scan->xs_ann_orderby.valid = true;
             scan->xs_ann_orderby.quality = cand->outputQuality;
+            scan->xs_ann_orderby.heap_recheck = cand->heapRecheck;
             scan->xs_ann_orderby.scan_epoch = so->scanEpoch;
             scan->xs_ann_orderby.row_token = ++so->rowToken;
             scan->xs_ann_orderby.heap_tid = cand->heapTid;
@@ -301,7 +309,12 @@ void diskannsearch(DiskAnnScanOpaque so)
     SearchFixedPoint(so);
 
     for (size_t i = 0; i < queue->size(); i++) {
-        queue->_data[i].distance = GetDistance(so, queue->_data[i].id, NULL, NULL);
+        /* Refresh identity together with the full distance. Search-time
+         * TIDs can be stale, and distance-threshold deduplication does not
+         * prove that every TID has the node's stored vector. */
+        queue->_data[i].distance = GetDistance(so, queue->_data[i].id,
+            queue->_data[i].heaptids, &queue->_data[i].heaptidsLength,
+            &queue->_data[i].vectorTid);
         so->scan->xs_ann_orderby.full_distance_evaluations++;
     }
 
@@ -343,6 +356,10 @@ void diskannsearch(DiskAnnScanOpaque so)
                                                .distance = (double)queue->_data[i].distance,
                                                .outputDistance = outputDistance,
                                                .outputDistanceReady = outputDistanceReady,
+                                               .heapRecheck = outputDistanceReady &&
+                                                   outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2 &&
+                                                   !ItemPointerEquals(&queue->_data[i].vectorTid,
+                                                                      &queue->_data[i].heaptids[j]),
                                                .outputQuality = outputQuality,
                                                .distanceSource = distanceSource,
                                                .outputEpoch = outputDistanceReady ? so->scanEpoch : 0};
@@ -441,7 +458,8 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
     }
 }
 
-float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, uint8* heaptidsLength)
+float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids,
+                  uint8* heaptidsLength, ItemPointer vectorTid)
 {
     Buffer buf = ReadBuffer(so->rel, blk);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -457,13 +475,17 @@ float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, u
     DiskAnnNodePage tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     float *query = DatumGetVector(so->value)->x;
     if (heaptids != NULL) {
+        if (tup->heaptidsLength > DISKANN_HEAPTIDS) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("DiskANN node has an invalid heap TID count")));
+        }
         *heaptidsLength = tup->heaptidsLength;
-        for (int i = 0; i < DISKANN_HEAPTIDS; i++) {
-            if (!ItemPointerIsValid(&tup->heaptids[i])) {
-                break;
-            }
+        for (int i = 0; i < tup->heaptidsLength; i++) {
             heaptids[i] = tup->heaptids[i];
         }
+    }
+    if (vectorTid != NULL) {
+        *vectorTid = itup->t_tid;
     }
 
     float distance = DatumGetFloat8(FunctionCall2Coll(so->procinfo, so->collation, so->value, PointerGetDatum(vec)));

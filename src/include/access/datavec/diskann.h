@@ -147,6 +147,8 @@ struct Neighbor {
     bool expanded;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
     uint8 heaptidsLength;
+    /* Captured with the final distance and TID list under one page lock. */
+    ItemPointerData vectorTid;
 
     Neighbor() = default;
 
@@ -491,6 +493,7 @@ struct DiskAnnCandidatesData {
     double distance;
     double outputDistance;
     bool outputDistanceReady;
+    bool heapRecheck;
     AnnOrderByDistanceQuality outputQuality;
     DiskAnnDistanceSource distanceSource;
     uint64 outputEpoch;
@@ -653,7 +656,8 @@ void diskannendscan_internal(IndexScanDesc scan);
 void diskannsearch(DiskAnnScanOpaque so);
 bool IsMarkDeleted(Relation index, BlockNumber master);
 void SearchFixedPoint(DiskAnnScanOpaque so);
-float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, uint8* heaptidsLength);
+float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids,
+                  uint8* heaptidsLength, ItemPointer vectorTid = NULL);
 int CmpIdxScanData(const void *a, const void *b);
 Neighbor *GetNextNeighbor(NeighborPriorityQueue* queue, size_t *idx);
 VamanaVertexNbIterator *CreateIterator(BlockNumber blk, DiskAnnScanOpaque so, uint32_t infoFlag);

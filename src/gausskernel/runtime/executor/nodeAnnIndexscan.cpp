@@ -103,6 +103,7 @@ static AnnOrderByDistanceQuality AnnIndexRuntimeDistanceQuality(IndexScanDesc sc
 static void AnnIndexInvalidateOrderByValue(AnnIndexScanState* node)
 {
     node->iss_AnnOrderByValid = false;
+    node->iss_AnnOrderByHeapRecheck = false;
     node->iss_AnnOrderByIsNull = true;
     node->iss_AnnOrderByValue = (Datum)0;
     node->iss_AnnOrderByQuality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
@@ -126,10 +127,12 @@ static void AnnIndexBindOrderByValue(AnnIndexScanState* node, IndexScanDesc scan
     }
 
     /* Once reuse is selected for this scan, a missing or stale publication
-     * is an AM/executor contract violation.  Falling back for only this row
-     * could mix distance scales in a Merge Append. */
+     * is an AM/executor contract violation. The sole row-local exception
+     * is an explicit L2 heap recheck: both sources return exact SQL L2.
+     * Never silently fall back from an approximate cosine publication. */
     if (!channel->requested || !channel->valid || channel->isnull ||
         channel->quality != node->iss_AnnOrderByExpectedQuality ||
+        (channel->heap_recheck && channel->quality != ANN_ORDERBY_DISTANCE_EXACT_L2) ||
         channel->scan_epoch == 0 || channel->row_token == 0 ||
         !ItemPointerIsValid(&channel->heap_tid) ||
         !ItemPointerIsValid(&scan->xs_ctup.t_self) ||
@@ -144,6 +147,7 @@ static void AnnIndexBindOrderByValue(AnnIndexScanState* node, IndexScanDesc scan
     node->iss_AnnOrderByValue = channel->value;
     node->iss_AnnOrderByIsNull = false;
     node->iss_AnnOrderByValid = true;
+    node->iss_AnnOrderByHeapRecheck = channel->heap_recheck;
     node->iss_AnnOrderByQuality = channel->quality;
     node->iss_AnnOrderByEpoch = channel->scan_epoch;
     node->iss_AnnOrderByRowToken = channel->row_token;

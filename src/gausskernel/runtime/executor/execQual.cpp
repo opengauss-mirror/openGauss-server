@@ -4324,6 +4324,19 @@ static Datum ExecEvalAnnOrderByRef(ExprState* exprstate, ExprContext* econtext, 
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("ANN ORDER BY distance publication does not match the planned reference")));
         }
+        if (scanstate->iss_AnnOrderByHeapRecheck) {
+            /* Old DiskANN indexes may merge unequal vectors by a distance
+             * threshold. Re-evaluate only the unproven L2 TID, then cache
+             * its exact result for other references in the same row. */
+            if (runtime->quality != ANN_ORDERBY_DISTANCE_EXACT_L2) {
+                ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                    errmsg("only exact L2 supports an ANN heap distance recheck")));
+            }
+            scanstate->iss_AnnOrderByValue = ExecEvalExpr(runtime->fallback, econtext,
+                &scanstate->iss_AnnOrderByIsNull, NULL);
+            scanstate->iss_AnnOrderByHeapRecheck = false;
+            scanstate->iss_AnnOrderByFallbacks++;
+        }
         if (isDone != NULL) {
             *isDone = ExprSingleResult;
         }

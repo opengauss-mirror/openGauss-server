@@ -602,41 +602,50 @@ static bool ann_orderby_plan_is_unsafe(PlannerGlobal* glob, Plan* topPlan)
 
 static bool ann_orderby_node_allows_approx(Node* node)
 {
-    /* Approximate cosine may be projected, sorted, limited and passed
-     * through UNION ALL, but must not acquire relational semantics from
-     * grouping, deduplication, joins, windows or recursive/subplan
-     * consumers. */
+    /* Only transparent consumers may inherit an approximate distance.
+     * A blacklist of joins/aggregates misses SubqueryScan.qual and Result
+     * expressions, which can turn rounding into a different query result.
+     * This runs after setrefs: pass-through outputs are Vars, not copies
+     * of the original ORDER BY expression. Unknown consumers fail closed.
+     */
     switch (nodeTag(node)) {
-        case T_Join:
-        case T_NestLoop:
-        case T_VecNestLoop:
-        case T_MergeJoin:
-        case T_VecMergeJoin:
-        case T_HashJoin:
-        case T_VecHashJoin:
-        case T_AsofJoin:
-        case T_VecAsofJoin:
-        case T_Agg:
-        case T_VecAgg:
-        case T_Group:
-        case T_VecGroup:
-        case T_Unique:
-        case T_VecUnique:
-        case T_SetOp:
-        case T_VecSetOp:
-        case T_WindowAgg:
-        case T_VecWindowAgg:
-        case T_RecursiveUnion:
-        case T_VecRecursiveUnion:
-        case T_SortGroup:
-        case T_SubPlan:
-        case T_AlternativeSubPlan:
-        case T_CteScan:
-        case T_WorkTableScan:
-            return false;
-        default:
+        case T_List:
+            /* Append/MergeAppend children are visited through a List. */
             return true;
+        case T_AnnIndexScan:
+            /* Scan quals and other scan outputs still evaluate their own
+             * exact expressions; only whole matching outputs are replaced. */
+            return true;
+        case T_BaseResult:
+            if (((BaseResult*)node)->resconstantqual != NULL) {
+                return false;
+            }
+            break;
+        case T_Limit:
+        case T_Sort:
+        case T_Material:
+        case T_Append:
+        case T_MergeAppend:
+        case T_SubqueryScan:
+            break;
+        default:
+            /* Includes Param: plan_tree_walker can reach an InitPlan via
+             * its PARAM_EXEC without invoking our T_SubPlan callback. */
+            return false;
     }
+
+    Plan* plan = (Plan*)node;
+    if (plan->qual != NIL) {
+        return false;
+    }
+    ListCell* lc = NULL;
+    foreach (lc, plan->targetlist) {
+        Expr* expr = ((TargetEntry*)lfirst(lc))->expr;
+        if (!IsA(expr, Var) && !IsA(expr, Const)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*

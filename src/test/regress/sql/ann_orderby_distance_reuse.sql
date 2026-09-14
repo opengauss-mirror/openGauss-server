@@ -5,6 +5,15 @@ DROP SCHEMA IF EXISTS ann_orderby_reuse_test CASCADE;
 CREATE SCHEMA ann_orderby_reuse_test;
 SET search_path = ann_orderby_reuse_test, public;
 
+-- Execute the SELECT as its own statement before materializing its rows.
+-- Direct CTAS/INSERT has a modifying parent and intentionally cannot prove
+-- that the approximate value is used only for projection/ordering.
+CREATE FUNCTION ann_capture(query_text text) RETURNS SETOF record AS $$
+BEGIN
+    RETURN QUERY EXECUTE query_text;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE ann_l2_t
 (
     id integer PRIMARY KEY,
@@ -45,12 +54,13 @@ ORDER BY embedding <-> '[11,23,35,47]'::vector
 LIMIT 10;
 
 CREATE TEMP TABLE l2_off AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
        id, embedding <-> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 
 -- l2: AM d^2 is converted once with sqrt and projection reads it.
 SET ann_orderby_distance_reuse = l2;
@@ -71,12 +81,13 @@ ORDER BY embedding <-> '[11,23,35,47]'::vector
 LIMIT 10;
 
 CREATE TEMP TABLE l2_exact AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
        id, embedding <-> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 
 SELECT count(*) AS l2_binary_mismatches
 FROM (
@@ -176,12 +187,13 @@ ORDER BY embedding <=> '[11,23,35,47]'::vector
 LIMIT 3;
 
 CREATE TEMP TABLE cosine_approx AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_cos_idx) */
        id, embedding <=> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <=> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 
 -- Validate the documented AM conversion itself, then separately record
 -- its bounded difference from the exact SQL cosine operator.
@@ -264,19 +276,21 @@ ORDER BY embedding <-> '[11,23,35,47]'::vector
 LIMIT 10;
 
 CREATE TEMP TABLE union_reuse_on AS
+SELECT * FROM ann_capture($q$
 SELECT row_id
 FROM live_union
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(row_id bigint);
 
 SET ann_orderby_distance_reuse = off;
 CREATE TEMP TABLE union_reuse_off AS
+SELECT * FROM ann_capture($q$
 SELECT row_id
 FROM live_union
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(row_id bigint);
 
 SELECT count(*) AS union_result_mismatches
 FROM (
@@ -295,6 +309,17 @@ SELECT row_id
 FROM live_union
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
+LIMIT 10;
+
+-- A sibling snapshot anti-join must not disable the transparent delta
+-- branch's cosine projection. Append child Lists are not consumers.
+CREATE INDEX delta_cosine_diskann ON delta_t
+USING diskann (embedding vector_cosine_ops) WITH (index_size = 16);
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+SELECT row_id
+FROM live_union
+WHERE title IS NOT NULL
+ORDER BY embedding <=> '[11,23,35,47]'::vector
 LIMIT 10;
 
 RESET ann_orderby_distance_reuse;

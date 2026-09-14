@@ -2190,6 +2190,7 @@ typedef struct AnnIndexScanState {
     Datum iss_AnnOrderByValue;
     bool iss_AnnOrderByIsNull;
     bool iss_AnnOrderByValid;
+    bool iss_AnnOrderByHeapRecheck;
     AnnOrderByDistanceQuality iss_AnnOrderByQuality;
     AnnOrderByDistanceQuality iss_AnnOrderByExpectedQuality;
     uint64 iss_AnnOrderByEpoch;

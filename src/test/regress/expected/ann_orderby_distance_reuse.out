@@ -3,6 +3,14 @@ SET client_min_messages = warning;
 DROP SCHEMA IF EXISTS ann_orderby_reuse_test CASCADE;
 CREATE SCHEMA ann_orderby_reuse_test;
 SET search_path = ann_orderby_reuse_test, public;
+-- Execute the SELECT as its own statement before materializing its rows.
+-- Direct CTAS/INSERT has a modifying parent and intentionally cannot prove
+-- that the approximate value is used only for projection/ordering.
+CREATE FUNCTION ann_capture(query_text text) RETURNS SETOF record AS $$
+BEGIN
+    RETURN QUERY EXECUTE query_text;
+END;
+$$ LANGUAGE plpgsql;
 CREATE TABLE ann_l2_t
 (
     id integer PRIMARY KEY,
@@ -30,7 +38,8 @@ SHOW ann_orderby_distance_reuse;
  off
 (1 row)
 
--- Default/off: no reference or distance-source diagnostics.
+-- Default/off: no reference is planned; EXPLAIN remains free of
+-- distance-source diagnostics in every mode.
 SET ann_orderby_distance_reuse = off;
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
@@ -51,12 +60,13 @@ LIMIT 10;
 (7 rows)
 
 CREATE TEMP TABLE l2_off AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
        id, embedding <-> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 -- l2: AM d^2 is converted once with sqrt and projection reads it.
 SET ann_orderby_distance_reuse = l2;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -97,12 +107,13 @@ LIMIT 10;
 (8 rows)
 
 CREATE TEMP TABLE l2_exact AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
        id, embedding <-> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 SELECT count(*) AS l2_binary_mismatches
 FROM (
     (SELECT id, float8send(distance) AS bits FROM l2_off
@@ -282,12 +293,13 @@ LIMIT 3;
 (8 rows)
 
 CREATE TEMP TABLE cosine_approx AS
+SELECT * FROM ann_capture($q$
 SELECT /*+ indexscan(ann_l2_t ann_cos_idx) */
        id, embedding <=> '[11,23,35,47]'::vector AS distance
 FROM ann_l2_t
 WHERE title IS NOT NULL
 ORDER BY embedding <=> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(id integer, distance float8);
 -- Validate the documented AM conversion itself, then separately record
 -- its bounded difference from the exact SQL cosine operator.
 SET ann_orderby_distance_reuse = off;
@@ -301,7 +313,7 @@ WHERE float8send(r.distance) IS DISTINCT FROM float8send(
                   l2_normalize('[11,23,35,47]'::vector)))));
  cosine_conversion_mismatches 
 ------------------------------
-                            9
+                            0
 (1 row)
 
 SELECT count(*) AS cosine_values_different_from_exact
@@ -311,7 +323,7 @@ WHERE float8send(r.distance) IS DISTINCT FROM
       float8send(t.embedding <=> '[11,23,35,47]'::vector);
  cosine_values_different_from_exact 
 ------------------------------------
-                                  0
+                                  9
 (1 row)
 
 SELECT bool_and(r.distance >= 0.0 AND r.distance <= 2.0) AS cosine_in_range,
@@ -418,18 +430,20 @@ LIMIT 10;
 (29 rows)
 
 CREATE TEMP TABLE union_reuse_on AS
+SELECT * FROM ann_capture($q$
 SELECT row_id
 FROM live_union
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(row_id bigint);
 SET ann_orderby_distance_reuse = off;
 CREATE TEMP TABLE union_reuse_off AS
+SELECT * FROM ann_capture($q$
 SELECT row_id
 FROM live_union
 WHERE title IS NOT NULL
 ORDER BY embedding <-> '[11,23,35,47]'::vector
-LIMIT 10;
+LIMIT 10$q$) AS r(row_id bigint);
 SELECT count(*) AS union_result_mismatches
 FROM (
     (SELECT row_id FROM union_reuse_on
@@ -464,6 +478,49 @@ LIMIT 10;
       7
      12
 (10 rows)
+
+-- A sibling snapshot anti-join must not disable the transparent delta
+-- branch's cosine projection. Append child Lists are not consumers.
+CREATE INDEX delta_cosine_diskann ON delta_t
+USING diskann (embedding vector_cosine_ops) WITH (index_size = 16);
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+SELECT row_id
+FROM live_union
+WHERE title IS NOT NULL
+ORDER BY embedding <=> '[11,23,35,47]'::vector
+LIMIT 10;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual rows=10 loops=1)
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[11,23,35,47]'::vector))
+   ->  Result (actual rows=10 loops=1)
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[11,23,35,47]'::vector))
+         ->  Merge Append (actual rows=10 loops=1)
+               Sort Key: ((delta_t.embedding <=> '[11,23,35,47]'::vector))
+               ->  Limit (actual rows=4 loops=1)
+                     Output: delta_t.row_id, ((delta_t.embedding <=> '[11,23,35,47]'::vector))
+                     ->  Ann Index Scan using delta_cosine_diskann on ann_orderby_reuse_test.delta_t (actual rows=4 loops=1)
+                           Output: delta_t.row_id, ((delta_t.embedding <=> '[11,23,35,47]'::vector))
+                           Order By: (delta_t.embedding <=> '[11,23,35,47]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.title IS NOT NULL)
+               ->  Limit (actual rows=7 loops=1)
+                     Output: s.row_id, ((s.embedding <=> '[11,23,35,47]'::vector))
+                     ->  Sort (actual rows=7 loops=1)
+                           Output: s.row_id, ((s.embedding <=> '[11,23,35,47]'::vector))
+                           Sort Key: ((s.embedding <=> '[11,23,35,47]'::vector))
+                           Sort Method: top-N heapsort  Memory: 27kB
+                           ->  Merge Anti Join (actual rows=21 loops=1)
+                                 Output: s.row_id, (s.embedding <=> '[11,23,35,47]'::vector)
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Index Scan using snapshot_t_pkey on ann_orderby_reuse_test.snapshot_t s (actual rows=24 loops=1)
+                                       Output: s.row_id, s.embedding
+                                       Filter: (s.title IS NOT NULL)
+                                 ->  Index Only Scan using delete_t_pkey on ann_orderby_reuse_test.delete_t d (actual rows=3 loops=1)
+                                       Output: d.row_id
+                                       Heap Fetches: 3
+--? Total runtime: .* ms
+(29 rows)
 
 RESET ann_orderby_distance_reuse;
 RESET enable_union_all_diskann_topk_pushdown;
