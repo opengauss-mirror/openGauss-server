@@ -40,6 +40,7 @@
 #include "utils/typcache.h"
 #include "instruments/instr_unique_sql.h"
 #include "commands/sqladvisor.h"
+#include "commands/extension.h"
 #include "access/hash.h"
 #include "instruments/instr_handle_mgr.h"
 #include "distributelayer/streamMain.h"
@@ -1008,6 +1009,7 @@ void stp_reset_xact()
     stp_cleanup_subxact_resource(-1);
     /* reset stack counter for xact. */
     u_sess->plsql_cxt.nextStackEntryId = 0;
+    u_sess->plsql_cxt.trycatch_depth = 0;
 }
 
 /* reset store procedure context for each statement. */
@@ -3950,12 +3952,14 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
             PLpgSqlTrycatchState save_trycatch_state = estate->trycatchState;
 
             estate->trycatchState = IN_TRY_CATCH_BLOCK;
+            u_sess->plsql_cxt.trycatch_depth++;
 
             PG_TRY();
             {
                 estate->err_text = NULL;
 
                 rc = exec_stmts(estate, block->body);
+                u_sess->plsql_cxt.trycatch_depth--;
                 estate->trycatchState = save_trycatch_state;
 
 #ifdef ENABLE_MOT
@@ -3970,6 +3974,7 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 LockErrorCleanup();
                 ExceptionContext excptContext;
                 exec_exception_begin(estate, &excptContext);
+                u_sess->plsql_cxt.trycatch_depth--;
 
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
                 u_sess->SPI_cxt.is_stp = savedIsSTP;
@@ -5107,7 +5112,10 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             MemoryContext oldcontext = CurrentMemoryContext;
             ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
             if (DB_IS_CMPT(D_FORMAT) && !estate->func->xact_abort && IsTransactionOrTransactionBlock() &&
-                !u_sess->attr.attr_common.IsInplaceUpgrade) {
+                !u_sess->attr.attr_common.IsInplaceUpgrade &&
+                !u_sess->plsql_cxt.in_extension_create &&
+                strcmp(estate->func->fn_signature, "inline_code_block") != 0
+		&& u_sess->plsql_cxt.trycatch_depth == 0) {
                 BeginInternalSubTransaction(NULL);
                 MemoryContextSwitchTo(oldcontext);
             }
@@ -5115,7 +5123,10 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             {
                 rc = exec_stmt_execsql(estate, (PLpgSQL_stmt_execsql*)stmt);
                 if (DB_IS_CMPT(D_FORMAT) && !estate->func->xact_abort && IsTransactionOrTransactionBlock() &&
-                    !u_sess->attr.attr_common.IsInplaceUpgrade) {
+                    !u_sess->attr.attr_common.IsInplaceUpgrade &&
+                    !u_sess->plsql_cxt.in_extension_create &&
+                    strcmp(estate->func->fn_signature, "inline_code_block") != 0
+		    && u_sess->plsql_cxt.trycatch_depth == 0) {
                     ReleaseCurrentSubTransaction();
                     MemoryContextSwitchTo(oldcontext);
                     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
@@ -5124,10 +5135,21 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             PG_CATCH();
             {
                 if (DB_IS_CMPT(D_FORMAT) && !estate->func->xact_abort && IsTransactionOrTransactionBlock() &&
-                    !u_sess->attr.attr_common.IsInplaceUpgrade) {
+                    !u_sess->attr.attr_common.IsInplaceUpgrade &&
+                    !u_sess->plsql_cxt.in_extension_create &&
+                    strcmp(estate->func->fn_signature, "inline_code_block") != 0
+		    && u_sess->plsql_cxt.trycatch_depth == 0) {
                     RollbackAndReleaseCurrentSubTransaction();
                     MemoryContextSwitchTo(oldcontext);
                     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+                    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+                    int saved_elevel = edata->elevel;
+                    bool saved_output_to_client = edata->output_to_client;
+                    edata->elevel = WARNING;
+                    edata->output_to_client = true;
+                    EmitErrorReport();
+                    edata->elevel = saved_elevel;
+                    edata->output_to_client = saved_output_to_client;
                     FlushErrorState();
                     SPI_STACK_LOG("end", ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->query, NULL);
                     _SPI_end_call(true);

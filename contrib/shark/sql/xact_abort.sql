@@ -157,6 +157,84 @@ END;
 /
 CALL d_dbproc.proc5();
 select * from t1;
+
+drop procedure if exists p1;
+drop procedure if exists p2;
+drop procedure if exists p3;
+drop procedure if exists p4;
+drop table if exists test;
+
+show xact_abort;
+set xact_abort = on;
+CREATE TABLE test(a int);
+CREATE OR REPLACE PROCEDURE p1()
+AS
+BEGIN
+  select 1/0;
+END;
+/
+CREATE OR REPLACE PROCEDURE p2()
+AS
+BEGIN
+   BEGIN TRY
+	   delete from test;
+	   insert into test values(1);
+	   insert into test values(2);
+	   call p1();
+	   insert into test values(3);
+   END TRY
+   BEGIN CATCH
+	   insert into test values(4);
+	   RAISE NOTICE 'ERROR_NUMBER() is %', ERROR_NUMBER();
+	   RAISE NOTICE 'ERROR_SEVERITY() is %', ERROR_SEVERITY();
+	   RAISE NOTICE 'ERROR_STATE() is %', ERROR_STATE();
+	   RAISE NOTICE 'ERROR_PROCEDURE() is %', ERROR_PROCEDURE();
+	   RAISE NOTICE 'ERROR_LINE() is %', ERROR_LINE();
+	   RAISE NOTICE 'ERROR_MESSAGE() is %', ERROR_MESSAGE();
+   END CATCH;
+END;
+/
+CALL p1();
+CALL p2();
+select * from test;
+
+set xact_abort = off;
+CALL p1();
+CALL p2();
+select * from test;
+
+set xact_abort = on;
+CREATE OR REPLACE PROCEDURE p3()
+AS
+BEGIN
+  delete from test;
+  insert into test values(33);
+  select 1/0;
+  insert into test values(5);
+END;
+/
+call p3();
+select * from test;
+
+set xact_abort = off;
+CREATE OR REPLACE PROCEDURE p4()
+AS
+BEGIN
+  delete from test;
+  insert into test values(44);
+  select 1/0;
+  insert into test values(5);
+END;
+/
+call p4();
+select * from test;
+
+drop procedure if exists p1;
+drop procedure if exists p2;
+drop procedure if exists p3;
+drop procedure if exists p4;
+drop table if exists test;
+
 --dump
 drop schema d_dbproc cascade;
 alter user tester2 set xact_abort to on;
