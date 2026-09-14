@@ -59,6 +59,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
+#include "utils/guc.h"
 #include "utils/xml.h"
 #include "access/hash.h"
 #include "access/transam.h"
@@ -125,6 +126,7 @@ static Datum ExecEvalConvertRowtype(
    ConvertRowtypeExprState* cstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalCase(CaseExprState* caseExpr, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalCaseTestExpr(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+static Datum ExecEvalAnnOrderByRef(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalArray(ArrayExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalRow(RowExprState* rstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static Datum ExecEvalRowCompare(RowCompareExprState* rstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -4303,6 +4305,37 @@ static Datum ExecEvalCaseTestExpr(ExprState* exprstate, ExprContext* econtext, b
    return econtext->caseValue_datum;
 }
 
+static Datum ExecEvalAnnOrderByRef(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    AnnOrderByRefExprRuntime* runtime = (AnnOrderByRefExprRuntime*)exprstate->evalfunc_private;
+    AnnIndexScanState* scanstate = runtime->scanstate;
+
+    if (scanstate == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("ANN ORDER BY reference is not owned by an AnnIndexScan")));
+    }
+
+    if (scanstate->iss_AnnOrderByExpectedQuality != ANN_ORDERBY_DISTANCE_UNAVAILABLE) {
+        if (!scanstate->iss_AnnOrderByValid ||
+            scanstate->iss_AnnOrderByQuality != runtime->quality ||
+            scanstate->iss_AnnOrderByExpectedQuality != runtime->quality) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("ANN ORDER BY distance publication does not match the planned reference")));
+        }
+        if (isDone != NULL) {
+            *isDone = ExprSingleResult;
+        }
+        scanstate->iss_AnnOrderByReads++;
+        *isNull = scanstate->iss_AnnOrderByIsNull;
+        return scanstate->iss_AnnOrderByValue;
+    }
+
+    scanstate->iss_AnnOrderByFallbacks++;
+    return ExecEvalExpr(runtime->fallback, econtext, isNull, isDone);
+}
+
 /*
 * ExecEvalGroupingFuncExpr
 *
@@ -6066,6 +6099,22 @@ ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent)
            state->is_flt_frame = false;
            state->evalfunc = ExecEvalCaseTestExpr;
            break;
+       case T_AnnOrderByRef: {
+           AnnOrderByRef* ref = (AnnOrderByRef*)node;
+           AnnOrderByRefExprRuntime* runtime =
+               (AnnOrderByRefExprRuntime*)palloc0(sizeof(AnnOrderByRefExprRuntime));
+
+           state = (ExprState*)makeNode(ExprState);
+           state->is_flt_frame = false;
+           state->evalfunc = ExecEvalAnnOrderByRef;
+           runtime->scanstate = (parent != NULL && IsA(parent, AnnIndexScanState))
+               ? (AnnIndexScanState*)parent
+               : NULL;
+           runtime->fallback = ExecInitExprByRecursion(ref->original_expr, parent);
+           runtime->quality = (AnnOrderByDistanceQuality)ref->quality;
+           state->evalfunc_private = runtime;
+           break;
+       }
        case T_Aggref: {
            Aggref* aggref = (Aggref*)node;
            AggrefExprState* astate = makeNode(AggrefExprState);

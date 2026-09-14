@@ -589,6 +589,15 @@ static bool _equalCaseTestExpr(const CaseTestExpr* a, const CaseTestExpr* b)
     return true;
 }
 
+static bool _equalAnnOrderByRef(const AnnOrderByRef* a, const AnnOrderByRef* b)
+{
+    COMPARE_SCALAR_FIELD(orderby_index);
+    COMPARE_SCALAR_FIELD(quality);
+    COMPARE_NODE_FIELD(original_expr);
+
+    return true;
+}
+
 static bool _equalArrayExpr(const ArrayExpr* a, const ArrayExpr* b)
 {
     COMPARE_SCALAR_FIELD(array_typeid);
@@ -4038,6 +4047,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_CaseTestExpr:
             retval = _equalCaseTestExpr((CaseTestExpr*)a, (CaseTestExpr*)b);
+            break;
+        case T_AnnOrderByRef:
+            retval = _equalAnnOrderByRef((AnnOrderByRef*)a, (AnnOrderByRef*)b);
             break;
         case T_ArrayExpr:
             retval = _equalArrayExpr((ArrayExpr*)a, (ArrayExpr*)b);

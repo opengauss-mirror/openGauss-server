@@ -981,6 +981,24 @@ typedef struct CaseTestExpr {
 } CaseTestExpr;
 
 /*
+ * AnnOrderByRef
+ *
+ * A post-setrefs executor reference to the current DiskANN candidate's
+ * already-computed ORDER BY distance.  original_expr is retained both for
+ * EXPLAIN deparsing and as the fail-closed executor fallback when the
+ * runtime policy or AM channel cannot satisfy the planned contract.
+ *
+ * This node is deliberately introduced only in an AnnIndexScan targetlist;
+ * it is not parser-visible and must never be treated as a Var.
+ */
+typedef struct AnnOrderByRef {
+    Expr xpr;
+    int orderby_index; /* zero-based index into the AM ORDER BY channel */
+    int quality;       /* AnnOrderByDistanceQuality, kept as int to avoid an access-header dependency */
+    Expr* original_expr;
+} AnnOrderByRef;
+
+/*
  * ArrayExpr - an ARRAY[] expression
  *
  * Note: if multidims is false, the constituent expressions all yield the

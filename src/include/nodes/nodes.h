@@ -730,6 +730,9 @@ typedef enum NodeTag {
     /*
      * Vectorized Plan Nodes
      */
+    /* Executor-only ANN result reference.  Keep an explicit value below the
+     * vectorized-node range so adding it does not renumber existing tags. */
+    T_AnnOrderByRef = 999,
     T_VecPlan = 1000,
     T_VecResult,
     T_VecModifyTable,

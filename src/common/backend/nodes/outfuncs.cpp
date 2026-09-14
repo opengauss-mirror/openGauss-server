@@ -3212,6 +3212,15 @@ static void _outCaseTestExpr(StringInfo str, CaseTestExpr* node)
     WRITE_TYPEINFO_FIELD(typeId);
 }
 
+static void _outAnnOrderByRef(StringInfo str, AnnOrderByRef* node)
+{
+    WRITE_NODE_TYPE("ANNORDERBYREF");
+
+    WRITE_INT_FIELD(orderby_index);
+    WRITE_INT_FIELD(quality);
+    WRITE_NODE_FIELD(original_expr);
+}
+
 static void _outArrayExpr(StringInfo str, ArrayExpr* node)
 {
     WRITE_NODE_TYPE("ARRAY");
@@ -7211,6 +7220,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CaseTestExpr:
                 _outCaseTestExpr(str, (CaseTestExpr*)obj);
+                break;
+            case T_AnnOrderByRef:
+                _outAnnOrderByRef(str, (AnnOrderByRef*)obj);
                 break;
             case T_ArrayExpr:
                 _outArrayExpr(str, (ArrayExpr*)obj);
