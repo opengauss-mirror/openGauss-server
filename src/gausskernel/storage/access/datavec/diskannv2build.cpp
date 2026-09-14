@@ -25,8 +25,32 @@
  *                  reduces the dimension; M = W * P
  *          Encode  VtTransform + ComputeVectorRBQCodeBits (rabitq) into the
  *                  code slots; entry = vector closest to the mean
+ *          Graph   Vamana graph over EXACT original-space distances built by
+ *                  the shared DiskAnnGraph::Link algorithm (diskannutils.cpp)
+ *                  through DiskAnnV2MemGraphStore: two rounds over all nodes,
+ *                  candidate list L = index_size, alpha = 1.2 RobustPrune over
+ *                  the whole visited set to out-degree <= 64, reverse-edge
+ *                  InterInsert
  *          Write   transform / code / graph regions sequentially, full-page
  *                  WAL afterwards, meta page (version 2) last
+ *        Vector source (GUC diskann_build_in_memory):
+ *          on   the heap scan copies every (normalized) vector into a chunked
+ *               instance-memory array; encode and graph read the array
+ *          off  nothing but the per-node TIDs, norms, codes and adjacency stay
+ *               in memory; encode and graph re-read each vector from the heap
+ *               through the buffer pool by the node's first TID
+ *               (DiskAnnV2HeapVector: ReadBuffer + heap_getattr + detoast,
+ *               pin released at once; the cosine opclass rescales the raw
+ *               vector by the node's scan-time 1 / |x|, so no norm is
+ *               recomputed and the floats equal the scan's). CREATE INDEX
+ *               holds ShareLock, so TIDs do not move. The bitwise-duplicate
+ *               check on a hash hit also re-reads the candidate node's vector.
+ *               The graph search reads one vector per distance; a prune
+ *               materializes its pool once (DiskAnnGraphStore::PrefetchPool
+ *               -> per-store cache of <= INDEXINGMAXC + degree + 1 vectors)
+ *               and pairs it from there.
+ *        One DiskAnnGraph (scratch lists, candidate queue) and one store
+ *        (generation-stamped visited array, pool cache) serve every Link.
  *
  * IDENTIFICATION
  *        src/gausskernel/storage/access/datavec/diskannv2build.cpp
@@ -43,6 +67,7 @@
 #include "access/tableam.h"
 #include "catalog/index.h"
 #include "catalog/pg_type.h"
+#include "knl/knl_session.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "utils/memutils.h"
@@ -50,8 +75,16 @@
 #include "access/datavec/vector.h"
 #include "access/datavec/diskannv2.h"
 
+#define DISKANN_V2_GRAPH_ROUNDS 2
+
 /* encode work chunk (CHECK_FOR_INTERRUPTS granularity) */
 #define DISKANN_V2_ENCODE_CHUNK 256
+
+/* buffer-pool source: per-store cache of the prune pool vectors (PrefetchPool):
+ * a Link pool holds <= INDEXINGMAXC + 1 nodes, an InterInsert re-prune pool <= degree + 2 */
+#define DISKANN_V2_POOL_CACHE_CAP (INDEXINGMAXC + DISKANN_V2_DEGREE + 1)
+#define DISKANN_V2_POOL_CACHE_HASH 2048 /* power of two, >= 2 x CAP */
+#define DISKANN_V2_LINK_INTERRUPT_MASK 0x3FF
 
 /* in-memory vector array: fixed-size chunks so the heap scan can grow it
  * without knowing the row count and without a 2x copy on growth */
@@ -214,7 +247,12 @@ typedef struct DiskAnnV2BuildState {
     bool usePca;
     uint8 bits;
     FmgrInfo* normprocinfo;
-    bool normalize; /* cosine opclass: vectors are indexed normalized */
+
+    /* vector source: in-memory array (inMemory) or heap re-read by TID */
+    bool inMemory;
+    bool normalize;  /* cosine opclass: vectors are indexed normalized */
+    AttrNumber attno; /* heap attribute of the indexed column (buffer-pool source) */
+    float* cmpBuf;    /* dimIn scratch for the duplicate check (buffer-pool source) */
 
     /* scan */
     uint32 nnodes;
@@ -243,12 +281,22 @@ typedef struct DiskAnnV2BuildState {
     uint16* gcount; /* nnodes */
     uint32 frozen;
 
+    /* graph construction through DiskAnnGraph::Link */
+    double* norms; /* nnodes squared norms for ComputeL2DistanceFast (instance memory) */
+    /*
+     * cosine opclass: 1 / |raw vector| per node (instance memory, nodeCap), taken
+     * during the scan. The scan normalizes with it and the buffer-pool source
+     * re-normalizes a re-read raw vector with the very same factor
+     * (NormalizeVector), so both sources yield the bitwise-equal vector
+     * without recomputing the norm per read. NULL for L2 / IP.
+     */
+    float* invNorms;
     float* normBuf; /* dimIn scratch: normalized vector of the row being scanned */
 
     MemoryContext buildCtx;
 } DiskAnnV2BuildState;
 
-/* cosine opclass: out = raw * inv */
+/* cosine opclass: out = raw * inv, the one arithmetic every vector source uses */
 static inline void NormalizeVector(const float* raw, float inv, int dim, float* out)
 {
     for (int i = 0; i < dim; i++) {
@@ -259,6 +307,45 @@ static inline void NormalizeVector(const float* raw, float inv, int dim, float* 
 static inline DiskAnnV2CodeSlot* BuildCodeSlot(const DiskAnnV2BuildState* state, uint32 nodeId)
 {
     return (DiskAnnV2CodeSlot*)(state->codes + (Size)nodeId * state->codeSlotSize);
+}
+
+/* ------------------------------------------------------ vector source */
+
+/*
+ * Buffer-pool source: the vector of node `id` (first TID) into `out`, with the
+ * same preprocessing as the heap scan: the raw vector is read back and, for
+ * the cosine opclass, scaled by the node's scan-time 1 / |x| (no norm is
+ * recomputed per read). Under the ShareLock of CREATE INDEX every TID the
+ * scan handed out is still there, so a miss is an error.
+ */
+static void FetchNodeVector(const DiskAnnV2BuildState* state, uint32 id, float* out)
+{
+    const ItemPointer tid = &state->tids[(Size)id * DISKANN_HEAPTIDS];
+    DiskAnnV2HeapVecArgs hv;
+    hv.heap = state->heap;
+    hv.tid = tid;
+    hv.attno = state->attno;
+    hv.normalize = false;
+    hv.dim = state->dimIn;
+    hv.out = out;
+    if (!DiskAnnV2HeapVector(&hv)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("diskann: heap row (%u,%u) of node %u vanished during the index build",
+                               ItemPointerGetBlockNumber(tid), ItemPointerGetOffsetNumber(tid), id)));
+    }
+    if (state->normalize) {
+        NormalizeVector(out, state->invNorms[id], state->dimIn, out);
+    }
+}
+
+/* the vector of node `id`: the array element (in-memory) or a heap re-read into `buf` */
+static inline const float* NodeVector(const DiskAnnV2BuildState* state, uint32 id, float* buf)
+{
+    if (state->inMemory) {
+        return VecAt(&state->vecs, id);
+    }
+    FetchNodeVector(state, id, buf);
+    return buf;
 }
 
 /* ------------------------------------------------------------------ scan */
@@ -276,6 +363,18 @@ static void NodesEnsure(DiskAnnV2BuildState* state, uint32 need)
     } else {
         state->tids = (ItemPointerData*)repalloc_huge(state->tids, tidBytes);
         state->ntids = (uint8*)repalloc_huge(state->ntids, (Size)newCap);
+    }
+    MemoryContext instCtx = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+    if (!state->inMemory) {
+        /* buffer-pool source: norms are taken during the scan (no array to recompute them from later) */
+        Size normBytes = sizeof(double) * (Size)newCap;
+        state->norms = (state->norms == NULL) ? (double*)palloc_huge(instCtx, normBytes)
+                                              : (double*)repalloc_huge(state->norms, normBytes);
+    }
+    if (state->normalize) {
+        Size invBytes = sizeof(float) * (Size)newCap;
+        state->invNorms = (state->invNorms == NULL) ? (float*)palloc_huge(instCtx, invBytes)
+                                                    : (float*)repalloc_huge(state->invNorms, invBytes);
     }
     state->nodeCap = newCap;
 }
@@ -302,15 +401,17 @@ static void SampleVector(DiskAnnV2BuildState* state, const float* x)
     }
 }
 
-/* one indexed row (x = indexed vector): merge into a bitwise-equal node or open a new one */
-static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x)
+/* one indexed row (x = indexed vector, inv = 1 / |raw| for cosine):
+ * merge into a bitwise-equal node or open a new one */
+static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x, float inv)
 {
     uint64 h = HashVector(x, state->dimIn);
     DiskAnnV2DupTable* t = &state->dup;
     uint32 pos = (uint32)h & t->mask;
     while (t->ids[pos] != DISKANN_V2_INVALID_NODE) {
+        /* hash hit is almost always a true duplicate; buffer-pool source re-reads rarely */
         if (t->hashes[pos] == h &&
-            memcmp(VecAt(&state->vecs, t->ids[pos]), x, sizeof(float) * (Size)state->dimIn) == 0) {
+            memcmp(NodeVector(state, t->ids[pos], state->cmpBuf), x, sizeof(float) * (Size)state->dimIn) == 0) {
             uint32 id = t->ids[pos];
             if (state->ntids[id] < DISKANN_HEAPTIDS) {
                 state->tids[(Size)id * DISKANN_HEAPTIDS + state->ntids[id]] = *tid;
@@ -324,7 +425,18 @@ static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x)
 
     uint32 nodeId = state->nnodes;
     NodesEnsure(state, nodeId + 1);
-    VecStoreAppend(&state->vecs, x);
+    if (state->inMemory) {
+        VecStoreAppend(&state->vecs, x);
+    } else {
+        double acc = 0;
+        for (int c = 0; c < state->dimIn; c++) {
+            acc += (double)x[c] * x[c];
+        }
+        state->norms[nodeId] = acc;
+    }
+    if (state->normalize) {
+        state->invNorms[nodeId] = inv;
+    }
     state->tids[(Size)nodeId * DISKANN_HEAPTIDS] = *tid;
     state->ntids[nodeId] = 1;
     state->nnodes++;
@@ -360,8 +472,13 @@ static void BuildCallback(Relation index, HeapTuple hup, Datum* values, const bo
     }
     MemoryContextSwitchTo(oldCtx);
 
-    /* cosine opclass: skip zero vectors, index x * (1 / |x|) */
+    /*
+     * cosine opclass: skip zero vectors, index x * (1 / |x|). The factor is kept
+     * per node so the buffer-pool source reproduces the same floats from the
+     * raw row (FetchNodeVector) without recomputing the norm.
+     */
     const float* x = vec->x;
+    float inv = 0.0f;
     if (state->normalize) {
         double sq = 0;
         for (int i = 0; i < state->dimIn; i++) {
@@ -371,7 +488,8 @@ static void BuildCallback(Relation index, HeapTuple hup, Datum* values, const bo
             MemoryContextReset(state->rowCtx);
             return;
         }
-        NormalizeVector(vec->x, (float)(1.0 / sqrt(sq)), state->dimIn, state->normBuf);
+        inv = (float)(1.0 / sqrt(sq));
+        NormalizeVector(vec->x, inv, state->dimIn, state->normBuf);
         x = state->normBuf;
     }
 
@@ -381,7 +499,7 @@ static void BuildCallback(Relation index, HeapTuple hup, Datum* values, const bo
     if (state->samples != NULL) {
         SampleVector(state, x);
     }
-    AddRow(state, tid, x);
+    AddRow(state, tid, x, inv);
     state->reltuples += 1;
 
     MemoryContextReset(state->rowCtx);
@@ -422,6 +540,7 @@ typedef struct DiskAnnV2EncodeRange {
     uint32 from;
     uint32 to;
     float* y;
+    float* xbuf;
     uint32* bestId;
     float* bestDist;
 } DiskAnnV2EncodeRange;
@@ -430,7 +549,7 @@ static void EncodeRange(const DiskAnnV2EncodeRange* args)
 {
     const DiskAnnV2BuildState* state = args->state;
     for (uint32 i = args->from; i < args->to; i++) {
-        const float* x = VecAt(&state->vecs, i);
+        const float* x = NodeVector(state, i, args->xbuf);
         VtTransform(state->vt, x, args->y);
         RbqBitsArgs rbq;
         rbq.dim = state->dimOut;
@@ -452,6 +571,7 @@ static void EncodeRange(const DiskAnnV2EncodeRange* args)
 static void EncodeAll(DiskAnnV2BuildState* state)
 {
     float* y = (float*)palloc(sizeof(float) * (Size)state->dimOut);
+    float* xbuf = (float*)palloc(sizeof(float) * (Size)state->dimIn);
     uint32 bestId = 0;
     float bestDist = FLT_MAX;
 
@@ -461,13 +581,381 @@ static void EncodeAll(DiskAnnV2BuildState* state)
         range.from = start;
         range.to = Min(start + DISKANN_V2_ENCODE_CHUNK, state->nnodes);
         range.y = y;
+        range.xbuf = xbuf;
         range.bestId = &bestId;
         range.bestDist = &bestDist;
         EncodeRange(&range);
         CHECK_FOR_INTERRUPTS();
     }
     state->frozen = bestId;
+    pfree(xbuf);
     pfree(y);
+}
+
+/* ---------------------------------------------------------------- graph */
+
+static bool GraphContains(const uint32* nbrs, int cnt, uint32 id)
+{
+    for (int i = 0; i < cnt; i++) {
+        if (nbrs[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* ------------------------------------------------ DiskAnnGraph::Link reuse
+ *
+ * Storage adapter that lets the shared Vamana algorithm layer (DiskAnnGraph
+ * in diskannutils.cpp) build the in-memory v2 graph. Vectors come from the
+ * shared chunked array (in-memory source) or from the heap by TID (buffer-pool
+ * source): the greedy search re-reads one vector per ComputeDistance, while a
+ * prune (RobustPrune over <= INDEXINGMAXC candidates, or the reverse-edge
+ * re-prune of InterInsert) first materializes the vectors of its pool once
+ * through PrefetchPool into a per-store cache that GetDistance consults, so
+ * the O(pool^2) pair distances cost no heap reads. Distances are exact L2 for
+ * every opclass (like the version 1 build), adjacency lives in graph/gcount and is
+ * snapshotted or replaced as a whole. Edge distances are not stored (v2 slots keep ids only;
+ * DiskAnnGraph never reads them back). Bitwise duplicates were merged during
+ * the heap scan, so a zero distance here is a distinct node and
+ * MergeDuplicate declines.
+ */
+class DiskAnnV2MemGraphStore : public DiskAnnGraphStore {
+public:
+    explicit DiskAnnV2MemGraphStore(const DiskAnnV2BuildState* state) : m_state(state)
+    {
+        m_edgeSize = sizeof(DiskAnnEdgePageData);
+        m_visitGen = (uint32*)palloc0(sizeof(uint32) * (Size)Max(state->nnodes, 1u));
+        if (!state->inMemory) {
+            m_bufA = (float*)palloc(sizeof(float) * (Size)state->dimIn);
+            m_bufB = (float*)palloc(sizeof(float) * (Size)state->dimIn);
+            m_cacheVecs = (float*)palloc(sizeof(float) * (Size)DISKANN_V2_POOL_CACHE_CAP * (Size)state->dimIn);
+            m_cacheKeys = (uint32*)palloc(sizeof(uint32) * (Size)DISKANN_V2_POOL_CACHE_HASH);
+            m_cacheSlots = (uint16*)palloc(sizeof(uint16) * (Size)DISKANN_V2_POOL_CACHE_HASH);
+            m_cacheGen = (uint32*)palloc0(sizeof(uint32) * (Size)DISKANN_V2_POOL_CACHE_HASH);
+        }
+    }
+
+    ~DiskAnnV2MemGraphStore() override
+    {
+        pfree_ext(m_visitGen);
+        pfree_ext(m_bufA);
+        pfree_ext(m_bufB);
+        pfree_ext(m_cacheVecs);
+        pfree_ext(m_cacheKeys);
+        pfree_ext(m_cacheSlots);
+        pfree_ext(m_cacheGen);
+    }
+
+    void GetVector(BlockNumber id, float* vec, double* sqrSum, ItemPointerData* hctid) const override
+    {
+        if (m_state->inMemory) {
+            Size bytes = sizeof(float) * (Size)m_state->dimIn;
+            errno_t rc = memcpy_s(vec, bytes, VecAt(&m_state->vecs, id), bytes);
+            if (rc != EOK) {
+                securec_check(rc, "\0", "\0");
+            }
+        } else {
+            FetchNodeVector(m_state, id, vec);
+        }
+        *sqrSum = m_state->norms[id];
+        ItemPointerSetInvalid(hctid);
+    }
+
+    float GetDistance(BlockNumber a, BlockNumber b) const override
+    {
+        if (m_state->inMemory) {
+            return ComputeL2DistanceFast(VecAt(&m_state->vecs, a), m_state->norms[a], VecAt(&m_state->vecs, b),
+                                         m_state->norms[b], (uint16_t)m_state->dimIn);
+        }
+        /* prune pairs hit the pool cache; any other pair falls back to a heap read */
+        const float* va = CachedVector(a);
+        if (va == NULL) {
+            FetchNodeVector(m_state, a, m_bufA);
+            va = m_bufA;
+        }
+        const float* vb = CachedVector(b);
+        if (vb == NULL) {
+            FetchNodeVector(m_state, b, m_bufB);
+            vb = m_bufB;
+        }
+        return ComputeL2DistanceFast(va, m_state->norms[a], vb, m_state->norms[b], (uint16_t)m_state->dimIn);
+    }
+
+    /*
+     * Buffer-pool source: make the vectors of `location` and every pool member
+     * resident in the cache before the prune reads them pairwise. Entries left
+     * by earlier prunes stay valid (vectors never change under the ShareLock),
+     * so only the missing ones are read; the cache is emptied first when they
+     * would not fit. A Link pool (<= INDEXINGMAXC + 1) always fits an empty
+     * cache, the InterInsert pools (<= degree + 2) usually fit next to it.
+     */
+    void PrefetchPool(BlockNumber location, const VectorList<Neighbor>* pool) override
+    {
+        if (m_state->inMemory) {
+            return;
+        }
+        uint32 missing = (CachedVector(location) == NULL) ? 1 : 0;
+        for (size_t i = 0; i < pool->size(); i++) {
+            if (CachedVector((*pool)[i].id) == NULL) {
+                missing++;
+            }
+        }
+        if (missing == 0) {
+            return;
+        }
+        if (m_cacheCount + missing > DISKANN_V2_POOL_CACHE_CAP) {
+            CacheReset();
+        }
+        CacheInsert(location);
+        for (size_t i = 0; i < pool->size(); i++) {
+            CacheInsert((*pool)[i].id);
+        }
+    }
+
+    float ComputeDistance(BlockNumber a, float* vec, double sqrSum) const override
+    {
+        return ComputeL2DistanceFast(NodeVector(m_state, a, m_bufA), m_state->norms[a], vec, sqrSum,
+                                     (uint16_t)m_state->dimIn);
+    }
+
+    void GetNeighbors(BlockNumber id, VectorList<Neighbor>* nbrs) override
+    {
+        uint32 snap[DISKANN_V2_DEGREE];
+        int cnt = Snapshot(id, snap);
+        nbrs->reset();
+        nbrs->reserve(DISKANN_V2_DEGREE);
+        for (int i = 0; i < cnt; i++) {
+            nbrs->push_back(Neighbor(snap[i], 0.0f));
+        }
+    }
+
+    void GetEdge(DiskAnnEdgePage edge, BlockNumber id) const override
+    {
+        edge->type = 0;
+        int cnt = Snapshot(id, edge->nexts);
+        for (int i = 0; i < cnt; i++) {
+            edge->distance[i] = 0.0f;
+        }
+        edge->count = (uint16)cnt;
+    }
+
+    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const override
+    {
+        int cnt = Min((int)edge->count, DISKANN_V2_DEGREE);
+        uint32* nbrs = m_state->graph + (Size)id * DISKANN_V2_DEGREE;
+        errno_t rc = memcpy_s(nbrs, sizeof(uint32) * (Size)DISKANN_V2_DEGREE, edge->nexts, sizeof(uint32) * (Size)cnt);
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+        m_state->gcount[id] = (uint16)cnt;
+    }
+
+    bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const override
+    {
+        const uint32* nbrs = m_state->graph + (Size)src * DISKANN_V2_DEGREE;
+        bool found = GraphContains(nbrs, m_state->gcount[src], blk);
+        return found;
+    }
+
+    bool MergeDuplicate(BlockNumber dst, BlockNumber blk, bool building) override
+    {
+        return false;
+    }
+
+    uint32 MaxDegree() const override
+    {
+        return DISKANN_V2_DEGREE;
+    }
+
+    int GetFuncType() const override
+    {
+        return DISKANN_DIS_L2;
+    }
+
+    /*
+     * RobustPrune over the whole visited set (Vamana paper): with the fixed
+     * out-degree of this format the expanded-nodes pool alone leaves the graph
+     * too sparse, the visited pool reaches the target degree at L = index_size
+     * without saturating the lists.
+     */
+    bool PruneOverVisited() const override
+    {
+        return true;
+    }
+
+    /*
+     * Visited set: node ids are dense, so one generation stamp per node
+     * stands in for the hash table of the page store; Reset only bumps the stamp.
+     */
+    void VisitedReset(long nelemHint) override
+    {
+        if (++m_visitCur == 0) {
+            /* stamp wrapped: stale entries could look current, wipe them */
+            errno_t rc = memset_s(m_visitGen, sizeof(uint32) * (Size)m_state->nnodes, 0,
+                                  sizeof(uint32) * (Size)m_state->nnodes);
+            if (rc != EOK) {
+                securec_check(rc, "\0", "\0");
+            }
+            m_visitCur = 1;
+        }
+    }
+
+    bool VisitedTestAndSet(BlockNumber id) override
+    {
+        if (m_visitGen[id] == m_visitCur) {
+            return true;
+        }
+        m_visitGen[id] = m_visitCur;
+        return false;
+    }
+
+    void VisitedRelease() override
+    {}
+
+private:
+    int Snapshot(uint32 id, uint32* out) const
+    {
+        const uint32* nbrs = m_state->graph + (Size)id * DISKANN_V2_DEGREE;
+        int cnt = m_state->gcount[id];
+        errno_t rc = memcpy_s(out, sizeof(uint32) * (Size)DISKANN_V2_DEGREE, nbrs, sizeof(uint32) * (Size)cnt);
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+        return cnt;
+    }
+
+    /*
+     * Pool cache (buffer-pool source): open-addressing hash node id -> slot of
+     * m_cacheVecs. Entries are valid while their generation stamp equals
+     * m_cacheGenCur; CacheReset only bumps the stamp.
+     */
+    static inline uint32 CacheHash(uint32 id)
+    {
+        return (id * 2654435761u) & (DISKANN_V2_POOL_CACHE_HASH - 1);
+    }
+
+    const float* CachedVector(uint32 id) const
+    {
+        uint32 pos = CacheHash(id);
+        while (m_cacheGen[pos] == m_cacheGenCur) {
+            if (m_cacheKeys[pos] == id) {
+                return m_cacheVecs + (Size)m_cacheSlots[pos] * m_state->dimIn;
+            }
+            pos = (pos + 1) & (DISKANN_V2_POOL_CACHE_HASH - 1);
+        }
+        return NULL;
+    }
+
+    void CacheReset()
+    {
+        m_cacheCount = 0;
+        if (++m_cacheGenCur == 0) {
+            /* stamp wrapped: stale entries could look current, wipe them */
+            errno_t rc = memset_s(m_cacheGen, sizeof(uint32) * (Size)DISKANN_V2_POOL_CACHE_HASH, 0,
+                                  sizeof(uint32) * (Size)DISKANN_V2_POOL_CACHE_HASH);
+            if (rc != EOK) {
+                securec_check(rc, "\0", "\0");
+            }
+            m_cacheGenCur = 1;
+        }
+    }
+
+    void CacheInsert(uint32 id)
+    {
+        uint32 pos = CacheHash(id);
+        while (m_cacheGen[pos] == m_cacheGenCur) {
+            if (m_cacheKeys[pos] == id) {
+                return; /* already resident */
+            }
+            pos = (pos + 1) & (DISKANN_V2_POOL_CACHE_HASH - 1);
+        }
+        if (m_cacheCount >= DISKANN_V2_POOL_CACHE_CAP) {
+            /* PrefetchPool sized the reset so this does not happen; misses would only cost heap reads */
+            CacheReset();
+            pos = CacheHash(id);
+        }
+        uint16 slot = (uint16)m_cacheCount++;
+        FetchNodeVector(m_state, id, m_cacheVecs + (Size)slot * m_state->dimIn);
+        m_cacheGen[pos] = m_cacheGenCur;
+        m_cacheKeys[pos] = id;
+        m_cacheSlots[pos] = slot;
+    }
+
+    const DiskAnnV2BuildState* m_state;
+    uint32* m_visitGen = NULL; /* nnodes visited stamps, valid while == m_visitCur */
+    uint32 m_visitCur = 1;
+    float* m_bufA = NULL; /* buffer-pool source: fetched operands of GetDistance / ComputeDistance */
+    float* m_bufB = NULL;
+    /* buffer-pool source: vectors of the current prune pool(s), see PrefetchPool */
+    float* m_cacheVecs = NULL;   /* DISKANN_V2_POOL_CACHE_CAP x dimIn */
+    uint32* m_cacheKeys = NULL;  /* DISKANN_V2_POOL_CACHE_HASH */
+    uint16* m_cacheSlots = NULL; /* DISKANN_V2_POOL_CACHE_HASH */
+    uint32* m_cacheGen = NULL;   /* DISKANN_V2_POOL_CACHE_HASH */
+    uint32 m_cacheGenCur = 1;
+    uint32 m_cacheCount = 0;
+};
+
+/* squared L2 norms for ComputeL2DistanceFast; buffer-pool source takes them during the scan */
+static void ComputeNorms(DiskAnnV2BuildState* state)
+{
+    if (!state->inMemory) {
+        return;
+    }
+    MemoryContext instCtx = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+    uint32 n = state->nnodes;
+    state->norms = (double*)palloc_huge(instCtx, sizeof(double) * (Size)n);
+    for (uint32 i = 0; i < n; i++) {
+        const float* x = VecAt(&state->vecs, i);
+        double acc = 0;
+        for (int c = 0; c < state->dimIn; c++) {
+            acc += (double)x[c] * x[c];
+        }
+        state->norms[i] = acc;
+        if ((i & 0xFFFF) == 0) {
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+}
+
+/*
+ * One Link per node of [from, to). Graph object and store outlive the range:
+ * Link resets the visited set and reuses the scratch lists, so no per-node
+ * allocation happens here.
+ */
+static void LinkRange(DiskAnnGraph* graph, const DiskAnnV2BuildState* state, uint32 from, uint32 to)
+{
+    for (uint32 i = from; i < to; i++) {
+        if (i == state->frozen) {
+            continue;
+        }
+        graph->Link(i, state->lsize, true);
+        if ((i & DISKANN_V2_LINK_INTERRUPT_MASK) == 0) {
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+}
+
+static void DiskAnnV2CheckPoolCacheLayout(void)
+{
+    StaticAssertStmt(DISKANN_V2_POOL_CACHE_HASH >= DISKANN_V2_GROW_FACTOR * DISKANN_V2_POOL_CACHE_CAP,
+                     "pool cache hash too small");
+    StaticAssertStmt(DISKANN_V2_POOL_CACHE_CAP <= PG_UINT16_MAX, "pool cache slots are uint16");
+}
+
+/*
+ * Serial graph build: two rounds (DiskANN batch-build convention). During
+ * round one every node links against a half-built graph; round two re-links
+ * every node against the complete graph.
+ */
+static void GraphLoop(DiskAnnV2BuildState* state)
+{
+    DiskAnnV2CheckPoolCacheLayout();
+    DiskAnnV2MemGraphStore store(state);
+    DiskAnnGraph graph(NULL, (double)state->dimIn, state->frozen, &store);
+    for (int round = 0; round < DISKANN_V2_GRAPH_ROUNDS; round++) {
+        LinkRange(&graph, state, 0, state->nnodes);
+    }
 }
 
 /* ----------------------------------------------------------- region IO */
@@ -629,6 +1117,15 @@ static void InitBuildState(DiskAnnV2BuildState* state, Relation heap, Relation i
     state->funcType = GetFunctionType(procinfo, state->normprocinfo);
     state->normalize = (state->normprocinfo != NULL);
 
+    /* vector source; the init fork of an unlogged index has no rows and needs neither */
+    state->inMemory = u_sess->datavec_ctx.diskann_build_in_memory;
+    state->attno = (indexInfo != NULL) ? indexInfo->ii_KeyAttrNumbers[0] : 0;
+    if (!state->inMemory && indexInfo != NULL && (state->attno <= 0 || indexInfo->ii_Expressions != NIL)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("diskann buffer-pool build mode does not support expression indexes"),
+                        errhint("SET diskann_build_in_memory = on.")));
+    }
+
     int pcaDim = DiskAnnGetPcaDim(index);
     state->usePca = (pcaDim != 0);
     state->dimOut = state->usePca ? pcaDim : state->dimIn;
@@ -643,12 +1140,20 @@ static void FreeSharedArrays(DiskAnnV2BuildState* state)
     pfree_ext(state->codes);
     pfree_ext(state->graph);
     pfree_ext(state->gcount);
+    pfree_ext(state->norms);
+    pfree_ext(state->invNorms);
 }
 
 static void PrepareScan(DiskAnnV2BuildState* state)
 {
     MemoryContext instCtx = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
-    VecStoreInit(&state->vecs, state->dimIn, instCtx);
+
+    /* scan: vectors into memory (in-memory source), TIDs + norms per node, running mean, optional sample */
+    if (state->inMemory) {
+        VecStoreInit(&state->vecs, state->dimIn, instCtx);
+    } else {
+        state->cmpBuf = (float*)palloc(sizeof(float) * (Size)state->dimIn);
+    }
     if (state->normalize) {
         state->normBuf = (float*)palloc(sizeof(float) * (Size)state->dimIn);
     }
@@ -680,7 +1185,20 @@ static void EncodeAndWrite(DiskAnnV2BuildState* state, const DiskAnnV2Meta* meta
     state->graph = (uint32*)palloc_huge(instCtx, graphBytes);
     state->gcount = (uint16*)palloc0_huge(instCtx, sizeof(uint16) * (Size)n);
 
+    ComputeNorms(state);
     EncodeAll(state);
+    GraphLoop(state);
+
+    uint64 sumOut = 0;
+    for (uint32 i = 0; i < n; i++) {
+        sumOut += state->gcount[i];
+    }
+    ereport(LOG, (errmsg("diskann: rabitq index \"%s\" graph built, %u nodes (%.0f rows), dim %d -> %d, %u bit, "
+                         "avg out-degree %.1f, entry %u, L=%d, vectors %s",
+                         RelationGetRelationName(state->index), n, state->reltuples, state->dimIn, state->dimOut,
+                         (unsigned)state->bits, (double)sumOut / n, state->frozen, state->lsize,
+                         state->inMemory ? "in memory" : "from the buffer pool")));
+
     VecStoreFree(&state->vecs);
     WriteCodeRegion(state, meta->codeSlotsPerPage, codeExt);
     WriteGraphRegion(state, meta->graphSlotsPerPage, graphExt);

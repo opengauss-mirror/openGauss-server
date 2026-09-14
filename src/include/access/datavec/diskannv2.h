@@ -279,6 +279,12 @@ void DiskAnnV2ResolveGraphSlot(const DiskAnnV2Meta* meta, uint32 nodeId, BlockNu
 void DiskAnnV2ReadCodeSlot(Relation index, const DiskAnnV2Meta* meta, uint32 nodeId, DiskAnnV2CodeSlot* out);
 void DiskAnnV2ReadGraphSlot(Relation index, const DiskAnnV2Meta* meta, uint32 nodeId, DiskAnnV2GraphSlot* out);
 
+/* runtime node allocation and tail growth (diskannv2utils.cpp) */
+uint32 DiskAnnV2AllocateNodeId(Relation index, uint32* tailChunkCount);
+uint32 DiskAnnV2PublishFirstNode(Relation index, uint32 nodeId);
+void DiskAnnV2EnsureNodeCapacity(Relation index, uint64 requiredSlots);
+uint32 DiskAnnV2GraphSlotsOnPage(const DiskAnnV2Meta* meta, uint32 nodeId);
+
 bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args);
 
 /* build (diskannv2build.cpp) */

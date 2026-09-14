@@ -507,3 +507,194 @@ void DiskAnnV2ReadGraphSlot(Relation index, const DiskAnnV2Meta* meta, uint32 no
         out->tidCount = DISKANN_HEAPTIDS;
     }
 }
+
+/*
+ * Graph slots from `nodeId` (inclusive) to the end of its page: bounded by the
+ * page and by the end of the initial region or of the node's tail chunk.
+ */
+uint32 DiskAnnV2GraphSlotsOnPage(const DiskAnnV2Meta* meta, uint32 nodeId)
+{
+    uint32 regionEnd;
+    uint32 slotNo;
+    if (nodeId < meta->tailNodeStart) {
+        regionEnd = meta->tailNodeStart;
+        slotNo = nodeId % meta->graphSlotsPerPage;
+    } else {
+        uint32 localId = (nodeId - meta->tailNodeStart) & (DISKANN_V2_CHUNK_NODES - 1);
+        regionEnd = nodeId - localId + DISKANN_V2_CHUNK_NODES;
+        slotNo = localId % meta->graphSlotsPerPage;
+    }
+    return Min(meta->graphSlotsPerPage - slotNo, regionEnd - nodeId);
+}
+
+/* ------------------------------------------------- runtime node allocation
+ *
+ * INSERT grows the index by fixed 1024-node tail chunks. Lock order is
+ * extension lock (block 1) -> meta page; readers only ever see chunks whose
+ * every page has been initialized and WAL-logged.
+ */
+
+/*
+ * Allocate a node id under the meta page lock (WAL-logged) and report the
+ * published tail capacity as of that moment. The traversal entry is published
+ * separately, after both of the first node's slots exist.
+ */
+uint32 DiskAnnV2AllocateNodeId(Relation index, uint32* tailChunkCount)
+{
+    Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    GenericXLogState* state = GenericXLogStart(index);
+    Page page = GenericXLogRegisterBuffer(state, buf, 0);
+    DiskAnnV2MetaPage metap = DiskAnnV2PageGetMeta(page);
+    uint32 id = metap->nextNodeId;
+    if (id == DISKANN_V2_INVALID_NODE) {
+        GenericXLogAbort(state);
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("diskann: node id space of index \"%s\" is exhausted", RelationGetRelationName(index))));
+    }
+    metap->nextNodeId = id + 1;
+    *tailChunkCount = metap->tailChunkCount;
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
+    return id;
+}
+
+/*
+ * Publish the first fully initialized node as the traversal entry. Concurrent
+ * first inserters all observe the same winner, which is returned.
+ */
+uint32 DiskAnnV2PublishFirstNode(Relation index, uint32 nodeId)
+{
+    Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    GenericXLogState* state = GenericXLogStart(index);
+    Page page = GenericXLogRegisterBuffer(state, buf, 0);
+    DiskAnnV2MetaPage metap = DiskAnnV2PageGetMeta(page);
+    uint32 entry = metap->frozenNodeId;
+    if (entry == DISKANN_V2_INVALID_NODE) {
+        metap->frozenNodeId = nodeId;
+        entry = nodeId;
+        GenericXLogFinish(state);
+    } else {
+        GenericXLogAbort(state);
+    }
+    UnlockReleaseBuffer(buf);
+    return entry;
+}
+
+/*
+ * Initialize (or, after a crash before the chunk was published, re-initialize)
+ * one tail page at its deterministic block number. Full-page WAL image.
+ */
+static void DiskAnnV2PrepareTailPage(Relation index, BlockNumber expected, uint8 pageType)
+{
+    BlockNumber nblocks = RelationGetNumberOfBlocksInFork(index, MAIN_FORKNUM);
+    Buffer buf;
+    if (expected < nblocks) {
+        /* a crash can leave a prefix of an unpublished chunk at EOF: reuse it in place */
+        buf = ReadBuffer(index, expected);
+    } else if (expected == nblocks) {
+        buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+        BlockNumber got = BufferGetBlockNumber(buf);
+        if (got != expected) {
+            ReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("diskann: tail page landed on block %u, expected %u", got, expected)));
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("diskann: index \"%s\" has a hole before block %u", RelationGetRelationName(index),
+                               expected)));
+        return;
+    }
+
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    GenericXLogState* state = GenericXLogStart(index);
+    Page page = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
+    DiskAnnV2InitPage(page, BufferGetPageSize(buf), pageType);
+    ((PageHeader)page)->pd_lower = (uint16)(DISKANN_V2_PAGE_DATA_OFFSET + DiskAnnV2PageUsable());
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
+}
+
+/*
+ * Initialize unpublished tail chunks and publish tailChunkCount only after
+ * every new page is in WAL. lockBuf is the extension lock; overflow paths
+ * release it before ereport.
+ */
+static void DiskAnnV2GrowTailChunks(Relation index, Buffer lockBuf, const DiskAnnV2Meta* snap, uint32 targetChunks)
+{
+    uint32 codePages = DiskAnnV2ChunkCodePages(snap);
+    uint32 graphPages = DiskAnnV2ChunkGraphPages(snap);
+    uint32 chunkPages = codePages + graphPages;
+
+    for (uint32 chunk = snap->tailChunkCount; chunk < targetChunks; chunk++) {
+        uint64 start64 = (uint64)snap->tailStart + (uint64)chunk * chunkPages;
+        if (start64 + chunkPages >= InvalidBlockNumber) {
+            UnlockReleaseBuffer(lockBuf);
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("diskann: tail chunk block number overflow")));
+        }
+        BlockNumber start = (BlockNumber)start64;
+        for (uint32 pg = 0; pg < codePages; pg++) {
+            DiskAnnV2PrepareTailPage(index, start + pg, DISKANN_V2_PAGE_CODE);
+        }
+        for (uint32 pg = 0; pg < graphPages; pg++) {
+            DiskAnnV2PrepareTailPage(index, start + codePages + pg, DISKANN_V2_PAGE_GRAPH);
+        }
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    Buffer metaBuf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(metaBuf, BUFFER_LOCK_EXCLUSIVE);
+    GenericXLogState* state = GenericXLogStart(index);
+    Page metaPage = GenericXLogRegisterBuffer(state, metaBuf, 0);
+    DiskAnnV2PageGetMeta(metaPage)->tailChunkCount = targetChunks;
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(metaBuf);
+}
+
+/*
+ * Make node `requiredSlots - 1` addressable by appending 1024-node chunks.
+ * The extension lock serializes creators; the meta page is re-read under it
+ * because another session may have grown the index meanwhile. Every code and
+ * graph page of a chunk is initialized and WAL-logged before tailChunkCount
+ * is published, so readers never see a partial chunk. A post-crash retry
+ * finds the pages at the same block numbers and overwrites them in place.
+ */
+void DiskAnnV2EnsureNodeCapacity(Relation index, uint64 requiredSlots)
+{
+    DiskAnnV2Meta snap;
+    Buffer lockBuf;
+    uint64 tailSlots;
+    uint64 target64;
+
+    DiskAnnV2GetMetaSnapshot(index, &snap);
+    if (DiskAnnV2NodeCapacity(&snap) >= requiredSlots) {
+        return;
+    }
+
+    lockBuf = ReadBuffer(index, DISKANN_EXTENTION_LOCK_BLKNO);
+    LockBuffer(lockBuf, BUFFER_LOCK_EXCLUSIVE);
+    DiskAnnV2GetMetaSnapshot(index, &snap);
+    if (DiskAnnV2NodeCapacity(&snap) >= requiredSlots) {
+        UnlockReleaseBuffer(lockBuf);
+        return;
+    }
+    if (snap.tailStart == InvalidBlockNumber || requiredSlots <= snap.tailNodeStart) {
+        UnlockReleaseBuffer(lockBuf);
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("diskann: index \"%s\" has invalid tail chunk metadata",
+                               RelationGetRelationName(index))));
+    }
+
+    tailSlots = requiredSlots - snap.tailNodeStart;
+    target64 = (tailSlots + DISKANN_V2_CHUNK_NODES - 1) / DISKANN_V2_CHUNK_NODES;
+    if (target64 > PG_UINT32_MAX) {
+        UnlockReleaseBuffer(lockBuf);
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("diskann: tail chunk count overflow")));
+    }
+    DiskAnnV2GrowTailChunks(index, lockBuf, &snap, (uint32)target64);
+    UnlockReleaseBuffer(lockBuf);
+}

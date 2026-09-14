@@ -3226,6 +3226,7 @@ typedef struct knl_u_datavec_context {
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    bool diskann_build_in_memory;
     double rbq_refinek;
     bool enable_npu;
     bool hnsw_use_mmap;

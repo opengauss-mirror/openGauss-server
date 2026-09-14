@@ -1989,6 +1989,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"diskann_build_in_memory",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Keep the original vectors in memory while building a diskann rabitq index."),
+            gettext_noop("on: fastest build, about 4 * rows * dimensions bytes of memory; "
+                         "off: vectors are read through the buffer pool.")},
+            &u_sess->datavec_ctx.diskann_build_in_memory,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifndef ENABLE_MULTIPLE_NODES
         {{"plsql_show_all_error",
             PGC_USERSET,
