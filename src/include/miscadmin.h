@@ -871,6 +871,11 @@ extern size_t GetHashMemoryLimit(void);
 /* [P1-1] Version control for HybridRecall task-stream fields on the Stream
  * plan node (is_task_parallel/task_group_id/task_branch_id). */
 #define HYBRID_RECALL_VERSION_NUM 93100
+
+/* AnnOrderByRef is a new planned-expression protocol.  Use the current
+ * server working version as its local compatibility floor; do not borrow
+ * the unrelated DiskANN INCLUDE gate. */
+#define ANN_ORDERBY_DISTANCE_REUSE_VERSION_NUM 93098
 #ifdef ENABLE_NEON
 extern void InitStandaloneProcess(const char* argv0);
 #endif
