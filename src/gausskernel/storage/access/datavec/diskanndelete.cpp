@@ -36,20 +36,6 @@ static constexpr bool IsPartitionedRelation(char parttype)
             (parttype) == PARTTYPE_VALUE_PARTITIONED_RELATION);
 }
 
-static bool isTupleEqual(IndexTuple indexTuple1, IndexTuple indexTuple2)
-{
-    if (indexTuple1 == NULL || indexTuple2 == NULL) {
-        return false;
-    }
-    Size size1 = IndexTupleSize(indexTuple1);
-    Size size2 = IndexTupleSize(indexTuple2);
-    if (size1 != size2 || size1 == 0) {
-        return false;
-    }
-
-    return memcmp(indexTuple1, indexTuple2, size1) == 0;
-}
-
 static bool CheckIndexBuilding(Relation index)
 {
     Relation pgIndex = heap_open(IndexRelationId, RowExclusiveLock);
@@ -88,17 +74,7 @@ Buffer DiskannGetSameIndexTuple(Relation rel, DiskAnnScanOpaque so, IndexTuple i
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         GenericXLogState *state = GenericXLogStart(rel);
         Page page = GenericXLogRegisterBuffer(state, buf, 0);
-        IndexTuple currIndexTuple = DiskAnnPageGetIndexTuple(page);
-        DiskAnnNodePage ntup = DiskAnnPageGetNode(currIndexTuple);
-        if (ItemPointerEquals(&(indexTuple->t_tid), &(currIndexTuple->t_tid)) &&
-            isTupleEqual(indexTuple, currIndexTuple)) {
-            target = blkno;
-
-            GenericXLogUnregister(state, buf);
-            GenericXLogAbort(state);
-            UnlockReleaseBuffer(buf);
-            continue;
-        }
+        DiskAnnNodePage ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
 
         uint8 count = 0;
         for (uint8 curr = 0; curr < ntup->heaptidsLength; ++curr) {
@@ -111,6 +87,13 @@ Buffer DiskannGetSameIndexTuple(Relation rel, DiskAnnScanOpaque so, IndexTuple i
         if (ntup->heaptidsLength != count) {
             ntup->heaptidsLength = count;
             GenericXLogFinish(state);
+            /* A merged node stays alive while any heap TID survives.  The
+             * stored vector and IndexTuple TID remain unchanged, so distance
+             * reuse treats every surviving non-owner TID as a heap recheck.
+             * Only an empty node may be detached from the graph. */
+            if (count == 0) {
+                target = blkno;
+            }
         } else {
             GenericXLogUnregister(state, buf);
             GenericXLogAbort(state);

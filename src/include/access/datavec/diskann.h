@@ -321,7 +321,7 @@ struct DiskAnnGraphStore : public BaseObject {
     void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
     void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const;
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
-    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
+    bool AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
     bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
     void Clear() const;
 

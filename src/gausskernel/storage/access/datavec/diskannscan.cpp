@@ -58,7 +58,7 @@ static bool DiskAnnConvertOrderByDistance(DiskAnnScanOpaque so, float rawDistanc
              errmsg("DiskANN ORDER BY reuse received a distance with unsupported provenance")));
     }
 
-    if (so->procinfo->fn_oid == L2_FUNC_OID &&
+    if (so->procinfo->fn_oid == L2_FUNC_OID && so->normprocinfo == NULL &&
         (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_L2) != 0) {
         if (std::isnan(rawDistance) || rawDistance < 0.0f) {
             ereport(ERROR,
@@ -190,6 +190,25 @@ void diskannendscan_internal(IndexScanDesc scan)
     MemoryContextDelete(so->tmpCtx);
     pfree(so);
     scan->opaque = NULL;
+}
+
+/*
+ * A heap tuple is one logical index result even if an old-format DiskANN
+ * index happens to retain its TID in more than one zero-distance node.  This
+ * can occur when a duplicate bucket reaches DISKANN_HEAPTIDS: the overflow
+ * tuple must remain in a newly linked node, while a legacy frozen point may
+ * already carry the same sampled TID.  Node identity therefore must not be
+ * part of result de-duplication.
+ */
+static bool DiskAnnCandidatesContainHeapTid(VectorList<DiskAnnCandidatesData>* candidates,
+                                            ItemPointerData* heapTid)
+{
+    for (size_t i = 0; i < candidates->size(); ++i) {
+        if (ItemPointerEquals(&(*candidates)[i].heapTid, heapTid)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /*
@@ -331,9 +350,7 @@ void diskannsearch(DiskAnnScanOpaque so)
 
         bool hasNewTuple = false;
         for (size_t j = 0; j < queue->_data[i].heaptidsLength; j++) {
-            DiskAnnCandidatesData identity = {.id = queue->_data[i].id,
-                                              .heapTid = queue->_data[i].heaptids[j]};
-            if (!searchedResults->contains(identity)) {
+            if (!DiskAnnCandidatesContainHeapTid(searchedResults, &queue->_data[i].heaptids[j])) {
                 hasNewTuple = true;
                 break;
             }
@@ -363,7 +380,7 @@ void diskannsearch(DiskAnnScanOpaque so)
                                                .outputQuality = outputQuality,
                                                .distanceSource = distanceSource,
                                                .outputEpoch = outputDistanceReady ? so->scanEpoch : 0};
-            if (!searchedResults->contains(candidate)) {
+            if (!DiskAnnCandidatesContainHeapTid(searchedResults, &candidate.heapTid)) {
                 searchedResults->push_back(candidate);
             }
         }

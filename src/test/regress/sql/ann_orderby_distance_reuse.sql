@@ -111,6 +111,190 @@ WHERE float8send(r.distance) IS DISTINCT FROM
       float8send(t.embedding <-> '[11,23,35,47]'::vector);
 SET ann_orderby_distance_reuse = l2;
 
+-- A support-2 normalization procedure changes the index distance scale.
+-- Even when support-1 and the SQL operator look like L2, that value is not
+-- the exact raw-vector <-> result and must stay on the fallback expression.
+CREATE OPERATOR CLASS normalized_l2_ops
+FOR TYPE pg_catalog.vector USING diskann AS
+    OPERATOR 1 pg_catalog.<->(pg_catalog.vector, pg_catalog.vector)
+        FOR ORDER BY pg_catalog.float_ops,
+    FUNCTION 1 pg_catalog.vector_l2_squared_distance(
+        pg_catalog.vector, pg_catalog.vector),
+    FUNCTION 2 pg_catalog.vector_norm(pg_catalog.vector);
+
+CREATE TABLE ann_normalized_l2_t(id integer PRIMARY KEY, embedding vector(4));
+INSERT INTO ann_normalized_l2_t VALUES
+    (1, '[6,8,0,0]'),
+    (2, '[0,10,0,0]'),
+    (3, '[10,0,0,0]'),
+    (4, '[-3,-4,0,0]');
+CREATE INDEX ann_normalized_l2_idx ON ann_normalized_l2_t
+USING diskann (embedding normalized_l2_ops) WITH (index_size = 16);
+
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT /*+ indexscan(ann_normalized_l2_t ann_normalized_l2_idx) */
+       id, embedding <-> '[3,4,0,0]'::vector AS distance
+FROM ann_normalized_l2_t
+ORDER BY embedding <-> '[3,4,0,0]'::vector
+LIMIT 10;
+
+CREATE TEMP TABLE normalized_l2_guard_on AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_normalized_l2_t ann_normalized_l2_idx) */
+       id, embedding <-> '[3,4,0,0]'::vector AS distance
+FROM ann_normalized_l2_t
+ORDER BY embedding <-> '[3,4,0,0]'::vector
+LIMIT 10$q$) AS r(id integer, distance float8);
+
+SET ann_orderby_distance_reuse = off;
+CREATE TEMP TABLE normalized_l2_guard_off AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_normalized_l2_t ann_normalized_l2_idx) */
+       id, embedding <-> '[3,4,0,0]'::vector AS distance
+FROM ann_normalized_l2_t
+ORDER BY embedding <-> '[3,4,0,0]'::vector
+LIMIT 10$q$) AS r(id integer, distance float8);
+
+SELECT count(*) AS normalized_l2_reuse_mismatches
+FROM (
+    (SELECT id, float8send(distance) AS bits FROM normalized_l2_guard_on
+     EXCEPT ALL
+     SELECT id, float8send(distance) AS bits FROM normalized_l2_guard_off)
+    UNION ALL
+    (SELECT id, float8send(distance) AS bits FROM normalized_l2_guard_off
+     EXCEPT ALL
+     SELECT id, float8send(distance) AS bits FROM normalized_l2_guard_on)
+) mismatch;
+
+-- More than DISKANN_HEAPTIDS equal vectors must start/link another node;
+-- reaching one full merge bucket must not silently discard later rows.
+CREATE TABLE ann_duplicate_capacity_t(id integer PRIMARY KEY, embedding vector(4));
+INSERT INTO ann_duplicate_capacity_t
+SELECT g, '[10,20,30,40]'::vector FROM generate_series(1,12) g;
+CREATE INDEX ann_duplicate_capacity_idx ON ann_duplicate_capacity_t
+USING diskann (embedding vector_l2_ops) WITH (index_size = 16);
+
+CREATE TEMP TABLE duplicate_capacity_off AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_duplicate_capacity_t ann_duplicate_capacity_idx) */
+       id, embedding <-> '[10,20,30,40]'::vector AS distance
+FROM ann_duplicate_capacity_t
+WHERE id > 0
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 20$q$) AS r(id integer, distance float8);
+
+SET ann_orderby_distance_reuse = l2;
+CREATE TEMP TABLE duplicate_capacity_on AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_duplicate_capacity_t ann_duplicate_capacity_idx) */
+       id, embedding <-> '[10,20,30,40]'::vector AS distance
+FROM ann_duplicate_capacity_t
+WHERE id > 0
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 20$q$) AS r(id integer, distance float8);
+
+SELECT (SELECT count(*) FROM duplicate_capacity_off) AS duplicate_off_rows,
+       (SELECT count(*) FROM duplicate_capacity_on) AS duplicate_on_rows,
+       (SELECT count(*) FROM (
+            (SELECT id FROM duplicate_capacity_off
+             EXCEPT ALL SELECT id FROM duplicate_capacity_on)
+            UNION ALL
+            (SELECT id FROM duplicate_capacity_on
+             EXCEPT ALL SELECT id FROM duplicate_capacity_off)
+        ) mismatch) AS duplicate_result_mismatches;
+
+-- Exercise the non-build GenericXLog path as well: the first equal-vector
+-- bucket is already full, so each insert must either use another bucket or
+-- link a new node without losing or publishing a heap TID twice.
+INSERT INTO ann_duplicate_capacity_t VALUES
+    (13, '[10,20,30,40]'),
+    (14, '[10,20,30,40]');
+
+SET ann_orderby_distance_reuse = off;
+CREATE TEMP TABLE duplicate_insert_off AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_duplicate_capacity_t ann_duplicate_capacity_idx) */ id
+FROM ann_duplicate_capacity_t
+WHERE id > 0
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 20$q$) AS r(id integer);
+
+SET ann_orderby_distance_reuse = l2;
+CREATE TEMP TABLE duplicate_insert_on AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_duplicate_capacity_t ann_duplicate_capacity_idx) */ id
+FROM ann_duplicate_capacity_t
+WHERE id > 0
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 20$q$) AS r(id integer);
+
+SELECT (SELECT count(*) FROM ann_duplicate_capacity_t) AS duplicate_heap_rows,
+       (SELECT count(*) FROM duplicate_insert_off) AS duplicate_insert_off_rows,
+       (SELECT count(*) FROM duplicate_insert_on) AS duplicate_insert_on_rows,
+       (SELECT count(*) FROM (
+            (SELECT id FROM duplicate_insert_off
+             EXCEPT ALL SELECT id FROM duplicate_insert_on)
+            UNION ALL
+            (SELECT id FROM duplicate_insert_on
+             EXCEPT ALL SELECT id FROM duplicate_insert_off)
+        ) mismatch) AS duplicate_insert_mismatches;
+
+-- The v1 immediate-delete path may remove a TID from a merged node, but it
+-- may detach the node only after its final TID disappears.  Two vector groups
+-- ensure that exactly one group is not represented by the random frozen point.
+CREATE TABLE ann_merged_delete_t(
+    id integer PRIMARY KEY,
+    grp text,
+    embedding vector(4)
+);
+INSERT INTO ann_merged_delete_t
+SELECT g, 'A', '[10,20,30,40]'::vector FROM generate_series(1,6) g
+UNION ALL
+SELECT g, 'B', '[40,30,20,10]'::vector FROM generate_series(101,106) g;
+CREATE INDEX ann_merged_delete_idx ON ann_merged_delete_t
+USING diskann (embedding vector_l2_ops) WITH (index_size = 16);
+ALTER TABLE ann_merged_delete_t SET (immediate_delete = true);
+
+SET ann_orderby_distance_reuse = off;
+CREATE TEMP TABLE merged_delete_victims AS
+SELECT 'A'::text AS grp,
+       (SELECT /*+ indexscan(d ann_merged_delete_idx) */ id
+        FROM ann_merged_delete_t d
+        WHERE grp = 'A'
+        ORDER BY embedding <-> '[10,20,30,40]'::vector LIMIT 1) AS id
+UNION ALL
+SELECT 'B'::text,
+       (SELECT /*+ indexscan(d ann_merged_delete_idx) */ id
+        FROM ann_merged_delete_t d
+        WHERE grp = 'B'
+        ORDER BY embedding <-> '[40,30,20,10]'::vector LIMIT 1);
+
+DELETE FROM ann_merged_delete_t
+WHERE id IN (SELECT id FROM merged_delete_victims);
+
+CREATE TEMP TABLE merged_delete_a_after AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_merged_delete_t ann_merged_delete_idx) */ id
+FROM ann_merged_delete_t
+WHERE grp = 'A'
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 10$q$) AS r(id integer);
+
+CREATE TEMP TABLE merged_delete_b_after AS
+SELECT * FROM ann_capture($q$
+SELECT /*+ indexscan(ann_merged_delete_t ann_merged_delete_idx) */ id
+FROM ann_merged_delete_t
+WHERE grp = 'B'
+ORDER BY embedding <-> '[40,30,20,10]'::vector
+LIMIT 10$q$) AS r(id integer);
+
+SELECT (SELECT count(*) FROM ann_merged_delete_t WHERE grp = 'A') AS heap_a,
+       (SELECT count(*) FROM ann_merged_delete_t WHERE grp = 'B') AS heap_b,
+       (SELECT count(*) FROM merged_delete_a_after) AS index_a,
+       (SELECT count(*) FROM merged_delete_b_after) AS index_b;
+
+SET ann_orderby_distance_reuse = l2;
+
 -- Hidden ORDER BY output: the user requests only id, but the scan still
 -- consumes the reference as a resjunk ordering value.
 EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)

@@ -90,11 +90,11 @@ static AnnOrderByDistanceQuality AnnIndexRuntimeDistanceQuality(IndexScanDesc sc
     }
 
     Oid distanceProc = index_getprocid(scan->indexRelation, 1, DISKANN_DISTANCE_PROC);
-    if (distanceProc == L2_FUNC_OID) {
+    Oid normProc = index_getprocid(scan->indexRelation, 1, DISKANN_NORM_PROC);
+    if (distanceProc == L2_FUNC_OID && !OidIsValid(normProc)) {
         return ANN_ORDERBY_DISTANCE_EXACT_L2;
     }
-    if (distanceProc == IP_FUNC_OID &&
-        OidIsValid(index_getprocid(scan->indexRelation, 1, DISKANN_NORM_PROC))) {
+    if (distanceProc == IP_FUNC_OID && OidIsValid(normProc)) {
         return ANN_ORDERBY_DISTANCE_APPROX_COSINE;
     }
     return ANN_ORDERBY_DISTANCE_UNAVAILABLE;

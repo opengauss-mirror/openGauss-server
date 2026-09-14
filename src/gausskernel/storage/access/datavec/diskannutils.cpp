@@ -387,7 +387,7 @@ bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) cons
     return found;
 }
 
-void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
+bool DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
 {
     Buffer buf;
     Page page;
@@ -412,22 +412,25 @@ void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
         }
     }
 
-    /* Only add if not a duplicate */
-    if (!found) {
-        /* Check if there's space */
-        if (ntup->heaptidsLength >= DISKANN_HEAPTIDS) {
-            elog(WARNING, "Cannot add more neighbors, heaptids array is full");
+    bool accepted = found;
+    bool changed = false;
+    if (!found && ntup->heaptidsLength < DISKANN_HEAPTIDS) {
+        ntup->heaptids[ntup->heaptidsLength] = tid;
+        ntup->heaptidsLength++;
+        accepted = true;
+        changed = true;
+        if (building) {
+            MarkBufferDirty(buf);
         } else {
-            ntup->heaptids[ntup->heaptidsLength] = tid;
-            ntup->heaptidsLength++;
-            if (building) {
-                MarkBufferDirty(buf);
-            } else {
-                GenericXLogFinish(state);
-            }    
+            GenericXLogFinish(state);
         }
     }
+    if (!building && !changed) {
+        GenericXLogUnregister(state, buf);
+        GenericXLogAbort(state);
+    }
     UnlockReleaseBuffer(buf);
+    return accepted;
 }
 
 bool DiskAnnGraphStore::NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const
@@ -759,23 +762,28 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
 
 bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk, bool building)
 {
+    ItemPointerData heapTid;
+    Buffer buf = ReadBuffer(graphStore->m_rel, blk);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    IndexTuple itup = DiskAnnPageGetIndexTuple(page);
+    heapTid = itup->t_tid;
+    UnlockReleaseBuffer(buf);
+
     for (size_t i = 0; i < bestLNodes->size(); i++) {
         Neighbor res = bestLNodes->_data[i];
         if (res.distance > DISKANN_DISTANCE_THRESHOLD) {
             break;
         }
         if (res.id != blk) {
-            Buffer buf;
-            Page page;
-
-            buf = ReadBuffer(graphStore->m_rel, blk);
-            LockBuffer(buf, BUFFER_LOCK_SHARE);
-
-            page = BufferGetPage(buf);
-            IndexTuple itup = DiskAnnPageGetIndexTuple(page);
-            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid, building);
-            UnlockReleaseBuffer(buf);
-            return true;
+            /* Never hold blk while taking an exclusive lock on res.id.
+             * Parallel builders can otherwise form an A -> B / B -> A
+             * buffer-lock cycle once a full duplicate bucket makes both
+             * workers continue beyond their first candidate. */
+            bool accepted = graphStore->AddDuplicateNeighbor(res.id, heapTid, building);
+            if (accepted) {
+                return true;
+            }
         }
     }
 
