@@ -260,7 +260,7 @@ After the openGauss installation environment is prepared by executing the pre-in
     gs_install -X /opt/software/openGauss/clusterconfig.xml
     ```
 
-    **/opt/software/openGauss/script/clusterconfig.xml** is the path to the openGauss configuration file. During the execution, you need to enter a database password as prompted. The password must meet complexity requirements. To ensure that you can use the database properly, remember the entered database password.
+    **/opt/software/openGauss/clusterconfig.xml** is the path to the openGauss configuration file. During the execution, you need to enter a database password as prompted. The password must meet complexity requirements. To ensure that you can use the database properly, remember the entered database password.
 
     A password must meet the following requirements:
 

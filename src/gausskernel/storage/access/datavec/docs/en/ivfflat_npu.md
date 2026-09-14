@@ -16,7 +16,7 @@ This chapter mainly describes the installation and usage steps of the IVFFLAT-NP
 ### Obtain the openGauss Image and Start the Container
 
 - Image acquisition
-For details, see [openGauss Container Installation and Deployment](https://docs.opengauss.org/zh/docs/latest-lite/docs/InstallationGuide/%E5%AE%B9%E5%99%A8%E9%95%9C%E5%83%8F%E5%AE%89%E8%A3%85.html).
+For details, see [openGauss Container Installation and Deployment](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 - Container startup
 Startup command:
 
