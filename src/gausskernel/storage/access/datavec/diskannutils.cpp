@@ -387,7 +387,7 @@ bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) cons
     return found;
 }
 
-bool DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
+bool DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, const Vector* vector, bool building)
 {
     Buffer buf;
     Page page;
@@ -398,13 +398,39 @@ bool DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
     buf = ReadBuffer(m_rel, src);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
+    page = BufferGetPage(buf);
+    if (ItemIdIsDead(PageGetItemId(page, FirstOffsetNumber))) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+    /* The fast search score can cancel to zero for different vectors. A
+     * threshold is only a candidate lookup, never an equality proof. Check
+     * the stored bytes under the destination lock before changing its TIDs. */
+    bool isnull = false;
+    Datum key = index_getattr(DiskAnnPageGetIndexTuple(page), 1, RelationGetDescr(m_rel), &isnull);
+    if (isnull) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+    Vector* stored = DatumGetVector(PointerGetDatum(PG_DETOAST_DATUM(key)));
+    bool sameVector = !isnull && stored->dim == vector->dim &&
+        memcmp(stored->x, vector->x, vector->dim * sizeof(float)) == 0;
+    if ((Pointer)stored != DatumGetPointer(key)) {
+        pfree(stored);
+    }
+    if (!sameVector) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+
     if (building) {
         page = BufferGetPage(buf);
     } else {
         state = GenericXLogStart(m_rel);
         page = GenericXLogRegisterBuffer(state, buf, 0);
     }
-    ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    IndexTuple itup = DiskAnnPageGetIndexTuple(page);
+    ntup = DiskAnnPageGetNode(itup);
     for (int i = 0; i < ntup->heaptidsLength; i++) {
         if (ItemPointerEquals(&ntup->heaptids[i], &tid)) {
             found = true;
@@ -419,6 +445,14 @@ bool DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
         ntup->heaptidsLength++;
         accepted = true;
         changed = true;
+    }
+    if (accepted && !ItemPointerIsValid(&itup->t_tid)) {
+        /* VACUUM invalidated an old owner. The byte comparison above proves
+         * that this newly inserted TID can safely own the stored vector. */
+        itup->t_tid = tid;
+        changed = true;
+    }
+    if (changed) {
         if (building) {
             MarkBufferDirty(buf);
         } else {
@@ -768,6 +802,9 @@ bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, Bloc
     Page page = BufferGetPage(buf);
     IndexTuple itup = DiskAnnPageGetIndexTuple(page);
     heapTid = itup->t_tid;
+    bool isnull = false;
+    Datum key = index_getattr(itup, 1, RelationGetDescr(graphStore->m_rel), &isnull);
+    Vector* vector = (Vector*)PG_DETOAST_DATUM_COPY(key);
     UnlockReleaseBuffer(buf);
 
     for (size_t i = 0; i < bestLNodes->size(); i++) {
@@ -780,13 +817,15 @@ bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, Bloc
              * Parallel builders can otherwise form an A -> B / B -> A
              * buffer-lock cycle once a full duplicate bucket makes both
              * workers continue beyond their first candidate. */
-            bool accepted = graphStore->AddDuplicateNeighbor(res.id, heapTid, building);
+            bool accepted = graphStore->AddDuplicateNeighbor(res.id, heapTid, vector, building);
             if (accepted) {
+                pfree(vector);
                 return true;
             }
         }
     }
 
+    pfree(vector);
     return false;
 }
 

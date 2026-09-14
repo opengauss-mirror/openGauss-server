@@ -103,8 +103,9 @@ LIMIT 10;
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
          Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
+         Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(8 rows)
+(9 rows)
 
 CREATE TEMP TABLE l2_exact AS
 SELECT * FROM ann_capture($q$
@@ -353,8 +354,9 @@ LIMIT 3;
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
          Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
+         Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(8 rows)
+(9 rows)
 
 -- Two equal outputs may read the same publication twice; a different
 -- query vector must remain an ordinary expression and never receive the
@@ -378,8 +380,9 @@ LIMIT 3;
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
          Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
+         Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(8 rows)
+(9 rows)
 
 -- A never-entered branch must report zero work, not a fabricated fallback.
 EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
@@ -419,8 +422,9 @@ LIMIT 3;
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
          Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
+         Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(8 rows)
+(9 rows)
 
 SET enable_expr_fusion = off;
 -- l2 must reject cosine; cosine may request its normalized value.
@@ -481,8 +485,9 @@ LIMIT 3;
          Order By: (ann_l2_t.embedding <=> '[11,23,35,47]'::vector)
          Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
+         Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(8 rows)
+(9 rows)
 
 CREATE TEMP TABLE cosine_approx AS
 SELECT * FROM ann_capture($q$

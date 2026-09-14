@@ -303,6 +303,16 @@ void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* est
         if (actualIndex == NULL) {
             continue;
         }
+        /*
+         * Runtime defense for all DiskANN formats: deletion
+         * is deferred to VACUUM; the executor-level gate in ExecOpenIndices
+         * normally keeps us out of here for them, but concurrent DDL,
+         * upgrade leftovers or catalog anomalies must not reach the
+         * edge-breaking path (design doc 8.1/4.12).
+         */
+        if (actualIndex->rd_rel->relam == DISKANN_AM_OID && DiskAnnIndexUsesDeferredDelete(actualIndex)) {
+            continue;
+        }
         CheckAndDeleteFromIndex(actualIndex, indexInfo, tid, estate);
     }
 

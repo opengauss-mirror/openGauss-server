@@ -150,6 +150,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->ncandidates = 0;
     so->curpos = 0;
     so->delSearch = false;
+    so->orderedBatch = false;
     so->curIterNum = 0;
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
@@ -211,6 +212,78 @@ static bool DiskAnnCandidatesContainHeapTid(VectorList<DiskAnnCandidatesData>* c
     return false;
 }
 
+/* A batch ends at the AM boundary, not at LIMIT: the executor must see
+ * every visible, qualifying member before choosing which rows to return.
+ * Only the executor may request another batch, and only before publishing
+ * the sorted result. This also prevents cross-batch order inversions. */
+bool diskann_advance_ordered_batch(IndexScanDesc scan)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    Assert(so->orderedBatch && so->curpos == so->ncandidates);
+    if (so->curIterNum >= MAX_SEARCH_ITERATION || so->nfrozen == 0 ||
+        (scan->orderByData[0].sk_flags & SK_ISNULL)) {
+        return false;
+    }
+    MemoryContext oldCtx = MemoryContextSwitchTo(so->tmpCtx);
+    Datum query = GetScanValue(scan);
+    so->value = query;
+    so->nexpextedCandidates = so->curIterNum == 0 ? (uint32)DEFAULT_CADIDATES_NUMBER :
+        so->nexpextedCandidates * SEARCH_DOUBLE;
+    diskannsearch(so);
+    so->ncandidates = (uint32)so->candidates.size();
+    so->curIterNum++;
+    if (so->queue->size() < so->nexpextedCandidates) {
+        /* The beam did not fill: all reachable vertices were visited. */
+        so->curIterNum = MAX_SEARCH_ITERATION;
+    }
+    if (so->normprocinfo != NULL) {
+        pfree(DatumGetPointer(query));
+    }
+    so->value = (Datum)0;
+    MemoryContextSwitchTo(oldCtx);
+    /* No new output at a narrow beam does not prove graph exhaustion:
+     * dead/navigation-only vertices can fill the beam. The caller retries
+     * with a wider beam until the iteration cap, or enough qualified rows. */
+    return true;
+}
+
+/* Old indexes may already contain a TID recycled before VACUUM maintenance
+ * was implemented. Even full TID equality is not a row-version proof.
+ * Compare the immutable stored vector with the current visible row before
+ * trusting its cached distance. This is a byte comparison, not another
+ * distance evaluation. Normalized opclasses compare normalized vectors. */
+bool diskann_orderby_vector_matches(IndexScanDesc scan, Datum value)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    Assert(so->curpos > 0 && so->curpos <= so->ncandidates);
+    Datum heapValue = PointerGetDatum(PG_DETOAST_DATUM(value));
+    Datum normalized = so->normprocinfo != NULL ?
+        DirectFunctionCall1Coll(l2_normalize, so->collation, heapValue) : heapValue;
+    Vector* heapVector = DatumGetVector(normalized);
+    Buffer buf = ReadBuffer(so->rel, so->candidates[so->curpos - 1].id);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    bool isnull = false;
+    Datum key = index_getattr(DiskAnnPageGetIndexTuple(BufferGetPage(buf)), 1,
+        RelationGetDescr(so->rel), &isnull);
+    bool matches = false;
+    if (!isnull) {
+        Vector* stored = (Vector*)PG_DETOAST_DATUM(key);
+        matches = heapVector->dim == stored->dim &&
+            memcmp(heapVector->x, stored->x, stored->dim * sizeof(float)) == 0;
+        if ((Pointer)stored != DatumGetPointer(key)) {
+            pfree(stored);
+        }
+    }
+    UnlockReleaseBuffer(buf);
+    if (normalized != heapValue) {
+        pfree(DatumGetPointer(normalized));
+    }
+    if (heapValue != value) {
+        pfree(DatumGetPointer(heapValue));
+    }
+    return matches;
+}
+
 /*
 * Fetch the next tuple in the given scan
 */
@@ -229,10 +302,18 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
     if (scan->orderByData == NULL)
         elog(ERROR, "cannot scan diskann index without order");
 
-    value = GetScanValue(scan);
+    if (scan->orderByData[0].sk_flags & SK_ISNULL) {
+        MemoryContextSwitchTo(oldCtx);
+        return false;
+    }
+    /* Ordered batches already evaluated the query and materialized their
+     * candidates. Do not normalize/allocate again for each returned TID. */
+    value = so->orderedBatch ? (Datum)0 : GetScanValue(scan);
     so->value = value;
 
-    if ((so->curpos == 0 || so->curpos == so->ncandidates) && so->curIterNum < MAX_SEARCH_ITERATION) {
+    if (so->orderedBatch) {
+        /* Explicit batch advancement belongs to the executor. */
+    } else if ((so->curpos == 0 || so->curpos == so->ncandidates) && so->curIterNum < MAX_SEARCH_ITERATION) {
         if (so->curIterNum == 0) {
             so->nexpextedCandidates = (uint32_t)DEFAULT_CADIDATES_NUMBER;
         } else {
@@ -337,7 +418,9 @@ void diskannsearch(DiskAnnScanOpaque so)
         so->scan->xs_ann_orderby.full_distance_evaluations++;
     }
 
-    qsort(&(queue->_data[0]), queue->size(), sizeof(Neighbor), CmpNeighborInfo);
+    if (queue->size() > 1) {
+        qsort(&(queue->_data[0]), queue->size(), sizeof(Neighbor), CmpNeighborInfo);
+    }
 
     uint32_t pos = 0;
     bool hasDuplicates = false;

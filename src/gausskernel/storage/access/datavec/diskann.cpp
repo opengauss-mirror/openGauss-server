@@ -28,6 +28,7 @@
 #include "utils/guc.h"
 #include "utils/selfuncs.h"
 #include "access/datavec/diskann.h"
+#include "access/generic_xlog.h"
 
 /*
  * Estimate the cost of an index scan
@@ -341,8 +342,87 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
 IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
                                                   IndexBulkDeleteCallback callback, void* callbackState)
 {
-    return NULL;
+    DiskAnnMetaPageData meta;
+    DiskANNGetMetaPageInfo(info->index, &meta);
+    if (stats == NULL) {
+        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+    }
+
+    /* The v1 layout has no page-type discriminator. PQ pages precede all
+     * vertex pages; the frozen vertex is NOT necessarily the first vertex.
+     * Include unlinked duplicate pages and the frozen vertex in cleanup. */
+    BlockNumber first = DISKANN_PQDATA_START_BLKNO + meta.pqTableNblk +
+        meta.pqCentroidsblk + meta.pqOffsetblk;
+    BlockNumber nblocks = RelationGetNumberOfBlocks(info->index);
+    for (BlockNumber blk = first; blk < nblocks; ++blk) {
+        vacuum_delay_point();
+        Buffer buf = ReadBufferExtended(info->index, MAIN_FORKNUM, blk, RBM_NORMAL, info->strategy);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        Page page = BufferGetPage(buf);
+        if (PageIsNew(page) || PageGetMaxOffsetNumber(page) < FirstOffsetNumber ||
+            !ItemIdHasStorage(PageGetItemId(page, FirstOffsetNumber))) {
+            UnlockReleaseBuffer(buf);
+            continue;
+        }
+        IndexTuple itup = DiskAnnPageGetIndexTuple(page);
+        DiskAnnNodePage node = DiskAnnPageGetNode(itup);
+        if (node->heaptidsLength > DISKANN_HEAPTIDS) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("DiskANN node has an invalid heap TID count")));
+        }
+
+        ItemPointerData survivors[DISKANN_HEAPTIDS];
+        uint8 count = 0;
+        for (uint8 i = 0; i < node->heaptidsLength; ++i) {
+            if (!callback(&node->heaptids[i], callbackState, InvalidOid, InvalidBktId)) {
+                survivors[count++] = node->heaptids[i];
+            }
+        }
+        /* t_tid identifies the stored vector, not just a member of the
+         * bucket. Invalidate that ownership before the heap slot is reused,
+         * even if an older deletion already removed it from heaptids[]. */
+        bool deadOwner = ItemPointerIsValid(&itup->t_tid) &&
+            callback(&itup->t_tid, callbackState, InvalidOid, InvalidBktId);
+        if (count != node->heaptidsLength || deadOwner) {
+            uint8 removed = node->heaptidsLength - count;
+            GenericXLogState* state = GenericXLogStart(info->index);
+            page = GenericXLogRegisterBuffer(state, buf, 0);
+            itup = DiskAnnPageGetIndexTuple(page);
+            node = DiskAnnPageGetNode(itup);
+            for (uint8 i = 0; i < count; ++i) {
+                node->heaptids[i] = survivors[i];
+            }
+            for (uint8 i = count; i < DISKANN_HEAPTIDS; ++i) {
+                ItemPointerSetInvalid(&node->heaptids[i]);
+            }
+            node->heaptidsLength = count;
+            if (deadOwner) {
+                ItemPointerSetInvalid(&itup->t_tid);
+            }
+            GenericXLogFinish(state);
+            stats->tuples_removed += removed;
+        }
+        /* Empty vertices remain navigation landmarks. Do not break edges,
+         * recycle vertex pages, or erase vectors while searches can use them. */
+        UnlockReleaseBuffer(buf);
+    }
+    stats->num_pages = nblocks;
+    /* Physical buckets can contain the same TID in frozen/unlinked pages. */
+    stats->num_index_tuples = info->num_heap_tuples;
+    stats->estimated_count = true;
+    return stats;
 }
+
+/*
+ * Every DiskANN format must defer physical deletion to VACUUM. Generic WAL
+ * is redo, not transaction undo: immediate deletion loses rows after an
+ * abort and also destroys rows still needed by older snapshots.
+ */
+bool DiskAnnIndexUsesDeferredDelete(Relation index)
+{
+    return index->rd_rel->relam == DISKANN_AM_OID;
+}
+
 IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats)
 {
     if (!stats) {

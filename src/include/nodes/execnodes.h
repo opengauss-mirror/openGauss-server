@@ -2197,6 +2197,16 @@ typedef struct AnnIndexScanState {
     uint64 iss_AnnOrderByRowToken;
     uint64 iss_AnnOrderByReads;
     uint64 iss_AnnOrderByFallbacks;
+    /* DiskANN materializes qualified candidates before first output. The
+     * sorter spills under work_mem; its private tuples preserve heap system
+     * attributes as well as the exact/approximate key used for this scan. */
+    bool iss_DiskannOrdered;
+    bool iss_OrderedReady;
+    bool iss_OrderedHasSRF;
+    struct Tuplesortstate* iss_OrderedSort;
+    TupleTableSlot* iss_OrderedSlot;
+    ExprState* iss_OrderedExpr;
+    List* iss_OrderedQual;
 } AnnIndexScanState;
 
 /* Shared private payload used by recursive and flattened evaluation of an

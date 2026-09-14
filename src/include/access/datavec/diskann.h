@@ -41,6 +41,13 @@
 #define DISKANN_MAGIC_NUMBER 0x14FF1A7
 #define DISKANN_PAGE_ID 0xFF84
 
+/* All formats use MVCC-safe deferred deletion, including legacy v1. */
+bool DiskAnnIndexUsesDeferredDelete(Relation index);
+
+/* Executor requests complete candidate batches before publishing sorted rows. */
+bool diskann_advance_ordered_batch(struct IndexScanDescData* scan);
+bool diskann_orderby_vector_matches(struct IndexScanDescData* scan, Datum value);
+
 /* Support functions */
 #define DISKANN_DISTANCE_PROC 1
 #define DISKANN_NORM_PROC 2
@@ -321,7 +328,7 @@ struct DiskAnnGraphStore : public BaseObject {
     void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
     void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const;
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
-    bool AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
+    bool AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, const Vector* vector, bool building);
     bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
     void Clear() const;
 
@@ -517,6 +524,7 @@ struct DiskAnnScanOpaqueData {
     Datum value;
     double querySqrSum;
     bool delSearch;
+    bool orderedBatch;
 
     FmgrInfo *procinfo;
     FmgrInfo *normprocinfo;
