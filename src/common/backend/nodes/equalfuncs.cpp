@@ -2617,6 +2617,7 @@ static bool _equalReindexStmt(const ReindexStmt* a, const ReindexStmt* b)
     COMPARE_SCALAR_FIELD(do_system);
     COMPARE_SCALAR_FIELD(do_user);
     COMPARE_SCALAR_FIELD(concurrent);
+    COMPARE_SCALAR_FIELD(is_alter_index_rebuild);
 
     return true;
 }

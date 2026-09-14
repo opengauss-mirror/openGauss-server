@@ -7074,6 +7074,7 @@ static ReindexStmt* _copyReindexStmt(const ReindexStmt* from)
     COPY_SCALAR_FIELD(memUsage.work_mem);
     COPY_SCALAR_FIELD(memUsage.max_mem);
     COPY_SCALAR_FIELD(concurrent);
+    COPY_SCALAR_FIELD(is_alter_index_rebuild);
 
     return newnode;
 }
