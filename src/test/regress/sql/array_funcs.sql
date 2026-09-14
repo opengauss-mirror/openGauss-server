@@ -59,3 +59,8 @@ SELECT array_position('3 5 4'::int2vector::int2[], 5);
 SELECT array_position('3 5 4'::int2vector::int2[], 5::int2);
 SELECT array_position('3 5 4'::int2vector::int2[], 66::int2);
 SELECT array_position(string_to_array('3 5 4'::int2vector::TEXT, ' '), '66');
+
+-- DTS21: incomplete multibyte characters at the end of array values
+SELECT E'{\302}'::text[] IS NOT NULL;
+SELECT E'{"\302"}'::text[] IS NOT NULL;
+SELECT format('%s', ARRAY[E'\302 '::text]) IS NOT NULL;

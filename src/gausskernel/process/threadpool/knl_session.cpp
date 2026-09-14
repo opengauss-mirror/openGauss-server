@@ -315,6 +315,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->different_nodegroup_count = 1;
     opt_cxt->is_randomfunc_shippable = true;
     opt_cxt->is_dngather_support = true;
+    opt_cxt->mmgr_geqo_backup_context = NULL;
 
     opt_cxt->srvtype = 0;
     opt_cxt->qrw_inlist2join_optmode = QRW_INLIST2JOIN_CBO;
@@ -1012,6 +1013,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->createFunctionOid = InvalidOid;
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
+    plsql_cxt->nestedCompileInvalidPackageList = NIL;
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
     plsql_cxt->parallel_cursor_arg_name = NULL;

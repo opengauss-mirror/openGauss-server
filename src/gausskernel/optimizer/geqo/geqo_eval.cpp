@@ -54,6 +54,7 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
     Cost fitness;
     int savelength;
     struct HTAB* savehash;
+    MemoryContext saved_geqo_backup_context;
 
     /*
      * Create a private memory context that will hold all temp storage
@@ -67,8 +68,14 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
     mycontext = AllocSetContextCreate(
         CurrentMemoryContext, "GEQO", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     oldcxt = MemoryContextSwitchTo(mycontext);
+    saved_geqo_backup_context = u_sess->opt_cxt.mmgr_geqo_backup_context;
+    u_sess->opt_cxt.mmgr_geqo_backup_context = oldcxt;
+    savelength = list_length(root->join_rel_list);
+    savehash = root->join_rel_hash;
 
-    /*
+    PG_TRY();
+    {
+        /*
      * gimme_tree will add entries to root->join_rel_list, which may or may
      * not already contain some entries.  The newly added entries will be
      * recycled by the MemoryContextDelete below, so we must ensure that the
@@ -83,29 +90,40 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
      *
      * join_rel_level[] shouldn't be in use, so just Assert it isn't.
      */
-    savelength = list_length(root->join_rel_list);
-    savehash = root->join_rel_hash;
-    AssertEreport(root->join_rel_level == NULL, MOD_OPT, "");
+        AssertEreport(root->join_rel_level == NULL, MOD_OPT, "");
 
-    root->join_rel_hash = NULL;
+        root->join_rel_hash = NULL;
 
-    /* construct the best path for the given combination of relations */
-    joinrel = gimme_tree(root, tour, num_gene);
+        /* construct the best path for the given combination of relations */
+        joinrel = gimme_tree(root, tour, num_gene);
 
-    /*
+        /*
      * compute fitness
      *
      * XXX geqo does not currently support optimization for partial result
      * retrieval --- how to fix?
      */
-    fitness = ((Path*)linitial(joinrel->cheapest_total_path))->total_cost;
+        fitness = ((Path*)linitial(joinrel->cheapest_total_path))->total_cost;
 
     /*
      * Restore join_rel_list to its former state, and put back original
      * hashtable if any.
      */
-    root->join_rel_list = list_truncate(root->join_rel_list, savelength);
-    root->join_rel_hash = savehash;
+        root->join_rel_list = list_truncate(root->join_rel_list, savelength);
+        root->join_rel_hash = savehash;
+    }
+    PG_CATCH();
+    {
+        root->join_rel_list = list_truncate(root->join_rel_list, savelength);
+        root->join_rel_hash = savehash;
+        u_sess->opt_cxt.mmgr_geqo_backup_context = saved_geqo_backup_context;
+        (void)MemoryContextSwitchTo(oldcxt);
+        MemoryContextDelete(mycontext);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    u_sess->opt_cxt.mmgr_geqo_backup_context = saved_geqo_backup_context;
 
     /* release all the memory acquired within gimme_tree */
     (void)MemoryContextSwitchTo(oldcxt);

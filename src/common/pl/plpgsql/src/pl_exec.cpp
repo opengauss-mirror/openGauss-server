@@ -15976,6 +15976,18 @@ void plpgsql_hashtable_clear_invalid_obj(bool need_clear)
     plpgsql_hashtable_clear_invalid_func();
 }
 
+void gsplsql_record_nested_compile_invalid_package(Oid pkgOid)
+{
+    if (!OidIsValid(pkgOid)) {
+        return;
+    }
+
+    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList =
+        list_append_unique_oid(u_sess->plsql_cxt.nestedCompileInvalidPackageList, pkgOid);
+    MemoryContextSwitchTo(oldContext);
+}
+
 /*
  * Check dependency for function and package's hash table,
  * and delete the invalid package or functio from session.
@@ -16006,11 +16018,13 @@ void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId)
     }
 
     /*
-     * when compile, invalid the package may cause confilct, so ignore it.
-     * maybe a better way to record it and handler it later, will support in
-     * the future.
+     * when compile, invalid the package may cause conflict, so record it and
+     * handle it after the transaction outcome is known.
      */
     if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        if (classId == PACKAGEOID) {
+            gsplsql_record_nested_compile_invalid_package(objId);
+        }
         return;
     }
     
@@ -16079,6 +16093,29 @@ void delete_package_and_check_invalid_item(Oid pkgOid)
         delete_package_and_check_invalid_item(lfirst_oid(cell));
     }
     list_free_ext(invalidPkgList);
+}
+
+void GsplsqlCleanupNestedCompileInvalidPackages(bool isRollback)
+{
+    List* packageList = u_sess->plsql_cxt.nestedCompileInvalidPackageList;
+    if (packageList == NIL) {
+        return;
+    }
+
+    /* A nested compiler still owns the package while it is active. Defer the
+     * cleanup until the outer transaction cleanup has restored the context. */
+    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        return;
+    }
+
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList = NIL;
+    if (isRollback) {
+        ListCell* cell = NULL;
+        foreach (cell, packageList) {
+            delete_package_and_check_invalid_item(lfirst_oid(cell));
+        }
+    }
+    list_free_ext(packageList);
 }
 
 /*
@@ -17126,10 +17163,47 @@ static int exec_stmt_exec(PLpgSQL_execstate *estate, PLpgSQL_stmt_exec *stmt)
     }
 
     /*
+     * A CachedPlanSource may have been invalidated by a nested call.  Its
+     * query_list is then NIL until the plan is prepared again.  Do not inspect
+     * that list before forcing a recompile, otherwise linitial() below can
+     * dereference an empty list and abort the backend.
+     */
+    if (needRecompilePlan(plan)) {
+        free_expr(expr);
+        plan = prepare_stmt_exec(estate, estate->func, stmt);
+    }
+
+    List* plan_sources = SPI_plan_get_plan_sources(plan);
+    if (plan_sources == NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                errmsg("cached plan has no plan source for EXEC statement")));
+    }
+
+    CachedPlanSource* plansource = (CachedPlanSource*)linitial(plan_sources);
+    if (plansource == NULL || plansource->query_list == NIL) {
+        /* The source can be invalidated between the first check and here. */
+        free_expr(expr);
+        plan = prepare_stmt_exec(estate, estate->func, stmt);
+        plan_sources = SPI_plan_get_plan_sources(plan);
+        if (plan_sources == NIL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                    errmsg("cached plan has no plan source for EXEC statement")));
+        }
+        plansource = (CachedPlanSource*)linitial(plan_sources);
+    }
+    if (plansource == NULL || plansource->query_list == NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                errmsg("cached plan has no valid query tree for EXEC statement")));
+    }
+
+    /*
      * If we will deal with scalar function, we need to know the correct
      * return-type.
      */
-    query = linitial_node(Query, ((CachedPlanSource *) linitial(plan->plancache_list))->query_list);
+    query = linitial_node(Query, plansource->query_list);
 
     if (query->commandType == CMD_SELECT) {
         Node        *node;

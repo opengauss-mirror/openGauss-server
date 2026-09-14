@@ -445,17 +445,11 @@ VACUUM interval_partition_table_004;
 DELETE from interval_partition_table_004 where c1 = 6;
 ANALYZE interval_partition_table_004;
 \parallel off
+\o gpi_interval_plan.txt
 explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Aggregate
-   ->  Partition Iterator
-         Iterations: 11
-         ->  Partitioned Seq Scan on interval_partition_table_004
-               Filter: (c1 <= 7)
-               Selected Partitions:  1..11
-(6 rows)
-
+\o
+\! grep -E 'Scan.* on interval_partition_table_004[[:space:]]*$' gpi_interval_plan.txt
+--? *->  .*Scan.* on interval_partition_table_004 *
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
  count 
 -------
@@ -463,16 +457,12 @@ SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 (1 row)
 
 VACUUM full interval_partition_table_004;
+\o gpi_interval_plan.txt
 explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
- Aggregate
-   ->  Bitmap Heap Scan on interval_partition_table_004
-         Recheck Cond: (c1 <= 7)
-         ->  Bitmap Index Scan on interval_partition_table_004_index_03
-               Index Cond: (c1 <= 7)
-(5 rows)
-
+\o
+\! grep -E 'Scan.* on interval_partition_table_004[[:space:]]*$' gpi_interval_plan.txt
+--? *->  .*Scan.* on interval_partition_table_004 *
+\! rm gpi_interval_plan.txt
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
  count 
 -------

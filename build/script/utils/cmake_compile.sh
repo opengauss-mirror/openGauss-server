@@ -122,6 +122,10 @@ function make_gaussdb_kernel()
         die "cmake failed."
     fi
     cpus_num=$(grep -w processor /proc/cpuinfo|wc -l)
+    # Limit parallel jobs so memory constrained build workers can complete the package build.
+    if [ "$cpus_num" -gt 4 ]; then
+        cpus_num=4
+    fi
     make -sj ${cpus_num}
     if [ $? -ne 0 ]; then
         die "make failed."

@@ -456,6 +456,7 @@ extern int pg_wchar_strncmp(const pg_wchar* s1, const pg_wchar* s2, size_t n);
 extern int pg_char_and_wchar_strncmp(const char* s1, const pg_wchar* s2, size_t n);
 extern size_t pg_wchar_strlen(const pg_wchar* wstr);
 extern int pg_mblen(const char* mbstr);
+extern int GetSafeMbCharLength(const char* mbstr, int remainingLength);
 extern int pg_dsplen(const char* mbstr);
 extern void pg_encoding_set_invalid(int encoding, char* dst);
 extern int pg_encoding_mblen(int encoding, const char* mbstr);
