@@ -315,6 +315,7 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->different_nodegroup_count = 1;
     opt_cxt->is_randomfunc_shippable = true;
     opt_cxt->is_dngather_support = true;
+    opt_cxt->mmgr_geqo_backup_context = NULL;
 
     opt_cxt->srvtype = 0;
     opt_cxt->qrw_inlist2join_optmode = QRW_INLIST2JOIN_CBO;
@@ -339,7 +340,6 @@ static void knl_u_optimizer_init(knl_u_optimizer_context* opt_cxt)
     opt_cxt->skew_strategy_opt = SKEW_OPT_OFF;
     opt_cxt->op_work_mem = 1024;
     opt_cxt->ft_context = NULL;
-    opt_cxt->geqo_backup_context = NULL;
     opt_cxt->is_under_append_plan = false;
     opt_cxt->xact_modify_sql_patch = false;
     opt_cxt->out_plan_stat = true;
@@ -1013,6 +1013,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->createFunctionOid = InvalidOid;
     plsql_cxt->isCreatePkg = false;
     plsql_cxt->isCreatePkgFunction = false;
+    plsql_cxt->nestedCompileInvalidPackageList = NIL;
     plsql_cxt->currCompilingObjStatus = true;
     plsql_cxt->need_init = true;
     plsql_cxt->parallel_cursor_arg_name = NULL;
@@ -1613,6 +1614,7 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->ivfflat_probes = 0;
     datavec_cxt->ivfpq_kreorder = 0;
     datavec_cxt->diskann_probes = 0;
+    datavec_cxt->diskann_build_in_memory = false;
     datavec_cxt->rbq_refinek = 0.0;
     datavec_cxt->enable_npu = false;
 }

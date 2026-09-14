@@ -390,8 +390,8 @@ typedef struct knl_u_optimizer_context {
 
     MemoryContext ft_context;
 
-    /* Planner context used for objects that must survive a GEQO evaluation. */
-    MemoryContext geqo_backup_context;
+    /* Stable context for allocations that may outlive one GEQO evaluation. */
+    MemoryContext mmgr_geqo_backup_context;
 
     struct Distribution* in_redistribution_group_distribution;
 
@@ -1794,6 +1794,7 @@ typedef struct knl_u_plpgsql_context {
     bool isCreatePkgFunction;
     bool has_invalid_pkg;
     bool has_invalid_func;
+    List* nestedCompileInvalidPackageList;
     bool has_error;
     bool is_pipelined; /* for readonly ereport */
     bool is_exec_autonomous;
@@ -3225,6 +3226,7 @@ typedef struct knl_u_datavec_context {
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    bool diskann_build_in_memory;
     double rbq_refinek;
     bool enable_npu;
     bool hnsw_use_mmap;
