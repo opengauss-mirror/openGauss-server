@@ -136,7 +136,7 @@ Oid exprType(const Node* expr)
                 Assert(!tent->resjunk);
                 type = exprType((Node*)tent->expr);
                 if (sublink->subLinkType == ARRAY_SUBLINK) {
-                    type = get_array_type(type);
+                    type = get_promoted_array_type(type);
                     if (!OidIsValid(type)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -156,7 +156,7 @@ Oid exprType(const Node* expr)
                 /* get the type of the subselect's first target column */
                 type = subplan->firstColType;
                 if (subplan->subLinkType == ARRAY_SUBLINK) {
-                    type = get_array_type(type);
+                    type = get_promoted_array_type(type);
                     if (!OidIsValid(type)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -1105,7 +1105,9 @@ Oid exprInputCollation(const Node* expr)
 static void AssertExprCollation(const Node* expr, Oid collation)
 {
     Oid expr_collation = exprCollation(expr);
-    if (DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) {
+    if ((DB_IS_CMPT(B_FORMAT) && ENABLE_MULTI_CHARSET && IsBinaryType(exprType(expr))) ||
+        (DB_IS_CMPT(D_FORMAT) && collation == BINARY_COLLATION_OID &&
+         IsBinaryTypeWithCollation(exprType(expr)))) {
         expr_collation = BINARY_COLLATION_OID;
     }
     Assert(collation == expr_collation);

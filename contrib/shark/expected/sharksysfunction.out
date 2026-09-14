@@ -3173,16 +3173,13 @@ SELECT EOMONTH('2023-05-20', -100);          --expect: 2015-01-31
 SELECT EOMONTH('2023/13/01');                --expect: error
 ERROR:  date/time field value out of range: "2023/13/01"
 HINT:  Perhaps you need a different "datestyle" setting.
-CONTEXT:  SQL function "eomonth" during inlining
-referenced column: eomonth
+CONTEXT:  referenced column: eomonth
 SELECT EOMONTH('2023-02-30');                --expect: error
 ERROR:  date/time field value out of range: "2023-02-30"
-CONTEXT:  SQL function "eomonth" during inlining
-referenced column: eomonth
+CONTEXT:  referenced column: eomonth
 SELECT EOMONTH('hello world');               --expect: error
 ERROR:  invalid input syntax for type date: "hello world"
-CONTEXT:  SQL function "eomonth" during inlining
-referenced column: eomonth
+CONTEXT:  referenced column: eomonth
 SELECT EOMONTH(20230515);                    --expect: error
   eomonth   
 ------------

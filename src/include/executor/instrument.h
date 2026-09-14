@@ -715,6 +715,10 @@ public:
     /* get ThreadInstrumentation in CN */
     ThreadInstrumentation* getThreadInstrumentationCN(int idx, int planNodeId, int smpId)
     {
+        if (planNodeId < 1 || planNodeId > m_plannodes_num) {
+            return NULL;
+        }
+        
         Assert(planNodeId >= 1 && planNodeId <= m_plannodes_num);
         int offset =
             (m_planIdOffsetArray[planNodeId - 1] == 0) ? -1 : (m_planIdOffsetArray[planNodeId - 1] - 1) * m_query_dop;

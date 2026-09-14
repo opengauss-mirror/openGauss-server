@@ -59,6 +59,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
+#include "replication/slot.h"
 #include "replication/dcf_replication.h"
 #include "replication/ss_disaster_cluster.h"
 #include "storage/copydir.h"
@@ -1908,7 +1909,12 @@ static void XLogWalRcvSendHSFeedback(void)
         /*
          * Make the expensive call to get the oldest xmin once we are certain
          * everything else has been checked.
+         *
+         * Refresh slot xmin first: with hot_standby_feedback=on, leftover
+         * physical slots after switchover must not pin feedback via stale HS
+         * xmin (see ComputeRequiredXmin).
          */
+        ReplicationSlotsComputeRequiredXmin(false);
         xmin = GetOldestXmin(NULL);
     } else {
         xmin = InvalidTransactionId;

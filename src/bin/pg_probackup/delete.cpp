@@ -23,6 +23,8 @@ static void do_retention_internal(parray *backup_list, parray *to_keep_list,
                                                         parray *to_purge_list);
 static void do_retention_merge(parray *backup_list, parray *to_keep_list,
                                                         parray *to_purge_list);
+static void LogRetentionMergeDependencies(parray *backupList, pgBackup *fullBackup,
+                                             pgBackup *keepBackup);
 static void do_retention_purge(parray *to_keep_list, parray *to_purge_list);
 static void do_retention_wal(bool dry_run);
 
@@ -52,12 +54,9 @@ do_delete(time_t backup_id)
     delete_list = parray_new();
 
     /* Find backup to be deleted and make increment backups array to be deleted */
-    for (i = 0; (size_t)i < parray_num(backup_list); i++)
-    {
+    for (i = 0; (size_t)i < parray_num(backup_list); i++) {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
-
-        if (backup->start_time == backup_id)
-        {
+        if (backup->start_time == backup_id) {
             target_backup = backup;
             break;
         }
@@ -71,13 +70,11 @@ do_delete(time_t backup_id)
          base36enc((unsigned long)backup_id), dry_run ? "can" : "will");
 
     /* form delete list */
-    for (i = 0; (size_t)i < parray_num(backup_list); i++)
-    {
+    for (i = 0; (size_t)i < parray_num(backup_list); i++) {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
 
         /* check if backup is descendant of delete target */
-        if (is_parent(target_backup->start_time, backup, true))
-        {
+        if (is_parent(target_backup->start_time, backup, true)) {
             parray_append(delete_list, backup);
 
             elog(LOG, "Backup %s %s be deleted",
@@ -90,15 +87,13 @@ do_delete(time_t backup_id)
     }
 
     /* Report the resident size to delete */
-    if (size_to_delete >= 0)
-    {
+    if (size_to_delete >= 0) {
         pretty_size(size_to_delete, size_to_delete_pretty, lengthof(size_to_delete_pretty));
         elog(INFO, "Resident data size to free by delete of backup %s : %s",
             base36enc(target_backup->start_time), size_to_delete_pretty);
     }
 
-    if (!dry_run)
-    {
+    if (!dry_run) {
         if (current.media_type == MEDIA_TYPE_OSS) {
             bucket_name = getBucketName();
             if (!oss->BucketExists(bucket_name)) {
@@ -109,8 +104,7 @@ do_delete(time_t backup_id)
         catalog_lock_backup_list(delete_list, parray_num(delete_list) - 1, 0, false, true);
 
         /* Delete backups from the end of list */
-        for (i = (int) parray_num(delete_list) - 1; i >= 0; i--)
-        {
+        for (i = (int) parray_num(delete_list) - 1; i >= 0; i--) {
             pgBackup   *backup = (pgBackup *) parray_get(delete_list, (size_t) i);
 
             if (interrupted)
@@ -478,6 +472,66 @@ do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purg
     parray_free(redundancy_full_backup_list);
 }
 
+/* Explain why a branched FULL family cannot be merged automatically. */
+static void LogRetentionMergeDependencies(parray *backupList, pgBackup *fullBackup,
+                                 pgBackup *keepBackup)
+{
+    parray *dependentBackups = parray_new();
+    char   *fullBackupId = base36enc_dup(fullBackup->start_time);
+    char   *keepBackupId = base36enc_dup(keepBackup->start_time);
+
+    elog(WARNING, "Retention merge skipped for FULL backup %s while considering "
+         "backup %s: the FULL backup has multiple valid direct child backups. "
+         "Merging one branch would make sibling restore points unusable, so the "
+         "FULL backup will be retained. Delete obsolete sibling backups or merge "
+         "the newest required branch manually",
+         fullBackupId, keepBackupId);
+
+    pg_free(fullBackupId);
+    pg_free(keepBackupId);
+
+    append_children(backupList, fullBackup, dependentBackups);
+
+    for (size_t dependentIndex = 0;
+         dependentIndex < parray_num(dependentBackups);
+         dependentIndex++) {
+        pgBackup  *dependentBackup =
+            (pgBackup *) parray_get(dependentBackups, dependentIndex);
+        const char *incrementalType;
+        const char *dependencyType;
+        char       *dependentBackupId;
+        char       *parentBackupId;
+
+        if (dependentBackup->status != BACKUP_STATUS_OK &&
+            dependentBackup->status != BACKUP_STATUS_DONE) {
+            continue;
+        }
+
+        if (dependentBackup->backup_mode != BACKUP_MODE_DIFF_PTRACK) {
+            continue;
+        }
+
+        incrementalType =
+            dependentBackup->incrementalType == INCR_TYPE_CUMULATIVE ?
+            "cumulative" : "differential";
+        dependencyType =
+            dependentBackup->parent_backup == fullBackup->start_time ?
+            "direct" : "indirect";
+        dependentBackupId = base36enc_dup(dependentBackup->start_time);
+        parentBackupId = base36enc_dup(dependentBackup->parent_backup);
+
+        elog(WARNING, "Dependent backup %s: type=%s, parent=%s, "
+             "dependency=%s, status=%s",
+             dependentBackupId, incrementalType, parentBackupId,
+             dependencyType, status2str(dependentBackup->status));
+
+        pg_free(dependentBackupId);
+        pg_free(parentBackupId);
+    }
+
+    parray_free(dependentBackups);
+}
+
 /* Merge partially expired incremental chains */
 static void
 do_retention_merge(parray *backup_list, parray *to_keep_list, parray *to_purge_list)
@@ -533,6 +587,18 @@ do_retention_merge(parray *backup_list, parray *to_keep_list, parray *to_purge_l
         {
             elog(WARNING, "Skip backup %s for merging, "
                 "because his FULL parent is not marked for purge", base36enc(keep_backup->start_time));
+            continue;
+        }
+
+        /*
+         * Cumulative incremental backups may give a FULL backup several
+         * direct children. In-place retention merge would silently destroy
+         * the sibling branches, so such families are skipped here; the FULL
+         * backup itself stays protected by the descendant check in
+         * do_retention_purge(). Resolve manually with merge/delete commands.
+         */
+        if (is_prolific(backup_list, full_backup)) {
+            LogRetentionMergeDependencies(backup_list, full_backup, keep_backup);
             continue;
         }
 
@@ -808,7 +874,9 @@ delete_backup_files(pgBackup *backup)
     * Update STATUS to BACKUP_STATUS_DELETING in preparation for the case which
     * the error occurs before deleting all backup files.
     */
-    write_backup_status(backup, BACKUP_STATUS_DELETING, instance_name, false);
+    if (backup->encrypt_version == 0) {
+        write_backup_status(backup, BACKUP_STATUS_DELETING, instance_name, false);
+    }
 
     /* list files to be deleted */
     files = parray_new();

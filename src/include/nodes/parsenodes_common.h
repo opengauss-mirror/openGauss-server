@@ -1073,6 +1073,8 @@ typedef struct ReindexStmt {
     bool do_user;       /* include user tables in database case */
     AdaptMem memUsage;  /* adaptive memory assigned for the stmt */
     bool concurrent;    /* reindex concurrently */
+    /* true only when produced from ALTER INDEX ... REBUILD */
+    bool is_alter_index_rebuild;
 } ReindexStmt;
 
 typedef struct Position {

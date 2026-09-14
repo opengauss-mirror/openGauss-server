@@ -134,6 +134,7 @@ void gs_message_by_memory(StringInfo buf, StreamSharedContext* sharedContext, in
         (void)entry->_timewait(SINGLE_WAITQUOTA);
     }
     appendBinaryStringInfo(buf_dst, buf->data, buf->len);
+    pg_memory_barrier();
     buf_dst->cursor = buf->cursor;
 
     /* Send signal to dest consumer. */
@@ -539,10 +540,13 @@ void gs_memory_send_finish(StreamSharedContext* sharedContext, int connNum)
 {
     struct hash_entry* entry = NULL;
 
-    for (int i = 0; i < connNum; i++) {
+    /* Only a producer may publish its own execution completion. */
+    sharedContext->is_producer_complete[u_sess->stream_cxt.smp_id] = true;
 #ifdef __aarch64__
     pg_memory_barrier();
 #endif
+
+    for (int i = 0; i < connNum; i++) {
         /* Set flags. */
         sharedContext->is_connect_end[i][u_sess->stream_cxt.smp_id] = true;
 
@@ -579,4 +583,3 @@ void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int c
         entry->_signal();
     }
 }
-

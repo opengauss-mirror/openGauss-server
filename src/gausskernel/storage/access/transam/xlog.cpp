@@ -14116,6 +14116,13 @@ bool CreateRestartPoint(int flags)
         if (!ENABLE_INCRE_CKPT || elapsed_secs >= u_sess->attr.attr_storage.fullCheckPointTimeout) {
             TransactionId globalXmin = InvalidTransactionId;
             (void)GetOldestActiveTransactionId(&globalXmin);
+            /*
+             * Refresh slot xmin before truncate.  With hot_standby_feedback=on,
+             * demoted primary may still hold inactive physical slots with HS
+             * xmin; ComputeRequiredXmin ignores those on regular standby so
+             * CSNLOG is not pinned by leftover feedback water marks.
+             */
+            ReplicationSlotsComputeRequiredXmin(false);
             TransactionId cutoffXid = GetOldestXmin(NULL);
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoffXid)) {
                 cutoffXid = globalXmin;

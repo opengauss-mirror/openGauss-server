@@ -3991,8 +3991,18 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt)
                 parser_errposition(pstate, exprLocation((const Node*)list_nth(qry->targetList, tllen)))));
     }
 
+    /*
+    * Keep the FETCH metadata on the top-level set operation.  Unlike a
+    * regular SELECT, this path extracts the LIMIT clauses before recursively
+    * transforming the set-operation tree, so propagate the associated flags
+    * explicitly here.
+    */
+    pstate->p_is_percent = stmt->limitIsPercent;
     qry->limitOffset = transformLimitClause(pstate, limitOffset, EXPR_KIND_OFFSET, "OFFSET");
     qry->limitCount = transformLimitClause(pstate, limitCount, EXPR_KIND_LIMIT, "LIMIT");
+    qry->limitIsPercent = stmt->limitIsPercent;
+    qry->limitWithTies = stmt->limitWithTies;
+    qry->isFetch = stmt->isFetch;
 
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, NULL);

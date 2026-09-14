@@ -247,15 +247,15 @@ extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_last_value(PG_FUNCTION_ARGS);
 
-extern int128 nextval_internal(Oid relid, bool checkPermissions);
-extern int128 nextval_internal_for_global_seq_cache(Oid relid);
+extern int128 nextval_internal(Oid relid, bool checkPermissions, bool autoInc);
+extern int128 nextval_internal_for_global_seq_cache(Oid relid, bool autoInc);
 extern void autoinc_setval(Oid relid, int128 next, bool iscalled);
 extern int128 autoinc_get_nextval(Oid relid);
 extern bool CheckSeqOwnedByAutoInc(Oid seqoid);
 extern ObjectAddress DefineSequenceWrapper(CreateSeqStmt* stmt);
 extern ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt);
 extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
-extern void ResetSequence(Oid seq_relid, bool restart);
+extern void ResetSequence(Oid seq_relid, bool restart, bool isAutoInc);
 
 extern void seq_redo(XLogReaderState* rptr);
 extern void seq_desc(StringInfo buf, XLogReaderState* record);

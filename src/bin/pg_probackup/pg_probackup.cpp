@@ -48,6 +48,7 @@ typedef enum ProbackupSubcmd
     VALIDATE_CMD,
     DELETE_CMD,
     MERGE_CMD,
+    REKEY_CMD,
     SHOW_CMD,
     SET_CONFIG_CMD,
     SET_BACKUP_CMD,
@@ -89,6 +90,11 @@ int        rw_timeout = 0;
 bool         backup_logs = false;
 bool         backup_replslots = false;
 bool         smooth_checkpoint;
+time_t      g_requestedParentBackupId = INVALID_BACKUP_ID;
+bool        g_fromFull = false;
+IncrementalType g_incrementalType = INCR_TYPE_DIFFERENTIAL;
+bool        g_cumulativeFallbackError = true;
+static char *g_cumulativeFallbackStr = NULL;
 char        *remote_agent;
 static char *backup_note = NULL;
 static char *oss_status_string = NULL;
@@ -180,6 +186,11 @@ static bool help_opt = false;
 
 static void opt_incr_restore_mode(ConfigOption *opt, const char *arg);
 static void opt_backup_mode(ConfigOption *opt, const char *arg);
+/* backup ids are printed and parsed as base36, see base36enc() */
+#define BACKUP_ID_RADIX 36
+
+static void OptParentBackupId(ConfigOption *opt, const char *arg);
+static void OptIncrementalType(ConfigOption *opt, const char *arg);
 static void opt_show_format(ConfigOption *opt, const char *arg);
 static void opt_media_type(ConfigOption *opt, const char *arg);
 
@@ -202,6 +213,10 @@ static ConfigOption cmd_options[] =
     { 'b', 133, "no-sync",            &no_sync,            SOURCE_CMD_STRICT },
     { 'b', 180, "backup-pg-log",    &backup_logs,        SOURCE_CMD_STRICT },
     { 'f', 'b', "backup-mode",        (void *)opt_backup_mode,    SOURCE_CMD_STRICT },
+    { 'f', 242, "parent-backup-id",   (void *)OptParentBackupId, SOURCE_CMD_STRICT },
+    { 'b', 244, "from-full",          &g_fromFull,           SOURCE_CMD_STRICT },
+    { 'f', 245, "incremental-type",   (void *)OptIncrementalType, SOURCE_CMD_STRICT },
+    { 's', 246, "cumulative-fallback", &g_cumulativeFallbackStr, SOURCE_CMD_STRICT },
     { 'b', 'C', "smooth-checkpoint", &smooth_checkpoint,    SOURCE_CMD_STRICT },
     { 's', 'S', "slot",                &replication_slot,    SOURCE_CMD_STRICT },
     { 'b', 181, "temp-slot",        &temp_slot,            SOURCE_CMD_STRICT },
@@ -226,6 +241,14 @@ static ConfigOption cmd_options[] =
     { 's', 189, "with-salt",           &encrypt_salt,        SOURCE_CMD_STRICT},
     { 's', 190, "with-device-params", &encrypt_dev_params, SOURCE_CMD_STRICT},
     { 'b', 191, "gen-key",            &gen_key,            SOURCE_CMD_STRICT},
+    { 'b', 247, "encrypt",              &g_encryptEnabled,          SOURCE_CMD_STRICT},
+    { 's', 248, "encrypt-algorithm",    &g_encryptAlgorithmStr,    SOURCE_CMD_STRICT},
+    { 's', 249, "encrypt-key-source",   &g_encryptKeySourceStr,   SOURCE_CMD_STRICT},
+    { 's', 250, "encrypt-key",          &g_encryptKeyArg,          SOURCE_CMD_STRICT},
+    { 's', 251, "encrypt-key-file",     &g_encryptKeyFile,         SOURCE_CMD_STRICT},
+    { 's', 252, "encrypt-chunk-size",   &g_encryptChunkSizeStr,   SOURCE_CMD_STRICT},
+    { 's', 253, "new-encrypt-key",       &g_newEncryptKeyArg,      SOURCE_CMD_STRICT},
+    { 's', 254, "new-encrypt-key-file",  &g_newEncryptKeyFile,     SOURCE_CMD_STRICT},
     { 'b', 145, "wal",                &delete_wal,        SOURCE_CMD_STRICT },
     { 'b', 146, "expired",            &delete_expired,    SOURCE_CMD_STRICT },
     { 's', 172, "status",            &delete_status,        SOURCE_CMD_STRICT },
@@ -320,44 +343,83 @@ static void parse_non_subcommand_option(char *option, int argc, char *argv[])
 
 static void parse_options(char *option, int argc, char *argv[])
 {
-    if (strcmp(option, "add-instance") == 0)
+    if (strcmp(option, "add-instance") == 0) {
         backup_subcmd = ADD_INSTANCE_CMD;
-    else if (strcmp(option, "del-instance") == 0)
+    } else if (strcmp(option, "del-instance") == 0) {
         backup_subcmd = DELETE_INSTANCE_CMD;
-    else if (strcmp(option, "init") == 0)
+    } else if (strcmp(option, "init") == 0) {
         backup_subcmd = INIT_CMD;
-    else if (strcmp(option, "backup") == 0)
+    } else if (strcmp(option, "backup") == 0) {
         backup_subcmd = BACKUP_CMD;
-    else if (strcmp(option, "restore") == 0)
+    } else if (strcmp(option, "restore") == 0) {
         backup_subcmd = RESTORE_CMD;
-    else if (strcmp(option, "validate") == 0)
+    } else if (strcmp(option, "validate") == 0) {
         backup_subcmd = VALIDATE_CMD;
-    else if (strcmp(option, "delete") == 0)
+    } else if (strcmp(option, "delete") == 0) {
         backup_subcmd = DELETE_CMD;
-    else if (strcmp(option, "merge") == 0)
+    } else if (strcmp(option, "merge") == 0) {
         backup_subcmd = MERGE_CMD;
-    else if (strcmp(option, "show") == 0)
+    } else if (strcmp(option, "rekey") == 0) {
+        backup_subcmd = REKEY_CMD;
+    } else if (strcmp(option, "show") == 0) {
         backup_subcmd = SHOW_CMD;
-    else if (strcmp(option, "set-config") == 0)
+    } else if (strcmp(option, "set-config") == 0) {
         backup_subcmd = SET_CONFIG_CMD;
-    else if (strcmp(option, "set-backup") == 0)
+    } else if (strcmp(option, "set-backup") == 0) {
         backup_subcmd = SET_BACKUP_CMD;
-    else if (strcmp(option, "show-config") == 0)
+    } else if (strcmp(option, "show-config") == 0) {
         backup_subcmd = SHOW_CONFIG_CMD;
-    else
+    } else {
         parse_non_subcommand_option(option, argc, argv);
+    }
+}
+
+/*
+ * Options whose value is key material and therefore must never reach the
+ * log file or the audit record.
+ */
+static const char *const SECRET_OPTIONS[] = {
+    "--encrypt-key", "--new-encrypt-key", "--with-key", "--with-salt", NULL
+};
+
+/*
+ * Tell whether argv[i] carries a secret. Returns the redacted text to log
+ * instead, and sets skipNext when the value is a separate argument.
+ */
+static const char *RedactArgument(const char *arg, bool *skipNext)
+{
+    *skipNext = false;
+
+    for (int i = 0; SECRET_OPTIONS[i] != NULL; i++) {
+        size_t optLen = strlen(SECRET_OPTIONS[i]);
+        if (strncmp(arg, SECRET_OPTIONS[i], optLen) != 0) {
+            continue;
+        }
+
+        if (arg[optLen] == '=') {
+            return "***";
+        }
+        if (arg[optLen] == '\0') {
+            *skipNext = true;
+            return NULL;
+        }
+    }
+
+    return NULL;
 }
 
 static char *make_command_string(int argc, char *argv[])
 {
     char *command = NULL;
     errno_t rc = 0;
+    bool skipValue = false;
     
     if (backup_subcmd == BACKUP_CMD ||
         backup_subcmd == RESTORE_CMD ||
         backup_subcmd == VALIDATE_CMD ||
         backup_subcmd == DELETE_CMD ||
         backup_subcmd == MERGE_CMD ||
+        backup_subcmd == REKEY_CMD ||
         backup_subcmd == SET_CONFIG_CMD ||
         backup_subcmd == SET_BACKUP_CMD)
     {
@@ -370,15 +432,44 @@ static char *make_command_string(int argc, char *argv[])
 
         for (i = 0; i < argc; i++)
         {
-            int            arglen = strlen(argv[i]);
+            const char *text = argv[i];
+            const char *redacted;
+            bool        valueFollows = false;
+            int         arglen;
 
+            if (skipValue) {
+                /* the value of the previous option is a secret */
+                skipValue = false;
+                text = "***";
+            } else if ((redacted = RedactArgument(argv[i], &valueFollows)) != NULL)
+            {
+                char *optEnd = strchr(argv[i], '=');
+                int   nameLen = (int) (optEnd - argv[i] + 1);
+                if (nameLen + (int) strlen(redacted) + len > allocated) {
+                    allocated *= 2;
+                    command = (char *)gs_repalloc(command, allocated);
+                }
+
+                rc = strncpy_s(command + len, allocated - len, argv[i], nameLen);
+                securec_check_c(rc, "", "");
+                len += nameLen;
+                rc = strncpy_s(command + len, allocated - len, redacted, strlen(redacted));
+                securec_check_c(rc, "", "");
+                len += strlen(redacted);
+                command[len++] = ' ';
+                continue;
+            } else {
+                skipValue = valueFollows;
+            }
+
+            arglen = strlen(text);
             if (arglen + len > allocated)
             {
                 allocated *= 2;
                 command = (char *)gs_repalloc(command, allocated);
             }
 
-            rc = strncpy_s(command + len, allocated - len, argv[i], arglen);
+            rc = strncpy_s(command + len, allocated - len, text, arglen);
             securec_check_c(rc, "", "");
             len += arglen;
             command[len++] = ' ';
@@ -516,6 +607,9 @@ static void parse_cmdline_args(int argc, char *argv[], const char *command_name)
         elog(ERROR, "If specify --tablespace-mapping option, you must specify --external-mapping option together");
     }
 
+    /* keep the encryption key out of ps(1) output before anything else runs */
+    EncryptScrubArgv(argc, argv);
+
     pgut_init();
 
     if (help_opt)
@@ -612,6 +706,40 @@ static int do_actual_operate()
                     elog(ERROR, "required parameter not specified: BACKUP_MODE "
                          "(-b, --backup-mode)");
 
+                /* --from-full is an alias for --incremental-type=cumulative */
+                if (g_fromFull) {
+                    g_incrementalType = INCR_TYPE_CUMULATIVE;
+                }
+
+                if (g_requestedParentBackupId != INVALID_BACKUP_ID &&
+                    g_incrementalType == INCR_TYPE_CUMULATIVE) {
+                    elog(ERROR, "Option --parent-backup-id cannot be used together "
+                         "with --from-full or --incremental-type=cumulative");
+                }
+
+                if (current.backup_mode == BACKUP_MODE_FULL &&
+                    (g_requestedParentBackupId != INVALID_BACKUP_ID ||
+                     g_incrementalType == INCR_TYPE_CUMULATIVE)) {
+                    elog(ERROR, "Options --parent-backup-id, --from-full and --incremental-type "
+                         "can only be used with an incremental backup");
+                }
+
+                if (g_cumulativeFallbackStr != NULL) {
+                    if (g_incrementalType != INCR_TYPE_CUMULATIVE) {
+                        elog(ERROR, "Option --cumulative-fallback can only be used "
+                             "with --incremental-type=cumulative or --from-full");
+                    }
+
+                    if (pg_strcasecmp(g_cumulativeFallbackStr, "error") == 0) {
+                        g_cumulativeFallbackError = true;
+                    } else if (pg_strcasecmp(g_cumulativeFallbackStr, "differential") == 0) {
+                        g_cumulativeFallbackError = false;
+                    } else {
+                        elog(ERROR, "Invalid cumulative-fallback \"%s\": "
+                             "must be \"differential\" or \"error\"", g_cumulativeFallbackStr);
+                    }
+                }
+
                 res = do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs, backup_replslots);
                 break;
             }
@@ -624,13 +752,35 @@ static int do_actual_operate()
             res = do_validate_operate();
             break;
         case SHOW_CMD:
-            return do_show(instance_name, current.backup_id, show_archive);
+            res = do_show(instance_name, current.backup_id, show_archive);
+            break;
         case DELETE_CMD:
             do_delete_operate();
             break;
         case MERGE_CMD:
             do_merge(current.backup_id);
             break;
+        case REKEY_CMD: {
+            if (current.backup_id == INVALID_BACKUP_ID || instance_name == NULL) {
+                elog(ERROR, "rekey requires --instance and --backup-id");
+            }
+
+            parray *backups = catalog_get_backup_list(instance_name, current.backup_id);
+            if (parray_num(backups) != 1) {
+                elog(ERROR, "Failed to find backup %s", base36enc(current.backup_id));
+            }
+
+            pgBackup *backup = (pgBackup *) parray_get(backups, 0);
+            if (!lock_backup(backup, true, true)) {
+                elog(ERROR, "Cannot lock backup %s for rekey", base36enc(current.backup_id));
+            }
+            EncryptRekeyBackup(backup->root_dir);
+            elog(INFO, "Encryption key of backup %s was changed without rewriting data files",
+                 base36enc(current.backup_id));
+            parray_walk(backups, pgBackupFree);
+            parray_free(backups);
+            break;
+        }
         case SHOW_CONFIG_CMD:
             do_show_config();
             break;
@@ -648,6 +798,7 @@ static int do_actual_operate()
     }
     delete_backup_directory(instance_name);
     on_cleanup();
+    EncryptCleanup();
     release_logfile();
     clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
@@ -752,12 +903,19 @@ static void check_unlimit_stack_size(void)
 
 static void check_backid_option(char *command_name)
 {
-    if (backup_id_string != NULL)
-    {
+    if ((g_requestedParentBackupId != INVALID_BACKUP_ID || g_fromFull ||
+         g_incrementalType != INCR_TYPE_DIFFERENTIAL || g_cumulativeFallbackStr != NULL) &&
+        backup_subcmd != BACKUP_CMD) {
+        elog(ERROR, "Options --parent-backup-id, --from-full, --incremental-type and "
+             "--cumulative-fallback can only be used with the backup command");
+    }
+
+    if (backup_id_string != NULL) {
         if (backup_subcmd != RESTORE_CMD &&
             backup_subcmd != VALIDATE_CMD &&
             backup_subcmd != DELETE_CMD &&
             backup_subcmd != MERGE_CMD &&
+            backup_subcmd != REKEY_CMD &&
             backup_subcmd != SET_BACKUP_CMD &&
             backup_subcmd != SHOW_CMD)
             elog(ERROR, "Cannot use -i (--backup-id) option together with the \"%s\" command",
@@ -938,7 +1096,22 @@ int main(int argc, char *argv[])
 
     /* Sanity check of --backup-id option */
     check_backid_option(command_name);
-    
+
+    EncryptValidateOptions(command_name);
+
+    bool legacyEncryptOptionUsed = (encrypt_mode != NULL || encrypt_key != NULL ||
+                                    encrypt_salt != NULL || encrypt_dev_params != NULL ||
+                                    gen_key);
+    if (legacyEncryptOptionUsed && strcmp(command_name, "backup") == 0) {
+        elog(ERROR, "The legacy tar encryption format is read-only because it uses a fixed IV. "
+             "Use --encrypt for new encrypted backups");
+    }
+    if (legacyEncryptOptionUsed) {
+        elog(WARNING, "Options --with-encryption/--with-key/--with-salt/"
+             "--with-device-params are deprecated and only supported for reading "
+             "legacy encrypted backups");
+    }
+
     check_restore_option(command_name);
 
     check_threads_num_option();
@@ -995,6 +1168,38 @@ static void
 opt_backup_mode(ConfigOption *opt, const char *arg)
 {
     current.backup_mode = parse_backup_mode(arg);
+}
+
+static void OptParentBackupId(ConfigOption *opt, const char *arg)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if (arg[0] == 0 ||
+        strspn(arg, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") != strlen(arg)) {
+        elog(ERROR, "Invalid parent-backup-id '%s'", arg);
+    }
+
+    errno = 0;
+    value = strtoul(arg, &end, BACKUP_ID_RADIX);
+    if (errno == ERANGE || *end != 0 || value == INVALID_BACKUP_ID ||
+        value > (unsigned long)PG_INT64_MAX) {
+        elog(ERROR, "Invalid parent-backup-id '%s'", arg);
+    }
+
+    g_requestedParentBackupId = (time_t)value;
+}
+
+static void OptIncrementalType(ConfigOption *opt, const char *arg)
+{
+    if (pg_strcasecmp(arg, "differential") == 0) {
+        g_incrementalType = INCR_TYPE_DIFFERENTIAL;
+    } else if (pg_strcasecmp(arg, "cumulative") == 0) {
+        g_incrementalType = INCR_TYPE_CUMULATIVE;
+    } else {
+        elog(ERROR, "Invalid incremental-type \"%s\": "
+             "must be \"differential\" or \"cumulative\"", arg);
+    }
 }
 
 static void

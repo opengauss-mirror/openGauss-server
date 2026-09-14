@@ -1703,11 +1703,42 @@ create table t_auto_nextval_test(a int, b int auto_increment primary key);
 select nextval('t_auto_nextval_test_b_seq'); -- error
 drop table t_auto_nextval_test;
 
--- error cases
+-- all error cases
 CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY auto_increment, b text);
 CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
-CREATE TABLE test_t1 (a int GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
-CREATE TABLE test_t1 (a int ON UPDATE current_timestamp auto_increment, b text);
+CREATE TABLE test_t1 (a timestamptz GENERATED ALWAYS AS IDENTITY ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t1 (a timestamptz ON UPDATE current_timestamp auto_increment, b text);
+CREATE TABLE test_t1 (a timestamptz NOT NULL UNIQUE AUTO_INCREMENT ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t1 (a INT AUTO_INCREMENT AUTO_INCREMENT, b text);
+CREATE TABLE test_t1 (a INT AUTO_INCREMENT DEFAULT 5, b text);
+CREATE TABLE test_t1 (a INT DEFAULT 5 AUTO_INCREMENT, b text);
+CREATE TABLE test_t1 (a INT DEFAULT 5 DEFAULT 6, b text);
+
+CREATE TABLE test_t1 (a serial auto_increment, b text);
+CREATE TABLE test_t1 (a serial DEFAULT 5, b text);
+
+-- success
+CREATE TABLE test_dump_autoinc_null1(col1 int null auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+CREATE TABLE test_dump_autoinc_null2(col1 int auto_increment null UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+CREATE TABLE test_t5 (a timestamp DEFAULT 5 ON UPDATE current_timestamp, b text);
+CREATE TABLE test_t6 (a timestamp ON UPDATE current_timestamp DEFAULT 5, b text);
+
+-- default on update check, all success
+CREATE TABLE test_at1 (a timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at2 (a timestamp ON UPDATE current_timestamp default current_timestamp, b text);
+CREATE TABLE test_at3 (a timestamp ON UPDATE current_timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at4 (a timestamp ON UPDATE current_timestamp default current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at5 (a timestamp ON UPDATE current_timestamp default '2026-09-09' ON UPDATE current_timestamp, b text);
+
+CREATE TABLE test_at6 (a timestamp default current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at7 (a timestamp default current_timestamp ON UPDATE current_timestamp, b text);
+CREATE TABLE test_at8 (a timestamp default current_timestamp ON UPDATE current_timestamp default '2026-09-09', b text);
+CREATE TABLE test_at9 (a timestamp default current_timestamp default '2026-09-09' ON UPDATE current_timestamp ON UPDATE current_timestamp, b text);
+
+CREATE TABLE test_at10 (a serial);
+
+-- default on update check, with serial
+CREATE TABLE test_t1 (a serial ON UPDATE current_timestamp, b text);
 
 \c regression
 clean connection to all force for database autoinc_b_db;

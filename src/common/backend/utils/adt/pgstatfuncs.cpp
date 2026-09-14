@@ -40,6 +40,7 @@
 #include "commands/online_ddl_globalhash.h"
 #include "commands/online_ddl_util.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_ub_link_status.h"
 #include "funcapi.h"
 #include "gaussdb_version.h"
 #include "libpq/ip.h"
@@ -65,6 +66,7 @@
 #include "storage/smgr/segment.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/bufpage.h"
@@ -259,6 +261,7 @@ extern Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS);
 extern Datum get_local_rel_iostat(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS);
 extern Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS);
+extern Datum ss_ub_link_available(PG_FUNCTION_ARGS);
 extern Datum pv_session_stat(PG_FUNCTION_ARGS);
 extern Datum pv_session_memory(PG_FUNCTION_ARGS);
 
@@ -9077,7 +9080,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].forknum = bufHdr->tag.forkNum;
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
-            fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
+            fctx->record[i].pinning_backends = GetBufferRefCount(buf_state, bufHdr->buf_id);
             fctx->record[i].segfileno = bufHdr->extra->seg_fileno;
             fctx->record[i].segblockno = bufHdr->extra->seg_blockno;
 
@@ -9571,6 +9574,14 @@ Datum ss_transaction_sync_stat(PG_FUNCTION_ARGS)
 
     pfree_ext(statusCtx);
     SRF_RETURN_DONE(funcctx);
+}
+
+/*
+ * Whether the UB cache link is currently usable. 
+ */
+Datum ss_ub_link_available(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(SSIsUbLinkAvailable());
 }
 
 const char* SessionStatisticsTypeName[N_TOTAL_SESSION_STATISTICS_TYPES] = {"n_commit",
@@ -16256,14 +16267,14 @@ TupleDesc create_query_all_drc_info_tupdesc()
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "LOCK_MODE", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)6, "LAST_EDP", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)7, "TYPE", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)8, "IN_RECOVERY", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "IN_RECOVERY", BPCHAROID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)9, "COPY_PROMOTE", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)10, "PART_ID", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "PART_ID", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)11, "EDP_MAP", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)12, "LSN", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)13, "LEN", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "LEN", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)14, "RECOVERY_SKIP", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)15, "RECYCLING", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "RECYCLING", BPCHAROID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)16, "CONVERTING_INST_ID", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)17, "CONVERTING_CURR_MODE", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)18, "CONVERTING_REQ_MODE", INT4OID, -1, 0);
@@ -16273,6 +16284,9 @@ TupleDesc create_query_all_drc_info_tupdesc()
 
 void fill_drc_info_to_values(dv_drc_buf_info *drc_info, Datum *values)
 {
+    char inRecovery[2] = {(char)('0' + drc_info->in_recovery), '\0'};
+    char recycling[2] = {(char)('0' + drc_info->recycling), '\0'};
+
     values[0] = CStringGetTextDatum(drc_info->data);
     values[1] = UInt32GetDatum((uint32)drc_info->master_id);
     values[2] = UInt64GetDatum(drc_info->copy_insts);
@@ -16280,14 +16294,14 @@ void fill_drc_info_to_values(dv_drc_buf_info *drc_info, Datum *values)
     values[4] = UInt32GetDatum((uint32)drc_info->lock_mode);
     values[5] = UInt32GetDatum((uint32)drc_info->last_edp);
     values[6] = UInt32GetDatum((uint32)drc_info->type);
-    values[7] = UInt32GetDatum((uint32)drc_info->in_recovery);
+    values[7] = DirectFunctionCall3(bpcharin, CStringGetDatum(inRecovery), ObjectIdGetDatum(0), Int32GetDatum(-1));
     values[8] = UInt32GetDatum((uint32)drc_info->copy_promote);
-    values[9] = UInt16GetDatum(drc_info->part_id);
+    values[9] = UInt32GetDatum((uint32)drc_info->part_id);
     values[10] = UInt64GetDatum(drc_info->edp_map);
     values[11] = UInt64GetDatum(drc_info->lsn);
-    values[12] = UInt16GetDatum(drc_info->len);
+    values[12] = UInt32GetDatum((uint32)drc_info->len);
     values[13] = UInt32GetDatum((uint32)drc_info->recovery_skip);
-    values[14] = UInt32GetDatum((uint32)drc_info->recycling);
+    values[14] = DirectFunctionCall3(bpcharin, CStringGetDatum(recycling), ObjectIdGetDatum(0), Int32GetDatum(-1));
     values[15] = UInt32GetDatum((uint32)drc_info->converting_req_info_inst_id);
     values[16] = UInt32GetDatum((uint32)drc_info->converting_req_info_curr_mode);
     values[17] = UInt32GetDatum((uint32)drc_info->converting_req_info_req_mode);

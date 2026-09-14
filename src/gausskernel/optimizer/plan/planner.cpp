@@ -77,6 +77,7 @@
 #include "utils/relcache.h"
 #include "utils/selfuncs.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "vecexecutor/vecfunc.h"
@@ -191,6 +192,7 @@ static void init_optimizer_context(PlannerGlobal* glob);
 static void deinit_optimizer_context(PlannerGlobal* glob);
 static void check_index_column();
 static bool check_sort_for_upsert(PlannerInfo* root);
+bool check_distinct_redundant_by_unique(PlannerInfo* root);
 
 extern void PushDownFullPseudoTargetlist(PlannerInfo *root, Plan *topNode, Plan *botNode,
             List *fullEntryList);
@@ -784,6 +786,13 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     if (u_sess->opt_cxt.query_dop > 1) {
         List* subplan_list = NIL;
         (void)has_subplan(top_plan, NULL, NULL, true, &subplan_list, true);
+        /* Delete useless top-level local stream node. */
+        if (top_plan != NULL && (IsA(top_plan, Stream) || IsA(top_plan, VecStream))) {
+            Stream* stream = (Stream*)top_plan;
+            if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1 && !stream->is_recursive_local) {
+                remove_local_plan(top_plan, NULL, NULL, true);
+            }
+        }
     }
     confirm_parallel_info(top_plan, 1);
 
@@ -1316,21 +1325,16 @@ static inline bool contain_placeholdervar(Node *var_list)
     return result;
 }
 
-typedef struct {
-    bool need_redistribute;
-    bool upper_stream;
-} RedistributeContext;
-
 #ifndef ENABLE_MULTIPLE_NODES
-static void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context)
+void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context)
 {
-    if (NULL == path || context->need_redistribute) {
+    if (NULL == path) {
         return;
     }
 
     // smp indexscan or smp indexonlyscan
     if ((T_IndexScan == path->pathtype || T_IndexOnlyScan == path->pathtype)
-        && path->parent->relid == dml_rel->relid) {
+        && dml_rel != NULL && path->parent->relid == dml_rel->relid) {
         context->need_redistribute = true;
         return;
     }
@@ -1346,7 +1350,7 @@ static void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, Redistribu
         } break;
 
         case T_SeqScan: {
-            if (context->upper_stream && path->parent->relid == dml_rel->relid) {
+            if (context->upper_stream && dml_rel != NULL && path->parent->relid == dml_rel->relid) {
                 context->need_redistribute = true;
                 return;
             }
@@ -1416,18 +1420,7 @@ Path* optplan_add_redis_ctid_if_necessary(PlannerInfo* root, Path* path, List* t
         return NULL;
     }
 
-    /* 2. check whether to add stream redistribute path */
-    RedistributeContext redis_ctx;
-    redis_ctx.need_redistribute = false;
-    redis_ctx.upper_stream = false;
-    Index reidx = (Index)linitial_int(root->parse->resultRelations);
-    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
-    optplan_join_path_walker(path, dml_rel, &redis_ctx);
-    if (!redis_ctx.need_redistribute) {
-        return NULL;
-    }
-
-    /* 3. add stream redistribute path */
+    /* 2. add stream redistribute path */
     ParallelDesc* smp_desc = (ParallelDesc*)palloc0(sizeof(ParallelDesc));
     smp_desc->distriType = LOCAL_DISTRIBUTE;
     smp_desc->consumerDop = path->dop;
@@ -1697,6 +1690,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
+    /* Materialize ROWNUM at the scan and carry it through ORDER BY / window. */
+    preprocess_rownum_carrythrough(root, parse);
     /* Change ROWNUM to LIMIT if possible */
     preprocess_rownum(root, parse);
     DEBUG_QRW("After preprocess rownum");
@@ -3081,6 +3076,223 @@ static void process_rowMarks(Query* parse, Plan** resultPlan, PlannerInfo* root,
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static Path* check_smp_dml_and_add_redis_ctid_if_necessary(PlannerInfo* root, Path* best_path, Query* parse)
+{
+    RedistributeContext *redis_ctx = (RedistributeContext*)palloc0(sizeof(RedistributeContext));
+    redis_ctx->need_redistribute = false;
+    redis_ctx->upper_stream = false;
+    redis_ctx->use_imcvscan = false;
+
+    if (u_sess->attr.attr_sql.enable_smp_dml && u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP &&
+            best_path->dop > OPTPLAN_DEFAULT_DOP && IS_CMDTYPE_DML(root->parse->commandType)) {
+        /*
+         * Check if smp dml scenario is currently supported and mark it in PlannerInfo.
+         * And if stream redistribute path need to be added.
+         */
+        check_support_smp_dml_scenario(root, best_path, redis_ctx);
+
+        if (parse->targetList != NULL && root->support_smp_dml_scenario && redis_ctx->need_redistribute &&
+            root->parse->commandType != CMD_INSERT) {
+            Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
+            best_path = new_best_path != NULL ? new_best_path : best_path;
+        }
+    }
+    return best_path;
+}
+#endif
+
+/*
+ * check_distinct_redundant_by_unique:
+ *   Check whether the DISTINCT clause on the query is redundant because
+ *   the SELECT target list already includes all columns of a primary key
+ *   or unique index of the base table.
+ *
+ *   When a query like "SELECT DISTINCT pk_col, other_col FROM table"
+ *   includes all key columns of a unique index in its target list, the
+ *   result rows are guaranteed to be unique (since the PK/UK itself
+ *   enforces row uniqueness), making the DISTINCT operation unnecessary.
+ *
+ *   Returns true if the DISTINCT clause can be safely removed.
+ */
+bool check_distinct_redundant_by_unique(PlannerInfo* root)
+{
+    Query* parse = root->parse;
+    ListCell* lc = NULL;
+    RangeTblEntry* rte = NULL;
+    RelOptInfo* rel = NULL;
+    Relation relation = NULL;
+    TupleDesc tupdesc = NULL;
+    Oid primaryIndexOid = InvalidOid;
+    Node* jtnode = NULL;
+    Index rti = 0;
+
+    /* Only applicable to SELECT DISTINCT, not DISTINCT ON */
+    if (parse->hasDistinctOn) {
+        return false;
+    }
+
+    /* Not applicable when aggregates or GROUP BY are present */
+    if (parse->hasAggs || parse->groupClause || parse->groupingSets) {
+        return false;
+    }
+
+    /* Not applicable for set operations (UNION/INTERSECT/EXCEPT) */
+    if (parse->setOperations != NULL) {
+        return false;
+    }
+
+    /* Not applicable when window functions are present */
+    if (parse->hasWindowFuncs) {
+        return false;
+    }
+
+    /* Set-returning functions could produce duplicate rows */
+    if (parse->hasTargetSRFs || expression_returns_set((Node*)parse->targetList)) {
+        return false;
+    }
+
+    /*
+     * Only a plain single base table is eligible.  The FROM list must
+     * contain exactly one RangeTblRef pointing to a base relation.  Reject
+     * JOINs, subqueries, VALUES, functions and any other row-producing RTE,
+     * since they can multiply the base rows or otherwise break uniqueness.
+     */
+    if (parse->jointree == NULL || list_length(parse->jointree->fromlist) != 1) {
+        return false;
+    }
+
+    jtnode = (Node*)linitial(parse->jointree->fromlist);
+    if (!IsA(jtnode, RangeTblRef)) {
+        return false;
+    }
+
+    rti = ((RangeTblRef*)jtnode)->rtindex;
+    if (rti == 0 || rti > (Index)list_length(parse->rtable)) {
+        return false;
+    }
+
+    rte = rt_fetch(rti, parse->rtable);
+    if (rte->rtekind != RTE_RELATION) {
+        return false;
+    }
+
+    /* Get the RelOptInfo for the base table */
+    if (rti >= (Index)root->simple_rel_array_size) {
+        return false;
+    }
+
+    rel = root->simple_rel_array[rti];
+    if (rel == NULL || rel->reloptkind != RELOPT_BASEREL) {
+        return false;
+    }
+
+    /* This optimization is only enabled for A-format and B-format databases. */
+    if (!DB_IS_CMPT(A_FORMAT) && !DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+
+    /* Open the relation to verify NOT NULL constraints on key columns */
+    relation = heap_open(rte->relid, NoLock);
+    tupdesc = RelationGetDescr(relation);
+    primaryIndexOid = RelationGetPrimaryKeyIndex(relation);
+
+    /* Ordinary inheritance can multiply rows, while partitioned tables are safe to inspect. */
+    if (rte->inh && !RELATION_IS_PARTITIONED(relation)) {
+        heap_close(relation, NoLock);
+        return false;
+    }
+
+    /* Iterate over all indexes of the base relation */
+    foreach (lc, rel->indexlist) {
+        IndexOptInfo* indexInfo = (IndexOptInfo*)lfirst(lc);
+        int i;
+        bool allColsFound = true;
+        bool isPrimary = primaryIndexOid == indexInfo->indexoid;
+
+        /*
+         * Only a unique, immediately enforced, non-partial index can prove
+         * whole-table uniqueness.  Global partition indexes are not used for
+         * this optimization.  A local primary-key index includes the
+         * partition key and can prove uniqueness across all partitions.
+         */
+        if (!indexInfo->unique || !indexInfo->immediate) {
+            continue;
+        }
+        /* B-format non-primary-key unique constraints can contain duplicate keys. */
+        if (DB_IS_CMPT(B_FORMAT) && !isPrimary) {
+            continue;
+        }
+        if (indexInfo->indpred != NIL) {
+            continue;
+        }
+        if (indexInfo->isGlobal) {
+            continue;
+        }
+
+        /*
+         * Every key column must be a plain column reference present in the
+         * DISTINCT clause, must be NOT NULL (a UNIQUE index allows multiple
+         * NULLs, but DISTINCT collapses them), and the DISTINCT equality
+         * operator must agree with the index opfamily semantics.
+         */
+        for (i = 0; i < indexInfo->nkeycolumns; i++) {
+            AttrNumber keyAttno = indexInfo->indexkeys[i];
+            ListCell* tlc = NULL;
+            bool found = false;
+
+            /* Expression index column cannot be matched to a plain Var */
+            if (keyAttno <= 0 || keyAttno > tupdesc->natts) {
+                allColsFound = false;
+                break;
+            }
+
+            /* NULL-able key columns break the DISTINCT-equivalence proof */
+            if (!tupdesc->attrs[keyAttno - 1].attnotnull) {
+                allColsFound = false;
+                break;
+            }
+
+            /* Find a DISTINCT clause entry matching this key column */
+            foreach (tlc, parse->distinctClause) {
+                SortGroupClause* sgc = (SortGroupClause*)lfirst(tlc);
+                TargetEntry* tle = get_sortgroupclause_tle(sgc, parse->targetList);
+
+                if (tle->resjunk) {
+                    continue;
+                }
+
+                if (IsA(tle->expr, Var)) {
+                    Var* var = (Var*)tle->expr;
+
+                    if (var->varno == rti && var->varlevelsup == 0 && var->varattno == keyAttno &&
+                        op_in_opfamily(sgc->eqop, indexInfo->opfamily[i]) &&
+                        (indexInfo->indexcollations[i] == InvalidOid ||
+                         indexInfo->indexcollations[i] == exprCollation((Node*)tle->expr))) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                allColsFound = false;
+                break;
+            }
+        }
+
+        /* If all key columns of this unique index are covered, the DISTINCT
+         * is redundant and can be safely removed. */
+        if (allColsFound) {
+            heap_close(relation, NoLock);
+            return true;
+        }
+    }
+
+    heap_close(relation, NoLock);
+    return false;
+}
+
 /* --------------------
  * internal_grouping_planner
  *	  Perform planning steps related to grouping, aggregation, etc.
@@ -3655,15 +3867,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                                     root, cheapest_path, sorted_path);
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (u_sess->attr.attr_sql.enable_smp_dml && parse->targetList != NULL &&
-            u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP && best_path->dop > OPTPLAN_DEFAULT_DOP &&
-            (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE ||
-            root->parse->commandType == CMD_MERGE)) {
-            Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
-            if (new_best_path != NULL) {
-                best_path = new_best_path;
-            }
-        }
+        best_path = check_smp_dml_and_add_redis_ctid_if_necessary(root, best_path, parse);
 #endif
         (void)MemoryContextSwitchTo(PlanGenerateContext);
 
@@ -3798,7 +4002,7 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                             result_plan->lefttree->targetlist = result_plan->targetlist;
                         }
                     }
-                } else if (!is_projection_capable_plan(result_plan) ||
+                } else if ((!is_projection_capable_plan(result_plan) && !check_ctid_redis_stream(result_plan)) ||
                     (is_vector_scan(result_plan) && vector_engine_unsupport_expression_walker((Node*)sub_tlist))) {
                     result_plan = (Plan*)make_result(root, sub_tlist, NULL, result_plan);
                 } else {
@@ -3807,17 +4011,29 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * the desired tlist.
                      * but with the user var, we cannot push down into subtree in b format
                      */
+                    Plan* plan_need_replace_tlist = result_plan;
+
                     if (parse->sortClause)
                         pullup_userset_before_sort = need_pullup_userset_before_sort(sub_tlist);
-                    if (!pullup_userset_before_sort)
+                    if (!pullup_userset_before_sort) {
+                        /*
+                         * Check if the result_plan is a stream node redistributed based on ctid.
+                         * This type of stream node is designed to resolve page lock conflicts during smp iud.
+                         */
+                        if (check_ctid_redis_stream(result_plan)) {
+                            plan_need_replace_tlist->targetlist = sub_tlist;
+                            plan_need_replace_tlist = result_plan->lefttree;
+                        }
+                        plan_need_replace_tlist->targetlist = sub_tlist;
                         result_plan->targetlist = sub_tlist;
 
-                    if (IsA(result_plan, PartIterator)) {
-                        /*
-                         * If is a PartIterator + Scan, push the PartIterator's
-                         * tlist to Scan.
-                         */
-                        result_plan->lefttree->targetlist = sub_tlist;
+                        if (IsA(plan_need_replace_tlist, PartIterator) || IsA(plan_need_replace_tlist, VecPartIterator)) {
+                            /*
+                             * If is a PartIterator + Scan, push the PartIterator's
+                             * tlist to Scan.
+                             */
+                            plan_need_replace_tlist->lefttree->targetlist = sub_tlist;
+                        }
                     }
 #ifdef PGXC
                     /*
@@ -4804,6 +5020,19 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
      */
     bool next_is_second_level_distinct = false; /* flag for DISTINCT agg */
     bool contain_sets_expression = expression_returns_set((Node*)tlist);
+
+    if (parse->distinctClause) {
+        /*
+         * If the SELECT target list already includes all columns of a
+         * primary key or unique index, the result is guaranteed to be
+         * unique and the DISTINCT operation can be skipped entirely.
+         */
+        if (!parse->hasDistinctOn &&
+            check_distinct_redundant_by_unique(root)) {
+            list_free_deep(parse->distinctClause);
+            parse->distinctClause = NIL;
+        }
+    }
 
     if (parse->distinctClause) {
         double dNumDistinctRows[2];
@@ -10269,10 +10498,21 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         case T_Stream: {
             check_rescan = false;
             Stream* sj = (Stream*)result_plan;
+#ifndef ENABLE_MULTIPLE_NODES
+            bool record_has_stream_upper = planContext->has_stream_upper;
+            planContext->has_stream_upper =  true;
+            /* smp dml does not support vectorized plan */
+            if (check_ctid_redis_stream(result_plan)) {
+                return true;
+            }
+#endif
             if (vector_engine_unsupport_expression_walker((Node*)sj->distribute_keys, planContext))
                 return true;
             if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
+#ifndef ENABLE_MULTIPLE_NODES
+            planContext->has_stream_upper = record_has_stream_upper;
+#endif
         } break;
         case T_Limit: {
             Limit* lm = (Limit*)result_plan;
@@ -10441,6 +10681,12 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         } break;
 
         case T_ModifyTable: {
+#ifndef ENABLE_MULTIPLE_NODES
+            /* smp dml does not support vectorized */
+            if (planContext->has_stream_upper) {
+                return true;
+            }
+#endif
             ModifyTable* mt = (ModifyTable*)result_plan;
             ListCell* lc = NULL;
             foreach (lc, mt->plans) {
@@ -10489,6 +10735,9 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
     planContext.currentExprIsFilter = false;
     planContext.rowCost = 0.0;
     planContext.vecCost = 0.0;
+#ifndef ENABLE_MULTIPLE_NODES
+    planContext.has_stream_upper = false;
+#endif
 
     /* for OPT_VECTOR_ENGINE, we treat plan can be transformed to vectorized plan,
      * and if the plan not satisfied rules to vectorize, will return false later.

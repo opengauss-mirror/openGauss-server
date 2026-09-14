@@ -992,6 +992,14 @@ static bool IfIgnoreStandbyXmin(TransactionId xmin, TimestampTz last_xmin_change
  *
  * If already_locked is true, ProcArrayLock has already been acquired
  * exclusively.
+ *
+ * When hot_standby_feedback is on, physical slot xmin is only meaningful while
+ * this node is a replication source for that slot.  After switchover the demoted
+ * primary keeps inactive physical slots whose HS xmin would otherwise pin
+ * GetOldestXmin, HS feedback and CSNLOG truncation on the new standby.  Match
+ * ReplicationSlotsComputeRequiredLSN: with feedback enabled, ignore ordinary
+ * physical slots unless we are primary, pending, or hadr main standby
+ * (backup slots still count).
  */
 void ReplicationSlotsComputeRequiredXmin(bool already_locked)
 {
@@ -1000,6 +1008,10 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
     TransactionId agg_catalog_xmin = InvalidTransactionId;
 
     Assert(t_thrd.slot_cxt.ReplicationSlotCtl != NULL);
+
+    /* server_mode must be set before deciding whether physical slot xmin applies */
+    load_server_mode();
+
     LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 
     for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
@@ -1010,6 +1022,23 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
 
         if (!s->in_use)
             continue;
+
+        /*
+         * With hot_standby_feedback=on, skip leftover physical HS xmin on a
+         * regular standby; keep the slot itself.
+         */
+        if (u_sess->attr.attr_storage.hot_standby_feedback &&
+            s->data.database == InvalidOid && GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP) {
+            bool ignore_physical_xmin =
+                (t_thrd.xlog_cxt.server_mode != PRIMARY_MODE &&
+#ifdef ENABLE_NEON
+                 t_thrd.xlog_cxt.server_mode != NORMAL_MODE &&
+#endif
+                 !(t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby) &&
+                 t_thrd.xlog_cxt.server_mode != PENDING_MODE);
+            if (ignore_physical_xmin)
+                continue;
+        }
 
         {
             volatile ReplicationSlot *vslot = s;

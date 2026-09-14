@@ -100,7 +100,7 @@ $ uv pip install setuptools<70 modelscope psycopg2-binary
 
 ## 处理文档
 
-本文以 [Markdown](https://gitcode.com/openGauss/docs/blob/master/docs/zh/datavec/datavec_overview.md) 文件作为源文件进行操作演示。
+本文以 [Markdown](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md) 文件作为源文件进行操作演示。
 
 此处以 “#” 为分隔符进行简单的分块处理。
 

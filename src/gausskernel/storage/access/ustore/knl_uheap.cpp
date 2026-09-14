@@ -46,7 +46,7 @@
 #include <stdlib.h>
 
 static Bitmapset *UHeapDetermineModifiedColumns(Relation relation, Bitmapset *interesting_cols, UHeapTuple oldtup,
-    UHeapTuple newtup);
+                                                UHeapTuple newtup);
 static void TtsUHeapMaterialize(TupleTableSlot *slot);
 static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel, bool isToast = false);
 static void LogUPageExtendTDSlots(Buffer buf, uint8 currTDSlots, uint8 numExtended);
@@ -60,11 +60,17 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
     TransactionId updateXid, TransactionId lockerXid, SubTransactionId updateSubXid, SubTransactionId lockerSubXid,
     bool *hasTupLock, bool *multixidIsMySelf, int waitSec = 0);
 
+SubTransactionId getCombinedSubXid()
+{
+    return (pg_atomic_read_u64(&t_thrd.undo_cxt.curSequence) << SUBXID_BITS) + GetCurrentSubTransactionId();
+}
+
 static Page GetPageBuffer(Relation relation, BlockNumber blkno, Buffer &buffer)
 {
     buffer = ReadBuffer(relation, blkno);
     return BufferGetPage(buffer);
 }
+
 static bool UHeapPageXidMinMax(Page page, bool multi, ShortTransactionId *min, ShortTransactionId *max)
 {
     bool found = false;
@@ -586,8 +592,8 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
 
     TransactionId fxid = GetTopTransactionId();
 
-    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
-        subxid = GetCurrentSubTransactionId();
+    if (IsSubTransaction() && likely(t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+        subxid = getCombinedSubXid();
     }
 
     /* Prepare the tuple for insertion */
@@ -1956,10 +1962,13 @@ UHeapTuple UHeapExtractReplicaIdentity(Relation relation, UHeapTuple tp, bool* c
     }
 
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-    Oid tmpRelid = partid_get_parentid(relid);
-    if (OidIsValid(tmpRelid)) {
-        relid = tmpRelid;
+    Oid relid;
+    if (OidIsValid(relation->grandparentId)) {
+        relid = relation->grandparentId;
+    } else if (OidIsValid(relation->parentId)) {
+        relid = relation->parentId;
+    } else {
+        relid = relation->rd_id;
     }
     bool is_null = true;
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
@@ -2168,7 +2177,7 @@ check_tup_satisfies_update:
      * subtransaction.
      */
     if (IsSubTransaction()) {
-        subxid = GetCurrentSubTransactionId();
+        subxid = getCombinedSubXid();
         SubXactLockTableInsert(subxid);
     }
 
@@ -2731,10 +2740,22 @@ check_tup_satisfies_update:
     /*
      * Acquire subtransaction lock, if current transaction is a
      * subtransaction.
+     *
+     * because that commandId is less than 2^32 - 2, in the same transaction, the number of sub transactions
+     * will be no more than 2^32 - 2. So that we use high 32 bits to indicate the sequence of current
+     * sub transaction(will be used in rollback_actions_uheap) and low 32 bits to indicate
+     * s->subxid(which is the level of current sub transaction, will be used here and in function uheap_date).
+     *
+     * |--------------------------------------------------|--------------------------------------------------|
+     * |                   high 32 bits                   |                   low 32 bits                    |
+     * |--------------------------------------------------|--------------------------------------------------|
+     * |                   curSequence                    |                  current_subxid(level)           |
+     * |--------------------------------------------------|--------------------------------------------------|
+     *
      */
     hasSubXactLock = IsSubTransaction();
     if (hasSubXactLock) {
-        subxid = GetCurrentSubTransactionId();
+        subxid = getCombinedSubXid();
         SubXactLockTableInsert(subxid);
     }
 
@@ -3466,8 +3487,8 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
 
     ndone = 0;
 
-    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
-        subxid = GetCurrentSubTransactionId();
+    if (IsSubTransaction() && likely(t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+        subxid = getCombinedSubXid();
     }
 
     while (ndone < ntuples) {
@@ -5496,6 +5517,22 @@ UndoRecPtr UHeapPrepareUndoUpdate(Oid relOid, Oid partitionOid, Oid relfilenode,
         urecNew->SetNeedInsert(true);
         urecNew->SetUtype(UNDO_INSERT);
         urecNew->SetOldXactId(xid);
+
+        /*
+         * A non-inplace update creates an UPDATE record for the old tuple and
+         * an INSERT record for the tuple at its new location.  Subtransaction
+         * rollback follows the block undo chain only while records belong to
+         * the same subtransaction, so both records must carry the subxid once
+         * the SMP rollback semantics are enabled.
+         */
+        if (subxid != InvalidSubTransactionId && t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM) {
+            urecNew->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+            urecNew->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+            MemoryContext oldContext = MemoryContextSwitchTo(urecNew->mem_context());
+            initStringInfo(urecNew->Rawdata());
+            MemoryContextSwitchTo(oldContext);
+            appendBinaryStringInfo(urecNew->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+        }
 
         /* Non-inplace updates contains the ctid after the tuple data */
         payloadLen += sizeof(ItemPointerData);

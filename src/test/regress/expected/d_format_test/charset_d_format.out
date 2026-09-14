@@ -155,12 +155,12 @@ create table t_charset_7 (c1 varchar(20)) default charset = utf8mb4 default coll
 create table t_charset_8 (c1 varchar(20)) charset = binary;
 create table t_charset_28 (c1 text) charset = binary;
 select pg_get_tabledef('t_charset_28');
-                    pg_get_tabledef                     
---------------------------------------------------------
- SET search_path = public;                             +
- CREATE TABLE t_charset_28 (                           +
-     c1 blob CHARACTER SET "SQL_ASCII" COLLATE "binary"+
- )                                                     +
+                    pg_get_tabledef                    
+-------------------------------------------------------
+ SET search_path = public;                            +
+ CREATE TABLE t_charset_28 (                          +
+     c1 blob                                          +
+ )                                                    +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
 
@@ -353,8 +353,8 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
-     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                      +
-     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary"                       +
+     a8 blob,                                                                 +
+     a9 blob                                                                  +
  )                                                                            +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
@@ -378,11 +378,11 @@ ERROR:  type name not support set charset
 alter table a_charset_2 add a20 "char" charset utf8mb4 collate utf8mb4_general_ci; -- error
 ERROR:  type "char" not support set charset
 alter table a_charset_2 add a21 BLOB charset utf8mb4 collate utf8mb4_general_ci; -- error
-ERROR:  type blob not support set charset
+ERROR:  binary collation only support binary type in B and D format
 alter table a_charset_2 add a22 RAW charset utf8mb4 collate utf8mb4_general_ci; -- error
 ERROR:  type raw not support set charset
 alter table a_charset_2 add a23 BYTEA charset utf8mb4 collate utf8mb4_general_ci; -- error
-ERROR:  type bytea not support set charset
+ERROR:  binary collation only support binary type in B and D format
 alter table a_charset_2 add a24 varchar(20) collate "zh_CN.gbk"; -- error;
 ERROR:  difference between the charset and the database encoding has not supported
 select pg_get_tabledef('a_charset_2');
@@ -397,11 +397,11 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
-     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
-     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
      a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
      a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
-     a12 varbinary(20) CHARACTER SET "SQL_ASCII" COLLATE "binary",             +
+     a12 varbinary(20),                                                        +
      a13 integer,                                                              +
      a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
      a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
@@ -439,8 +439,8 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
-     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
-     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
      a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
      a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
      a12 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
@@ -1038,12 +1038,16 @@ create extension shark;
 set d_format_behavior_compat_options = 'default_collation';
 create table test(id character(5));
 \d test
-                      Table "public.test"
- Column |     Type     |               Modifiers                
---------+--------------+----------------------------------------
- id     | varbinary(5) | character set SQL_ASCII collate binary
+        Table "public.test"
+ Column |     Type     | Modifiers 
+--------+--------------+-----------
+ id     | varbinary(5) | 
 
+create view test_view as select id from test;
 set d_format_behavior_compat_options = '';
+create view test_view_without_guc as select id from test;
+drop view test_view_without_guc;
+drop view test_view;
 create table test1(id character(5));
 \d test1
        Table "public.test1"

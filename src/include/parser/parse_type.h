@@ -68,6 +68,8 @@ extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname
 extern char* CastPackageTypeName(const char* typName, Oid  pkgOid, bool isPackage, bool isPublic = true);
 extern Oid LookupTypeInFunc(const char* typeName);
 extern bool IsBinaryType(Oid typid);
+/* Binary types that may legally retain BINARY_COLLATION_OID in legacy objects. */
+extern bool IsBinaryTypeWithCollation(Oid typid);
 typedef bool (*isBinaryType)(Oid typid);
 #define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)
 extern void check_type_supports_multi_charset(Oid typid, bool allow_array);

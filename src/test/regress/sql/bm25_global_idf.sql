@@ -1,0 +1,231 @@
+--
+-- BM25 distributed Global IDF: recall comparison test (single-node simulation)
+--
+-- Scenario: query "apple fruit".
+--   "fruit"  appears in every doc            -> globally near-zero IDF (noise term)
+--   "apple"  is the discriminator            -> docs with more "apple" are truly relevant
+--
+-- Skew across 2 simulated shards (ids: A=1..500, B=501..1000):
+--   shard A: apple in 300/500 docs  -> LOW  local IDF(apple) in A
+--   shard B: apple in  10/500 docs  -> HIGH local IDF(apple) in B
+--   global : apple in 310/1000 docs
+--
+-- Ground truth (single machine): the 20 docs with apple x5 (ids 1..20) are top-20.
+--
+-- Per-shard LOCAL IDF inflates shard B's 10 apple docs (apple x1) via its high local
+-- IDF, so CN merge-by-score wrongly ranks them above shard A's truly-relevant apple x5
+-- docs -> recall drops. GLOBAL IDF puts every shard on the same scale, restoring the
+-- ground-truth ranking.
+--
+-- Global avgdl uses the rescore mode: candidates are retrieved and pruned under the
+-- local avgdl (build-time maxScore bounds stay valid), then the returned candidates are
+-- rescored with the global avgdl so per-shard scores are comparable on merge.
+--
+-- bm25 "<&>" is an index-scan-driven operator, so each shard top-K is materialized by a
+-- simple query first, then merged by the stored score (this models CN merge-by-score).
+--
+SET client_min_messages = error;
+\pset format unaligned
+
+-- Global BM25 statistics are one atomic query-scoped payload. Reject it while the
+-- feature is disabled, reject malformed payloads, and reject non-local assignments.
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = '';
+COMMIT;
+
+SET enable_bm25_global_idf = on;
+SET bm25_global_stat = 'N=1;T=1;apple:1';
+SHOW bm25_global_stat;
+RESET bm25_global_stat;
+SELECT set_config('bm25_global_stat', 'N=1;T=1;apple:1', false);
+SHOW bm25_global_stat;
+RESET bm25_global_stat;
+BEGIN;
+CREATE ROLE bm25_global_idf_test_role PASSWORD 'Bm25@Test123';
+ALTER ROLE bm25_global_idf_test_role SET bm25_global_stat = 'N=1;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+ALTER DATABASE postgres SET bm25_global_stat = 'N=1;T=1;apple:1';
+ROLLBACK;
+ALTER SYSTEM SET bm25_global_stat = 'N=1;T=1;apple:1';
+
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=0;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=2;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:0';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:2';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:1,apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;N=1;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=x;T=1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=-1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=+1;apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:1,';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple:1,,fruit:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;,apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1; apple:1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1;T=1;apple :1';
+ROLLBACK;
+BEGIN;
+SET LOCAL bm25_global_stat = E'N=1;T=1;apple\t:1';
+ROLLBACK;
+
+-- Transaction-local assignments are accepted while the feature is enabled and
+-- automatically revert at transaction end.
+BEGIN;
+SELECT set_config('bm25_global_stat', 'N=1;T=2;apple:1', true) AS set_config_local_value;
+SHOW bm25_global_stat;
+COMMIT;
+SHOW bm25_global_stat;
+RESET enable_bm25_global_idf;
+
+DROP TABLE IF EXISTS bm25_gidf_all CASCADE;
+DROP TABLE IF EXISTS bm25_gidf_a   CASCADE;
+DROP TABLE IF EXISTS bm25_gidf_b   CASCADE;
+
+CREATE TABLE bm25_gidf_a (id int, content text);
+CREATE TABLE bm25_gidf_b (id int, content text);
+CREATE TABLE bm25_gidf_all (id int, content text);
+
+-- shard A: ids 1-20 apple x5; 21-300 apple x1; 301-500 none  (apple df_A = 300)
+INSERT INTO bm25_gidf_a
+SELECT i, CASE WHEN i <= 20  THEN 'apple apple apple apple apple fruit'
+               WHEN i <= 300 THEN 'apple fruit'
+               ELSE 'fruit' END
+FROM generate_series(1, 500) AS i;
+
+-- shard B: ids 501-510 apple x1; rest none  (apple df_B = 10)
+INSERT INTO bm25_gidf_b
+SELECT i, CASE WHEN i <= 510 THEN 'apple fruit' ELSE 'fruit' END
+FROM generate_series(501, 1000) AS i;
+
+INSERT INTO bm25_gidf_all SELECT * FROM bm25_gidf_a;
+INSERT INTO bm25_gidf_all SELECT * FROM bm25_gidf_b;
+
+CREATE INDEX ON bm25_gidf_a   USING bm25(content);
+CREATE INDEX ON bm25_gidf_b   USING bm25(content);
+CREATE INDEX ON bm25_gidf_all USING bm25(content);
+
+-- bm25_table_stat optionally identifies the indexed column. Without a column,
+-- multiple BM25 indexes are ambiguous; duplicate indexes on one column are
+-- ambiguous even when the column is specified.
+DROP TABLE IF EXISTS bm25_gidf_stat_pick CASCADE;
+CREATE TABLE bm25_gidf_stat_pick (id int, content text, title text);
+INSERT INTO bm25_gidf_stat_pick VALUES
+    (1, 'apple', 'banana'),
+    (2, 'banana', 'apple');
+CREATE INDEX bm25_gidf_stat_pick_content_idx ON bm25_gidf_stat_pick USING bm25(content);
+CREATE INDEX bm25_gidf_stat_pick_title_idx ON bm25_gidf_stat_pick USING bm25(title);
+
+SELECT pg_catalog.bm25_table_stat('^bm25_gidf_stat_pick$', 'apple', 'content');
+SELECT pg_catalog.bm25_table_stat('^bm25_gidf_stat_pick$', 'apple');
+
+CREATE SCHEMA bm25_gidf_other;
+CREATE TABLE bm25_gidf_other.bm25_gidf_stat_pick (id int, content text);
+INSERT INTO bm25_gidf_other.bm25_gidf_stat_pick VALUES
+    (3, 'apple'),
+    (4, 'apple');
+CREATE INDEX bm25_gidf_stat_pick_other_idx
+    ON bm25_gidf_other.bm25_gidf_stat_pick USING bm25(content);
+SELECT pg_catalog.bm25_table_stat(
+    '^bm25_gidf_stat_pick$', 'apple', 'content', 'public');
+SELECT pg_catalog.bm25_table_stat(
+    '^bm25_gidf_stat_pick$', 'apple', 'content', 'bm25_gidf_other');
+
+DROP INDEX bm25_gidf_stat_pick_title_idx;
+CREATE INDEX bm25_gidf_stat_pick_content_idx_2 ON bm25_gidf_stat_pick USING bm25(content);
+SELECT pg_catalog.bm25_table_stat('^bm25_gidf_stat_pick$', 'apple', 'content');
+
+DROP TABLE bm25_gidf_stat_pick CASCADE;
+DROP SCHEMA bm25_gidf_other CASCADE;
+
+SET enable_seqscan = off;
+
+-- ground truth: single-machine top-20
+CREATE TEMP TABLE truth AS
+SELECT id FROM bm25_gidf_all ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+
+-- 1) per-shard LOCAL IDF
+RESET bm25_global_stat;
+
+CREATE TEMP TABLE la AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_a ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE lb AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_b ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE local_merged AS
+SELECT id FROM (SELECT * FROM la UNION ALL SELECT * FROM lb) q ORDER BY s DESC LIMIT 20;
+
+-- 2) GLOBAL IDF + global avgdl
+SET enable_bm25_global_idf = on;
+BEGIN;
+SET LOCAL bm25_global_stat = 'N=1000;T=1390;apple:310,fruit:1000';
+
+CREATE TEMP TABLE ga AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_a ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE gb AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_b ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE global_idf_merged AS
+SELECT id FROM (SELECT * FROM ga UNION ALL SELECT * FROM gb) q ORDER BY s DESC LIMIT 20;
+
+-- Disabling the feature makes already-injected statistics inert immediately.
+SET LOCAL enable_bm25_global_idf = off;
+CREATE TEMP TABLE da AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_a ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE db AS SELECT id, content <&> 'apple fruit' AS s FROM bm25_gidf_b ORDER BY content <&> 'apple fruit' DESC LIMIT 20;
+CREATE TEMP TABLE disabled_merged AS
+SELECT id FROM (SELECT * FROM da UNION ALL SELECT * FROM db) q ORDER BY s DESC LIMIT 20;
+SET LOCAL enable_bm25_global_idf = on;
+
+COMMIT;
+RESET enable_bm25_global_idf;
+
+-- recall (intersection with ground truth, topk = 20)
+SELECT
+    (SELECT count(*) FROM local_merged       m JOIN truth t ON m.id = t.id) AS recall_local_idf,
+    (SELECT count(*) FROM global_idf_merged  m JOIN truth t ON m.id = t.id) AS recall_global_idf,
+    (SELECT count(*) FROM disabled_merged    m JOIN truth t ON m.id = t.id) AS recall_disabled_global_idf,
+    20 AS topk;
+
+-- 4) standalone execution stays unchanged: enabling the switch without injected
+--    distributed statistics keeps using the local index statistics.
+RESET bm25_global_stat;
+SET enable_bm25_global_idf = on;
+
+SELECT count(*) AS standalone_top20_hits FROM (
+    SELECT id FROM bm25_gidf_all ORDER BY content <&> 'apple fruit' DESC LIMIT 20
+) q JOIN truth t ON q.id = t.id;
+
+SHOW bm25_global_stat;
+
+RESET enable_bm25_global_idf;
+RESET enable_seqscan;
+
+DROP TABLE IF EXISTS bm25_gidf_all CASCADE;
+DROP TABLE IF EXISTS bm25_gidf_a   CASCADE;
+DROP TABLE IF EXISTS bm25_gidf_b   CASCADE;

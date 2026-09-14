@@ -1,0 +1,8 @@
+#!/bin/sh
+
+source $1/env_utils.sh $1 $2
+subscription_dir=$1
+case_use_db=$3
+
+exec_sql $case_use_db $sub_node1_port "DROP USER test_u1"
+exec_sql $case_use_db $sub_node1_port "DROP USER test_u1"

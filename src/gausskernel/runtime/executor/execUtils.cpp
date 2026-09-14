@@ -1961,9 +1961,9 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
                 estate->next_autoinc = 0;
             } else {
                 if (is_global_level_sequence_cache(cons_autoinc->seqoid)) {
-                    autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid);
+                    autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid, true);
                 } else {
-                    autoinc = nextval_internal(cons_autoinc->seqoid, true);
+                    autoinc = nextval_internal(cons_autoinc->seqoid, true, true);
                 }
             }
         }
@@ -2262,6 +2262,30 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
     return true;
 }
 
+/*
+ * Determine the uniqueness-check mode for an index insertion.
+ * unique_checks can only disable checks for non-primary-key unique indexes
+ * in a B-format database, and only for the table owner or a superuser.
+ */
+IndexUniqueCheck ExecGetIndexUniqueCheck(Relation heapRelation, Relation indexRelation, bool hasConflict)
+{
+    if (!indexRelation->rd_index->indisunique) {
+        return UNIQUE_CHECK_NO;
+    }
+
+    if (DB_IS_CMPT(B_FORMAT) && !u_sess->attr.attr_common.unique_checks &&
+        !indexRelation->rd_index->indisprimary &&
+        (pg_class_ownercheck(RelationGetRelid(heapRelation), GetUserId()) || superuser())) {
+        return UNIQUE_CHECK_NO;
+    }
+
+    if (hasConflict) {
+        return UNIQUE_CHECK_PARTIAL;
+    }
+
+    return indexRelation->rd_index->indimmediate ? UNIQUE_CHECK_YES : UNIQUE_CHECK_PARTIAL;
+}
+
 /* ----------------------------------------------------------------
  *		ExecInsertIndexTuples
  *
@@ -2473,26 +2497,8 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
          * possible non-uniqueness, and we add the index OID to the result
          * list if further checking is needed.
          */
-        if (!indexRelation->rd_index->indisunique) {
-            checkUnique = UNIQUE_CHECK_NO;
-        } else if (!u_sess->attr.attr_common.unique_checks) {
-            /*
-             * unique_checks is disabled. Only allow skipping uniqueness check
-             * if the current user is the table owner or a superuser. This prevents
-             * ordinary users from bypassing integrity constraints on tables they don't own.
-             */
-            if (pg_class_ownercheck(RelationGetRelid(heapRelation), GetUserId()) || superuser()) {
-                checkUnique = UNIQUE_CHECK_NO;
-            } else {
-                checkUnique = UNIQUE_CHECK_YES;
-            }
-        } else if (conflict != NULL && inArbiterIndexes) {
-            checkUnique = UNIQUE_CHECK_PARTIAL;
-        } else if (indexRelation->rd_index->indimmediate) {
-            checkUnique = UNIQUE_CHECK_YES;
-        } else {
-            checkUnique = UNIQUE_CHECK_PARTIAL;
-        }
+        checkUnique = ExecGetIndexUniqueCheck(
+            heapRelation, indexRelation, conflict != NULL && inArbiterIndexes);
         satisfiesConstraint = index_insert(actualindex, /* index relation */
             values,                                     /* array of index Datums */
             isnull,                                     /* null flags */

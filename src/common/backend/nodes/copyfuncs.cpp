@@ -1504,6 +1504,7 @@ static Sort* _copySort(const Sort* from)
     CopyPlanFields((const Plan*)from, (Plan*)newnode);
 
     COPY_SCALAR_FIELD(numCols);
+    COPY_SCALAR_FIELD(nPresortedCols);
     if (from->numCols > 0) {
         COPY_POINTER_FIELD(sortColIdx, from->numCols * sizeof(AttrNumber));
         COPY_POINTER_FIELD(sortOperators, from->numCols * sizeof(Oid));
@@ -7073,6 +7074,7 @@ static ReindexStmt* _copyReindexStmt(const ReindexStmt* from)
     COPY_SCALAR_FIELD(memUsage.work_mem);
     COPY_SCALAR_FIELD(memUsage.max_mem);
     COPY_SCALAR_FIELD(concurrent);
+    COPY_SCALAR_FIELD(is_alter_index_rebuild);
 
     return newnode;
 }
@@ -8000,6 +8002,9 @@ static PlannerInfo *_copyPartialPlannerInfo(const PlannerInfo *from)
     COPY_SCALAR_FIELD(hasPseudoConstantQuals);
     COPY_SCALAR_FIELD(hasRecursion);
     COPY_SCALAR_FIELD(wt_param_id);
+#ifndef ENABLE_MULTIPLE_NODES
+    COPY_SCALAR_FIELD(support_smp_dml_scenario);
+#endif
     return newnode;
 }
 

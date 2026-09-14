@@ -1,0 +1,6 @@
+< WITH (orientation=row, compression=no, on_commit_delete_rows=true, collate=1537);
+---
+> WITH (orientation=row, compression=no, collate=1537, on_commit_delete_rows=true);
+< WITH (orientation=row, compression=no, on_commit_delete_rows=false, collate=1537);
+---
+> WITH (orientation=row, compression=no, collate=1537, on_commit_delete_rows=false);

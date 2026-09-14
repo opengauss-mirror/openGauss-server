@@ -3972,6 +3972,7 @@ AlterTableStmt:
 						n->kind = OBJECT_INDEX;
 						n->relation = $3;
 						n->name = NULL;
+						n->is_alter_index_rebuild = true;
 						$$ = (Node *)n;
 					}
 					else if ($4->length == 1 && ((AlterTableCmd*)lfirst($4->head))->subtype == AT_RebuildIndexPartition)
@@ -3980,6 +3981,7 @@ AlterTableStmt:
 						n->kind = OBJECT_INDEX_PARTITION;
 						n->relation = $3;
 						n->name = ((AlterTableCmd*)lfirst($4->head))->name;
+						n->is_alter_index_rebuild = true;
 						$$ = (Node *)n;
 					}
 					else
@@ -35788,7 +35790,7 @@ static void CheckPartitionExprInner(Node* expr, int* colCount, bool checkTypeCas
 		if (checkTypeCast) {
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be a Type Cast")));
 		} else {
-			return;
+			CheckPartitionExprInner(((TypeCast*)expr)->arg, colCount, false);
 		}
 	} else {
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));

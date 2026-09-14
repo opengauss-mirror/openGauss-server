@@ -200,6 +200,50 @@ static PLpgSQL_compile_context* GetCompileContextByPkgOid(Oid pkgOid)
     return NULL;
 }
 
+struct PackageFunctionCompileInfo {
+    FunctionCallInfo fcinfo;
+    HeapTuple procTup;
+    PLpgSQL_func_hashkey* hashkey;
+    bool* hashkeyValid;
+    bool forValidator;
+    PLpgSQL_compile_context* packageCompileContext;
+    Oid oldValue;
+};
+
+static PLpgSQL_function* CompilePackageFunction(PackageFunctionCompileInfo* compileInfo)
+{
+    Form_pg_proc procStruct = (Form_pg_proc)GETSTRUCT(compileInfo->procTup);
+    PLpgSQL_function* func = NULL;
+    PLpgSQL_compile_context* saveCompileContext = u_sess->plsql_cxt.curr_compile_context;
+    int saveCompileStatus = getCompileStatus();
+    PG_TRY();
+    {
+        if (!*compileInfo->hashkeyValid) {
+            compute_function_hashkey(compileInfo->procTup, compileInfo->fcinfo, procStruct,
+                compileInfo->hashkey, compileInfo->forValidator);
+            *compileInfo->hashkeyValid = true;
+        }
+        u_sess->plsql_cxt.curr_compile_context = compileInfo->packageCompileContext;
+        (void)CompileStatusSwtichTo(COMPILIE_PKG_FUNC);
+        func = do_compile(compileInfo->fcinfo, compileInfo->procTup, func,
+            compileInfo->hashkey, compileInfo->forValidator);
+        u_sess->plsql_cxt.curr_compile_context = saveCompileContext;
+        (void)CompileStatusSwtichTo(saveCompileStatus);
+        ReleaseSysCache(compileInfo->procTup);
+        compileInfo->fcinfo->flinfo->fn_extra = (void*)func;
+        restoreCallFromPkgOid(compileInfo->oldValue);
+    }
+    PG_CATCH();
+    {
+        popToOldCompileContext(compileInfo->packageCompileContext);
+        u_sess->plsql_cxt.curr_compile_context = saveCompileContext;
+        (void)CompileStatusSwtichTo(saveCompileStatus);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    return func;
+}
+
 PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, bool isRecompile)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
@@ -336,32 +380,9 @@ recheck:
                 }
             }
             if (package_compile_context != NULL) {
-                PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
-                int save_compile_status = getCompileStatus();
-                PG_TRY();
-                {
-                    if (!hashkey_valid) {
-                        compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, for_validator);
-                        hashkey_valid = true;
-                    }
-                    u_sess->plsql_cxt.curr_compile_context = package_compile_context;
-                    (void)CompileStatusSwtichTo(COMPILIE_PKG_FUNC);
-                    func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
-                    u_sess->plsql_cxt.curr_compile_context = save_compile_context;
-                    (void)CompileStatusSwtichTo(save_compile_status);
-                    ReleaseSysCache(proc_tup);
-                    fcinfo->flinfo->fn_extra = (void*)func;
-                    restoreCallFromPkgOid(old_value);
-                    return func;
-                }
-                PG_CATCH();
-                {
-                    popToOldCompileContext(package_compile_context);
-                    u_sess->plsql_cxt.curr_compile_context = save_compile_context;
-                    (void)CompileStatusSwtichTo(save_compile_status);
-                    PG_RE_THROW();
-                }
-                PG_END_TRY();
+                PackageFunctionCompileInfo compile_info = {
+                    fcinfo, proc_tup, &hashkey, &hashkey_valid, for_validator, package_compile_context, old_value};
+                return CompilePackageFunction(&compile_info);
             }
             ereport(NOTICE, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
                 errmsg("not found function %u in package", fcinfo->flinfo->fn_oid)));
@@ -1572,8 +1593,17 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         plpgsql_scanner_finish();
         pfree_ext(proc_source);
         PopOverrideSearchPath();
+        u_sess->misc_cxt.Pseudo_CurrentUserId = saved_pseudo_current_userId;
+        t_thrd.log_cxt.error_context_stack = pl_err_context.previous;
+        curr_compile->plpgsql_error_funcname = NULL;
+        curr_compile->plpgsql_curr_compile = NULL;
+        curr_compile->plpgsql_check_syntax = false;
         u_sess->plsql_cxt.curr_compile_context = popCompileContext();
         clearCompileContext(curr_compile);
+        CompileStatusSwtichTo(save_compile_status);
+        if (temp != NULL) {
+            MemoryContextSwitchTo(temp);
+        }
         return NULL;
     }
 #ifndef ENABLE_MULTIPLE_NODES

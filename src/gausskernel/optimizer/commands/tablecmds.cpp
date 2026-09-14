@@ -5043,12 +5043,12 @@ void ExecuteTruncateGuts(
     foreach (cell, seq_relids) {
         Oid seq_relid = lfirst_oid(cell);
 
-        ResetSequence(seq_relid, true);
+        ResetSequence(seq_relid, true, false);
     }
     foreach (cell, autoinc_seqoids) {
         Oid seq_relid = lfirst_oid(cell);
 
-        ResetSequence(seq_relid, true);
+        ResetSequence(seq_relid, true, true);
     }
 
     /*
@@ -12713,6 +12713,30 @@ static void UpdatePgAttrdefFirstAfter(Relation rel, int startattnum, int endattn
  * 1. add column with first or after col_name.
  * 2. modify column to first or after column.
  */
+static bool IsInvalidViewRewriteForFirstAfter(Oid rewriteOid)
+{
+    bool isInvalid = false;
+    ScanKeyData key;
+    ScanKeyInit(&key, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rewriteOid));
+
+    Relation rewriteRel = heap_open(RewriteRelationId, AccessShareLock);
+    SysScanDesc scan = systable_beginscan(rewriteRel, RewriteOidIndexId, true, NULL, 1, &key);
+    HeapTuple tuple = systable_getnext(scan);
+    if (HeapTupleIsValid(tuple)) {
+        Form_pg_rewrite rewriteForm = (Form_pg_rewrite)GETSTRUCT(tuple);
+        if (strcmp(NameStr(rewriteForm->rulename), ViewSelectRuleName) == 0) {
+            char relkind = get_rel_relkind(rewriteForm->ev_class);
+            if ((relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW) &&
+                !GetPgObjectValid(rewriteForm->ev_class, relkind)) {
+                isInvalid = true;
+            }
+        }
+    }
+    systable_endscan(scan);
+    heap_close(rewriteRel, AccessShareLock);
+    return isInvalid;
+}
+
 static void UpdatePgDependFirstAfter(Relation rel, int startattnum, int endattnum, bool is_increase)
 {
     ScanKeyData key[2];
@@ -12739,6 +12763,11 @@ static void UpdatePgDependFirstAfter(Relation rel, int startattnum, int endattnu
         HeapTuple new_dep_tuple;
 
         dep_form  = (Form_pg_depend)GETSTRUCT(dep_tuple);
+
+        if (dep_form->classid == RewriteRelationId &&
+            IsInvalidViewRewriteForFirstAfter(dep_form->objid)) {
+            continue;
+        }
 
         if (dep_form->refobjsubid >= startattnum && dep_form->refobjsubid <= endattnum) {
             values[Anum_pg_depend_refobjsubid - 1] = is_increase ?
@@ -13275,12 +13304,15 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
      */
     char* origin_def = GetSqlStatementForSWCB(query);
     List* newEvAction = NIL;
+    MemoryContext oldcontext = CurrentMemoryContext;
     PG_TRY();
     {
         newEvAction = GetRefreshedViewQuery(viewid, rw_objid, origin_def);
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(oldcontext);
+        FlushErrorState();
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The view %s is invalid, please make it valid before operation.",
@@ -13799,7 +13831,18 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
         UpdateIndexFirstAfter(rel);
 
         /* create or replace view */
-        ReplaceViewQueryFirstAfter(query_str);
+        ListCell* viewinfo = NULL;
+        bool isViewValid = true;
+        foreach (viewinfo, query_str) {
+            ViewInfoForAdd *info = (ViewInfoForAdd *)lfirst(viewinfo);
+            isViewValid &= GetPgObjectValid(info->ev_class, get_rel_relkind(info->ev_class));
+            if (!isViewValid) {
+                break;
+            }
+        }
+        if (isViewValid) {
+            ReplaceViewQueryFirstAfter(query_str);
+        }
     } else if (rel->rd_rel->relkind == RELKIND_RELATION && query_str != NIL) {
         ListCell* viewinfo = NULL;
         bool isViewValid = true;
@@ -18398,7 +18441,18 @@ static void AlterColumnToFirstAfter(AlteredTableInfo* tab, Relation rel, AlterTa
     CommandCounterIncrement();
 
     /* create or replace view */
-    ReplaceViewQueryFirstAfter(query_str);
+    ListCell* viewinfo = NULL;
+    bool isViewValid = true;
+    foreach (viewinfo, query_str) {
+        ViewInfoForAdd *info = (ViewInfoForAdd *)lfirst(viewinfo);
+        isViewValid &= GetPgObjectValid(info->ev_class, get_rel_relkind(info->ev_class));
+        if (!isViewValid) {
+            break;
+        }
+    }
+    if (isViewValid) {
+        ReplaceViewQueryFirstAfter(query_str);
+    }
 }
 
 static bool CheckIndexIsConstraint(Relation dep_rel, Oid objid, Oid *refobjid)
@@ -19689,7 +19743,9 @@ static void CheckAuthForChangeTableOwner(Oid newOwnerId)
             errmsg("Non-initial user is not allowed to change the table owner to initial owner.")));
     }
 
-    if (g_instance.attr.attr_security.enablePrivilegesSeparate && superuser() &&
+    if (!u_sess->attr.attr_sql.enable_cluster_resize &&
+        g_instance.attr.attr_security.enablePrivilegesSeparate && superuser() &&
+        GetUserId() != BOOTSTRAP_SUPERUSERID &&
         (isSecurityadmin(newOwnerId) || isAuditadmin(newOwnerId))) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
             errmsg("if enablePrivilegesSeparate is enabled, system admin is"
@@ -20593,8 +20649,9 @@ bool static transformTableCompressedOptions(Relation rel, bytea* relOption, List
     ConvertChunkSize(newCompressOpt->compressChunkSize, &success);
     if (!success) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d",
-                                newCompressOpt->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2)));
+                        errmsg("invalid compress_chunk_size %u, must be a power-of-two page fraction between %u and %u",
+                               newCompressOpt->compressChunkSize, MIN_COMPRESS_CHUNK_SIZE,
+                               MAX_COMPRESS_CHUNK_SIZE)));
     }
     if (newCompressOpt->compressPreallocChunks >= BLCKSZ / newCompressOpt->compressChunkSize) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
@@ -34474,6 +34531,7 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     HeapTuple tup = NULL;
     ListCell* pwd_obj = NULL;
     bool is_null = false;
+    errno_t rc = EOK;
 
     if (!has_createrole_privilege(GetUserId())) {
         ereport(ERROR,
@@ -34486,8 +34544,16 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
         bool nulls[Natts_gs_global_config] = {false};
-        const char* pwd = (const char *)(((Value*)lfirst(pwd_obj))->val.str);
+        char* pwd = ((Value*)lfirst(pwd_obj))->val.str;
         if (password_contain_space(pwd)) {
+            if (pwd != NULL) {
+                rc = memset_s(pwd, strlen(pwd), 0, strlen(pwd));
+                securec_check(rc, "\0", "\0");
+                if (rc != EOK) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Failed to clear weak password.")));
+                }
+            }
             continue;
         }
         const char* name = "weak_password";
@@ -34514,6 +34580,12 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
             tup = (HeapTuple) heap_form_tuple(RelationGetDescr(rel), values, nulls);
             simple_heap_insert(rel, tup);
             heap_freetuple_ext(tup);
+        }
+        rc = memset_s(pwd, strlen(pwd), 0, strlen(pwd));
+        securec_check(rc, "\0", "\0");
+        if (rc != EOK) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("Failed to clear weak password.")));
         }
     }
     heap_close(rel, RowExclusiveLock);
@@ -34870,9 +34942,9 @@ int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Da
             autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
         } else {
             if (is_global_level_sequence_cache(cons_autoinc->seqoid)) {
-                autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid);
+                autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid, true);
             } else {
-                autoinc = nextval_internal(cons_autoinc->seqoid, true);
+                autoinc = nextval_internal(cons_autoinc->seqoid, true, true);
             }
         }
         if (modify_value) {
@@ -35825,17 +35897,33 @@ void RebuildDependViewForProc(Oid proc_oid)
         List* raw_parsetree_list = raw_parser(view_def);
         Node* stmt = (Node*)linitial(raw_parsetree_list);
         Assert(IsA(stmt, ViewStmt));
+        MemoryContext oldcontext = CurrentMemoryContext;
+        ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        volatile bool rebuildFailed = false;
 
+        BeginInternalSubTransaction(NULL);
+        (void)MemoryContextSwitchTo(oldcontext);
         PG_TRY();
         {
             DefineView((ViewStmt*)stmt, view_def);
+            ReleaseCurrentSubTransaction();
+            (void)MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
         }
         PG_CATCH();
         {
             /* If there is an error in rebuilding the view, ignore it and set it invalid. */
-            InvalidateDependView(view_oid, OBJECT_TYPE_VIEW);
+            (void)MemoryContextSwitchTo(oldcontext);
+            FlushErrorState();
+            RollbackAndReleaseCurrentSubTransaction();
+            (void)MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            rebuildFailed = true;
         }
         PG_END_TRY();
+        if (rebuildFailed) {
+            InvalidateDependView(view_oid, OBJECT_TYPE_VIEW);
+        }
         pfree(view_def);
         list_free(raw_parsetree_list);
     }

@@ -49,13 +49,13 @@ PG_MODULE_MAGIC;
 /*
  * External declarations for exported functions
  */
-extern Datum levenshtein_with_costs(PG_FUNCTION_ARGS);
-extern Datum levenshtein(PG_FUNCTION_ARGS);
-extern Datum levenshtein_less_equal_with_costs(PG_FUNCTION_ARGS);
-extern Datum levenshtein_less_equal(PG_FUNCTION_ARGS);
-extern Datum metaphone(PG_FUNCTION_ARGS);
-extern Datum soundex(PG_FUNCTION_ARGS);
-extern Datum difference(PG_FUNCTION_ARGS);
+extern "C" Datum levenshtein_with_costs(PG_FUNCTION_ARGS);
+extern "C" Datum levenshtein(PG_FUNCTION_ARGS);
+extern "C" Datum levenshtein_less_equal_with_costs(PG_FUNCTION_ARGS);
+extern "C" Datum levenshtein_less_equal(PG_FUNCTION_ARGS);
+extern "C" Datum metaphone(PG_FUNCTION_ARGS);
+extern "C" Datum soundex(PG_FUNCTION_ARGS);
+extern "C" Datum difference(PG_FUNCTION_ARGS);
 
 /*
  * Soundex
@@ -175,6 +175,7 @@ static inline bool rest_of_char_same(const char* s1, const char* s2, int len)
 #include "levenshtein.cpp"
 
 PG_FUNCTION_INFO_V1(levenshtein_with_costs);
+extern "C"
 Datum levenshtein_with_costs(PG_FUNCTION_ARGS)
 {
     text* src = PG_GETARG_TEXT_PP(0);
@@ -187,6 +188,7 @@ Datum levenshtein_with_costs(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(levenshtein);
+extern "C"
 Datum levenshtein(PG_FUNCTION_ARGS)
 {
     text* src = PG_GETARG_TEXT_PP(0);
@@ -196,6 +198,7 @@ Datum levenshtein(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(levenshtein_less_equal_with_costs);
+extern "C"
 Datum levenshtein_less_equal_with_costs(PG_FUNCTION_ARGS)
 {
     text* src = PG_GETARG_TEXT_PP(0);
@@ -209,6 +212,7 @@ Datum levenshtein_less_equal_with_costs(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(levenshtein_less_equal);
+extern "C"
 Datum levenshtein_less_equal(PG_FUNCTION_ARGS)
 {
     text* src = PG_GETARG_TEXT_PP(0);
@@ -224,6 +228,7 @@ Datum levenshtein_less_equal(PG_FUNCTION_ARGS)
  * (suggested value is 4)
  */
 PG_FUNCTION_INFO_V1(metaphone);
+extern "C"
 Datum metaphone(PG_FUNCTION_ARGS)
 {
     char* str_i = TextDatumGetCString(PG_GETARG_DATUM(0));
@@ -623,6 +628,7 @@ static int _metaphone(char* word,         /* IN */
  */
 PG_FUNCTION_INFO_V1(soundex);
 
+extern "C"
 Datum soundex(PG_FUNCTION_ARGS)
 {
     char outstr[SOUNDEX_LEN + 1];
@@ -679,6 +685,7 @@ static void _soundex(const char* instr, char* outstr)
 
 PG_FUNCTION_INFO_V1(difference);
 
+extern "C"
 Datum difference(PG_FUNCTION_ARGS)
 {
     char sndx1[SOUNDEX_LEN + 1], sndx2[SOUNDEX_LEN + 1];

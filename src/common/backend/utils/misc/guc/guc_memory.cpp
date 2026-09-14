@@ -329,6 +329,22 @@ static void InitMemoryConfigureNamesBool()
             NULL,
             NULL},
 
+        // variable to enable per-group buffer reference counting
+        {{"enable_group_ref_cnt",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Enable per-group buffer reference counting."),
+            gettext_noop("When enabled, buffer pin/unpin operations use per-CPU-group "
+                        "reference counters instead of a global atomic counter. "
+                        "This can significantly reduce cache line ping-pong on "
+                        "multi-core systems. Requires server restart to take effect.")},
+            &g_instance.attr.attr_memory.enable_group_ref_cnt,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

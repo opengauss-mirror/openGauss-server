@@ -502,7 +502,7 @@ INSERT INTO truncate_b DEFAULT VALUES;
 INSERT INTO truncate_b DEFAULT VALUES;
 SELECT * FROM truncate_b;
 
--- not supported 
+-- restart identity
 TRUNCATE truncate_b RESTART IDENTITY;
 
 --## create table like

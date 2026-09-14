@@ -15,6 +15,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/xact.h"
 
 #include <limits.h>
 #include <float.h>
@@ -1031,8 +1032,21 @@ Datum text_date(PG_FUNCTION_ARGS)
     char* tmp = NULL;
     Datum result;
     tmp = DatumGetCString(DirectFunctionCall1(textout, textValue));
+    if (pg_strcasecmp(tmp, "now") == 0) {
+        struct pg_tm tt;
+        struct pg_tm* tm = &tt;
+        fsec_t fsec;
+        int tz;
 
-    result = DirectFunctionCall1(date_in, CStringGetDatum(tmp));
+        if (timestamp2tm(GetCurrentStatementStartTimestamp(), &tz, tm, &fsec, NULL, NULL) != 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                    errmsg("date out of range")));
+        }
+        result = DateADTGetDatum(date2j(tm->tm_year, tm->tm_mon, tm->tm_mday) - POSTGRES_EPOCH_JDATE);
+    } else {
+        result = DirectFunctionCall1(date_in, CStringGetDatum(tmp));
+    }
 
     pfree_ext(tmp);
 

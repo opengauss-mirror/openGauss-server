@@ -41,7 +41,7 @@
 class OpFusion;
 typedef unsigned long (OpFusion::*OpFusionExecfuncType)(Relation rel, ResultRelInfo* resultRelInfo);
 
-extern void report_qps_type(CmdType commandType);
+extern void report_qps_type(CmdType commandType, CmdType queryType);
 extern void ExecCheckXactReadOnly(PlannedStmt* plannedstmt);
 extern bool IsRightRefState(List* plantreeList);
 EState* CreateExecutorStateForOpfusion(MemoryContext saveCxt, MemoryContext tmpCxt);
@@ -113,7 +113,8 @@ public:
     void copyGlobalOpfusionVar(OpFusion);
     void setPreparedDestReceiver(DestReceiver* preparedDest);
 
-    Datum CalFuncNodeVal(Oid functionId, List* args, bool* is_null, Datum* values, bool* isNulls);
+    Datum CalFuncNodeVal(Oid functionId, List* args, bool* is_null, Datum* values, bool* isNulls,
+        FmgrInfo* finfo = NULL);
 
     Datum EvalSimpleArg(Node* arg, bool* is_null, Datum* values, bool* isNulls);
 

@@ -803,11 +803,12 @@ static Node* create_udf_function(ParseState *pstate, Var* var, Oid funcid, maski
     Node* ret_node = NULL;
     AclResult aclresult;
     Oid rescollid = 100; /* OID of collation, or InvalidOid if none */
+    if (funcid == 0) {
+        return NULL;
+    }
+
     PG_TRY();
     {
-        if (funcid == 0) {
-            return NULL;
-        }
         Oid rettype = var->vartype;
         aclresult = pg_proc_aclcheck(funcid, GetUserId(), ACL_EXECUTE); 
         func_types proctypes;

@@ -2221,6 +2221,7 @@ void set_result_for_plpgsql_language_function_with_outparam(Datum *result, bool 
     {
         int ecode = geterrcode();
         if (ecode == ERRCODE_CACHE_LOOKUP_FAILED) {
+            FlushErrorState();
             ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmodule(MOD_PLSQL),
                            errmsg("tuple is null"),
                            errdetail("it may be because change guc behavior_compat_options in one session")));
@@ -5891,7 +5892,7 @@ static Datum ExecEvalNextValueExpr(ExprState* exprstate, ExprContext* econtext, 
             errmsg("no owned sequence found")));
     }
 
-    newval = nextval_internal(nve->seqid, false);
+    newval = nextval_internal(nve->seqid, false, false);
     switch (nve->typeId) {
         case INT1OID:
             result = Int8GetDatum((int8) newval);

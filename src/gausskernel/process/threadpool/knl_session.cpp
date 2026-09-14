@@ -514,6 +514,7 @@ static void knl_u_utils_init(knl_session_context* sess_cxt)
     guc_cold->GUC_check_errhint_string = NULL;
     guc_cold->set_params_htab = NULL;
     guc_cold->sync_guc_variables = NULL;
+    guc_cold->reserved_guc_prefixes = NIL;
     for (int strategy = 0; strategy < MAX_GUC_ATTR; strategy++) {
         guc_cold->ConfigureNamesBool[strategy] = NULL;
         guc_cold->ConfigureNamesInt[strategy] = NULL;
@@ -1138,6 +1139,7 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->LocalRefCount = NULL;
     storage_cxt->nextFreeLocalBuf = 0;
     storage_cxt->LocalBufHash = NULL;
+    storage_cxt->NLocalPinnedBuffers = 0;
     storage_cxt->cur_block = NULL;
     storage_cxt->next_buf_in_block = 0;
     storage_cxt->num_bufs_in_block = 0;

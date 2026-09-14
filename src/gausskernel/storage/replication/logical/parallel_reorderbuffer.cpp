@@ -152,6 +152,12 @@ void ParallelFreeChange(ParallelReorderBufferChange *change, int slotId)
     if (change->data.tp.oldtuple) {
         ParallelFreeTuple(change->data.tp.oldtuple, slotId);
     }
+#ifdef ENABLE_NEON
+    if (change->data.tp.changed_attrs != NULL) {
+        pfree(change->data.tp.changed_attrs);
+        change->data.tp.changed_attrs = NULL;
+    }
+#endif
 
     if (curChangeNum >= max_decode_cache_num) {
         pfree(change);
@@ -1843,4 +1849,3 @@ void ParallelReorderBufferChildAssignment(ParallelReorderBuffer *prb, logicalLog
         ParallelReorderBufferAssignChild(prb, logChange->xid, logChange->subXids[i], logChange->lsn);
     }
 }
-

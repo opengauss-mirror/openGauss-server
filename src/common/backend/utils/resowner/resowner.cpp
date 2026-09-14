@@ -27,6 +27,7 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
 #include "utils/aiomem.h"
 #include "utils/knl_partcache.h"
@@ -38,6 +39,9 @@
 #include "storage/cucache_mgr.h"
 #include "executor/executor.h"
 #include "catalog/pg_hashbucket_fn.h"
+
+static const int RESOURCE_OWNER_BUFFER_IO_INITIAL_CAPACITY = 16;
+static const int RESOURCE_OWNER_BUFFER_IO_GROWTH_FACTOR = 2;
 
 /*
  * ResourceOwner objects look like this. When tracking new types of resource,
@@ -55,6 +59,9 @@ typedef struct ResourceOwnerData {
     Buffer* buffers; /* dynamically allocated array */
     int maxbuffers;  /* currently allocated array size */
 
+    int nbufferio;
+    Buffer* bufferio;
+    int maxbufferio;
 
     int nlocalcatclist;
     LocalCatCList** localcatclists;
@@ -278,6 +285,9 @@ void ResourceOwnerRelease(ResourceOwner owner, ResourceReleasePhase phase, bool 
     PG_TRY();
     {
         ResourceOwnerReleaseInternal(owner, phase, isCommit, isTopLevel);
+        if (phase == RESOURCE_RELEASE_BEFORE_LOCKS) {
+            AbortBufferIOCleanup(isCommit, isTopLevel);
+        }
     }
     PG_CATCH();
     {
@@ -316,6 +326,14 @@ static void ResourceOwnerReleaseInternal(
             undo::ReleaseSlotBuffer();
         }
 
+        if (isCommit && owner->nbufferio > 0) {
+            ereport(WARNING,
+                (errmsg("buffer I/O remained active while releasing resource owner %s; aborting it",
+                    owner->name)));
+        }
+        if (owner->nbufferio > 0) {
+            ResourceOwnerAbortBufferIOs(owner);
+        }
         /*
          * Release buffer pins.  Note that ReleaseBuffer will remove the
          * buffer entry from my list, so I just have to iterate till there are
@@ -475,6 +493,9 @@ static void ResourceOwnerFreeOwner(ResourceOwner owner, bool whole)
     if (owner->valid) {
         if (owner->buffers)
             pfree(owner->buffers);
+
+        if (owner->bufferio)
+            pfree(owner->bufferio);
         if (owner->catrefs)
             pfree(owner->catrefs);
         if (owner->catlistrefs)
@@ -569,6 +590,11 @@ static void ResourceOwnerConcatPart1(ResourceOwner target, ResourceOwner source)
     while (source->nbuffers > 0) {
         ResourceOwnerEnlargeBuffers(target);
         ResourceOwnerRememberBuffer(target, source->buffers[--source->nbuffers]);
+    }
+
+    while (source->nbufferio > 0) {
+        ResourceOwnerEnlargeBufferIOs(target);
+        ResourceOwnerRememberBufferIO(target, source->bufferio[--source->nbufferio]);
     }
 
     while (source->nlocalcatclist > 0) {
@@ -727,9 +753,9 @@ void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
      * function needs to be adapted when tracing new types of resources.
      */
 #ifdef ENABLE_HTAP
-    Assert(sizeof(ResourceOwnerData) == 480); /* The current size of ResourceOwnerData is 480 */
+    Assert(sizeof(ResourceOwnerData) == 496); /* The current size of ResourceOwnerData is 496 */
 #else
-    Assert(sizeof(ResourceOwnerData) == 448); /* The current size of ResourceOwnerData is 448 */
+    Assert(sizeof(ResourceOwnerData) == 464); /* The current size of ResourceOwnerData is 464 */
 #endif
 
     /* Recurse to handle descendants */
@@ -1156,6 +1182,135 @@ void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer)
         ereport(ERROR,
             (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                 errmsg("buffer %d is not owned by resource owner %s", buffer, owner->name)));
+    }
+}
+
+/*
+ * Make sure there is room for at least one more entry in a ResourceOwner's
+ * buffer array.
+ *
+ * This is separate from actually inserting an entry because if we run out
+ * of memory, it's critical to do so *before* acquiring the resource.
+ */
+void ResourceOwnerEnlargeBufferIOs(ResourceOwner owner)
+{
+    int newmax;
+
+    if (owner == NULL || owner->nbufferio < owner->maxbufferio)
+        return; /* nothing to do */
+
+    if (owner->bufferio == NULL) {
+        newmax = RESOURCE_OWNER_BUFFER_IO_INITIAL_CAPACITY;
+        owner->bufferio = (Buffer*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Buffer));
+        owner->maxbufferio = newmax;
+    } else {
+        if (owner->maxbufferio > INT_MAX / RESOURCE_OWNER_BUFFER_IO_GROWTH_FACTOR) {
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                    errmsg("too many buffer I/O entries for resource owner")));
+        }
+        newmax = owner->maxbufferio * RESOURCE_OWNER_BUFFER_IO_GROWTH_FACTOR;
+        owner->bufferio = (Buffer*)repalloc(owner->bufferio, newmax * sizeof(Buffer));
+        owner->maxbufferio = newmax;
+    }
+}
+
+/*
+ * Remember that a buffer IO is owned by a ResourceOwner
+ *
+ * Caller must have previously done ResourceOwnerEnlargeBufferIOs()
+ */
+void ResourceOwnerRememberBufferIO(ResourceOwner owner, Buffer buffer)
+{
+    if (owner != NULL) {
+        /* Keep the public helper safe for callers that cannot pre-reserve. */
+        if (owner->nbufferio >= owner->maxbufferio)
+            ResourceOwnerEnlargeBufferIOs(owner);
+        owner->bufferio[owner->nbufferio] = buffer;
+        owner->nbufferio++;
+    }
+}
+
+/*
+ * Forget that a buffer IO is owned by a ResourceOwner
+ */
+bool ResourceOwnerForgetBufferIOIfOwned(ResourceOwner owner, Buffer buffer)
+{
+    if (owner != NULL && owner->valid) {
+        Buffer* buffers = owner->bufferio;
+        int nb1 = owner->nbufferio - 1;
+        int i;
+
+        /*
+         * Scan back-to-front because it's more likely we are releasing a
+         * recently pinned buffer.	This isn't always the case of course, but
+         * it's the way to bet.
+         */
+        for (i = nb1; i >= 0; i--) {
+            if (buffers[i] == buffer) {
+                while (i < nb1) {
+                    buffers[i] = buffers[i + 1];
+                    i++;
+                }
+                owner->nbufferio = nb1;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void ResourceOwnerForgetBufferIO(ResourceOwner owner, Buffer buffer)
+{
+    if (owner != NULL && owner->valid && !ResourceOwnerForgetBufferIOIfOwned(owner, buffer)) {
+        ereport(WARNING,
+            (errmsg("buffer I/O %d was already released from resource owner %s", buffer, owner->name)));
+    }
+}
+
+/*
+ * Abort the shared-buffer I/O owned by one batch relation extension.
+ *
+ * A locally caught ERROR resets InterruptHoldoffCount without releasing the
+ * LWLocks recorded by the current thread.  Release a still-held I/O lock
+ * before AbortBufferIOForExtension() reacquires it, then release the pin associated with
+ * the failed read.  Only the batch extension path records entries here, so
+ * ordinary synchronous and asynchronous I/O retain their legacy cleanup.
+ */
+void ResourceOwnerAbortBufferIOs(ResourceOwner owner)
+{
+    Assert(owner == t_thrd.utils_cxt.CurrentResourceOwner);
+
+    while (owner != NULL && owner->nbufferio > 0) {
+        Buffer buffer = owner->bufferio[owner->nbufferio - 1];
+
+        if (!BufferIsLocal(buffer)) {
+            BufferDesc *buf_hdr = GetBufferDescriptor(buffer - 1);
+
+            if (LWLockHeldByMe(buf_hdr->io_in_progress_lock)) {
+            bool interruptsHeld = false;
+            if (t_thrd.int_cxt.InterruptHoldoffCount == 0) {
+                HOLD_INTERRUPTS();
+                interruptsHeld = true;
+            }
+            LWLockRelease(buf_hdr->io_in_progress_lock);
+            if (interruptsHeld) {
+                RESUME_INTERRUPTS();
+                }
+            }
+        }
+
+        AbortBufferIOForExtension(buffer);
+
+        /*
+         * AbortBufferIOForExtension() can discover that another path completed the I/O
+         * while resource-owner cleanup was waiting to reacquire the I/O
+         * lock.  That path already released this backend's pin, so blindly
+         * releasing it again would underflow the private refcount and PANIC.
+         */
+        if (BufferIsPinned(buffer))
+            ReleaseBuffer(buffer);
     }
 }
 
@@ -2688,6 +2843,7 @@ bool CurrentResourceOwnerIsEmpty(ResourceOwner owner)
         return true;
     }
     Assert(owner->nbuffers == 0);
+    Assert(owner->nbufferio == 0);
     Assert(owner->nlocalcatclist == 0);
     Assert(owner->nlocalcatctup == 0);
     Assert(owner->nglobalcatctup == 0);

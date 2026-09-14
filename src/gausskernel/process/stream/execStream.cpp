@@ -383,6 +383,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     TupleVector*** sharedTuples = NULL;
     DataStatus** dataStatus = NULL;
     bool** is_connect_end = NULL;
+    bool* isProducerComplete = NULL;
     StringInfo** messages = NULL;
     int* scanLoc = NULL;
     char context_name[NODENAMELEN];
@@ -416,6 +417,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     /* Init data status. */
     dataStatus = (DataStatus**)palloc(sizeof(DataStatus*) * consumerNum);
     is_connect_end = (bool**)palloc(sizeof(bool*) * consumerNum);
+    isProducerComplete = (bool*)palloc0(sizeof(bool) * producerNum);
     messages = (StringInfo**)palloc(sizeof(StringInfo*) * consumerNum);
     for (int i = 0; i < consumerNum; i++) {
         dataStatus[i] = (DataStatus*)palloc(sizeof(DataStatus) * producerNum);
@@ -448,6 +450,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     sharedContext->sharedTuples = sharedTuples;
     sharedContext->dataStatus = dataStatus;
     sharedContext->is_connect_end = is_connect_end;
+    sharedContext->is_producer_complete = isProducerComplete;
     sharedContext->messages = messages;
     sharedContext->scanLoc = scanLoc;
 
@@ -477,6 +480,7 @@ static void resetLocalStreamContext(StreamSharedContext* context)
     context->scanLoc[0] = 0;
     context->dataStatus[0][0] = DATA_EMPTY;
     context->is_connect_end[0][0] = false;
+    context->is_producer_complete[0] = false;
     resetStringInfo(context->messages[0][0]);
 
     context->sharedTuples[0][0]->tuplePointer = 0;
@@ -1246,18 +1250,19 @@ void xact_allocate_undozones_memory_for_stream()
         return;
     }
 
-    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(t_thrd.xact_cxt.m_undozone_array);
-    if (m_undozone_array == NULL) {
-        MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-        m_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
-        for (int i = 0; i < MAX_QUERY_DOP; i++) {
-            m_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
-            for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
-                m_undozone_array[i]->undo_cxt.zids[j] = -1;
-            }
+    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(t_thrd.ustore_cxt.m_undozone_array);
+    Assert(m_undozone_array != NULL);
+    MemoryContext mem_cxt = t_thrd.ustore_cxt.smp_mem_cxt;
+
+    /* init producer undozone data array */
+    for (int i = 0; i < MAX_QUERY_DOP; i++) {
+        if (m_undozone_array[i] != NULL) {
+            continue;
         }
-        MemoryContextSwitchTo(old_cxt);
-        t_thrd.xact_cxt.m_undozone_array = (void **)m_undozone_array;
+        m_undozone_array[i] = (StreamUndoZoneData *)MemoryContextAllocZero(mem_cxt, sizeof(StreamUndoZoneData));
+        for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+            m_undozone_array[i]->undo_cxt.zids[j] = -1;
+        }
     }
 }
 
@@ -1302,7 +1307,12 @@ static void StartupStreamThread(StreamState* node, bool need_save_undo)
         }
     } else {
         if (need_save_undo) {
-            transactionCxt.txnId = GetTopTransactionId();
+            if (IsSubTransaction()) {
+                (void)GetTopTransactionId();
+                transactionCxt.txnId = GetCurrentTransactionId();
+            } else {
+                transactionCxt.txnId = GetTopTransactionId();
+            }
         } else {
             transactionCxt.txnId = GetCurrentTransactionId();
         }
@@ -1318,10 +1328,15 @@ static void StartupStreamThread(StreamState* node, bool need_save_undo)
                        transactionCxt,
                        node->ss.ps.state->es_param_list_info,
                        u_sess->stream_cxt.producer_obj ? u_sess->stream_cxt.producer_obj->getKey().planNodeId : 0);
-        if (need_save_undo && IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
+        if (need_save_undo && ((Stream*)node->ss.ps.plan)->smpDesc.consumerDop == 1 &&
+            IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
+            int producer_dop = ((Stream*)node->ss.ps.plan)->smpDesc.producerDop;
+            u_sess->stream_cxt.global_obj->m_producer_dop = producer_dop;
+            producer->set_need_copyback_undozone();
+            Assert(u_sess->stream_cxt.global_obj != NULL);
             u_sess->stream_cxt.global_obj->set_need_copyback_undozone();
             xact_allocate_undozones_memory_for_stream();
-            StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array);
+            StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData **)(t_thrd.ustore_cxt.m_undozone_array);
             if (m_undozone_array != NULL) {
                 uint smp_id = producer->getKey().smpIdentifier;
                 producer->copy_undozone_from_main_worker(m_undozone_array[smp_id]);

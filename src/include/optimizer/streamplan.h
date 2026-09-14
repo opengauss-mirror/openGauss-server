@@ -98,6 +98,14 @@ typedef struct {
     volatile bool initialized;
 } Id64Gen;
 
+#ifndef ENABLE_MULTIPLE_NODES
+typedef struct {
+    bool need_redistribute;
+    bool upper_stream;
+    bool use_imcvscan; /* true if the path has imcvscan */
+} RedistributeContext;
+#endif
+
 extern Id64Gen gt_queryId;
 
 extern Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path);
@@ -174,6 +182,12 @@ extern char* GetStreamTypeStrOf(StreamPath* path);
 extern void GetHashTableCount(Query* parse, List* cteList, int* ccontext);
 extern bool IsBucketmapNeeded(PlannedStmt* pstmt);
 extern bool remove_local_plan(Plan* stream_plan, Plan* parent, ListCell* lc, bool is_left);
+/* Function for smp dml. */
+#ifndef ENABLE_MULTIPLE_NODES
+extern void check_support_smp_dml_scenario(PlannerInfo *root, Path* path, RedistributeContext *redis_ctx);
+extern bool check_ctid_redis_stream(Plan* plan);
+extern void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context);
+#endif
 
 /* Macros for LZ4 error handle */
 #define validate_LZ4_compress_result(res, module, hint)                                                               \

@@ -593,6 +593,18 @@ bool IsOtherProcRedistribution(PGPROC *otherProc)
 inline bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
 {
     if (has_backend_cursor_stream()) {
+        /*
+         * A cursor producer unregisters its physical thread id before it
+         * releases the transaction locks at the stream quit sync point.
+         * sessMemorySessionid remains stable and is shared by the producer
+         * and its parent session.
+         */
+        if (proc1 != proc2 && (proc1->role == STREAM_WORKER || proc1->role == THREADPOOL_STREAM) &&
+            proc1->sessMemorySessionid != 0 &&
+            proc1->sessMemorySessionid == proc2->sessMemorySessionid) {
+            return true;
+        }
+
         ListCell *lc;
         foreach(lc, u_sess->stream_cxt.cursorNodeGroupList) {
             StreamNodeGroup* streamNodeGroup = (StreamNodeGroup*)lfirst(lc);

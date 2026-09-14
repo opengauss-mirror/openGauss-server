@@ -56,6 +56,10 @@ extern int        rw_timeout;
 
 /* backup options */
 extern bool        smooth_checkpoint;
+extern time_t      g_requestedParentBackupId;
+extern bool        g_fromFull;
+extern IncrementalType g_incrementalType;
+extern bool        g_cumulativeFallbackError;
 
 /* list of dirs which will not to be backuped
    it will be backuped up in external dirs  */
@@ -114,7 +118,6 @@ extern char** commands_args;
 /* exclude directory list for $PGDATA file listing */
 extern const char *pgdata_exclude_dir[];
 
-extern bool is_valid_cmd(char *cmd);
 extern void delete_backup_directory(char *instance_name);
 
 extern char* TS_DIR_WITH_PGXC;
@@ -538,6 +541,7 @@ typedef struct
     XLogRecPtr     stop_lsn;
     uint32        checksum_version;
     uint32        backup_version;
+    uint32        encrypt_version;
     BackupMode    backup_mode;
     const char    *external_prefix;
     HeaderMap   *hdr_map;

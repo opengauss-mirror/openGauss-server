@@ -2736,6 +2736,10 @@ int getNumberOfPartitions(Relation rel)
                 errmsg("CAN NOT get number of partition against NON-PARTITIONED relation")));
     }
 
+    if (rel->partMap == NULL) {
+        return ranges;
+    }
+
     if (rel->partMap->type == PART_TYPE_LIST) {
         ranges = getNumberOfListPartitions(rel);
     } else if (rel->partMap->type == PART_TYPE_HASH) {
@@ -3143,37 +3147,58 @@ Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid)
     return InvalidOid;
 }
 
-bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid, int partitionno,
-    Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart)
+static bool ResolvePartitionParentOid(Oid* partOid, Oid* parentOid)
 {
-    PartRelIdCacheKey _key = {partOid, -1};
+    *parentOid = partid_get_parentid(*partOid);
+    if (!OidIsValid(*parentOid)) {
+        if (PartitionGetMetadataStatus(*partOid, false) != PART_METADATA_INVISIBLE) {
+            ereport(ERROR,
+                (errcode(ERRCODE_RELATION_OPEN_ERROR),
+                errmsg("partition %u does not exist", *partOid),
+                errdetail("this partition may have already been dropped")));
+        }
+
+        *partOid = InvisiblePartidGetNewPartid(*partOid);
+        *parentOid = partid_get_parentid(*partOid);
+    }
+    return OidIsValid(*parentOid);
+}
+
+static HTAB* CreateFakeRelationCache(MemoryContext memoryContext)
+{
+    /*
+     * The cache is owned by the caller's memory context. Executor callers use
+     * es_query_cxt and destroy it with FakeRelationCacheDestroy before the
+     * executor context is released; GPI callers destroy it in GPIScanEnd.
+     */
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(PartRelIdCacheKey);
+    ctl.entrysize = sizeof(PartRelIdCacheEnt);
+    ctl.hash = tag_hash;
+    ctl.hcxt = memoryContext;
+    return hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid* partOid,
+    int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart)
+{
     Relation partParentRel = rel;
     Relation partRelForSubPart = NULL;
     if (PointerIsValid(*partition)) {
         return false;
     }
 
-    Oid parentOid = partid_get_parentid(partOid);
-    if (!OidIsValid(parentOid)) {
-        if (PartitionGetMetadataStatus(partOid, false) != PART_METADATA_INVISIBLE) {
-            ereport(ERROR,
-                (errcode(ERRCODE_RELATION_OPEN_ERROR),
-                errmsg("partition %u does not exist", partOid),
-                errdetail("this partition may have already been dropped")));
-        }
-
-        /* this partOid has just been dropped, we try to search the new partOid, if not found, just return */
-        partOid = InvisiblePartidGetNewPartid(partOid);
-        parentOid = partid_get_parentid(partOid);
-        if (!OidIsValid(parentOid)) {
-            return false;
-        }
+    Oid parentOid = InvalidOid;
+    if (!ResolvePartitionParentOid(partOid, &parentOid)) {
+        return false;
     }
-
+    PartRelIdCacheKey key = {*partOid, -1};
     if (checkSubPart && RelationIsSubPartitioned(rel) && !RelationIsIndex(rel)) {
         if (parentOid != rel->rd_id) {
             Partition partForSubPart = NULL;
-            bool res = trySearchFakeReationForPartitionOid(fakeRels, cxt, rel, parentOid, INVALID_PARTITION_NO,
+            bool res = trySearchFakeReationForPartitionOid(
+                fakeRels, cxt, rel, &parentOid, INVALID_PARTITION_NO,
                 &partRelForSubPart, &partForSubPart, lmode, false);
             if (!res) {
                 return false;
@@ -3186,27 +3211,23 @@ bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Rel
         *partition = NULL;
         return false;
     }
+    /* Keep the lock until transaction end; cache destruction closes with NoLock. */
     if (PointerIsValid(*fakeRels)) {
-        FakeRelationIdCacheLookup((*fakeRels), _key, *fakeRelation, *partition);
+        FakeRelationIdCacheLookup((*fakeRels), key, *fakeRelation, *partition);
         if (!RelationIsValid(*fakeRelation)) {
-            *partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);
+            *partition = PartitionOpenWithPartitionno(partParentRel, *partOid, partitionno, lmode);
             *fakeRelation = partitionGetRelation(partParentRel, *partition);
             FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
         }
     } else {
-        HASHCTL ctl;
-        errno_t errorno = EOK;
-        errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
-        securec_check_c(errorno, "\0", "\0");
-        ctl.keysize = sizeof(PartRelIdCacheKey);
-        ctl.entrysize = sizeof(PartRelIdCacheEnt);
-        ctl.hash = tag_hash;
-        ctl.hcxt = cxt;
-        *fakeRels = hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,
-                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-        *partition = PartitionOpenWithPartitionno(partParentRel, partOid, partitionno, lmode);
+        *fakeRels = CreateFakeRelationCache(cxt);
+        *partition = PartitionOpenWithPartitionno(partParentRel, *partOid, partitionno, lmode);
         *fakeRelation = partitionGetRelation(partParentRel, *partition);
         FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
+    }
+
+    if (*partOid != (*partition)->pd_id) {
+        *partOid = (*partition)->pd_id;
     }
 
     return true;

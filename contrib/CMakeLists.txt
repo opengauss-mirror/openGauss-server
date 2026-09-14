@@ -11,6 +11,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/hstore
     ${CMAKE_CURRENT_SOURCE_DIR}/test_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/mppdb_decoding
+    ${CMAKE_CURRENT_SOURCE_DIR}/neon_oggit
     ${CMAKE_CURRENT_SOURCE_DIR}/sql_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/spi
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_upgrade_support
@@ -21,6 +22,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/dummy_seclabel
     ${CMAKE_CURRENT_SOURCE_DIR}/pagehack
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_xlogdump
+    ${CMAKE_CURRENT_SOURCE_DIR}/pg_archivecleanup
     ${CMAKE_CURRENT_SOURCE_DIR}/file_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/log_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
@@ -65,6 +67,9 @@ endif()
 add_subdirectory(hstore)
 add_subdirectory(test_decoding)
 add_subdirectory(mppdb_decoding)
+if("${ENABLE_NEON}" STREQUAL "ON")
+    add_subdirectory(neon_oggit)
+endif()
 add_subdirectory(sql_decoding)
 add_subdirectory(spi)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
@@ -77,6 +82,7 @@ add_subdirectory(security_plugin)
 add_subdirectory(dummy_seclabel)
 add_subdirectory(pagehack)
 add_subdirectory(pg_xlogdump)
+add_subdirectory(pg_archivecleanup)
 add_subdirectory(file_fdw)
 add_subdirectory(log_fdw)
 add_subdirectory(gms_utility)
@@ -102,6 +108,12 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/age)
     add_subdirectory(age)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fuzzystrmatch)
+    add_subdirectory(fuzzystrmatch)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/pg_trgm)
+    add_subdirectory(pg_trgm)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/jieba_tokenizer)
     add_subdirectory(jieba_tokenizer)

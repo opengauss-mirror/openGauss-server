@@ -32,6 +32,7 @@
 #include "access/datavec/vector.h"
 #include "access/datavec/utils.h"
 #include "access/amapi.h"
+#include "utils/hsearch.h"
 
 #include <cstring>
 
@@ -145,7 +146,7 @@ struct Neighbor {
     float distance;
     bool expanded;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
-    uint8 heaptidsLength;
+    uint8 heaptidsLength = 0;
 
     Neighbor() = default;
 
@@ -275,11 +276,25 @@ public:
     }
 } NeighborPriorityQueue;
 
+/*
+ * Per-DiskAnnGraph scratch. Everything Link needs is allocated once here and
+ * reset (not freed) between calls, so one DiskAnnGraph can link many nodes.
+ * The visited set lives in the graph store (DiskAnnGraphStore::Visited*).
+ */
 struct QueryScratch {
     NeighborPriorityQueue* bestLNodes;
     float* alignedQuery;
     double sqrSum;
-    HTAB* insertedNodeHash;
+    struct DiskAnnEdgePageData* edgePage; /* m_edgeSize bytes: edge list being rewritten */
+    VectorList<Neighbor> pool;        /* Link: prune candidates */
+    VectorList<Neighbor> prunedList;  /* Link: RobustPrune result */
+    VectorList<Neighbor> current;     /* Link: current out-edges (PruneOverVisited) */
+    VectorList<Neighbor> neighbors;   /* IterateToFixedPoint: out-edges of the expanded node */
+    VectorList<float> occludeFactor;  /* OccludeList */
+    VectorList<Neighbor> desPool;     /* InterInsert: out-edges of the destination */
+    VectorList<Neighbor> copyNeighbors; /* InterInsert: destination edges + the new node */
+    VectorList<Neighbor> dummyPool;   /* InterInsert: de-duplicated re-prune pool */
+    VectorList<Neighbor> pruned;      /* InterInsert: re-prune result */
 };
 
 typedef struct DiskAnnTypeInfo {
@@ -307,26 +322,100 @@ typedef struct DiskAnnEdgePageData {
 } DiskAnnEdgePageData;
 typedef DiskAnnEdgePageData* DiskAnnEdgePage;
 
+/*
+ * Storage interface of the Vamana algorithm layer (DiskAnnGraph). Node ids
+ * are BlockNumber-typed: the version 1 format uses the node's block number, the
+ * RaBitQ format its dense node id. Edge lists travel as DiskAnnEdgePageData
+ * (capacity DISKANN_MAX_DEGREE >= any MaxDegree()).
+ */
 struct DiskAnnGraphStore : public BaseObject {
-    DiskAnnGraphStore(Relation index);
-    ~DiskAnnGraphStore();
+    virtual ~DiskAnnGraphStore()
+    {
+        if (m_visited != NULL) {
+            hash_destroy(m_visited);
+        }
+    }
 
-    void GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const;
-    float GetDistance(BlockNumber blk1, BlockNumber blk2) const;
-    float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const;
-    void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs);
+    virtual void GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const = 0;
+    virtual float GetDistance(BlockNumber blk1, BlockNumber blk2) const = 0;
+    virtual float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const = 0;
+    virtual void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs) = 0;
+    virtual void GetEdge(DiskAnnEdgePage edge, BlockNumber blkno) const = 0;
+    virtual void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const = 0;
+    virtual bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const = 0;
+    /* record blk as a duplicate of dst; false when the store keeps blk as its own node */
+    virtual bool MergeDuplicate(BlockNumber dst, BlockNumber blk, bool building) = 0;
+    virtual uint32 MaxDegree() const = 0;
+    virtual int GetFuncType() const = 0;
+    /*
+     * Prune pool of Link: false = nodes expanded by the greedy search (version 1
+     * behaviour); true = every node whose distance was computed during the
+     * search plus the node's current out-edges (Vamana RobustPrune(p, V, a, R)
+     * with V = visited set).
+     */
+    virtual bool PruneOverVisited() const
+    {
+        return false;
+    }
+    /*
+     * Optional: announces that the prune about to run (OccludeList, or the
+     * reverse-edge re-prune of InterInsert) will call GetDistance over pairs
+     * of `location` and the pool members only. A store whose vectors are not
+     * resident can materialize them once here; the default keeps GetDistance
+     * as it is.
+     */
+    virtual void PrefetchPool(BlockNumber location, const VectorList<Neighbor>* pool)
+    {}
+    /*
+     * Visited set of the algorithm layer: the greedy search of
+     * IterateToFixedPoint and the neighbour de-duplication of the InterInsert
+     * re-prune (never both at once). Reset starts an empty set (nelemHint =
+     * expected size), TestAndSet marks id and tells whether it was already
+     * in, Release frees the set. Default: a fresh dynahash per Reset, exactly
+     * what the version 1 build does per DiskAnnGraph; a store with dense node ids
+     * may keep a generation-stamped array instead.
+     */
+    virtual void VisitedReset(long nelemHint);
+    virtual bool VisitedTestAndSet(BlockNumber id);
+    virtual void VisitedRelease();
+
     void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
-    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const;
-    bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
-    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
     bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
+
+    uint32 m_edgeSize = 0;
+    HTAB* m_visited = NULL; /* default visited set */
+};
+
+/* version 1 format: one node per index page, edges behind the node tuple */
+struct DiskAnnPageGraphStore : public DiskAnnGraphStore {
+    DiskAnnPageGraphStore(Relation index);
+    ~DiskAnnPageGraphStore() override;
+
+    void GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const override;
+    float GetDistance(BlockNumber blk1, BlockNumber blk2) const override;
+    float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const override;
+    void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs) override;
+    void GetEdge(DiskAnnEdgePage edge, BlockNumber blkno) const override;
+    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const override;
+    bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const override;
+    bool MergeDuplicate(BlockNumber dst, BlockNumber blk, bool building) override;
+    uint32 MaxDegree() const override
+    {
+        return DISKANN_MAX_DEGREE;
+    }
+    int GetFuncType() const override
+    {
+        return m_funcType;
+    }
+
+    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
     void Clear() const;
 
     Relation m_rel;
     uint32 m_nodeSize;
-    uint32 m_edgeSize;
     uint32 m_itemSize;
     double m_dimension;
+    int m_funcType;
 };
 
 class DiskAnnGraph : public BaseObject {
@@ -345,11 +434,17 @@ public:
     void Clear();
 
 private:
+    bool AppendReverseEdge(BlockNumber desId, BlockNumber blk, float distance, bool building);
+    void RepruneReverseEdge(BlockNumber desId, VectorList<Neighbor>* copyNeighbors, bool building);
+
     int functype;
+    uint32 maxDegree;
     DiskAnnGraphStore* graphStore = NULL;
     QueryScratch* scratch;
     BlockNumber frozen;
     bool saturateGraph = false;
+    bool pruneVisited = false; /* graphStore->PruneOverVisited() */
+    bool visitedFresh = false; /* store visited set is empty and unused since the last reset */
 };
 
 typedef struct DiskAnnShared {
@@ -610,7 +705,6 @@ float ComputeL2DistanceFast(const float* u, const double su, const float* v, con
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
-
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
 void diskannbuildempty_internal(Relation index);
 bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, ItemPointer heap_tid, Relation heap,
@@ -697,4 +791,3 @@ void LoadPQInfo(Relation index, dataT *&data, BlockNumber startBlkno, uint16 nbl
 }
 
 #endif
-

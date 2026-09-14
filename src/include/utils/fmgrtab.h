@@ -231,8 +231,7 @@ extern const int fmgr_nbuiltins; /* number of entries in table */
 
 /* Store all built-in functions ordered by function oid. Actually, it stores the
  * function pointers to g_func_groups for saving memories. */
-extern const Builtin_func* g_sorted_funcs[nBuiltinFuncs];
-extern const FmgrBuiltin* g_fmgr_sorted_builtins[NFMGRFUNCS];
+extern const Builtin_func* g_built_in_funcs[FirstBootstrapObjectId];
 
 /* Store all built-in functions, that are grouped by function name in alphabetical
  * order with lower case comparison (see pg_strcasecmp). */

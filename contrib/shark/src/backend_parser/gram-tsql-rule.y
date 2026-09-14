@@ -1842,6 +1842,7 @@ direct_label_keyword: ABORT_P
             | CONCURRENTLY
             | CONDITION
             | CONFIGURATION
+            | CONFLICT
             | CONNECT
             | CONNECTION
             | CONSISTENT

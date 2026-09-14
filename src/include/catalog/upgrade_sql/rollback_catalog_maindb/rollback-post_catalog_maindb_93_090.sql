@@ -17,6 +17,34 @@ BEGIN
     end if;
 END$$;
 
+-- 12. 回滚 coverage.proc_coverage：将新版本 relkind='z' 的序列重建为 'S'
+DO $$
+DECLARE
+    ans boolean;
+BEGIN
+    SELECT CASE WHEN count(*)=1 THEN true ELSE false END
+      FROM pg_catalog.pg_class c, pg_catalog.pg_namespace n
+     WHERE c.relname='proc_coverage_coverage_id_seq'
+       AND n.nspname='coverage'
+       AND c.relnamespace=n.oid
+       AND c.relkind='z' INTO ans;
+    IF ans = true THEN
+        DROP TABLE IF EXISTS coverage.proc_coverage;
+        DROP SEQUENCE IF EXISTS coverage.proc_coverage_coverage_id_seq;
+        CREATE SEQUENCE coverage.proc_coverage_coverage_id_seq START 1;
+        CREATE UNLOGGED TABLE coverage.proc_coverage(
+            coverage_id bigint NOT NULL DEFAULT nextval('coverage.proc_coverage_coverage_id_seq'::regclass),
+            pro_oid oid NOT NULL,
+            pro_name text NOT NULL,
+            db_name text NOT NULL,
+            pro_querys text NOT NULL,
+            pro_canbreak bool[] NOT NULL,
+            coverage int[] NOT NULL
+        ) WITH (orientation=row, compression=no);
+        REVOKE ALL on table coverage.proc_coverage FROM public;
+    END IF;
+END$$;
+
 DROP TYPE IF EXISTS pg_catalog._pg_lsn CASCADE;
 DROP TYPE IF EXISTS pg_catalog.pg_lsn CASCADE;
 
@@ -59,6 +87,8 @@ CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT8)
 RETURNS NVARCHAR2
 AS $$ select CAST(pg_catalog.float8out($1) AS NVARCHAR2) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
+
+SET skip_new_column_for_ruledef = true;
 
 -- 1. 回滚 pg_sequence_parameters 至原始 6 参数版本
 -- CASCADE 自动删除依赖此函数的 information_schema.sequences 视图
@@ -342,7 +372,7 @@ DO $$
 DECLARE
     ans boolean;
 BEGIN
-select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='proc_coverage_coverage_id_seq' and n.nspname='coverage' and c.relkind ='z') into ans;
+select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='proc_coverage_coverage_id_seq' and n.nspname='coverage' and c.relnamespace=n.oid and c.relkind ='z') into ans;
     if ans = true THEN
         -- DELETE first
         DROP table IF EXISTS coverage.proc_coverage;
@@ -355,12 +385,12 @@ DO $$
 DECLARE
     ans boolean;
 BEGIN
-select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='proc_coverage_coverage_id_seq' and n.nspname='coverage') into ans;
+select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='proc_coverage_coverage_id_seq' and n.nspname='coverage' and c.relnamespace=n.oid) into ans;
     if ans = false THEN
         CREATE SCHEMA IF NOT EXISTS coverage;
         COMMENT ON schema coverage IS 'coverage schema';
 
-        CREATE SEQUENCE IF NOT EXISTS coverage.proc_coverage_coverage_id_seq START 1;
+        CREATE SEQUENCE coverage.proc_coverage_coverage_id_seq START 1;
         CREATE unlogged table IF NOT EXISTS coverage.proc_coverage(
             coverage_id bigint NOT NULL DEFAULT nextval('coverage.proc_coverage_coverage_id_seq'::regclass),
             pro_oid oid NOT NULL,
@@ -379,7 +409,7 @@ DO $$
 DECLARE
     ans boolean;
 BEGIN
-select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='snapshot_sequence' and n.nspname='db4ai' and c.relkind ='z') into ans;
+select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='snapshot_sequence' and n.nspname='db4ai' and c.relnamespace=n.oid and c.relkind ='z') into ans;
     if ans = true THEN
         DROP SEQUENCE IF EXISTS db4ai.snapshot_sequence;
     end if;
@@ -389,9 +419,9 @@ DO $$
 DECLARE
     ans boolean;
 BEGIN
-select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='snapshot_sequence' and n.nspname='db4ai') into ans;
+select case when count(*)=1 then true else false end from (select c.relname,c.relkind from pg_catalog.pg_class c, pg_catalog.pg_namespace n where c.relname='snapshot_sequence' and n.nspname='db4ai' and c.relnamespace=n.oid) into ans;
     if ans = false THEN
-        CREATE SEQUENCE IF NOT EXISTS db4ai.snapshot_sequence;
+        CREATE SEQUENCE db4ai.snapshot_sequence;
         REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
         GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     end if;
@@ -553,6 +583,8 @@ CREATE OR REPLACE VIEW information_schema.usage_privileges AS
 GRANT SELECT ON information_schema.usage_privileges TO PUBLIC;
 RESET search_path;
 
+RESET skip_new_column_for_ruledef;
+
 -- 11. 升级 db4ai.snapshot_sequence：将旧版 relkind='S' 的序列 DROP 后重建为 'z'
 DO $$
 DECLARE
@@ -562,7 +594,7 @@ BEGIN
     WHERE c.relname='snapshot_sequence' AND n.nspname='db4ai' AND c.relnamespace=n.oid AND c.relkind='z' INTO ans;
     IF ans = true THEN
         DROP SEQUENCE IF EXISTS db4ai.snapshot_sequence;
-        CREATE SEQUENCE IF NOT EXISTS db4ai.snapshot_sequence;
+        CREATE SEQUENCE db4ai.snapshot_sequence;
         REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
         GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     END IF;

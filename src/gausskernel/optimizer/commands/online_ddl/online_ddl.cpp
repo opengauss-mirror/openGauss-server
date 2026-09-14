@@ -27,6 +27,7 @@
 #include "commands/tablecmds.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "nodes/parsenodes_common.h"
+#include "utils/builtins.h"
 #include "utils/mem_snapshot.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
@@ -409,7 +410,8 @@ void OnlineDDLResetAppendMode(Relation* relation)
     relation_close(*relation, NoLock);
 
     StringInfo query = makeStringInfo();
-    appendStringInfo(query, "ALTER TABLE %s.%s RESET (append_mode)", namespacename, relname);
+    appendStringInfo(query, "ALTER TABLE %s.%s RESET (append_mode)", quote_identifier(namespacename),
+                     quote_identifier(relname));
     OnlineDDLExecuteCommand(query->data);
     DestroyStringInfo(query);
 
@@ -486,7 +488,8 @@ bool OnlineDDLInstanceInit(Relation* relation, LOCKMODE lockmode, OnlineDDLType 
     /* Relation has been closed, add append_mode, exec ddl with no pin of target table. */
     StringInfo query = makeStringInfo();
     appendStringInfo(query, "ALTER TABLE %s.%s SET (append_mode = online_ddl)",
-                     get_namespace_name((*relation)->rd_rel->relnamespace), (*relation)->rd_rel->relname.data);
+                     quote_identifier(get_namespace_name((*relation)->rd_rel->relnamespace)),
+                     quote_identifier((*relation)->rd_rel->relname.data));
     OnlineDDLExecuteCommand(query->data);
     DestroyStringInfo(query);
 

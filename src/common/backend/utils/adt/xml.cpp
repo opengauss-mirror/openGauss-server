@@ -135,7 +135,7 @@ static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encodi
 static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding,
     bool can_ignore = false, bool try_another_parse_mode = false);
 static text* xml_xmlnodetoxmltype(xmlNodePtr cur);
-static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate, PgXmlErrorContext *xmlerrcxt);
+static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState* astate, PgXmlErrorContext* xmlerrcxt);
 static xmlChar *pg_xmlCharStrndup(char *str, size_t len);
 #endif /* USE_LIBXML */
 
@@ -1424,6 +1424,60 @@ static xmlDocPtr try_xml_parse_on_document_mode(text* data, bool preserve_whites
     return NULL;
 }
 
+struct XmlContentParseResult {
+    xmlDocPtr doc;
+    bool ignoreFail;
+    bool parserClosed;
+};
+
+static XmlContentParseResult xml_parse_content(text* data, xmlChar* utf8string, PgXmlErrorContext* xmlerrcxt,
+    xmlParserCtxtPtr ctxt, volatile xmlDocPtr* callerDoc, bool preserve_whitespace, int encoding, bool can_ignore,
+    bool try_another_parse_mode)
+{
+    XmlContentParseResult result = {NULL, false, false};
+    size_t count;
+    xmlChar* version = NULL;
+    int standalone;
+    int resCode = parse_xml_decl(utf8string, &count, &version, NULL, &standalone);
+    if (resCode != 0) {
+        if (can_ignore) {
+            xml_ereport(xmlerrcxt, WARNING, ERRCODE_INVALID_XML_DOCUMENT, "invalid XML document");
+            result.ignoreFail = true;
+            return result;
+        }
+        xml_ereport_by_code(ERROR, ERRCODE_INVALID_XML_CONTENT,
+            "invalid XML content: invalid XML declaration", resCode);
+    }
+
+    result.doc = xmlNewDoc(version);
+    *callerDoc = result.doc;
+    Assert(result.doc->encoding == NULL);
+    result.doc->encoding = xmlStrdup((const xmlChar*)"UTF-8");
+    result.doc->standalone = standalone;
+    resCode = xmlParseBalancedChunkMemory(result.doc, NULL, NULL, 0, utf8string + count, NULL);
+    if (resCode == 0 && !xmlerrcxt->err_occurred) {
+        return result;
+    }
+
+    if (try_another_parse_mode) {
+        xmlFreeDoc(result.doc);
+        result.doc = NULL;
+        *callerDoc = NULL;
+        result.doc = try_xml_parse_on_document_mode(data, preserve_whitespace, encoding);
+        *callerDoc = result.doc;
+        if (result.doc != NULL) {
+            xmlFreeParserCtxt(ctxt);
+            pg_xml_done(xmlerrcxt, true);
+            result.parserClosed = true;
+            return result;
+        }
+    }
+
+    xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_CONTENT, "invalid XML content");
+    result.ignoreFail = true;
+    return result;
+}
+
 /*
  * Convert a C string to XML internal representation
  *
@@ -1443,6 +1497,7 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
     volatile xmlParserCtxtPtr ctxt = NULL;
     volatile xmlDocPtr doc = NULL;
     volatile bool ignore_fail = false;
+    volatile xmlDocPtr fallback_doc = NULL;
 
     len = VARSIZE(data) - VARHDRSZ; /* will be useful later */
     string = xml_text2xmlChar(data);
@@ -1476,60 +1531,19 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
                             "invalid XML document");
                 /* if invalid content value error is ignorable, report warning and return 'null' */
                 ignore_fail = true;
-                goto ignorable_error_handle;
             }
         } else {
-            int res_code;
-            size_t count;
-            xmlChar* version = NULL;
-            int standalone;
-
-            res_code = parse_xml_decl(utf8string, &count, &version, NULL, &standalone);
-            if (res_code != 0) {
-                if (can_ignore) {
-                    xml_ereport(xmlerrcxt, WARNING, ERRCODE_INVALID_XML_DOCUMENT, "invalid XML document");
-                    /* if invalid content value error is ignorable, report warning and return 'null' */
-                    ignore_fail = true;
-                    goto ignorable_error_handle;
-                } else {
-                    xml_ereport_by_code(ERROR, ERRCODE_INVALID_XML_CONTENT,
-                                        "invalid XML content: invalid XML declaration", res_code);
-                }
-            }
-
-            doc = xmlNewDoc(version);
-            Assert(doc->encoding == NULL);
-            doc->encoding = xmlStrdup((const xmlChar*)"UTF-8");
-            doc->standalone = standalone;
-
-            res_code = xmlParseBalancedChunkMemory(doc, NULL, NULL, 0, utf8string + count, NULL);
-            if (res_code != 0 || xmlerrcxt->err_occurred) {
-                /*
-                 *  we will try to use use XMLOPTION_DOCUMENT to parse again when we use XMLOPTION_CONTENT failed
-                 */
-                if (try_another_parse_mode) {
-                    if (doc != NULL) {
-                        xmlFreeDoc(doc);
-                        doc = NULL;
-                    }
-                    doc = try_xml_parse_on_document_mode(data, preserve_whitespace, encoding);
-                    if (doc != NULL) {
-                        xmlFreeParserCtxt(ctxt);
-                        pg_xml_done(xmlerrcxt, true);
-                        return doc;
-                    }
-                }
-                xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_CONTENT,
-                            "invalid XML content");
-                /* if invalid content value error is ignorable, report warning and return 'null' */
-                ignore_fail = true;
-                goto ignorable_error_handle;
+            XmlContentParseResult result = xml_parse_content(data, utf8string, xmlerrcxt, (xmlParserCtxtPtr)ctxt,
+                &doc, preserve_whitespace, encoding, can_ignore, try_another_parse_mode);
+            ignore_fail = result.ignoreFail;
+            if (result.parserClosed) {
+                ctxt = NULL;
+                fallback_doc = result.doc;
+                doc = NULL;
+            } else {
+                doc = result.doc;
             }
         }
-
-ignorable_error_handle:
-        /* no more code add here */
-        ;
     }
     PG_CATCH();
     {
@@ -1543,6 +1557,10 @@ ignorable_error_handle:
         PG_RE_THROW();
     }
     PG_END_TRY();
+
+    if (fallback_doc != NULL) {
+        return (xmlDocPtr)fallback_doc;
+    }
 
     if (ignore_fail) {
         if (doc != NULL)
@@ -3750,7 +3768,7 @@ static text* xml_xmlnodetoxmltype(xmlNodePtr cur)
 
 /*
  * Convert an XML XPath object (the result of evaluating an XPath expression)
- * to an array of xml values, which is returned at *astate.  The function
+ * to an array of xml values, which are appended to astate.  The function
  * result value is the number of elements in the array.
  *
  * If "astate" is NULL then we don't generate the array value, but we still
@@ -3760,15 +3778,12 @@ static text* xml_xmlnodetoxmltype(xmlNodePtr cur)
  * representations.  Primitive values (float, double, string) are converted
  * to a single-element array containing the value's string representation.
  */
-static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate, PgXmlErrorContext *xmlerrcxt)
+static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState* astate, PgXmlErrorContext *xmlerrcxt)
 {
     int result = 0;
     Datum datum;
     Oid datumtype;
     char* result_str = NULL;
-
-    if (astate != NULL)
-        *astate = NULL;
 
     switch (xpathobj->type) {
         case XPATH_NODESET:
@@ -3779,7 +3794,7 @@ static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** 
 
                     for (i = 0; i < result; i++) {
                         datum = PointerGetDatum(xml_xmlnodetoxmltype(xpathobj->nodesetval->nodeTab[i]));
-                        *astate = accumArrayResult(*astate, datum, false, XMLOID, CurrentMemoryContext);
+                        (void)accumArrayResult(astate, datum, false, XMLOID, CurrentMemoryContext);
                     }
                 }
             }
@@ -3818,7 +3833,7 @@ static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** 
     /* Common code for scalar-value cases */
     result_str = map_sql_value_to_xml_value(datum, datumtype, true);
     datum = PointerGetDatum(cstring_to_xmltype(result_str));
-    *astate = accumArrayResult(*astate, datum, false, XMLOID, CurrentMemoryContext);
+    (void)accumArrayResult(astate, datum, false, XMLOID, CurrentMemoryContext);
     return 1;
 }
 
@@ -3834,7 +3849,7 @@ static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** 
  * a context node being known.
  */
 static void xpath_internal(
-    text* xpath_expr_text, xmltype* data, ArrayType* namespaces, int* res_nitems, ArrayBuildState** astate)
+    text* xpath_expr_text, xmltype* data, ArrayType* namespaces, int* res_nitems, ArrayBuildState* astate)
 {
     PgXmlErrorContext* xmlerrcxt = NULL;
     volatile xmlParserCtxtPtr ctxt = NULL;
@@ -4016,7 +4031,7 @@ static xmlChar* buildXpathAbsolutePath(text* xpath_expr_text)
  * a context node being known.
  */
 static void extract_internal(
-    xmltype* data, text* xpath_expr_text, ArrayType* namespaces, int* res_nitems, ArrayBuildState** astate)
+    xmltype* data, text* xpath_expr_text, ArrayType* namespaces, int* res_nitems, ArrayBuildState* astate)
 {
     PgXmlErrorContext* xmlerrcxt = NULL;
     volatile xmlDocPtr doc = NULL;
@@ -4411,9 +4426,9 @@ Datum xmltype_extract(PG_FUNCTION_ARGS)
     xmltype* data = PG_GETARG_XML_P(0);
     ArrayType* namespaces = PG_GETARG_ARRAYTYPE_P(2);
     int res_nitems = 0;
-    ArrayBuildState* astate = NULL;
+    ArrayBuildState* astate = initArrayResult(XMLOID, CurrentMemoryContext);
 
-    extract_internal(data, xpath_expr_text, namespaces, &res_nitems, &astate);
+    extract_internal(data, xpath_expr_text, namespaces, &res_nitems, astate);
     if (res_nitems == 0) {
         PG_RETURN_NULL();
     } else {
@@ -4468,8 +4483,9 @@ Datum xmltype_xmlsequence(PG_FUNCTION_ARGS)
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
     }
     xmltype* data = PG_GETARG_XML_P(0);
-    ArrayBuildState* astate = NULL;
+    ArrayBuildState* astate = initArrayResult(XMLOID, CurrentMemoryContext);
     MemoryContext oldcontext = CurrentMemoryContext;
+    volatile Datum result = (Datum)0;
 
     PG_TRY();
     {
@@ -4478,16 +4494,17 @@ Datum xmltype_xmlsequence(PG_FUNCTION_ARGS)
         xmlFreeDoc(doc);
         astate = accumArrayResult(astate, PointerGetDatum(data), false, XMLOID, CurrentMemoryContext);
         if (astate->nelems == 0) {
-            PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
+            result = PointerGetDatum(construct_empty_array(XMLOID));
         } else {
-            PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+            result = makeArrayResult(astate, CurrentMemoryContext);
         }
     }
     PG_CATCH();
     {
-        FlushErrorState();
         MemoryContextSwitchTo(oldcontext);
+        FlushErrorState();
         int res_nitems = 0;
+        ArrayBuildState* fallbackAstate = initArrayResult(XMLOID, CurrentMemoryContext);
         StringInfoData buf;
         initStringInfo(&buf);
 
@@ -4501,15 +4518,15 @@ Datum xmltype_xmlsequence(PG_FUNCTION_ARGS)
 
         char* xpath_root_node = "/begin/*";
         text* xpath_root_path = cstring_to_text(xpath_root_node);
-        extract_internal(xmlbuf, xpath_root_path, NULL, &res_nitems, &astate);
+        extract_internal(xmlbuf, xpath_root_path, NULL, &res_nitems, fallbackAstate);
         if (res_nitems == 0) {
-            PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
+            result = PointerGetDatum(construct_empty_array(XMLOID));
         } else {
-            PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+            result = makeArrayResult(fallbackAstate, CurrentMemoryContext);
         }
     }
     PG_END_TRY();
-    return 0;
+    PG_RETURN_DATUM(result);
 #else
     NO_XML_SUPPORT();
     return 0;
@@ -4628,15 +4645,11 @@ Datum xpath(PG_FUNCTION_ARGS)
     text* xpath_expr_text = PG_GETARG_TEXT_P(0);
     xmltype* data = PG_GETARG_XML_P(1);
     ArrayType* namespaces = PG_GETARG_ARRAYTYPE_P(2);
-    int res_nitems;
     ArrayBuildState* astate = NULL;
 
-    xpath_internal(xpath_expr_text, data, namespaces, &res_nitems, &astate);
-
-    if (res_nitems == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
-    else
-        PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+    astate = initArrayResult(XMLOID, CurrentMemoryContext);
+    xpath_internal(xpath_expr_text, data, namespaces, NULL, astate);
+    PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
 #else
     NO_XML_SUPPORT();
     return 0;

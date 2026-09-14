@@ -27,7 +27,9 @@
 #include "c.h"
 #include "storage/barrier.h"
 #include "utils/atomic_arm.h"
+#include "utils/atomic_lse.h"
 
+typedef volatile uint16 pg_atomic_uint16;
 typedef volatile uint32 pg_atomic_uint32;
 typedef volatile uint64 pg_atomic_uint64;
 
@@ -123,6 +125,53 @@ static inline uint32 gs_compare_and_swap_u32(volatile uint32* ptr, uint32 oldval
 static inline uint64 gs_compare_and_swap_u64(volatile uint64* ptr, uint64 oldval, uint64 newval)
 {
     return (uint64)__sync_val_compare_and_swap(ptr, oldval, newval);
+}
+
+/*
+ * @Description: Atomic init in a 16-bit address.
+ * @IN ptr: uint16 pointer
+ * @IN val: uint16 value
+ * @Return: void
+ * @See also:
+ */
+static inline void pg_atomic_init_u16(volatile uint16* ptr, uint16 val)
+{
+    *ptr = val;
+}
+
+/*
+ * @Description: Atomic read a 16-bit address, and return the value.
+ * @IN ptr: uint16 pointer
+ * @Return: value
+ * @See also:
+ */
+static inline uint16 pg_atomic_read_u16(volatile uint16* ptr)
+{
+    return *ptr;
+}
+
+/*
+ * @Description: Atomic increment in a 16-bit address, and return the old value.
+ * @IN ptr: int16 pointer
+ * @IN inc: increase value
+ * @Return: old value
+ * @See also:
+ */
+static inline uint16 pg_atomic_fetch_add_u16(volatile uint16* ptr, uint16 inc)
+{
+    return __sync_fetch_and_add(ptr, inc);
+}
+
+/*
+ * @Description: Atomic decrement in a 16-bit address, and return the old value.
+ * @IN ptr: int16 pointer
+ * @IN inc: decrease value
+ * @Return: old value
+ * @See also:
+ */
+static inline uint16 pg_atomic_fetch_sub_u16(volatile uint16* ptr, int16 inc)
+{
+    return __sync_fetch_and_sub(ptr, inc);
 }
 
 /*
@@ -373,6 +422,8 @@ static inline uint64 pg_atomic_fetch_add_u64(volatile uint64* ptr, uint64 inc)
     :		"0" (inc), "m"(*ptr)
     :		"memory", "cc");
     return res;
+#elif __aarch64__ and __ARM_LSE
+    return __lse_atomic_fetch_add_u64(ptr, inc);
 #else
     return __sync_fetch_and_add(ptr, inc);
 #endif

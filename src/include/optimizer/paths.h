@@ -154,12 +154,16 @@ typedef struct {
     List* groupClause;   /* overrides parse->groupClause */
 } standard_qp_extra;
 
+#define MIN_PREFIX_SORT_KEYS 2
+extern bool prefix_sort_supported(PlannerInfo* root, RelOptInfo* rel);
+
 extern List* canonicalize_pathkeys(PlannerInfo* root, List* pathkeys);
 extern List* remove_param_pathkeys(PlannerInfo* root, List* pathkeys);
 extern void construct_pathkeys(PlannerInfo *root, List *tlist, List *activeWindows,
                    List *groupClause, bool canonical);
 extern PathKeysComparison compare_pathkeys(List* keys1, List* keys2);
 extern bool pathkeys_contained_in(List* keys1, List* keys2);
+extern bool pathkeys_count_contained_in(List* keys1, List* keys2, int* nCommon);
 extern Path* get_cheapest_path_for_pathkeys(
     List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion);
 extern Path* get_cheapest_fractional_path_for_pathkeys(

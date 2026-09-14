@@ -811,6 +811,66 @@ DROP TABLE
 \! rm -f @abs_bindir@/gsql_multi_cf_create.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
+-- clean
+DROP TABLE IF EXISTS t1;
+NOTICE:  table "t1" does not exist, skipping
+DROP TABLE IF EXISTS retry_flag;
+NOTICE:  table "retry_flag" does not exist, skipping
+DROP FUNCTION IF EXISTS f_retry_insert();
+NOTICE:  function f_retry_insert() does not exist, skipping
+DROP PROCEDURE IF EXISTS flip_retry_flag();
+NOTICE:  function flip_retry_flag() does not exist, skipping
+CREATE TABLE t1 (
+    a  SERIAL    PRIMARY KEY,
+    b  INT       NOT NULL CHECK (b % 2 = 0),
+    c  NUMERIC
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_a_seq" for serial column "t1.a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+-- record current retry count
+CREATE TABLE retry_flag (v TEXT);
+INSERT INTO retry_flag VALUES ('first');
+CREATE OR REPLACE PROCEDURE flip_retry_flag()
+IS
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    UPDATE retry_flag SET v = 'done';
+    COMMIT;
+END flip_retry_flag;
+/
+-- First throw error: 57P01; Then retry successfully
+CREATE OR REPLACE FUNCTION f_retry_insert() RETURNS TEXT AS $$
+BEGIN
+    IF (SELECT v FROM retry_flag) = 'first' THEN
+        flip_retry_flag();
+        RAISE EXCEPTION 'force gsql retry on first attempt'
+            USING ERRCODE = '57P01';
+    END IF;
+    INSERT INTO t1 (b, c) VALUES (2, 100);
+    RETURN 'ok';
+END;
+$$ LANGUAGE plpgsql;
+\set RETRY 5
+Retry is on with retry times: 5.
+SELECT f_retry_insert() as aa \gset
+INFO: query retry 1 time(s).
+\echo :aa
+ok
+select b as yy from t1 \gset
+select b as ya from t1;
+ ya 
+----
+  2
+(1 row)
+
+\echo :yy
+2
+\echo :ya
+:ya
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS retry_flag;
+DROP FUNCTION IF EXISTS f_retry_insert();
+DROP PROCEDURE IF EXISTS flip_retry_flag();
 select 'hello' as var1, 10 as var2
 \gset
 \echo :var1 :var2
@@ -879,6 +939,28 @@ no rows returned for \gset.
 \echo :pref_x :pref_y
 1 2
 \unset FETCH_COUNT
+\parallel on  
+select 1 \g
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \g /tmp/out.txt
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \g | cat
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 \gset
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 as c \gset vv
+Sending the query buffer by a meta-command is not supported in parallel mode.
+select 1 as from \gset   
+Sending the query buffer by a meta-command is not supported in parallel mode.
+\parallel off
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_core_dump.sql
+Parallel is on with scale default 1024.
+gsql:@abs_srcdir@/data/parallel_core_dump.sql:2: The statement at the end of input is not terminated by a semicolon and cannot be executed in parallel mode.
+--?total time: .*  ms
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_without_off.sql
+Parallel is on with scale default 1024.
+gsql:@abs_srcdir@/data/parallel_without_off.sql:4: 3 statement(s) buffered in parallel mode were discarded because "\parallel off" was not executed before the end of input.
+--?total time: .*  ms
 \c regression;
 drop database test_sql;
 \! rm -f @abs_bindir@/gsql_ut.sql

@@ -1,4 +1,4 @@
-# 使用 openGuass 和 Cognee 构建 RAG
+# 使用 openGauss 和 Cognee 构建 RAG
 
 [Cognee](https://docs.cognee.ai/) 是一个开源认知数据处理框架，支持将非结构化文档通过 LLM 提取实体与关系、构建知识图谱，并提供基于图谱增强和文档块检索两种工作模式，适用于 RAG 和语义搜索等场景。
 
@@ -199,7 +199,7 @@ await prune.prune_system(metadata=True)
 
 **（5）预处理文档**
 
-本文使用 [DataVec向量数据库](https://gitcode.com/opengauss/docs/blob/master/docs/zh/datavec/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
+本文使用 [DataVec向量数据库](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
 
 ```python
 import random

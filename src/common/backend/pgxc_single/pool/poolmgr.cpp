@@ -3925,6 +3925,7 @@ void reload_database_pools(PoolAgent* agent)
     {
         HOLD_INTERRUPTS();
         LWLockRelease(PoolerLock);
+        FlushErrorState();
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("pooler: Failed to reset agent!")));
     }
     PG_END_TRY();

@@ -586,6 +586,8 @@ extern Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int3
 extern Datum InputFunctionCallForDateType(
     FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, char* date_time_fmt);
 extern Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typmod, bool can_ignore = false);
+extern Datum OidInputFunctionCallCache(Oid functionId, char* str, Oid typioparam, int32 typmod,
+    FmgrInfo* finfo, bool can_ignore = false);
 extern char* OutputFunctionCall(FmgrInfo* flinfo, Datum val);
 extern char* OidOutputFunctionCall(Oid functionId, Datum val);
 extern Datum ReceiveFunctionCall(FmgrInfo* flinfo, fmStringInfo buf, Oid typioparam, int32 typmod);

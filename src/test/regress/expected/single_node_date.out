@@ -1223,3 +1223,11 @@ select isfinite('infinity'::date), isfinite('-infinity'::date), isfinite('today'
  f        | f        | t
 (1 row)
 
+-- test current_date is not folded to a constant
+EXPLAIN (VERBOSE ON, COSTS OFF) SELECT current_date;
+            QUERY PLAN            
+----------------------------------
+ Result
+   Output: text_date('now'::text)
+(2 rows)
+

@@ -32,7 +32,7 @@ class Pterodb():
 
 	def real_init_env(self, i):
 		datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd + " --dbcompatibility=" + dbcompatibility
-		print datanode_cmd_init
+		print(datanode_cmd_init)
 		os.system(datanode_cmd_init)
 
 		conf_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/postgresql.conf"
@@ -72,7 +72,7 @@ class Pterodb():
 				#repl
 				string = "replconninfo%d = 'localhost=%s localport=%d localheartbeatport=%d localservice=%d remotehost=%s remoteport=%d remoteheartbeatport=%d remoteservice=%d'\n" % \
 				(j, g_local_ip, self.ha_port_arr[n-1], self.heartbeat_port_arr[n-1], self.service_port_arr[n-1], g_local_ip, self.ha_port_arr[i-1], self.heartbeat_port_arr[i-1], self.service_port_arr[i-1])
-				print string
+				print(string)
 				file_handler.write(string)
 				j = j + 1
 
@@ -129,16 +129,16 @@ class Pterodb():
 		# dn
 		for i in range(1,self.data_node_num+1):
 			rm_cmd = cmd + self.data_dir + "/" + self.dname_prefix + str(i) + "/postmaster.pid"
-			print rm_cmd
+			print(rm_cmd)
 			os.system(rm_cmd)
 
 	def __real_start_server(self, i):
 		datanode_cmd = install_path + "/bin/gs_ctl" + " start -M standby "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1"
-		print datanode_cmd
+		print(datanode_cmd)
 		os.system(datanode_cmd)
 
 		datanode_cmd = install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1"
-		print datanode_cmd
+		print(datanode_cmd)
 		os.system(datanode_cmd)
 
 	def __start_server(self):
@@ -147,7 +147,7 @@ class Pterodb():
 
 		#start primary
 		datanode_cmd = install_path + "/bin/gs_ctl " + "start -M primary" + " -D " + self.data_dir + "/" + self.dname_prefix + str(1) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(1) + "/logdn" + str(1) + ".log 2>&1 &"
-		print datanode_cmd
+		print(datanode_cmd)
 		os.system(datanode_cmd)
 
 		time.sleep(5)
@@ -169,7 +169,7 @@ class Pterodb():
 	def __stop_server(self):
 		for i in range(1,self.data_node_num+1):
 			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + " -Z single_node"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 
 	def run(self, run_type):
@@ -180,22 +180,22 @@ class Pterodb():
 			#print "start_server ok"
 			self.__create_default_db()
 			#print "create_default_db ok"
-			print "start ok"
+			print("start ok")
 		elif(run_type == 1):
 			self.__start_server()
-			print "start ok"
+			print("start ok")
 		elif(run_type == 2):
 			self.__stop_server()
-			print "stop ok"
+			print("stop ok")
 
 def usage():
-	print "------------------------------------------------------"
-	print "python pubsub.py\n"
-	print "	-d datanode_num, set and start up dn"
-	print "	-s means start"
-	print "	-o means stop"
-	print "	-D data directory"
-	print "------------------------------------------------------"
+    print("------------------------------------------------------")
+    print("python pubsub.py\n")
+    print("	-d datanode_num, set and start up dn")
+    print("	-s means start")
+    print("	-o means stop")
+    print("	-D data directory")
+    print("------------------------------------------------------")
 
 def real_run(ptdb, run_type):
 	ptdb.run(run_type)
@@ -203,9 +203,9 @@ def real_run(ptdb, run_type):
 def main():
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], "hD:d:sov", ["help", "data_dir="])
-	except getopt.GetoptError, err:
+	except getopt.GetoptError as err:
 		# print help information and exit:
-		print str(err) # will print something like "option -a not recognized"
+		print(str(err)) # will print something like "option -a not recognized"
 		# usage()
 		sys.exit(2)
 
@@ -235,7 +235,7 @@ def main():
 		sys.exit()
 
 	create_key_cipher_cmd = install_path + "/bin/gs_guc generate -S " + g_passwd + " -D " + install_path + "/bin -o subscription"
-	print create_key_cipher_cmd
+	print(create_key_cipher_cmd)
 	os.system(create_key_cipher_cmd)
 
 	pub_port_arr = [pub_node1_port, pub_node2_port, pub_node3_port];

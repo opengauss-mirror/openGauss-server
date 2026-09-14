@@ -2766,7 +2766,7 @@ void ExecEvalNextValueExpr(ExprState *state, ExprEvalStep *op)
             errmsg("no owned sequence found")));
     }
 
-    newval = nextval_internal(op->d.nextvalueexpr.seqid, false);
+    newval = nextval_internal(op->d.nextvalueexpr.seqid, false, false);
     switch (op->d.nextvalueexpr.seqtypid) {
         case INT1OID:
             *op->resvalue = Int8GetDatum((int8) newval);

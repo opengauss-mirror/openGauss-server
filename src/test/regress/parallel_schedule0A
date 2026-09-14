@@ -37,7 +37,7 @@ test: extract_pushdown_or_clause
 test: workload_manager
 
 test: spm_adaptive_gplan
-#test: smp smp_cursor parallel_enable_function
+test: smp smp_cursor parallel_enable_function
 test: alter_hw_package dependent_view1
 test: hw_grant_package gsc_func gsc_db dependent_view2
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
@@ -180,6 +180,7 @@ test: array_compatible_a
 test: single_node_insert xc_rownum
 test: single_node_temple
 test: single_node_create_function_1
+test: rownum_agg_test
 #test: single_node_create_type
 #test: single_node_create_table
 #test: single_node_create_function_2
@@ -495,10 +496,11 @@ test: test_float test_numeric_with_neg_scale test_float_dump db4ai_security
 # test for tid range scan
 #test: tidrangescan
 
-test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
-#test: alter_table_001 alter_table_modify_ustore
-test: alter_table_modify_ltt alter_table_modify_gtt table_constraint
+test: alter_table_000 alter_table_002 alter_table_003
+#test: alter_table_001
+test: table_constraint
 test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+test: test_alter_table
 
 # test for empty string in A format database
 test: accept_empty_str not_accept_empty_str pg_empty_str accept_empty_copy not_accept_empty_copy

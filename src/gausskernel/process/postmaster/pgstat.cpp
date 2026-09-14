@@ -3664,7 +3664,7 @@ void pgstat_beshutdown_session(int ctrl_index)
  * ensure the compiler doesn't try to get cute.
  * ----------
  */
-void pgstat_report_activity(BackendState state, const char* cmd_str)
+void pgstat_report_activity(BackendState state, const char* cmd_str, int string_len)
 {
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     TimestampTz start_timestamp;
@@ -3709,7 +3709,8 @@ void pgstat_report_activity(BackendState state, const char* cmd_str)
         start_timestamp = GetCurrentStatementStartTimestamp();
 
     if (cmd_str != NULL) {
-        len = pg_mbcliplen(cmd_str, strlen(cmd_str), g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
+        len = (string_len != -1) ? string_len :
+              pg_mbcliplen(cmd_str, strlen(cmd_str), g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
         if (len == g_instance.attr.attr_common.pgstat_track_activity_query_size - 1 &&
             t_thrd.mem_cxt.mask_password_mem_cxt != NULL) {
             /* mask the cmd_str when the cmd_str is truncated. */
@@ -4146,13 +4147,17 @@ bool CheckUserExist(Oid userId, bool removeCount)
  * @in wait_event_info - one kind of WaitEventSQL
  * @out - void
  */
-void pgstat_report_wait_count(unsigned int wait_event_info)
+void pgstat_report_wait_count(uint32 wait_event_command, uint32 wait_event_query)
 {
     Oid userid;
     WaitCountHashValue* WaitCountIdx = NULL;
     int dataid;
     int listNodeid;
-    uint32 classId = wait_event_info & 0xFF000000;
+    uint32 commandClassId = wait_event_command & 0xFF000000;
+    uint32 queryClassId = wait_event_query & 0xFF000000;
+    if (commandClassId != PG_WAIT_SQL && queryClassId != PG_WAIT_SQL) {
+        return;
+    }
 
     LWLockAcquire(WaitCountHashLock, LW_SHARED);
     /* check if hash table exist */
@@ -4205,44 +4210,48 @@ void pgstat_report_wait_count(unsigned int wait_event_info)
     WaitCountStatusCell = (PgStat_WaitCountStatusCell*)lfirst(lc);
 
     /* Using pg atomic function to add count for corresponsible WaitEventSQL */
-    if (classId == PG_WAIT_SQL) {
-        WaitEventSQL w = (WaitEventSQL)wait_event_info;
-        switch (w) {
-            case WAIT_EVENT_SQL_SELECT: {
-                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_select,
-                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse);
-            } break;
-            case WAIT_EVENT_SQL_UPDATE: {
-                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_update,
-                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse);
-            } break;
-            case WAIT_EVENT_SQL_INSERT: {
-                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_insert,
-                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse);
-            } break;
-            case WAIT_EVENT_SQL_DELETE: {
-                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_delete,
-                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse);
-            } break;
-            case WAIT_EVENT_SQL_MERGEINTO:
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_mergeinto), 1);
-                break;
-            case WAIT_EVENT_SQL_DDL:
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_ddl), 1);
-                break;
-            case WAIT_EVENT_SQL_DML:
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dml), 1);
-                break;
-            case WAIT_EVENT_SQL_DCL:
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dcl), 1);
-                break;
-            case WAIT_EVENT_SQL_TCL:
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_tcl), 1);
-                break;
-            default:
-                break;
-        }
+    WaitEventSQL w = (WaitEventSQL)wait_event_command;
+    switch (w) {
+        case WAIT_EVENT_SQL_SELECT: {
+            UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_select,
+                WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse);
+        } break;
+        case WAIT_EVENT_SQL_UPDATE: {
+            UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_update,
+                WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse);
+        } break;
+        case WAIT_EVENT_SQL_INSERT: {
+            UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_insert,
+                WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse);
+        } break;
+        case WAIT_EVENT_SQL_DELETE: {
+            UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_delete,
+                WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse);
+        } break;
+        case WAIT_EVENT_SQL_MERGEINTO:
+            pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_mergeinto), 1);
+            break;
+        default:
+            break;
     }
+    w = (WaitEventSQL)wait_event_query;
+    switch (w) {
+        case WAIT_EVENT_SQL_DDL:
+            pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_ddl), 1);
+            break;
+        case WAIT_EVENT_SQL_DML:
+            pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dml), 1);
+            break;
+        case WAIT_EVENT_SQL_DCL:
+            pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dcl), 1);
+            break;
+        case WAIT_EVENT_SQL_TCL:
+            pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_tcl), 1);
+            break;
+        default:
+            break;
+    }
+
     LWLockRelease(WaitCountHashLock);
 }
 
@@ -8011,12 +8020,13 @@ MotJitProfile* GetMotJitProfile(uint32* num)
 
 int64 getCpuTime(void)
 {
+    uint64 US_PER_SEC = 1000000ULL;
 #ifndef WIN32
     struct timespec tv;
     int64 res;
 
     (void)clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv);
-    res = tv.tv_sec * 1000000 + tv.tv_nsec / 1000;
+    res = tv.tv_sec * US_PER_SEC + tv.tv_nsec / 1000;
 
     return res;
 #else
@@ -8973,8 +8983,10 @@ void DumpMemoryContext(DUMP_TYPE type)
         dump_file, MAX_PATH_LEN, "%s/%s_%lu_%lu.log", dump_dir, ctx_name, (unsigned long)tid, (uint64)time(NULL));
 #endif
     securec_check_ss(rc, "\0", "\0");
+    StringInfo memBuf = makeStringInfo();
     FILE* dump_fp = fopen(dump_file, "w");
     if (NULL == dump_fp) {
+        DestroyStringInfo(memBuf);
         elog(LOG, "dump_memory: Failed to create file: %s, cause: %s", dump_file, strerror(errno));
         return;
     }
@@ -8991,33 +9003,35 @@ void DumpMemoryContext(DUMP_TYPE type)
         default:
             elog(LOG, "dump_memory: invalid dump type: %d", type);
             fclose(dump_fp);
+            DestroyStringInfo(memBuf);
             return;
     }
 
     // 4. walk all memory context
+    volatile bool dumpFailed = false;
     PG_TRY();
     {
-        StringInfoData memBuf;
+        recursiveMemoryContextForDump(ctx, ctx_name, memBuf);
 
-        initStringInfo(&memBuf);
+        uint64 bytes = fwrite(memBuf->data, 1, memBuf->len, dump_fp);
 
-        recursiveMemoryContextForDump(ctx, ctx_name, &memBuf);
-
-        uint64 bytes = fwrite(memBuf.data, 1, memBuf.len, dump_fp);
-
-        if (bytes != (uint64)memBuf.len) {
-            elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf.len);
+        if (bytes != (uint64)memBuf->len) {
+            elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf->len);
         }
-
-        pfree(memBuf.data);
     }
     PG_CATCH();
     {
+        FlushErrorState();
+        DestroyStringInfo(memBuf);
         fclose(dump_fp);
-        return;
+        dumpFailed = true;
     }
     PG_END_TRY();
+    if (dumpFailed) {
+        return;
+    }
 
+    DestroyStringInfo(memBuf);
     fclose(dump_fp);
     return;
 }

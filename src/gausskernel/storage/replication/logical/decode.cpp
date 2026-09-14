@@ -75,6 +75,10 @@ static void AreaDecodeUInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
 
 static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
+static void DecodeUpdateChange(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+                               struct HeapUpdateDecodeData *decodeData);
+static void AreaDecodeUpdateChange(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+                                   struct HeapUpdateDecodeData *decodeData);
 
 static void DecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void AreaDecodeUUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
@@ -92,6 +96,17 @@ static void AreaDecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer 
 
 static void DecodeUMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void AreaDecodeUMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
+
+struct HeapUpdateDecodeData {
+    XLogReaderState *record;
+    xl_heap_update *update_record;
+    RelFileNode target_node;
+    CommitSeqNo snapshot_csn;
+    Size new_data_length;
+    Size old_data_length;
+    char *newData;
+    char *oldData;
+};
 
 static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, TransactionId xid, CommitSeqNo csn,
                          Oid dboid, TimestampTz commit_time, int nsubxacts, TransactionId *sub_xids, int ninval_msgs,
@@ -1353,9 +1368,9 @@ static void AreaDecodeUInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
 static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
     XLogReaderState *r = buf->record;
-    RelFileNode target_node = {0, 0, 0, 0, 0};
-    xl_heap_update *xlrec = (xl_heap_update *)GetXlrec(r);
-    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    HeapUpdateDecodeData decodeData = {0};
+    decodeData.record = r;
+    decodeData.update_record = (xl_heap_update *)GetXlrec(r);
     Size heapUpdateSize = 0;
     if ((XLogRecGetInfo(r) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) == 0) {
         heapUpdateSize = SizeOfOldHeapUpdate;
@@ -1364,52 +1379,82 @@ static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     bool hasCSN = (r->decoded_record->xl_term & XLOG_CONTAIN_CSN) == 0 ? false : true;
     if (hasCSN) {
-        curCSN = *(CommitSeqNo *)((char *)xlrec + heapUpdateSize);
+        decodeData.snapshot_csn = *(CommitSeqNo *)((char *)decodeData.update_record + heapUpdateSize);
+    } else {
+        decodeData.snapshot_csn = InvalidCommitSeqNo;
     }
 
-    XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
+    XLogRecGetBlockTag(r, 0, &decodeData.target_node, NULL, NULL);
     /* only interested in our database */
-    if (target_node.dbNode != ctx->slot->data.database) {
+    if (decodeData.target_node.dbNode != ctx->slot->data.database) {
         return;
     }
-    Size datalen_new = 0;
-    char *data_new = XLogRecGetBlockData(r, 0, &datalen_new);
-    Size tuplelen_new = datalen_new - SizeOfHeapHeader;
-    Size datalen_old = 0;
+    decodeData.newData = XLogRecGetBlockData(r, 0, &decodeData.new_data_length);
 
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
     bool is_init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
     /* caution, remaining data in record is not aligned */
-    char *data_old = (char *)xlrec + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
+    decodeData.oldData = (char *)decodeData.update_record + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
     if (is_init) {
-        datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
+        decodeData.old_data_length = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
     } else {
-        datalen_old = XLogRecGetDataLen(r) - heapUpdateSize;
+        decodeData.old_data_length = XLogRecGetDataLen(r) - heapUpdateSize;
     }
-    datalen_old -= hasCSN ? sizeof(CommitSeqNo) : 0;
-    Size tuplelen_old = datalen_old - SizeOfHeapHeader;
+    decodeData.old_data_length -= hasCSN ? sizeof(CommitSeqNo) : 0;
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
         return;
     }
+    DecodeUpdateChange(ctx, buf, &decodeData);
+}
 
+static void DecodeUpdateChange(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+                               HeapUpdateDecodeData *decodeData)
+{
+    XLogReaderState *r = decodeData->record;
+    xl_heap_update *xlrec = decodeData->update_record;
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_UPDATE;
     change->origin_id = XLogRecGetOrigin(r);
-    errno_t rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &target_node, sizeof(RelFileNode));
+    errno_t rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &decodeData->target_node,
+        sizeof(RelFileNode));
     securec_check(rc, "\0", "\0");
+#ifdef ENABLE_NEON
+    if (xlrec->flags & XLH_UPDATE_CONTAINS_CHANGED_ATTRS) {
+        uint16 nchanged_attrs = 0;
+        Size changed_attrs_size = sizeof(uint16);
+
+        rc = memcpy_s(&nchanged_attrs, sizeof(uint16), decodeData->oldData, sizeof(uint16));
+        securec_check(rc, "\0", "\0");
+        decodeData->oldData += sizeof(uint16);
+
+        change->data.tp.changed_attrs_valid = true;
+        change->data.tp.nchanged_attrs = nchanged_attrs;
+        if (nchanged_attrs > 0) {
+            changed_attrs_size += sizeof(AttrNumber) * nchanged_attrs;
+            change->data.tp.changed_attrs = (AttrNumber *)MemoryContextAlloc(ctx->reorder->context,
+                sizeof(AttrNumber) * nchanged_attrs);
+            rc = memcpy_s(change->data.tp.changed_attrs, sizeof(AttrNumber) * nchanged_attrs,
+            decodeData->oldData, sizeof(AttrNumber) * nchanged_attrs);
+            securec_check(rc, "\0", "\0");
+            decodeData->oldData += sizeof(AttrNumber) * nchanged_attrs;
+        }
+        decodeData->old_data_length -= changed_attrs_size;
+    }
+#endif
     if (xlrec->flags & XLH_UPDATE_CONTAINS_NEW_TUPLE) {
-        change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_new);
-        DecodeXLogTuple(data_new, datalen_new, change->data.tp.newtuple, true);
+        change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, decodeData->new_data_length);
+        DecodeXLogTuple(decodeData->newData, decodeData->new_data_length, change->data.tp.newtuple, true);
     }
     if (xlrec->flags & XLH_UPDATE_CONTAINS_OLD) {
+        Size tuplelen_old = decodeData->old_data_length - SizeOfHeapHeader;
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_old);
 
-        DecodeXLogTuple(data_old, datalen_old, change->data.tp.oldtuple, true);
+        DecodeXLogTuple(decodeData->oldData, decodeData->old_data_length, change->data.tp.oldtuple, true);
     }
 
-    change->data.tp.snapshotcsn = curCSN;
+    change->data.tp.snapshotcsn = decodeData->snapshot_csn;
     change->data.tp.clear_toast_afterwards = true;
 
     ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change);
@@ -1422,9 +1467,9 @@ static void DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
     XLogReaderState *r = buf->record;
-    RelFileNode target_node = {0, 0, 0, 0, 0};
-    xl_heap_update *xlrec = (xl_heap_update *)GetXlrec(r);
-    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    HeapUpdateDecodeData decodeData = {0};
+    decodeData.record = r;
+    decodeData.update_record = (xl_heap_update *)GetXlrec(r);
     Size heapUpdateSize = 0;
     if ((XLogRecGetInfo(r) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) == 0) {
         heapUpdateSize = SizeOfOldHeapUpdate;
@@ -1433,45 +1478,64 @@ static void AreaDecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
     bool hasCSN = (r->decoded_record->xl_term & XLOG_CONTAIN_CSN) == 0 ? false : true;
     if (hasCSN) {
-        curCSN = *(CommitSeqNo *)((char *)xlrec + heapUpdateSize);
+        decodeData.snapshot_csn = *(CommitSeqNo *)((char *)decodeData.update_record + heapUpdateSize);
+    } else {
+        decodeData.snapshot_csn = InvalidCommitSeqNo;
     }
-    XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
-    Size datalen_new = 0;
-    char *data_new = XLogRecGetBlockData(r, 0, &datalen_new);
-    Size tuplelen_new = datalen_new - SizeOfHeapHeader;
-    Size datalen_old = 0;
+    XLogRecGetBlockTag(r, 0, &decodeData.target_node, NULL, NULL);
+    decodeData.newData = XLogRecGetBlockData(r, 0, &decodeData.new_data_length);
 
     /* adapt 64 xid, if this tuple is the first tuple of a new page */
     bool is_init = (XLogRecGetInfo(r) & XLOG_HEAP_INIT_PAGE) != 0;
     /* caution, remaining data in record is not aligned */
-    char *data_old = (char *)xlrec + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
+    decodeData.oldData = (char *)decodeData.update_record + heapUpdateSize + SizeOfXLOGCSN(hasCSN);
     if (is_init) {
-        datalen_old = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
+        decodeData.old_data_length = XLogRecGetDataLen(r) - heapUpdateSize - sizeof(TransactionId);
     } else {
-        datalen_old = XLogRecGetDataLen(r) - heapUpdateSize;
+        decodeData.old_data_length = XLogRecGetDataLen(r) - heapUpdateSize;
     }
-    datalen_old -= hasCSN ? sizeof(CommitSeqNo) : 0;
-    Size tuplelen_old = datalen_old - SizeOfHeapHeader;
+    decodeData.old_data_length -= hasCSN ? sizeof(CommitSeqNo) : 0;
 
     /* output plugin doesn't look for this origin, no need to queue */
     if (FilterByOrigin(ctx, XLogRecGetOrigin(r))) {
         return;
     }
+    AreaDecodeUpdateChange(ctx, buf, &decodeData);
+}
 
+static void AreaDecodeUpdateChange(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+                                   HeapUpdateDecodeData *decodeData)
+{
+    XLogReaderState *r = decodeData->record;
+    xl_heap_update *xlrec = decodeData->update_record;
     ReorderBufferChange *change = ReorderBufferGetChange(ctx->reorder);
     change->action = REORDER_BUFFER_CHANGE_UPDATE;
     change->origin_id = XLogRecGetOrigin(r);
-    errno_t rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &target_node, sizeof(RelFileNode));
+    errno_t rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &decodeData->target_node,
+        sizeof(RelFileNode));
     securec_check(rc, "\0", "\0");
+#ifdef ENABLE_NEON
+    if (xlrec->flags & XLH_UPDATE_CONTAINS_CHANGED_ATTRS) {
+        uint16 nchanged_attrs = 0;
+        Size changed_attrs_size = sizeof(uint16);
+
+        rc = memcpy_s(&nchanged_attrs, sizeof(uint16), decodeData->oldData, sizeof(uint16));
+        securec_check(rc, "\0", "\0");
+        changed_attrs_size = sizeof(uint16) + sizeof(AttrNumber) * nchanged_attrs;
+        decodeData->oldData += changed_attrs_size;
+        decodeData->old_data_length -= changed_attrs_size;
+    }
+#endif
     if (xlrec->flags & XLH_UPDATE_CONTAINS_OLD) {
+        Size tuplelen_old = decodeData->old_data_length - SizeOfHeapHeader;
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_old);
-        DecodeXLogTuple(data_old, datalen_old, change->data.tp.oldtuple, true);
+        DecodeXLogTuple(decodeData->oldData, decodeData->old_data_length, change->data.tp.oldtuple, true);
     }
     if (xlrec->flags & XLH_UPDATE_CONTAINS_NEW_TUPLE) {
-        change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_new);
-        DecodeXLogTuple(data_new, datalen_new, change->data.tp.newtuple, true);
+        change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, decodeData->new_data_length);
+        DecodeXLogTuple(decodeData->newData, decodeData->new_data_length, change->data.tp.newtuple, true);
     }
-    change->data.tp.snapshotcsn = curCSN;
+    change->data.tp.snapshotcsn = decodeData->snapshot_csn;
     change->data.tp.clear_toast_afterwards = true;
     AreaDecodingChange(change, ctx, buf);
 }
@@ -2428,4 +2492,3 @@ void DecodeUHeapToastTuple(const char * toastData, Size len, ReorderBufferTupleB
     header->flag2 = xlhdr.flag2;
     header->t_hoff = xlhdr.t_hoff;
 }
-

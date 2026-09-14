@@ -940,24 +940,6 @@ typedef enum CompressionAlgorithms
 	_MAX_NUM_COMPRESSION_ALGORITHMS = 128,
 } CompressionAlgorithms;
 
-typedef struct ArrayBuildStateArr
-{
-	MemoryContext mcontext;		/* where all the temp stuff is kept */
-	char	   *data;			/* accumulated data */
-	bits8	   *nullbitmap;		/* bitmap of is-null flags, or NULL if none */
-	int			abytes;			/* allocated length of "data" */
-	int			nbytes;			/* number of bytes used so far */
-	int			aitems;			/* allocated length of bitmap (in elements) */
-	int			nitems;			/* total number of elements in result */
-	int			ndims;			/* current dimensions of result */
-	int			dims[MAXDIM];
-	int			lbs[MAXDIM];
-	Oid			array_type;		/* data type of the arrays */
-	Oid			element_type;	/* data type of the array elements */
-	bool		private_cxt;	/* use private memory context */
-} ArrayBuildStateArr; 
-
-
 typedef struct WindowAggPath
 {
 	Path		path;

@@ -4489,6 +4489,9 @@ static Sort* _readSort(Sort* local_node)
     _readPlan(&local_node->plan);
 
     READ_INT_FIELD(numCols);
+    IF_EXIST(nPresortedCols) {
+        READ_INT_FIELD(nPresortedCols);
+    }
     READ_ATTR_ARRAY(sortColIdx, numCols);
     READ_OPERATOROID_ARRAY(sortOperators, numCols);
     READ_OID_ARRAY(collations, numCols);

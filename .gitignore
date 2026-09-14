@@ -1,6 +1,7 @@
 /.gitee/
 /.vscode/
 /.idea/
+/.pre-commit-venv/
 /cmake-build-debug/
 *.a
 *.o
@@ -23,3 +24,4 @@ objfiles.txt
 
 /build/script/version.cfg
 /cmake_build
+/cmake_check.mk

@@ -1,17 +1,6 @@
 #This is the main CMAKE for build all components.
-SET(unicode_cmd_src
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_most.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_EUC_JP.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_EUC_CN.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_EUC_KR.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_EUC_TW.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_SJIS.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_GB18030.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_BIG5.pl|"
-    "${PROJECT_SRC_DIR}/common/backend/utils/mb/Unicode|||perl UCS_to_GB18030_2022.pl|"
-)
-
-add_cmd_gen_when_configure(perl_target unicode_cmd_src)
+# Unicode conversion maps are pre-generated in the source tree. The upstream
+# mapping inputs are not distributed, so configure must not attempt regeneration.
 
 execute_process(COMMAND ${CMAKE_SOURCE_DIR}/${openGauss}/cmake/src/buildfunction.sh --create_conversionfile ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR})
 

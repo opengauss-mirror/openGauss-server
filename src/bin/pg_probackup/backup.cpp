@@ -147,8 +147,6 @@ static bool IsPrimary(PGconn* conn);
 static void *ProgressReportProbackup(void *arg);
 static void *ProgressReportSyncBackupFile(void *arg);
 
-static void compress_encrypt_directory();
-
 static void set_ts_ver_dir_real(PGconn  *cur_conn);
 
 static void
@@ -349,6 +347,264 @@ static void start_stream_wal(const char *database_path, const char *dssdata_path
     pthread_create(&stream_thread, NULL, StreamLog, &stream_thread_arg);
 }
 
+/*
+ * Parent backup resolved (and validated) by preflight_incremental_backup()
+ * before pg_start_backup. INVALID_BACKUP_ID means the default differential
+ * logic in get_prev_backup_info() must be used.
+ */
+static time_t g_resolvedParentBackupId = INVALID_BACKUP_ID;
+
+static pgBackup *FindBackupById(parray *backupList, time_t backupId)
+{
+    int i;
+
+    for (i = 0; i < (int)parray_num(backupList); i++) {
+        pgBackup *backup = (pgBackup *)parray_get(backupList, i);
+        if (backup->start_time == backupId) {
+            return backup;
+        }
+    }
+
+    return NULL;
+}
+
+static void
+validate_requested_parent_backup(pgBackup *parentBackup, TimeLineID tli,
+                                 pgBackup *chainTail)
+{
+    pgBackup *invalidBackup = NULL;
+
+    if (parentBackup->start_time >= current.start_time) {
+        elog(ERROR, "Parent backup %s must be older than the current backup",
+            base36enc(parentBackup->start_time));
+    }
+
+    if (parentBackup->tli != tli) {
+        elog(ERROR, "Parent backup %s belongs to timeline %u, current timeline is %u",
+            base36enc(parentBackup->start_time), parentBackup->tli, tli);
+    }
+
+    if (parentBackup->status != BACKUP_STATUS_OK &&
+        parentBackup->status != BACKUP_STATUS_DONE) {
+        elog(ERROR, "Parent backup %s has status %s",
+            base36enc(parentBackup->start_time), status2str(parentBackup->status));
+    }
+
+    if (scan_parent_chain(parentBackup, &invalidBackup) != ChainIsOk) {
+        elog(ERROR, "Parent backup %s does not have a valid backup chain",
+            base36enc(parentBackup->start_time));
+    }
+
+    /*
+     * Restrict explicit parent to a valid FULL backup or the latest backup of
+     * the current chain. Anything else would silently fork the backup chain
+     * in a way merge and retention cannot handle.
+     */
+    if (parentBackup->backup_mode != BACKUP_MODE_FULL &&
+        (chainTail == NULL || parentBackup->start_time != chainTail->start_time)) {
+        elog(ERROR, "Parent backup %s must be a valid FULL backup or "
+             "the latest backup of the current chain",
+            base36enc(parentBackup->start_time));
+    }
+
+    if (parentBackup->media_type != current.media_type) {
+        elog(ERROR, "Parent backup %s has different media type", base36enc(parentBackup->start_time));
+    }
+
+    if (parentBackup->stream != current.stream) {
+        elog(WARNING, "Parent backup %s has different WAL mode (%s)",
+            base36enc(parentBackup->start_time), parentBackup->stream ? "STREAM" : "ARCHIVE");
+    }
+}
+
+/*
+ * Check that CBM files covering start_lsn still exist on the server.
+ *
+ * The probe merges the minimal interval [start_lsn, start_lsn + 1]. It must
+ * not be empty: pg_cbm_get_changed_block() answers a zero width interval
+ * before inspecting anything. One byte is enough, since the server resolves
+ * and validates the CBM file covering the interval start.
+ *
+ * The server refuses an interval ending past its CBM tracked location, and
+ * that location only advances when a checkpoint wakes the CBM writer. Right
+ * after the parent backup it sits exactly on the parent's start_lsn - both
+ * are products of the parent's forced checkpoint. Waiting here would race
+ * the periodic checkpoint, and forcing the writer to a position of our own
+ * choosing corrupts its resume point (start_lsn + 1 is not a record end).
+ *
+ * So when the tracked location has not passed start_lsn yet, skip the
+ * probe. A parent that recent is at most one checkpoint old and cannot have
+ * had its CBM recycled, and make_pagemap_from_ptrack() re-validates the
+ * whole interval against the server when the page map is built.
+ */
+static bool
+cbm_interval_available(PGconn *backup_conn, XLogRecPtr start_lsn)
+{
+    PGresult   *res;
+    char        startBuf[64];
+    char        endBuf[64];
+    const char *params[2];
+    bool        available;
+    errno_t     rc;
+    XLogRecPtr  tracked_lsn;
+    XLogRecPtr  end_lsn = start_lsn + 1;
+
+    tracked_lsn = get_last_ptrack_lsn(backup_conn, NULL);
+    if (XLogRecPtrIsInvalid(tracked_lsn)) {
+        elog(ERROR, "Cannot get CBM tracked location, "
+             "maybe enable_cbm_tracking is off");
+    }
+
+    if (tracked_lsn < end_lsn) {
+        elog(LOG, "CBM tracked location %X/%X has not passed LSN %X/%X of the "
+             "parent backup yet (it advances on checkpoint). Skipping the CBM "
+             "availability probe: a parent backup this recent cannot have had "
+             "its CBM recycled",
+             (uint32) (tracked_lsn >> 32), (uint32) tracked_lsn,
+             (uint32) (start_lsn >> 32), (uint32) start_lsn);
+        return true;
+    }
+
+    rc = snprintf_s(startBuf, sizeof(startBuf), sizeof(startBuf) - 1, "%X/%X",
+                    (uint32) (start_lsn >> 32), (uint32) start_lsn);
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = snprintf_s(endBuf, sizeof(endBuf), sizeof(endBuf) - 1, "%X/%X",
+                    (uint32) (end_lsn >> 32), (uint32) end_lsn);
+    securec_check_ss_c(rc, "\0", "\0");
+    params[0] = startBuf;
+    params[1] = endBuf;
+
+    res = pgut_execute_extended(backup_conn,
+                                "SELECT path FROM pg_cbm_get_changed_block($1, $2)",
+                                2, params, true, true);
+    available = (PQresultStatus(res) == PGRES_TUPLES_OK ||
+                 PQresultStatus(res) == PGRES_COMMAND_OK);
+    if (!available) {
+        elog(WARNING, "CBM probe for LSN %s failed: %s", startBuf, PQerrorMessage(backup_conn));
+    }
+    PQclear(res);
+
+    return available;
+}
+
+/*
+ * Take shared locks on the whole parent chain, so that concurrent merge,
+ * delete or retention cannot destroy the parent while this backup is running.
+ * Locks are released on process exit.
+ */
+static void LockParentChain(pgBackup *parentBackup)
+{
+    pgBackup *backup = parentBackup;
+
+    while (backup != NULL) {
+        if (!lock_backup(backup, true, false)) {
+            elog(ERROR, "Cannot lock parent backup %s directory",
+                base36enc(backup->start_time));
+        }
+        backup = backup->parent_backup_link;
+    }
+}
+
+/*
+ * Resolve and fully validate the parent backup before pg_start_backup is
+ * issued, so that invalid combinations fail before a checkpoint is forced
+ * on the server. Runs only when --parent-backup-id or a cumulative
+ * incremental backup was requested: the default differential path keeps
+ * its historical behavior in get_prev_backup_info().
+ */
+static void
+preflight_incremental_backup(PGconn *backup_conn)
+{
+    parray     *backupList = NULL;
+    pgBackup   *chainTail = NULL;
+    pgBackup   *parentBackup = NULL;
+    TimeLineID  tli;
+
+    if (current.backup_mode != BACKUP_MODE_DIFF_PTRACK) {
+        return;
+    }
+
+    if (g_requestedParentBackupId == INVALID_BACKUP_ID &&
+        g_incrementalType != INCR_TYPE_CUMULATIVE) {
+        return;
+    }
+
+#if PG_VERSION_NUM >= 90600
+    tli = get_current_timeline(backup_conn);
+#else
+    tli = get_current_timeline_from_control(false);
+#endif
+
+    backupList = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
+    chainTail = catalog_get_last_data_backup(backupList, tli, current.start_time);
+
+    if (g_requestedParentBackupId != INVALID_BACKUP_ID) {
+        parentBackup = FindBackupById(backupList, g_requestedParentBackupId);
+        if (parentBackup == NULL) {
+            elog(ERROR, "Parent backup %s is not found",
+                base36enc(g_requestedParentBackupId));
+        }
+
+        validate_requested_parent_backup(parentBackup, tli, chainTail);
+
+        if (!cbm_interval_available(backup_conn, parentBackup->start_lsn)) {
+            elog(ERROR, "CBM information starting from LSN %X/%X of parent backup %s "
+                 "is not available (recycled?), cannot take incremental backup from it",
+                 (uint32) (parentBackup->start_lsn >> 32), (uint32) parentBackup->start_lsn,
+                 base36enc(parentBackup->start_time));
+        }
+
+        current.incrementalType = (parentBackup->backup_mode == BACKUP_MODE_FULL) ?
+            INCR_TYPE_CUMULATIVE : INCR_TYPE_DIFFERENTIAL;
+    } else { /* g_incrementalType == INCR_TYPE_CUMULATIVE */
+        if (chainTail == NULL) {
+            elog(ERROR, "Valid backup on current timeline %u is not found, "
+                 "create new FULL backup before an incremental one", tli);
+        }
+
+        parentBackup = find_parent_full_backup(chainTail);
+        if (parentBackup == NULL || parentBackup->tli != tli) {
+            elog(ERROR, "Cannot find a valid FULL backup on timeline %u "
+                 "for cumulative incremental backup", tli);
+        }
+
+        if (!cbm_interval_available(backup_conn, parentBackup->start_lsn)) {
+            if (g_cumulativeFallbackError) {
+                elog(ERROR, "CBM information starting from LSN %X/%X of FULL backup %s "
+                     "is not available (recycled?). Take a new FULL backup to preserve "
+                     "existing restore points, or rerun with "
+                     "--cumulative-fallback=differential to degrade explicitly. "
+                     "If older restore points may be discarded, merge the latest backup "
+                     "to advance the FULL baseline, then retry",
+                     (uint32) (parentBackup->start_lsn >> 32), (uint32) parentBackup->start_lsn,
+                     base36enc(parentBackup->start_time));
+            }
+
+            /* base36enc returns a static buffer, use the _dup variant for the second id */
+            char *fullId = base36enc_dup(parentBackup->start_time);
+            elog(WARNING, "CBM information of FULL backup %s is not available, "
+                 "falling back to differential incremental backup based on %s",
+                 fullId, base36enc(chainTail->start_time));
+            pg_free(fullId);
+
+            parentBackup = chainTail;
+            current.incrementalType = INCR_TYPE_DIFFERENTIAL;
+        } else {
+            current.incrementalType = INCR_TYPE_CUMULATIVE;
+        }
+    }
+
+    LockParentChain(parentBackup);
+
+    g_resolvedParentBackupId = parentBackup->start_time;
+    elog(INFO, "Resolved parent backup: %s (%s incremental)",
+         base36enc(g_resolvedParentBackupId),
+         current.incrementalType == INCR_TYPE_CUMULATIVE ? "cumulative" : "differential");
+
+    parray_walk(backupList, pgBackupFree);
+    parray_free(backupList);
+}
+
 static void get_prev_backup_info(parray **backup_list, pgBackup **prev_back, parray **prev_backup_filelist,
                                  XLogRecPtr *prev_backup_start_lsn, PGconn *backup_conn)
 {
@@ -361,9 +617,24 @@ static void get_prev_backup_info(parray **backup_list, pgBackup **prev_back, par
         /* get list of backups already taken */
         *backup_list = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
 
-        prev_backup = catalog_get_last_data_backup(*backup_list, current.tli, current.start_time);
-        if (prev_backup == NULL)
-        {
+        if (g_resolvedParentBackupId != INVALID_BACKUP_ID) {
+            /* parent was resolved, validated and share-locked in preflight */
+            prev_backup = FindBackupById(*backup_list, g_resolvedParentBackupId);
+            if (prev_backup == NULL) {
+                elog(ERROR, "Parent backup %s disappeared after validation",
+                    base36enc(g_resolvedParentBackupId));
+            }
+
+            if (prev_backup->tli != current.tli) {
+                elog(ERROR, "Timeline changed from %u to %u since parent backup %s "
+                     "was validated", prev_backup->tli, current.tli,
+                     base36enc(g_resolvedParentBackupId));
+            }
+        } else {
+            prev_backup = catalog_get_last_data_backup(*backup_list, current.tli, current.start_time);
+        }
+
+        if (prev_backup == NULL) {
             /* try to setup multi-timeline backup chain */
             elog(WARNING, "Valid backup on current timeline %u is not found, "
                     "trying to look up on previous timelines",
@@ -544,7 +815,17 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
             file->type = DEV_TYPE_DSS;
         }
 
+        /*
+         * Completed segments were encrypted when they were closed, but a
+         * partial one may still be in the clear.
+         */
+        if (!EncEncryptFileInplace(wal_full_path)) {
+            elog(ERROR, "Cannot encrypt WAL segment \"%s\"", wal_full_path);
+        }
+
         file->crc = pgFileGetCRC(wal_full_path, true, false);
+        /* sizes are accounted in plaintext bytes, the container adds its own */
+        file->size = enc_plain_size(wal_full_path, file->size);
         file->write_size = file->size;
 
         /* overwrite rel_path, because now it is relative to
@@ -1103,6 +1384,15 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
     current.compress_alg = instance_config.compress_alg;
     current.compress_level = instance_config.compress_level;
 
+    if (g_encryptEnabled) {
+        current.encrypt_version = GSPB_ENC_FORMAT_VERSION;
+        errno_t encrypt_rc = strncpy_s(current.encryptAlgorithm,
+                                       sizeof(current.encryptAlgorithm),
+                                       "AES128",
+                                       sizeof(current.encryptAlgorithm) - 1);
+        securec_check_c(encrypt_rc, "", "");
+    }
+
     current.storage_type = IsDssMode() ? DEV_TYPE_DSS : DEV_TYPE_FILE;
 
     /* Save list of external directories */
@@ -1125,6 +1415,9 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
             base36enc(current.start_time));
     }
     write_backup(&current, true);
+
+    /* the data key must exist before the first file of this backup is written */
+    EncryptSetupBackup(current.root_dir);
 
     /* set the error processing function for the backup process */
     pgut_atexit_push(backup_cleanup, NULL);
@@ -1161,6 +1454,12 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
     /* for long time backup, session will timeout, then backup will fail. So set the timeout */
     res = pgut_execute(backup_conn, "SET session_timeout = 0;", 0, NULL);
     PQclear(res);
+
+    /*
+     * Resolve and validate the parent backup (and probe CBM availability)
+     * before pg_start_backup forces a checkpoint on the server.
+     */
+    preflight_incremental_backup(backup_conn);
 
     /* backup data */
     do_backup_instance(backup_conn, &nodeInfo, no_sync, backup_logs, backup_replslots);
@@ -1199,8 +1498,6 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
 
     if (!no_validate && current.media_type != MEDIA_TYPE_OSS)
         pgBackupValidate(&current, NULL);
-
-    compress_encrypt_directory();
 
     /* do something after backup */
     do_after_backup();
@@ -1922,6 +2219,8 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
 
             file->crc = pgFileGetCRC(backup_label, true, false);
 
+            /* sizes are accounted in plaintext bytes */
+            file->size = enc_plain_size(backup_label, file->size);
             file->write_size = file->size;
             file->uncompressed_size = file->size;
             parray_append(backup_files_list, file);
@@ -1971,6 +2270,8 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
             if (S_ISREG(file->mode))
             {
                 file->crc = pgFileGetCRC(tablespace_map, true, false);
+                /* sizes are accounted in plaintext bytes */
+                file->size = enc_plain_size(tablespace_map, file->size);
                 file->write_size = file->size;
             }
 
@@ -2375,13 +2676,6 @@ backup_files(void *arg)
         /* update done_files */
         pg_atomic_add_fetch_u32((volatile uint32*) &g_doneFiles, 1);
 
-        /* Handle zero sized files */
-        if (file->size == 0)
-        {
-            file->write_size = 0;
-            continue;
-        }
-
         /* construct destination filepath */
         if (file->external_dir_num != 0)
         {
@@ -2405,6 +2699,25 @@ backup_files(void *arg)
         {
             join_path_components(from_fullpath, arguments->from_root, file->rel_path);
             join_path_components(to_fullpath, arguments->to_root, file->rel_path);
+        }
+
+        /* Preserve empty files; encrypted backups store an authenticated header. */
+        if (file->size == 0) {
+            FILE *emptyFile = fio_fopen(to_fullpath, PG_BINARY_W, FIO_BACKUP_HOST);
+            if (emptyFile == NULL) {
+                elog(ERROR, "Cannot create empty backup file \"%s\": %s",
+                     to_fullpath, gs_strerror(errno));
+            }
+            if (fio_fclose(emptyFile) != 0) {
+                elog(ERROR, "Cannot close empty backup file \"%s\": %s",
+                     to_fullpath, gs_strerror(errno));
+            }
+            if (!is_dss_type(file->type) && chmod(to_fullpath, file->mode) != 0) {
+                elog(ERROR, "Cannot change mode of \"%s\": %s",
+                     to_fullpath, gs_strerror(errno));
+            }
+            file->write_size = 0;
+            continue;
         }
 
         /* Encountered some strange beast */
@@ -2960,219 +3273,6 @@ static bool PathContainPath(const char* path1, const char* path2)
         }
     }
     return false;
-}
-
-/* compress and then encrypt the directory */
-static void compress_encrypt_directory()
-{
-    error_t rc;
-    int ret = 0;
-    uint key_len = 0;
-    uint hmac_len = MAX_HMAC_LEN;
-    uint enc_buffer_len = 0;
-    uint out_buffer_len = 0;
-    long int backup_tar_pos = 0;
-    long int backup_tar_length = 0;
-    char* key = NULL;
-    char sys_cmd[MAXPGPATH] = {0};
-    char tar_file[MAXPGPATH] = {0};
-    char enc_file[MAXPGPATH] = {0};
-    unsigned char hmac_buffer[MAX_HMAC_LEN + 1] = {0};
-    unsigned char enc_buffer[MAX_ENCRYPT_LEN + 1] = {0};
-    unsigned char out_buffer[MAX_CRYPTO_MODULE_LEN + 1] = {0};
-    char errmsg[MAX_ERRMSG_LEN] = {0};
-    int algo;
-
-    if (NULL == encrypt_dev_params) {
-        return;
-    }
-
-    rc = sprintf_s(sys_cmd, MAXPGPATH, "tar -cPf  %s.tar %s > /dev/null 2>&1", current.root_dir, current.root_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-    if (!is_valid_cmd(sys_cmd)) {
-        elog(ERROR, "cmd is rejected");
-        return;
-    }
-    system(sys_cmd);
-    rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
-    securec_check(rc, "\0", "\0");
-
-    rc = sprintf_s(tar_file, MAXPGPATH, "%s.tar", current.root_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    rc = sprintf_s(enc_file, MAXPGPATH, "%s_enc", current.root_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-    FILE* enc_backup_fd = fopen(enc_file, "wb");
-    if(!enc_backup_fd) {
-        elog(ERROR, ("failed to create or open encrypt backup file."));
-        return;
-    }
-
-    FILE* backup_tar_fd = fopen(tar_file, "rb");
-    if (!backup_tar_fd) {
-        elog(ERROR, ("failed to open compressed backup file"));
-        return;
-    }
-
-    CryptoModuleParamsCheck(gen_key, encrypt_dev_params, encrypt_mode, encrypt_key, encrypt_salt, &key_type);
-
-    initCryptoSession(&crypto_module_session);
-
-    algo = transform_type(encrypt_mode);
-
-    if (gen_key) {
-        if (key_type == KEY_TYPE_PLAINTEXT) {
-            elog(ERROR, "forbid to generate plaint key\n");
-        }
-        key = (char*)malloc(KEY_MAX_LEN);
-        ret = crypto_create_symm_key_use(crypto_module_session, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, (size_t*)&key_len);
-        if (ret != 1) {
-            pg_free(key);
-            crypto_get_errmsg_use(NULL, errmsg);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, "crypto module gen key error, errmsg:%s\n", errmsg);
-        }
-    } else {
-        key = SEC_decodeBase64(encrypt_key, &key_len);
-        if (NULL == key) {
-            pg_free(encrypt_key);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, "crypto module decode key error, please check --with-key.\n");
-        }
-    }
-    pg_free(encrypt_key);
-    if (key_type != KEY_TYPE_PLAINTEXT) {
-        encrypt_key = SEC_encodeBase64(key, (GS_UINT32)key_len);
-        if (NULL == encrypt_key) {
-            pg_free(encrypt_key);
-            pg_free(key);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, "crypto module encode key error.\n");
-        }
-        
-        elog(INFO, "crypto module encrypt with key: %s , salt: %s \n", encrypt_key, encrypt_salt);
-    }
-
-    ret = crypto_ctx_init_use(crypto_module_session, &crypto_module_keyctx, (ModuleSymmKeyAlgo)algo, 1, (unsigned char*)key, key_len);
-	if (ret != 1)
-	{
-        pg_free(encrypt_key);
-        pg_free(key);
-		crypto_get_errmsg_use(NULL, errmsg);
-        clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-		elog(ERROR, "crypto keyctx init error, errmsg:%s\n", errmsg);
-    }
-
-    algo = transform_hmac_type(encrypt_mode);
-    if (algo != MODULE_ALGO_MAX) {
-        ret = crypto_hmac_init_use(crypto_module_session, &crypto_hmac_keyctx, (ModuleSymmKeyAlgo)algo, (unsigned char*)key, key_len);
-        if (ret != 1)
-        {
-            pg_free(encrypt_key);
-            pg_free(key);
-            crypto_get_errmsg_use(NULL, errmsg);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, "crypto hmac keyctx init error, errmsg:%s\n", errmsg);
-        }
-    }
-
-    fseek(backup_tar_fd, 0, SEEK_END);
-    backup_tar_length = ftell(backup_tar_fd);
-    fseek(backup_tar_fd, 0, SEEK_SET);
-
-    while(backup_tar_pos < backup_tar_length)
-    {
-        ret = memset_s(enc_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
-        securec_check(ret, "\0", "\0");
-
-        if ((backup_tar_length - backup_tar_pos) > MAX_ENCRYPT_LEN) {
-            fread(enc_buffer, MAX_ENCRYPT_LEN, 1, backup_tar_fd);
-            backup_tar_pos += MAX_ENCRYPT_LEN;
-            enc_buffer_len = MAX_ENCRYPT_LEN;
-        } else {
-            fread(enc_buffer, (backup_tar_length - backup_tar_pos), 1, backup_tar_fd);
-            enc_buffer_len = backup_tar_length - backup_tar_pos;
-            backup_tar_pos = backup_tar_length;
-        }
-
-        ret = memset_s(out_buffer, MAX_ENCRYPT_LEN + 1, '\0', MAX_ENCRYPT_LEN + 1);
-        securec_check(ret, "\0", "\0");
-
-        ret = memset_s(hmac_buffer, MAX_HMAC_LEN + 1, '\0', MAX_HMAC_LEN + 1);
-        securec_check(ret, "\0", "\0");
-
-        if (algo != MODULE_ALGO_MAX){
-            ret = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)enc_buffer, enc_buffer_len, hmac_buffer, (size_t*)&hmac_len);
-            if (ret != 1) {
-                pg_free(encrypt_key);
-                pg_free(key);
-                clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-                elog(ERROR, ("failed to calculate hmac\n"));
-            }            
-        }
-
-        ret = crypto_encrypt_decrypt_use(crypto_module_keyctx, 1, (unsigned char*)enc_buffer, enc_buffer_len,
-                           (unsigned char*)encrypt_salt, MAX_IV_LEN, out_buffer, (size_t*)&out_buffer_len, NULL);
-        if (ret != 1) {
-            pg_free(encrypt_key);
-            pg_free(key);
-            clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-            elog(ERROR, ("failed to encrypt backup file\n"));
-        }
-
-        fwrite(out_buffer, 1, out_buffer_len, enc_backup_fd);
-        if (algo != MODULE_ALGO_MAX) {
-            fwrite(hmac_buffer, 1, hmac_len, enc_backup_fd);
-        }
-    }
-
-    fclose(backup_tar_fd);
-    fclose(enc_backup_fd);
-    clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
-    pg_free(encrypt_key);
-    pg_free(key);
-
-    rc = sprintf_s(sys_cmd, MAXPGPATH, "rm %s %s.tar -rf", current.root_dir, current.root_dir);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    if (!is_valid_cmd(sys_cmd)) {
-        elog(ERROR, "cmd is rejected\n");
-    }
-    system(sys_cmd);
-    enc_flag = true;
-}
-
-/*
- * Function: is_valid_cmd
- * Description: check cmd
- *
- * Input:
- *  char * cmd  exec
- * Return:
- *  bool true valid
- */
-bool is_valid_cmd(char * cmd)
-{
-    if (NULL == cmd)
-    {
-        elog(ERROR, "cmd is NULL");
-        return false;
-    }
-
-    if (strstr(cmd, "rm"))
-    {
-        return true;
-    }
-    else if (strstr(cmd, "tar"))
-    {
-        return true;
-    }
-    else
-    {
-        elog(ERROR, "the cmd line is rejected:%s.",cmd);
-        return false;
-    }
-
 }
 
 static bool IsPrimary(PGconn* conn)

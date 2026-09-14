@@ -46,8 +46,6 @@ COMMENT ON FUNCTION pg_catalog.gs_catalog_attribute_records(
 -- CREATE OR REPLACE VIEW is enough and avoids cascading the dependent views.
 SET search_path TO information_schema;
 
-SET skip_new_column_for_ruledef = true;
-
 CREATE OR REPLACE VIEW columns AS
     SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
            CAST(nc.nspname AS sql_identifier) AS table_schema,
@@ -167,8 +165,8 @@ CREATE OR REPLACE VIEW columns AS
                     ELSE 'USER-DEFINED' END
              END
              AS character_data)
-             AS COLUMN_TYPE,
-            CAST(d.description AS information_schema.character_data) AS COLUMN_COMMENT,
+             AS column_type,
+            CAST(d.description AS information_schema.character_data) AS column_comment,
             CAST(
                CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'AUTO_INCREMENT' 
                ELSE
@@ -176,7 +174,7 @@ CREATE OR REPLACE VIEW columns AS
                   ELSE null
                   END
                END 
-               AS character_data) AS EXTRA,
+               AS character_data) AS extra,
             CAST(array_to_string(ARRAY[
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'SELECT') THEN 'select' END,
                 CASE WHEN has_column_privilege(c.oid, a.attnum, 'INSERT') THEN 'insert' END,
@@ -272,7 +270,5 @@ BEGIN
 END $$;
 
 GRANT SELECT ON sequences TO PUBLIC;
-
-RESET skip_new_column_for_ruledef;
 
 RESET search_path;

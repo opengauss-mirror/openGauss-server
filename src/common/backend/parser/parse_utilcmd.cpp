@@ -1053,7 +1053,7 @@ static bool DropSetOwnedByTable(CreateStmtContext* cxt, char *colname)
 /*
  * createSeqOwnedByTable -
  *		create a sequence owned by table, need to add record to pg_depend.
- *		used in CREATE TABLE and CREATE TABLE ... LIKE
+ *		used in CREATE TABLE, CREATE TABLE ... LIKE, ALTER TABLE ADD IDENTITY.
  */
 static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool large,
                                   bool isAutoinc, bool forIdentity = false, bool forDIdentity = false,
@@ -1253,53 +1253,54 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
      * form until after the sequence is created, but there's no need to do
      * so.
      */
-    qstring = quote_qualified_identifier(snamespace, sname);
-    snamenode = makeNode(A_Const);
-    snamenode->val.type = T_String;
-    snamenode->val.val.str = qstring;
-    snamenode->location = -1;
-    castnode = makeNode(TypeCast);
-    castnode->typname = (TypeName*)SystemTypeName("regclass");
-    castnode->arg = (Node*)snamenode;
-    castnode->location = -1;
-    funccallnode = makeNode(FuncCall);
-    funccallnode->funcname = SystemFuncName("nextval");
-    funccallnode->args = list_make1(castnode);
-    funccallnode->agg_order = NIL;
-    funccallnode->agg_filter = NULL;
-    funccallnode->agg_star = false;
-    funccallnode->agg_distinct = false;
-    funccallnode->func_variadic = false;
-    funccallnode->over = NULL;
-    funccallnode->location = -1;
-
-    constraint = makeNode(Constraint);
-    constraint->contype = CONSTR_DEFAULT;
-    constraint->location = -1;
-    if (isAutoinc) {
-        autoincnode = makeNode(AutoIncrement);
-        autoincnode->expr = (Node*)funccallnode;
-        constraint->raw_expr = (Node*)autoincnode;
-    } else {
-        constraint->raw_expr = (Node*)funccallnode;
-    }
 
     /* for auto_increment and serial type */
     if (!(forIdentity || forDIdentity)) {
-        constraint->cooked_expr = NULL;
-        column->raw_default = constraint->raw_expr;
-        column->constraints = lappend(column->constraints, constraint);
+        qstring = quote_qualified_identifier(snamespace, sname);
+        snamenode = makeNode(A_Const);
+        snamenode->val.type = T_String;
+        snamenode->val.val.str = qstring;
+        snamenode->location = -1;
+        castnode = makeNode(TypeCast);
+        castnode->typname = (TypeName*)SystemTypeName("regclass");
+        castnode->arg = (Node*)snamenode;
+        castnode->location = -1;
+        funccallnode = makeNode(FuncCall);
+        funccallnode->funcname = SystemFuncName("nextval");
+        funccallnode->args = list_make1(castnode);
+        funccallnode->agg_order = NIL;
+        funccallnode->agg_filter = NULL;
+        funccallnode->agg_star = false;
+        funccallnode->agg_distinct = false;
+        funccallnode->func_variadic = false;
+        funccallnode->over = NULL;
+        funccallnode->location = -1;
+
+        if (isAutoinc) {
+            /* use sawAutoInc to check conflicts */
+            autoincnode = makeNode(AutoIncrement);
+            autoincnode->expr = (Node*)funccallnode;
+            column->raw_default = (Node*)autoincnode;
+        } else {
+            column->raw_default = (Node*)funccallnode;
+            /* to check conflicts */
+            constraint = makeNode(Constraint);
+            constraint->contype = CONSTR_DEFAULT;
+            constraint->location = -1;
+            constraint->cooked_expr = NULL;
+            constraint->raw_expr = (Node*)funccallnode;
+            column->constraints = lappend(column->constraints, constraint);
+        }
     }
 
     /* for serial type */
     if (!(isAutoinc || forIdentity || forDIdentity)) {
+        /* to check conflicts, and ensure serial column not null */
         constraint = makeNode(Constraint);
         constraint->contype = CONSTR_NOTNULL;
         constraint->location = -1;
         column->constraints = lappend(column->constraints, constraint);
     }
-
-    column->is_not_null = true;
 }
 
 static bool isColumnEncryptionAllowed(CreateStmtContext *cxt, ColumnDef *column)
@@ -1526,10 +1527,12 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
 {
     bool saw_nullable = false;
     bool saw_default = false;
+    bool sawOnUpdate = false;
     bool saw_generated = false;
+    bool sawIdentity = false;
+    bool sawAutoInc = false;
     Constraint* constraint = NULL;
     ListCell* clist = NULL;
-    bool sawIdentity = false;
 
     foreach (clist, column->constraints) {
         constraint = (Constraint*)lfirst(clist);
@@ -1560,21 +1563,34 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                 break;
 
             case CONSTR_DEFAULT:
-                if (saw_default && constraint->update_expr == NULL)
+                /*
+                 * ON UPDATE expr as CONSTR_DEFAULT in parser,
+                 * In B mode, can have multiple `default exprs and on update exprs,
+                 *
+                 * NOTE: If the column is of type serial and a CONSTR_DEFAULT constraint
+                 * will be added at last, therefore, all other CONSTR_DEFAULTs defined
+                 * for the serial column will be transformed firstly.
+                 */
+                if ((!DB_IS_CMPT(B_FORMAT) && saw_default) ||
+                    /* check for B mode. */
+                    ((saw_default || sawOnUpdate) && column->is_serial)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("multiple default values specified for column \"%s\" of table \"%s\"",
-                                column->colname,
-                                cxt->relation->relname),
-                            parser_errposition(cxt->pstate, constraint->location)));
-                if (!saw_default) {
-                    column->raw_default = constraint->raw_expr;
+                                   column->colname,
+                                   cxt->relation->relname),
+                                   parser_errposition(cxt->pstate, constraint->location)));
                 }
+
                 if (constraint->update_expr) {
                     column->update_default = constraint->update_expr;
+                    sawOnUpdate = true;
+                } else {
+                    column->raw_default = constraint->raw_expr;
+                    saw_default = true;
                 }
+
                 AssertEreport(constraint->cooked_expr == NULL, MOD_OPT, "");
-                saw_default = true;
                 break;
 
             case CONSTR_GENERATED_IDENTITY:
@@ -1603,14 +1619,6 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                                        parser_errposition(cxt->pstate, constraint->location)));
                     }
 
-                    if (saw_default) {
-                        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("Defaults cannot be created on columns with an IDENTITY attribute."
-                                       "Table '%s', column '%s'",
-                                       cxt->relation->relname, column->colname),
-                                       parser_errposition(cxt->pstate, constraint->location)));
-                    }
-
                     if (saw_nullable && !column->is_not_null) {
                         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                                 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
@@ -1625,8 +1633,8 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                                           !forDIdentity, forDIdentity,
                                           constraint->options);
                     sawIdentity = true;
-                    saw_default = true;
-                    saw_nullable = true;
+                    saw_nullable = true; /* identity can't be null. */
+                    column->is_not_null = true;
                     column->identity = constraint->generated_when;
                     break;
                 }
@@ -1705,17 +1713,17 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                         errmsg("Un-support feature"),
                         errdetail("auto_increment column is not supported in foreign table")));
                 }
+                /* multiple autoincrement */
+                if (sawAutoInc) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("multiple AUTO INCREMENT specifications for column \"%s\" of table \"%s\"",
+                                   column->colname, cxt->relation->relname),
+                                   parser_errposition(cxt->pstate, constraint->location)));
+                }
+
                 if (column->is_serial) {
                     ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                         errmsg("The datatype of column '%s' does not support auto_increment", column->colname)));
-                }
-                if (saw_default) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("multiple default values specified for column \"%s\" of table \"%s\"",
-                                column->colname,
-                                cxt->relation->relname),
-                            parser_errposition(cxt->pstate, constraint->location)));
                 }
                 AutoIncrementCheckOrientation(cxt);
                 if (cxt->relation->relpersistence == RELPERSISTENCE_TEMP) {
@@ -1724,6 +1732,9 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                     createSeqOwnedByTable(cxt, column, preCheck, true, true);
                     column->is_serial = true;
                 }
+                /* auto_increment can be null, don't set saw_nullable = true */
+                sawAutoInc = true;
+                /* It seems not very necessary */
                 column->is_not_null = true;
                 break;
             default:
@@ -1734,12 +1745,57 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
         }
     }
 
-    if (saw_default && saw_generated)
+    /* Check for conflicts between default/on update, identity, autoincrement, and generated expressions */
+    if ((saw_default || sawOnUpdate) && saw_generated) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("both default and generation expression specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                 parser_errposition(cxt->pstate, constraint->location)));
+    }
+
+    if ((saw_default || sawOnUpdate) && sawIdentity) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("both default and identity specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                 parser_errposition(cxt->pstate, constraint->location)));
+    }
+
+    if ((saw_default || sawOnUpdate) && sawAutoInc) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("both default and AUTO INCREMENT specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                 parser_errposition(cxt->pstate, constraint->location)));
+    }
+
+    if (sawIdentity && saw_generated) {
             ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
-                     errmsg("both default and generation expression specified for column \"%s\" of table \"%s\"",
+                     errmsg("both identity and generation expression specified for column \"%s\" of table \"%s\"",
                             column->colname, cxt->relation->relname),
-                     parser_errposition(cxt->pstate, constraint->location)));
+                     parser_errposition(cxt->pstate,
+                                        constraint->location)));
+    }
+
+    if (sawIdentity && sawAutoInc) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("both identity and AUTO INCREMENT specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                 parser_errposition(cxt->pstate,
+                                    constraint->location)));
+    }
+
+    if (saw_generated && sawAutoInc) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("both generation expression and AUTO INCREMENT specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                 parser_errposition(cxt->pstate,
+                                    constraint->location)));
+    }
 }
 
 /*
@@ -2257,7 +2313,7 @@ static void transformTableLikeClause(CreateStmtContext* cxt, TableLikeClause* ta
                         const Oid ColSettingOid  = columns_rel_data->column_key_id;
                         HeapTuple col_setting_tup  = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(ColSettingOid));
                         if(!col_setting_tup) {
-                            	ReleaseSysCache(col_tup);
+                                ReleaseSysCache(col_tup);
                                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
                                     errmsg("could not find column encryption keys for column %s", def->colname)));
                         }
@@ -2330,7 +2386,7 @@ static void transformTableLikeClause(CreateStmtContext* cxt, TableLikeClause* ta
                 bool forDIdentity = attrExtra->attidentity == ATTRIBUTE_IDENTITY_D;
                 seqId = getIdentitySequence(RelationGetRelid(relation), attribute->attnum, false, forDIdentity);
                 if (OidIsValid(seqId)) {
-                    large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
+                    large = RELKIND_IS_LARGE_SEQUENCE(get_rel_relkind(seqId));
                     seqoptions = sequence_to_options(seqId, large);
                     createSeqOwnedByTable(cxt, def, preCheck, large, false, !forDIdentity, forDIdentity, seqoptions);
                     def->identity = attrExtra->attidentity;
@@ -8746,7 +8802,6 @@ static void TransformTempAutoIncrement(ColumnDef* column, CreateStmt* stmt)
     int128 autoinc;
     Const* constnode = NULL;
     AutoIncrement* autoincnode = NULL;
-    Constraint* constraint = NULL;
 
     if (stmt) {
         autoinc = TransformAutoIncStart(stmt);
@@ -8757,13 +8812,7 @@ static void TransformTempAutoIncrement(ColumnDef* column, CreateStmt* stmt)
     constnode = makeConst(INT16OID, -1, InvalidOid, sizeof(int128), Int128GetDatum(autoinc), false, false);
     autoincnode = makeNode(AutoIncrement);
     autoincnode->expr = (Node*)constnode;
-    constraint = makeNode(Constraint);
-    constraint->contype = CONSTR_DEFAULT;
-    constraint->location = -1;
-    constraint->raw_expr = (Node*)autoincnode;
-    constraint->cooked_expr = NULL;
-    column->constraints = lappend(column->constraints, constraint);
-    column->raw_default = constraint->raw_expr;
+    column->raw_default = (Node*)autoincnode;
 }
 
 /*

@@ -211,7 +211,7 @@ void UndoXlogRedo(XLogReaderState *record)
             XlogExtendSlotSpaceReplay((XlogUndoExtend *)xlrec, record->EndRecPtr);
             break;
         case XLOG_UNDO_DISCARD:
-            XlogUndoDiscardReplay((XlogUndoDiscard *)xlrec, record->ReadRecPtr);
+            XlogUndoDiscardReplay((XlogUndoDiscard *)xlrec, record->EndRecPtr);
             break;
         default:
             ereport(PANIC, (errmsg(UNDOFORMAT("Unknown op code %u"), info)));

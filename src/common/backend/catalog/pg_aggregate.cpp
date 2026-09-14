@@ -74,7 +74,8 @@ static void InternalAggIsSupported(const char *aggName)
         "rank",
         "percent_rank",
         "corr_s",
-        "corr_k"
+        "corr_k",
+        "array_agg"
     };
 
     uint len = lengthof(supportList);

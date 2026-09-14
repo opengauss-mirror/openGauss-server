@@ -6,48 +6,48 @@ select 'abCdEf' = 'abcdef' collate "utf8mb4_general_ci";
 ERROR:  Un-support feature
 LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_general_ci";
                                    ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_general_ci";
 ERROR:  Un-support feature
 LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_gene...
                                                ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";
 ERROR:  Un-support feature
 LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";
                                    ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_unicode_ci";
 ERROR:  Un-support feature
 LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_unic...
                                                ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 select 'abCdEf' = 'abcdef' collate "utf8mb4_bin";
 ERROR:  Un-support feature
 LINE 1: select 'abCdEf' = 'abcdef' collate "utf8mb4_bin";
                                    ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_bin";
 ERROR:  Un-support feature
 LINE 1: select 'AAaabb'::char = 'AAaABb'::char collate "utf8mb4_bin"...
                                                ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 create table t1(a varchar(10) collate "utf8mb4_general_ci");
 ERROR:  Un-support feature
 LINE 1: create table t1(a varchar(10) collate "utf8mb4_general_ci");
                                       ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 create table t1(a text);
 create index idx_1 on t1(a collate "utf8mb4_unicode_ci");
 ERROR:  Un-support feature
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 create unique index idx_2 on t1(a collate "utf8mb4_unicode_ci");
 ERROR:  Un-support feature
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 create table hashjoin1(id int, f1 text, f2 text);
 create table hashjoin2(id int, f3 text, f4 text);
  
@@ -76,7 +76,7 @@ create table t1(a blob collate utf8mb4_bin);
 ERROR:  Un-support feature
 LINE 1: create table t1(a blob collate utf8mb4_bin);
                                ^
-DETAIL:  this collation only support in B-format database
+DETAIL:  this collation only support in B and D format database
 create table t1(a blob);
 -- test B format
 \c test_collate_B
@@ -1820,9 +1820,9 @@ select 'a' > 'A' collate "utf8mb4_bin", 'B' > 'A' collate "utf8mb4_bin", 'a' > '
 
 -- test binary
 create table t1(a blob collate utf8mb4_bin);
-ERROR:  binary collation only support binary type in B format
+ERROR:  binary collation only support binary type in B and D format
 create table t1(a blob collate "C");
-ERROR:  binary collation only support binary type in B format
+ERROR:  binary collation only support binary type in B and D format
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 create table t1(a blob collate binary);

@@ -26,6 +26,9 @@
 
 #include "receivelog.h"
 #include "streamutil.h"
+#ifdef GS_PROBACKUP_BUILD
+#include "backup_encrypt.h"
+#endif
 
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -338,6 +341,14 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
                 strerror(errno));
             return false;
         }
+
+#ifdef GS_PROBACKUP_BUILD
+        /* gs_probackup stores streamed WAL in the authenticated container. */
+        if (!EncEncryptFileInplace(newfn)) {
+            pg_log(PG_PRINT, _("%s: could not encrypt file \"%s/%s\"\n"), progname, basedir, walname);
+            return false;
+        }
+#endif
     } else {
         pg_log(PG_PRINT, _("%s: not renaming \"%s/%s\", segment is not complete.\n"), progname, basedir, walname);
     }

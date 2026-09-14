@@ -168,7 +168,24 @@ void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta)
     return;
 }
 
-DiskAnnGraphStore::DiskAnnGraphStore(Relation relation)
+void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const
+{
+    edge->nexts[edge->count] = id;
+    edge->distance[edge->count] = distance;
+    edge->count++;
+}
+
+bool DiskAnnGraphStore::NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const
+{
+    for (uint16_t i = 0; i < edge->count; ++i) {
+        if (edge->nexts[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+DiskAnnPageGraphStore::DiskAnnPageGraphStore(Relation relation)
 {
     m_rel = relation;
     DiskAnnMetaPageData metapage;
@@ -177,14 +194,16 @@ DiskAnnGraphStore::DiskAnnGraphStore(Relation relation)
     m_edgeSize = metapage.edgeSize;
     m_itemSize = metapage.itemSize;
     m_dimension = metapage.dimensions;
+    m_funcType = GetFunctionType(index_getprocinfo(relation, 1, DISKANN_DISTANCE_PROC),
+                                 DiskAnnOptionalProcInfo(relation, DISKANN_NORM_PROC));
 }
 
-DiskAnnGraphStore::~DiskAnnGraphStore()
+DiskAnnPageGraphStore::~DiskAnnPageGraphStore()
 {
     m_rel = NULL;
 }
 
-void DiskAnnGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const
+void DiskAnnPageGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const
 {
     Buffer buf;
     Page page;
@@ -212,7 +231,9 @@ void DiskAnnGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqrSum,
     vector = (Vector*)DatumGetPointer(dst);
     Assert(m_dimension == vector->dim);
     rc = memcpy_s(vec, (Size)(vector->dim * sizeof(float)), vector->x, (Size)(vector->dim * sizeof(float)));
-    securec_check_c(rc, "\0", "\0");
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
 
     /* get sqrSum from node tup */
     ntup = DiskAnnPageGetNode(ctup);
@@ -225,7 +246,7 @@ void DiskAnnGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqrSum,
     UnlockReleaseBuffer(buf);
 }
 
-float DiskAnnGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) const
+float DiskAnnPageGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) const
 {
     Buffer buf;
     Page page;
@@ -260,7 +281,7 @@ float DiskAnnGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) const
     return distance;
 }
 
-float DiskAnnGraphStore::ComputeDistance(BlockNumber blk1, float* vec2, double sqrSum2) const
+float DiskAnnPageGraphStore::ComputeDistance(BlockNumber blk1, float* vec2, double sqrSum2) const
 {
     Buffer buf;
     Page page;
@@ -294,7 +315,7 @@ float DiskAnnGraphStore::ComputeDistance(BlockNumber blk1, float* vec2, double s
     return distance;
 }
 
-void DiskAnnGraphStore::GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs)
+void DiskAnnPageGraphStore::GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs)
 {
     Buffer buf;
     Page page;
@@ -321,14 +342,12 @@ void DiskAnnGraphStore::GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nb
     UnlockReleaseBuffer(buf);
 }
 
-void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const
+void DiskAnnPageGraphStore::GetEdge(DiskAnnEdgePage edge, BlockNumber blkno) const
 {
-    edge->nexts[edge->count] = id;
-    edge->distance[edge->count] = distance;
-    edge->count++;
+    GetEdgeTuple(edge, blkno, m_rel, m_nodeSize, m_edgeSize);
 }
 
-void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, bool building) const
+void DiskAnnPageGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, bool building) const
 {
     Buffer buf;
     Page page;
@@ -349,7 +368,9 @@ void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, boo
     ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     etup = (DiskAnnEdgePage)((uint8_t*)ntup + m_nodeSize);
     rc = memcpy_s(etup, m_edgeSize, edgePage, m_edgeSize);
-    securec_check_c(rc, "\0", "\0");
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
 
     if (building) {
         MarkBufferDirty(buf);
@@ -359,7 +380,7 @@ void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, boo
     UnlockReleaseBuffer(buf);
 }
 
-bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) const
+bool DiskAnnPageGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) const
 {
     Buffer buf;
     Page page;
@@ -387,7 +408,18 @@ bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) cons
     return found;
 }
 
-void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
+/* blk holds a vector equal to dst's: record blk's heap TID on dst (blk's page stays an unlinked node) */
+bool DiskAnnPageGraphStore::MergeDuplicate(BlockNumber dst, BlockNumber blk, bool building)
+{
+    Buffer buf = ReadBuffer(m_rel, blk);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    IndexTuple itup = DiskAnnPageGetIndexTuple(BufferGetPage(buf));
+    AddDuplicateNeighbor(dst, itup->t_tid, building);
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+void DiskAnnPageGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
 {
     Buffer buf;
     Page page;
@@ -424,33 +456,66 @@ void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
                 MarkBufferDirty(buf);
             } else {
                 GenericXLogFinish(state);
-            }    
+            }
         }
     }
     UnlockReleaseBuffer(buf);
 }
 
-bool DiskAnnGraphStore::NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const
+/* ---- default visited set: one dynahash per Reset (the version 1 per-DiskAnnGraph hash table) */
+
+void DiskAnnGraphStore::VisitedReset(long nelemHint)
 {
-    for (uint16_t i = 0; i < edge->count; ++i) {
-        if (edge->nexts[i] == id) {
-            return true;
-        }
+    VisitedRelease();
+    HASHCTL hashCtl;
+    errno_t rc = memset_s(&hashCtl, sizeof(HASHCTL), 0, sizeof(HASHCTL));
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
     }
-    return false;
+    hashCtl.keysize = sizeof(uint32_t);
+    hashCtl.entrysize = sizeof(uint32_t);
+    hashCtl.hcxt = CurrentMemoryContext;
+    m_visited = hash_create("DiskANN inserted nodes hash", nelemHint, &hashCtl, HASH_ELEM | HASH_CONTEXT);
+}
+
+bool DiskAnnGraphStore::VisitedTestAndSet(BlockNumber id)
+{
+    bool found = false;
+    hash_search(m_visited, &id, HASH_ENTER, &found);
+    return found;
+}
+
+void DiskAnnGraphStore::VisitedRelease()
+{
+    if (m_visited != NULL) {
+        hash_destroy(m_visited);
+        m_visited = NULL;
+    }
 }
 
 DiskAnnGraph::DiskAnnGraph(Relation rel, double dim, BlockNumber blkno, DiskAnnGraphStore* graphStore)
 {
     this->graphStore = graphStore;
+    functype = graphStore->GetFuncType();
+    maxDegree = graphStore->MaxDegree();
+    pruneVisited = graphStore->PruneOverVisited();
     scratch = (QueryScratch*)palloc0(sizeof(QueryScratch));
     scratch->alignedQuery = (float*)palloc(dim * sizeof(float));
     scratch->bestLNodes = (NeighborPriorityQueue*)palloc0(sizeof(NeighborPriorityQueue));
     scratch->bestLNodes->_data = VectorList<Neighbor>();
-    HASHCTL hash_ctl = {.keysize = sizeof(uint32_t), .entrysize = sizeof(uint32_t), .hcxt = CurrentMemoryContext};
+    scratch->edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
+    scratch->pool.initialize_vector();
+    scratch->prunedList.initialize_vector();
+    scratch->current.initialize_vector();
+    scratch->neighbors.initialize_vector();
+    scratch->occludeFactor.initialize_vector();
+    scratch->desPool.initialize_vector();
+    scratch->copyNeighbors.initialize_vector();
+    scratch->dummyPool.initialize_vector();
+    scratch->pruned.initialize_vector();
 
-    scratch->insertedNodeHash =
-        hash_create("DiskANN inserted nodes hash", INIT_INSERT_NODE_SIZE, &hash_ctl, HASH_ELEM | HASH_CONTEXT);
+    graphStore->VisitedReset(INIT_INSERT_NODE_SIZE);
+    visitedFresh = true;
     frozen = blkno;
 }
 
@@ -465,9 +530,17 @@ void DiskAnnGraph::Clear()
         pfree_ext(scratch->alignedQuery);
         scratch->bestLNodes->_data.clear();
         pfree_ext(scratch->bestLNodes);
-        if (scratch->insertedNodeHash) {
-            hash_destroy(scratch->insertedNodeHash);
-        }
+        pfree_ext(scratch->edgePage);
+        scratch->pool.clear();
+        scratch->prunedList.clear();
+        scratch->current.clear();
+        scratch->neighbors.clear();
+        scratch->occludeFactor.clear();
+        scratch->desPool.clear();
+        scratch->copyNeighbors.clear();
+        scratch->dummyPool.clear();
+        scratch->pruned.clear();
+        graphStore->VisitedRelease();
         pfree_ext(scratch);
     }
     scratch = NULL;
@@ -475,68 +548,86 @@ void DiskAnnGraph::Clear()
 
 void DiskAnnGraph::Link(BlockNumber blk, int index_size, bool building)
 {
-    VectorList<Neighbor> pool;
+    VectorList<Neighbor>* pool = &scratch->pool;
+    VectorList<Neighbor>* prunedList = &scratch->prunedList;
     ItemPointerData hctid;
 
     scratch->bestLNodes->clear();
+    pool->reset();
     ItemPointerSetInvalid(&hctid);
+    /* the visited set is empty right after construction; every later Link starts a new one */
+    if (!visitedFresh) {
+        graphStore->VisitedReset(INIT_INSERT_NODE_SIZE);
+    }
+    visitedFresh = false;
 
     graphStore->GetVector(blk, scratch->alignedQuery, &(scratch->sqrSum), &hctid);
 
     /* Find and add appropriate graph edges */
-    IterateToFixedPoint(blk, index_size, frozen, &pool, false);
+    IterateToFixedPoint(blk, index_size, frozen, pool, false);
+
+    if (pruneVisited) {
+        /* RobustPrune over V union current out-edges: keep edges the search did not revisit */
+        VectorList<Neighbor>* current = &scratch->current;
+        graphStore->GetNeighbors(blk, current);
+        for (size_t i = 0; i < current->size(); i++) {
+            BlockNumber nb = (*current)[i].id;
+            if (nb != blk && !graphStore->VisitedTestAndSet(nb)) {
+                float dis = graphStore->ComputeDistance(nb, scratch->alignedQuery, scratch->sqrSum);
+                pool->push_back(Neighbor(nb, dis));
+            }
+        }
+        current->reset();
+    }
 
     if (FindDuplicateNeighbor(scratch->bestLNodes, blk, building)) {
         scratch->bestLNodes->clear();
-        pool.clear();
+        pool->reset();
         return;
     }
 
-    VectorList<Neighbor> prunedList = VectorList<Neighbor>();
-    PruneNeighbors(blk, &pool, &prunedList);
-    Assert(prunedList.size() <= DISKANN_MAX_DEGREE);
+    PruneNeighbors(blk, pool, prunedList);
+    Assert(prunedList->size() <= maxDegree);
 
-    DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
-    GetEdgeTuple(edgePage, blk, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
+    DiskAnnEdgePage edgePage = scratch->edgePage;
+    graphStore->GetEdge(edgePage, blk);
     for (uint16 i = 0; i < edgePage->count; i++) {
         edgePage->nexts[i] = InvalidOffsetNumber;
     }
     edgePage->count = 0;
 
-    for (uint32 i = 0; i < (uint32)prunedList.size(); i++) {
-        graphStore->AddNeighbor(edgePage, prunedList[i].id, prunedList[i].distance);
+    for (uint32 i = 0; i < (uint32)prunedList->size(); i++) {
+        graphStore->AddNeighbor(edgePage, (*prunedList)[i].id, (*prunedList)[i].distance);
     }
     graphStore->FlushEdge(edgePage, blk, building);
-    pfree(edgePage);
 
     /* Establish conns for blk and its neighbors */
-    InterInsert(blk, &prunedList, building);
+    InterInsert(blk, prunedList, building);
 
     /* Clean up */
     scratch->bestLNodes->clear();
-    prunedList.clear();
-    pool.clear();
-}
-
-static bool IsVisited(BlockNumber blk, HTAB* insertedNodeHash)
-{
-    bool found;
-    hash_search(insertedNodeHash, &blk, HASH_ENTER, &found);
-    return found;
+    prunedList->reset();
+    pool->reset();
 }
 
 void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, BlockNumber frozen,
                                        VectorList<Neighbor>* pool, bool searchInvocation)
 {
     NeighborPriorityQueue* bestLNodes = scratch->bestLNodes;
-    HTAB* insertedNodeHash = scratch->insertedNodeHash;
+    VectorList<Neighbor>* neighbors = &scratch->neighbors;
     bestLNodes->reserve(Lsize);
 
-    if (!IsVisited(frozen, insertedNodeHash)) {
-        hash_search(insertedNodeHash, &frozen, HASH_ENTER, NULL);
+    /* pool collects the expanded nodes, or (pruneVisited) every node whose distance was computed */
+    bool collectVisited = !searchInvocation && pruneVisited;
+    bool collectExpanded = !searchInvocation && !pruneVisited;
+
+    if (!graphStore->VisitedTestAndSet(frozen)) {
         float dis = graphStore->ComputeDistance(frozen, scratch->alignedQuery, scratch->sqrSum);
         Neighbor nn = Neighbor(frozen, dis);
         bestLNodes->insert(nn);
+        if (collectVisited) {
+            pool->push_back(nn);
+        }
     }
 
     while (bestLNodes->has_unexpanded_node()) {
@@ -546,45 +637,47 @@ void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, Bloc
         nbr = bestLNodes->closest_unexpanded();
         blockNumber = nbr.id;
 
-        if (!searchInvocation) {
+        if (collectExpanded) {
             pool->push_back(nbr);
         }
 
-        VectorList<Neighbor> neighbors = VectorList<Neighbor>();
-        graphStore->GetNeighbors(blockNumber, &neighbors);
-        if (!neighbors.empty()) {
-            float distance;
-            for (size_t i = 0; i < neighbors.size(); i++) {
-                BlockNumber blkno = neighbors[i].id;
-                distance = graphStore->ComputeDistance(blkno, scratch->alignedQuery, scratch->sqrSum);
-                if (!IsVisited(blkno, insertedNodeHash)) {
-                    hash_search(insertedNodeHash, &blkno, HASH_ENTER, NULL);
-                    bestLNodes->insert(Neighbor(blkno, distance));
-                }
+        neighbors->reset();
+        graphStore->GetNeighbors(blockNumber, neighbors);
+        for (size_t i = 0; i < neighbors->size(); i++) {
+            BlockNumber blkno = (*neighbors)[i].id;
+            /* TestAndSet enters blkno; the distance is only needed for unvisited nodes */
+            if (graphStore->VisitedTestAndSet(blkno)) {
+                continue;
+            }
+            float distance = graphStore->ComputeDistance(blkno, scratch->alignedQuery, scratch->sqrSum);
+            Neighbor cand = Neighbor(blkno, distance);
+            bestLNodes->insert(cand);
+            if (collectVisited) {
+                pool->push_back(cand);
             }
         }
-        neighbors.clear();
+        neighbors->reset();
     }
 }
 
 void DiskAnnGraph::PruneNeighbors(BlockNumber location, VectorList<Neighbor>* pool, VectorList<Neighbor>* prunedList)
 {
     if (pool->size() == 0) {
-        // if the pool is empty, behave like a noop
-        prunedList->clear();
+        // if the pool is empty, behave like a noop (the list is scratch: empty it, keep its buffer)
+        prunedList->reset();
         return;
     }
     qsort(&((*pool)[0]), pool->size(), sizeof(Neighbor), CmpNeighborInfo);
     prunedList->reset();
-    prunedList->reserve(DISKANN_MAX_DEGREE);
+    prunedList->reserve(maxDegree);
     float alpha = INDEXING_ALPHA;
     OccludeList(location, pool, prunedList, alpha);
-    Assert(prunedList->size() <= DISKANN_MAX_DEGREE);
+    Assert(prunedList->size() <= maxDegree);
 
     if (saturateGraph && alpha > 1) {
         for (size_t i = 0; i < pool->size(); i++) {
             const auto& node = (*pool)[i];
-            if (prunedList->size() >= DISKANN_MAX_DEGREE)
+            if (prunedList->size() >= maxDegree)
                 break;
             if (!prunedList->contains(node) && node.id != location) {
                 prunedList->push_back(node);
@@ -602,22 +695,24 @@ void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool,
     Assert(result->size() == 0);
     if (pool->size() > INDEXINGMAXC)
         pool->resize(INDEXINGMAXC);
+    graphStore->PrefetchPool(location, pool);
 
-    VectorList<float> occlude_factor = VectorList<float>();
+    VectorList<float>& occlude_factor = scratch->occludeFactor;
     // occlude_list can be called with the same scratch more than once by
     // search_for_point_and_add_link through inter_insert.
+    occlude_factor.reset();
     occlude_factor.resize(pool->size());
     errno_t rc = memset_s(&occlude_factor[0], sizeof(float) * occlude_factor.size(), 0.0f,
                           sizeof(float) * occlude_factor.size());
     securec_check(rc, "\0", "\0");
 
     float cur_alpha = 1;
-    while (cur_alpha <= alpha && result->size() < DISKANN_MAX_DEGREE) {
+    while (cur_alpha <= alpha && result->size() < maxDegree) {
         // used for MIPS, where we store a value of eps in cur_alpha to
         // denote pruned out entries which we can skip in later rounds.
         float eps = cur_alpha + 0.01f;
         unsigned int idx = 0;
-        for (auto iter = pool->begin(); result->size() < DISKANN_MAX_DEGREE && iter != pool->end(); ++iter, ++idx) {
+        for (auto iter = pool->begin(); result->size() < maxDegree && iter != pool->end(); ++iter, ++idx) {
             size_t slot = (size_t)(iter - pool->begin());
             if (occlude_factor[slot] > cur_alpha) {
                 continue;
@@ -653,107 +748,106 @@ void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool,
         }
         cur_alpha *= 1.2f;
     }
-    occlude_factor.clear();
+    occlude_factor.reset();
+}
+
+/*
+ * Reverse edges for blk. Called by Link right after the forward edges were
+ * flushed: scratch->alignedQuery / sqrSum still hold blk's vector from the
+ * GetVector at the start of Link, so it is not fetched again. The search's
+ * visited set is not needed any more at this point; the re-prune reuses it
+ * to de-duplicate the destination's neighbour list.
+ */
+static void CopyNeighborsWithExtra(VectorList<Neighbor>* dst, VectorList<Neighbor>* src, const Neighbor& extra)
+{
+    for (size_t j = 0; j < src->size(); j++) {
+        dst->push_back((*src)[j]);
+    }
+    dst->push_back(extra);
+}
+
+bool DiskAnnGraph::AppendReverseEdge(BlockNumber desId, BlockNumber blk, float distance, bool building)
+{
+    DiskAnnEdgePage edgePage = scratch->edgePage;
+    graphStore->GetEdge(edgePage, desId);
+    if (graphStore->NeighborExists(edgePage, blk) || edgePage->count >= maxDegree) {
+        return false;
+    }
+    graphStore->AddNeighbor(edgePage, blk, distance);
+    graphStore->FlushEdge(edgePage, desId, building);
+    return true;
+}
+
+void DiskAnnGraph::RepruneReverseEdge(BlockNumber desId, VectorList<Neighbor>* copyNeighbors, bool building)
+{
+    VectorList<Neighbor>* dummyPool = &scratch->dummyPool;
+    VectorList<Neighbor>* pruned = &scratch->pruned;
+    DiskAnnEdgePage edgePage = scratch->edgePage;
+    size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * maxDegree));
+
+    dummyPool->reset();
+    dummyPool->reserve(reserveSize);
+    graphStore->VisitedReset((long)reserveSize);
+    visitedFresh = false;
+
+    graphStore->PrefetchPool(desId, copyNeighbors);
+    for (size_t j = 0; j < copyNeighbors->size(); j++) {
+        const Neighbor& curNbr = (*copyNeighbors)[j];
+        if (graphStore->VisitedTestAndSet(curNbr.id) || curNbr.id == desId) {
+            continue;
+        }
+        float dist = graphStore->GetDistance(desId, curNbr.id);
+        dummyPool->push_back(Neighbor(curNbr.id, dist));
+    }
+
+    PruneNeighbors(desId, dummyPool, pruned);
+    graphStore->GetEdge(edgePage, desId);
+    for (uint16 k = 0; k < edgePage->count; k++) {
+        edgePage->nexts[k] = InvalidBlockNumber;
+    }
+    edgePage->count = 0;
+    for (uint32 k = 0; k < (uint32)pruned->size(); k++) {
+        graphStore->AddNeighbor(edgePage, (*pruned)[k].id, (*pruned)[k].distance);
+    }
+    graphStore->FlushEdge(edgePage, desId, building);
+    pruned->reset();
+    dummyPool->reset();
 }
 
 void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList, bool building)
 {
     VectorList<Neighbor>* pool = prunedList;
-    ItemPointerData hctid;
-    ItemPointerSetInvalid(&hctid);
-
-    /* Save origin block node info into scratch */
-    graphStore->GetVector(blk, scratch->alignedQuery, &(scratch->sqrSum), &hctid);
+    VectorList<Neighbor>* desPool = &scratch->desPool;
+    VectorList<Neighbor>* copyNeighbors = &scratch->copyNeighbors;
 
     for (size_t i = 0; i < pool->size(); ++i) {
-        bool prune_needed = false;
         auto des = (*pool)[i];
-        /* Skip existed neighbor node */
         if (graphStore->ContainsNeighbors(des.id, blk)) {
             continue;
         }
 
-        float distance;
-        Neighbor nn;
-        /* Calculate distance between destination node and origin block node */
-        distance = graphStore->ComputeDistance(des.id, scratch->alignedQuery, scratch->sqrSum);
-        nn = Neighbor(blk, distance);
-        /* Get destination block neighbors */
-        VectorList<Neighbor> copyNeighbors;
-        VectorList<Neighbor> desPool = VectorList<Neighbor>();
-        graphStore->GetNeighbors(des.id, &desPool);
-
-        if (!desPool.contains(nn)) {
-            if (desPool.size() < DISKANN_MAX_DEGREE) {
-                DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
-                GetEdgeTuple(edgePage, des.id, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
-                if (graphStore->NeighborExists(edgePage, blk) || edgePage->count >= DISKANN_MAX_DEGREE) {
-                    desPool.clear();
-                    copyNeighbors.clear();
-                    break;
-                }
-                graphStore->AddNeighbor(edgePage, blk, distance);
-                graphStore->FlushEdge(edgePage, des.id, building);
-
-                pfree(edgePage);
-                prune_needed = false;
-            } else {
-                copyNeighbors = desPool;
-                copyNeighbors.push_back(nn);
-                prune_needed = true;
-            }
+        float distance = graphStore->ComputeDistance(des.id, scratch->alignedQuery, scratch->sqrSum);
+        Neighbor nn = Neighbor(blk, distance);
+        copyNeighbors->reset();
+        graphStore->GetNeighbors(des.id, desPool);
+        if (desPool->contains(nn)) {
+            desPool->reset();
+            copyNeighbors->reset();
+            continue;
         }
-
-        desPool.clear();
-
-        if (prune_needed) {
-            VectorList<Neighbor> dummyPool;
-
-            size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * DISKANN_MAX_DEGREE));
-            dummyPool.reset();
-            dummyPool.reserve(reserveSize);
-
-            HASHCTL hctl;
-            int ret = memset_s(&hctl, sizeof(HASHCTL), 0, sizeof(HASHCTL));
-            securec_check(ret, "\0", "\0");
-            hctl.keysize = sizeof(uint32_t);
-            hctl.entrysize = sizeof(uint32_t);
-
-            HTAB* dummyVisited = hash_create("Dummy visited hash table", reserveSize, &hctl, HASH_ELEM | HASH_CONTEXT);
-
-            for (auto cur_nbr : copyNeighbors) {
-                bool found = false;
-                hash_search(dummyVisited, &cur_nbr.id, HASH_ENTER, &found);
-                if (!found && cur_nbr.id != des.id) {
-                    float dist = graphStore->GetDistance(des.id, cur_nbr.id);
-                    Neighbor neighbor = Neighbor(cur_nbr.id, dist);
-                    dummyPool.push_back(neighbor);
-                }
+        if (desPool->size() < maxDegree) {
+            bool appended = AppendReverseEdge(des.id, blk, distance, building);
+            desPool->reset();
+            copyNeighbors->reset();
+            if (!appended) {
+                break;
             }
-            hash_destroy(dummyVisited);
-
-            VectorList<Neighbor> pruned;
-            PruneNeighbors(des.id, &dummyPool, &pruned);
-            DiskAnnEdgePage edge = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
-            GetEdgeTuple(edge, des.id, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
-            for (uint16 i = 0; i < edge->count; i++) {
-                edge->nexts[i] = InvalidBlockNumber;
-            }
-            edge->count = 0;
-
-            for (uint32 i = 0; i < (uint32)pruned.size(); i++) {
-                graphStore->AddNeighbor(edge, pruned[i].id, pruned[i].distance);
-            }
-            graphStore->FlushEdge(edge, des.id, building);
-
-            /* Clean up */
-            pruned.clear();
-            dummyPool.clear();
-            pfree(edge);
+            continue;
         }
-
-        /* Clean up */
-        copyNeighbors.clear();
+        CopyNeighborsWithExtra(copyNeighbors, desPool, nn);
+        RepruneReverseEdge(des.id, copyNeighbors, building);
+        desPool->reset();
+        copyNeighbors->reset();
     }
 }
 
@@ -765,17 +859,7 @@ bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, Bloc
             break;
         }
         if (res.id != blk) {
-            Buffer buf;
-            Page page;
-
-            buf = ReadBuffer(graphStore->m_rel, blk);
-            LockBuffer(buf, BUFFER_LOCK_SHARE);
-
-            page = BufferGetPage(buf);
-            IndexTuple itup = DiskAnnPageGetIndexTuple(page);
-            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid, building);
-            UnlockReleaseBuffer(buf);
-            return true;
+            return graphStore->MergeDuplicate(res.id, blk, building);
         }
     }
 

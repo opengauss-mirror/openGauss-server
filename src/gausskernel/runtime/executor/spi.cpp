@@ -3324,6 +3324,7 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
      * We need to hold the original one in order to forget the snapshot, plan reference.and etc.
      */
     ResourceOwner oldOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    MemoryContext callerContext = CurrentMemoryContext;
 
     PG_TRY();
     {
@@ -3427,6 +3428,7 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(callerContext);
         SPI_cleanup_executor(queryDesc, executorStarted);
         PG_RE_THROW();
     }

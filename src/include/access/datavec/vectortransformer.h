@@ -39,7 +39,8 @@
 
 enum VectorTransformType {
     RANDOM_ORTHOGONAL, /* Random Orthogonal Matrix */
-    FAST_HTRANSFORM /* Fast Walsh-Hadamard Transform Matrix */
+    FAST_HTRANSFORM,   /* Fast Walsh-Hadamard Transform Matrix */
+    PCA_ORTHOGONAL     /* PCA projection merged with a random orthogonal rotation: y = M (x - mean) */
 };
 
 typedef struct {
@@ -57,13 +58,22 @@ typedef struct VectorTransform VectorTransform;
 
 struct VectorTransform {
     VectorTransformType type;
-    int dim;
-    
-    /* ROM */
+    int dim; /* ROM / FHT: input (= output) dimension */
+
+    /* ROM: dim x dim orthogonal matrix. PCA_ORTHOGONAL: M = W * P, dimOut x dimIn, row-major */
     float *matrix;
 
     /* FHT */
     FastRotation *fastRotation;
+
+    /*
+     * PCA_ORTHOGONAL only (ROM / FHT users leave these untouched). mean and
+     * matrix live in one allocation, mean first, so the pair serializes as
+     * one byte stream (PcaSerialize) and frees as one block.
+     */
+    int dimIn;
+    int dimOut;
+    float *mean; /* dimIn */
 };
 
 struct RandomGenerator {
@@ -98,6 +108,25 @@ void *FhtGetMatrix(VectorTransform* vtrans);
 size_t FhtSerializeSize(int outputDim);
 void FreeTransformer(VectorTransform *vt);
 FastRotation *FhtDeserialize(void *rbq);
+
+/*
+ * PCA_ORTHOGONAL: y = M (x - mean), M = W * P (dimOut x dimIn) where P holds
+ * the top dimOut principal components of the samples and W is a dimOut x
+ * dimOut random orthogonal rotation (the RANDOM_ORTHOGONAL construction).
+ * dimOut == dimIn takes P = I: a pure rotation around the mean, no samples
+ * needed. Caller sets vtrans->dimIn / dimOut first. mean is the population
+ * mean the caller accumulated over the whole data set (NULL: the sample mean
+ * is used; zero when there are no samples).
+ */
+void PcaTrain(VectorTransform *vtrans, const float *samples, int nSamples, const float *mean);
+void PcaTransform(const VectorTransform *vtrans, const float *vec, float *transvec);
+/* unified entry point: dispatches on vtrans->type to Rom / Fht / Pca */
+void VtTransform(VectorTransform *vtrans, const float *vec, float *transvec);
+/* byte stream = mean[dimIn] then M[dimOut][dimIn], raw floats, no header */
+size_t PcaSerializeSize(int dimIn, int dimOut);
+void PcaSerialize(const VectorTransform *vtrans, char *out, size_t outSize);
+/* one allocation (struct + mean + M) in CurrentMemoryContext; release with FreeTransformer or pfree */
+VectorTransform *PcaDeserialize(int dimIn, int dimOut, const char *bytes);
 
 
 #endif

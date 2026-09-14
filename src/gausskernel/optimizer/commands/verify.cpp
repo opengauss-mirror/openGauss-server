@@ -1902,6 +1902,7 @@ static void VerifyUstorePage(Relation rel, Page page, BlockNumber blkno, VerifyL
     PG_CATCH();
     {
         u_sess->attr.attr_storage.ustore_verify_level = prevLevel;
+        FlushErrorState();
     }
     PG_END_TRY();
     u_sess->attr.attr_storage.ustore_verify_level = prevLevel;

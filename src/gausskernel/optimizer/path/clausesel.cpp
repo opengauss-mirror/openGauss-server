@@ -836,6 +836,7 @@ static List* switch_arg_items(Node* funExpr, Const* cnst, Oid* eqlOprOid, Oid* i
                 outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
             }
 
+            volatile bool functionCallFailed = false;
             PG_TRY();
             {
                 constValue = OidFunctionCall1(funcId, ((Const*)cnst)->constvalue);
@@ -858,9 +859,12 @@ static List* switch_arg_items(Node* funExpr, Const* cnst, Oid* eqlOprOid, Oid* i
                 t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
                 ResourceOwnerDelete(tempOwner);
 
-                return NIL;
+                functionCallFailed = true;
             }
             PG_END_TRY();
+            if (functionCallFailed) {
+                return NIL;
+            }
 
             /* release resource applied in standard_planner of the PG_TRY. */
             ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);

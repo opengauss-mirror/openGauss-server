@@ -30,6 +30,7 @@
 #include "threadpool/threadpool.h"
 #include "utils/hsearch.h"
 #include "utils/inval.h"
+#include "utils/aiomem.h"
 #include "postmaster/aiocompleter.h"
 #include "catalog/pg_partition_fn.h"
 
@@ -56,6 +57,7 @@ typedef struct f_smgr {
     bool (*smgr_exists)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum);
     void (*smgr_unlink)(const RelFileNodeBackend &rnode, ForkNumber forknum, bool isRedo, BlockNumber blockNum);
     void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer, bool skipFsync);
+    void (*smgr_zeroextend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, int nblocks, bool skipFsync);
     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
     SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
     void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
@@ -79,6 +81,7 @@ static const f_smgr smgrsw[] = {
       mdexists,
       mdunlink,
       mdextend,
+      mdzeroextend,
       mdprefetch,
       mdread,
       mdreadbatch,
@@ -101,6 +104,7 @@ static const f_smgr smgrsw[] = {
         CheckUndoFileExists,
         UnlinkUndoFile,
         ExtendUndoFile,
+        NULL,
         PrefetchUndoFile,
         ReadUndoFile,
         NULL,
@@ -120,6 +124,7 @@ static const f_smgr smgrsw[] = {
         seg_exists,
         seg_unlink,
         seg_extend,
+        NULL,
         seg_prefetch,
         seg_read,
         NULL,
@@ -142,6 +147,7 @@ static const f_smgr smgrsw[] = {
         exrto_exists,
         exrto_unlink,
         exrto_extend,
+        NULL,
         NULL,
         exrto_read,
         NULL,
@@ -830,6 +836,58 @@ void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 #else
     (*(smgrsw[reln->smgr_which].smgr_extend))(reln, forknum, blocknum, buffer, skipFsync);
 #endif
+}
+
+/*
+ * smgrzeroextend() -- Add new zeroed out blocks to a file.
+ *
+ * Similar to smgrextend(), except the relation can be extended by
+ * multiple blocks at once and the added blocks will be filled with
+ * zeroes.
+ */
+void smgrzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int nblocks, bool skipFsync)
+{
+    if (nblocks <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("number of blocks to extend must be greater than zero")));
+    }
+
+#ifndef ENABLE_NEON
+    if (smgrsw[reln->smgr_which].smgr_zeroextend != NULL) {
+        (*(smgrsw[reln->smgr_which].smgr_zeroextend))(reln, forknum, blocknum, nblocks, skipFsync);
+        return;
+    }
+#endif
+
+    /* Some storage managers only expose single-block extension. */
+    char *zerobuf = NULL;
+    ADIO_RUN()
+    {
+        zerobuf = (char *)adio_align_alloc(BLCKSZ);
+        errno_t rc = memset_s(zerobuf, BLCKSZ, 0, BLCKSZ);
+        securec_check(rc, "", "");
+    }
+    ADIO_ELSE()
+    {
+        zerobuf = (char *)palloc0(BLCKSZ);
+    }
+    ADIO_END();
+
+    BlockNumber curblock = blocknum;
+    for (int i = 0; i < nblocks; i++) {
+        smgrextend(reln, forknum, curblock++, zerobuf, skipFsync);
+    }
+
+    ADIO_RUN()
+    {
+        adio_align_free(zerobuf);
+    }
+    ADIO_ELSE()
+    {
+        pfree(zerobuf);
+    }
+    ADIO_END();
 }
 
 /*

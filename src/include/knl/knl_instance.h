@@ -120,6 +120,8 @@ const int SMBWRITER_THD_NUM = 8;
 const int DB_CMPT_MAX = 5;
 #endif
 
+#define FirstBootstrapObjectId 10000
+
 enum knl_virtual_role {
     VUNKNOWN = 0,
     VCOORDINATOR = 1,
@@ -304,6 +306,9 @@ typedef struct knl_g_pid_context {
     ThreadId AtfWorkerPID;
 #ifdef ENABLE_NEON
     ThreadId WALproposerPID;
+    ThreadId OggitWorkerPID;
+    volatile sig_atomic_t OggitWorkerStartAllowed;
+    volatile sig_atomic_t OggitWorkerReady;
 #endif
 #ifdef ENABLE_HTAP
     ThreadId IMCStoreVacuumPID;

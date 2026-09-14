@@ -1,0 +1,1 @@
+create schema test_own authorization test_u1;

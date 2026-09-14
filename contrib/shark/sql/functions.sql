@@ -1,5 +1,6 @@
 create schema functions_test;
 set search_path = 'functions_test';
+set xact_abort off;
 
 -- test @@rowcount
 create table t1 (c1 int);
@@ -713,6 +714,25 @@ select dateadd(dw,2,time'23:20:20');
 select dateadd(yy,2,time'23:20:20');
 select dateadd(mm,2,time'23:20:20');
 
+select dateadd(null,1,'2023/3/31');
+select dateadd(qq,null,'2023/3/31');
+select dateadd(qq,1,null);
+select dateadd(null,1,date'1998-01-30');
+select dateadd(null,1,timestamp'1997-12-31 23:59:59');
+select dateadd(null,1,timestamptz'1997-12-31 23:59:59');
+select dateadd(null,1,time'23:20:20');
+select dateadd(null,1,timetz '23:20:20');
+select dateadd(qq,null,date'1998-01-30');
+select dateadd(qq,null,timestamp'1997-12-31 23:59:59');
+select dateadd(qq,null,timestamptz'1997-12-31 23:59:59');
+select dateadd(qq,null,time'23:20:20');
+select dateadd(qq,null,timetz '23:20:20');
+select dateadd(qq,1,null::date);
+select dateadd(qq,1,null::timestamp);
+select dateadd(qq,1,null::timestamptz);
+select dateadd(qq,1,null::time);
+select dateadd(qq,1,null::timetz);
+
 select dateadd('',1,'2023/3/31');
 select dateadd(2022,3,'2023/3/31 11:25:35.123456789');
 
@@ -825,3 +845,4 @@ SELECT LEN(CAST('123' as char(25)));
 SELECT LEN('abc');
 SELECT LEN('12345678901234567890123456789012345'::varchar);
 select len('aa'::varbinary);
+reset xact_abort;

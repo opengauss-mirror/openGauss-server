@@ -487,7 +487,7 @@ void DiskAnnParallelBuildMain(const BgWorkerContext* bwc)
 
         size_t start = workerId * (totalBlocks / diskannshared->parallelWorker) + Min(workerId, remainder);
         const BlockNumber* workerBlk = diskannshared->blocksList.begin() + start;
-        DiskAnnGraphStore graphStore(indexRel);
+        DiskAnnPageGraphStore graphStore(indexRel);
         for (size_t i = 0; i < workerBlockCount; i++) {
             DiskAnnGraph graph(indexRel, diskannshared->dimensions, diskannshared->frozen, &graphStore);
             BlockNumber blk = workerBlk[i];
@@ -806,7 +806,7 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
         DiskAnnFlushPQInfo(buildstate);
     }
 
-    buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    buildstate->graphStore = New(CurrentMemoryContext) DiskAnnPageGraphStore(index);
     DiskANNGetMetaPageInfo(index, &buildstate->metaPage);
     CreateEntryPages(buildstate);
 

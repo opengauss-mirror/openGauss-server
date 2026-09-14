@@ -539,7 +539,8 @@ static bool ExtendChunksOfBlockCore(CfsExtentHeader *cfsExtentHeader,
                                     uint8 needChunks, uint8 actualUse, LWLock *freeChunkLock)
 {
     bool res = false;
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(cfsExtentHeader->chunk_size)) {
         if (freeChunkLock != NULL) {
             (void)LWLockAcquire(freeChunkLock, LW_EXCLUSIVE);
         }
@@ -796,7 +797,8 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     pca_buf_free_page(ctrl, location, changed || isExtend);
 
     /* try recyle extent */
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(cfsExtentHeader->chunk_size)) {
         if (cfsExtentHeader->n_fragment_chunks > RecycleChunkThreshold(cfsExtentHeader) ||
             (cfsExtentHeader->allocated_chunks >= MaxChunkNumForRecycle(cfsExtentHeader) &&
             cfsExtentHeader->n_fragment_chunks >= SingleBlockChunkNumForRecycle(cfsExtentHeader))) {
@@ -907,6 +909,65 @@ void CfsExtendExtent(SMgrRelation reln, const RelFileNode &relNode, int fd, int 
 
     pca_buf_free_page(ctrl, location, true);
     return;
+}
+
+void CfsZeroExtend(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                   BlockNumber logicBlockNumber, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
+{
+    BlockNumber currentBlock = logicBlockNumber;
+    BlockNumber remainingBlocks = nblocks;
+
+    Assert(type == COMMON_STORAGE);
+    Assert(nblocks > 0);
+    Assert(logicBlockNumber / CFS_LOGIC_BLOCKS_PER_FILE ==
+           (logicBlockNumber + nblocks - 1) / CFS_LOGIC_BLOCKS_PER_FILE);
+
+    while (remainingBlocks > 0) {
+        ExtentLocation location =
+            g_location_convert[type](reln, relNode, fd, extent_size, forknum, currentBlock);
+        BlockNumber blocksInExtent = Min(remainingBlocks,
+            (BlockNumber)CFS_LOGIC_BLOCKS_PER_EXTENT - location.extentOffset);
+
+        Assert(location.fd >= 0);
+        Assert(!location.is_segment_page && location.is_compress_allowed);
+
+        /*
+         * A CFS extent stores 127 logical pages followed by one PCA page.
+         * Zero pages need no data chunks: an address with nchunks == 0 is
+         * read as an all-zero page.  Initialize each new extent once and
+         * reserve its data area as a sparse range.
+         */
+        if (location.extentOffset == 0) {
+            InitExtentHeader(location);
+            FileAllocate(location.fd, location.extentStart * BLCKSZ,
+                         CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        }
+
+        pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
+        if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
+            pca_buf_free_page(ctrl, location, false);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Failed to CfsZeroExtend %s, headerNum: %u.",
+                       FilePathName(location.fd), location.headerNum)));
+        }
+
+        CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
+        uint32 requiredBlocks = location.extentOffset + blocksInExtent;
+        uint32 actualBlocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+        bool changed = false;
+
+        while (requiredBlocks > actualBlocks) {
+            if (pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &actualBlocks, requiredBlocks)) {
+                changed = true;
+                break;
+            }
+        }
+        Assert(pg_atomic_read_u32(&cfsExtentHeader->nblocks) >= requiredBlocks);
+        pca_buf_free_page(ctrl, location, changed);
+
+        currentBlock += blocksInExtent;
+        remainingBlocks -= blocksInExtent;
+    }
 }
 
 BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo, off_t len)
@@ -1682,13 +1743,14 @@ static void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *al
     CfsExtentHeader *assistPca = (CfsExtentHeader *)(void *)(assistBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ);
     CfsPunchHole(location, assistPca);
 
-    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks) {
+    if (g_instance.attr.attr_storage.enable_tpc_fragment_chunks &&
+        CfsCanUseFragmentChunks(ctrl->pca_page->chunk_size)) {
         /* lock free chunk bitmap */
         (void)LWLockAcquire(ctrl->allocated_chunk_usages_lock, LW_EXCLUSIVE);
         CfsExtentAddress *extAddr = NULL;
 
-        rc = memset_s(ctrl->pca_page->allocated_chunk_usages, ALLOCATE_CHUNK_USAGE_LEN,
-                      0, ALLOCATE_CHUNK_USAGE_LEN);
+        rc = memset_s(ctrl->pca_page->allocated_chunk_usages, CFS_FRAGMENT_BITMAP_LENGTH,
+                      0, CFS_FRAGMENT_BITMAP_LENGTH);
         securec_check(rc, "\0", "\0");
 
         /* recount n_fragment_chunks */
@@ -1756,6 +1818,10 @@ static void CfsRecycleOneExtent(SMgrRelation reln, ForkNumber forknum, ExtentLoc
 void CfsRecycleChunkProc(SMgrRelation reln, ForkNumber forknum)
 {
     ExtentLocation location = FormExtLocation(reln, 0);
+    if (!CfsCanUseFragmentChunks(location.chunk_size)) {
+        return;
+    }
+
     MdfdVec *mdfd = CfsMdOpenReln(reln, forknum, EXTENSION_RETURN_NULL);
     if (unlikely(mdfd == NULL)) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("can not get vfd using CfsMdOpen")));

@@ -49,6 +49,7 @@
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "parser/parser.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -678,6 +679,36 @@ static char* read_extension_script_file(const ExtensionControlFile* control, con
 }
 
 /*
+ * Run one plannable statement of an extension script through the executor.
+ *
+ * The multiple-nodes build only executes datanode-side INSERT here (suitable
+ * for replicated tables); the coordinator relies on the CREATE EXTENSION
+ * statement being dispatched to remote nodes instead. The single-node build
+ * has no remote dispatch path, so it executes every planned statement, e.g.
+ * SELECT pg_catalog.pg_extension_config_dump(...).
+ */
+static void execute_extension_planned_stmt(PlannedStmt* stmt, const char* query_string, DestReceiver* dest)
+{
+    QueryDesc* qdesc = CreateQueryDesc(stmt, query_string, GetActiveSnapshot(), NULL, dest, NULL, 0);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (stmt->commandType == CMD_INSERT && IS_PGXC_DATANODE && !isRestoreMode) {
+        ExecutorStart(qdesc, 0);
+        ExecutorRun(qdesc, ForwardScanDirection, 0);
+        ExecutorFinish(qdesc);
+        ExecutorEnd(qdesc);
+    }
+#else
+    ExecutorStart(qdesc, 0);
+    ExecutorRun(qdesc, ForwardScanDirection, 0);
+    ExecutorFinish(qdesc);
+    ExecutorEnd(qdesc);
+#endif
+
+    FreeQueryDesc(qdesc);
+}
+
+/*
  * Execute given SQL string.
  *
  * filename is used only to report errors.
@@ -690,16 +721,17 @@ static char* read_extension_script_file(const ExtensionControlFile* control, con
  * on printing the whole string as errcontext in case of any error, and that
  * could be very long.
  */
-static void execute_sql_string(const char* sql, const char* filename)
+static void ExecuteSqlString(const char* sql, const char* filename, bool useCoreParser)
 {
     List* raw_parsetree_list = NIL;
     DestReceiver* dest = NULL;
     ListCell* lc1 = NULL;
 
     /*
-     * Parse the SQL string into a list of raw parse trees.
+     * Parse AGE's PostgreSQL DDL with the core parser because Dolphin's
+     * B-compatibility lexer treats '?' as a parameter marker.
      */
-    raw_parsetree_list = pg_parse_query(sql);
+    raw_parsetree_list = pg_parse_query(sql, NULL, useCoreParser ? raw_parser : NULL);
 
     /* All output from SELECTs goes to the bit bucket */
     dest = CreateDestReceiver(DestNone);
@@ -738,22 +770,7 @@ static void execute_sql_string(const char* sql, const char* filename)
             PushActiveSnapshot(GetTransactionSnapshot());
 
             if (IsA(stmt, PlannedStmt) && ((PlannedStmt*)stmt)->utilityStmt == NULL) {
-                QueryDesc* qdesc = NULL;
-
-                qdesc = CreateQueryDesc((PlannedStmt*)stmt, query_string, GetActiveSnapshot(), NULL, dest, NULL, 0);
-                /*
-                 * Only supported for Insert statement and only can be executed by datanodes. As all of
-                 * the datanodes will process the following procedure, the insert action is only suitable for
-                 * replicated table.
-                 */
-                if ((((PlannedStmt*)stmt)->commandType == CMD_INSERT && IS_PGXC_DATANODE && !isRestoreMode)) {
-                    ExecutorStart(qdesc, 0);
-                    ExecutorRun(qdesc, ForwardScanDirection, 0);
-                    ExecutorFinish(qdesc);
-                    ExecutorEnd(qdesc);
-                }
-
-                FreeQueryDesc(qdesc);
+                execute_extension_planned_stmt((PlannedStmt*)stmt, query_string, dest);
             } else {
                 processutility_context proutility_cxt;
                 proutility_cxt.parse_tree = stmt;
@@ -923,7 +940,10 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
         /* And now back to C string */
         c_sql = text_to_cstring(DatumGetTextPP(t_sql));
 
-        execute_sql_string(c_sql, filename);
+        ExecuteSqlString(c_sql,
+            filename,
+            u_sess->attr.attr_sql.dolphin &&
+            pg_strcasecmp(control->name, "age") == 0 && DB_IS_CMPT(B_FORMAT));
     }
     PG_CATCH();
     {
@@ -1212,10 +1232,12 @@ ObjectAddress CreateExtension(CreateExtensionStmt* stmt)
     } else if (pg_strcasecmp(stmt->extname, "shark") == 0 && !DB_IS_CMPT(D_FORMAT)) {
         ereport(ERROR,
             (errmsg("extension \"%s\" is only supported in D type database", stmt->extname)));
-    } else if (pg_strcasecmp(stmt->extname, "shark") == 0 && u_sess->attr.attr_common.upgrade_mode != 0) {
+    } else if ((pg_strcasecmp(stmt->extname, "shark") == 0 || pg_strcasecmp(stmt->extname, "dolphin") == 0)
+        && u_sess->attr.attr_common.upgrade_mode != 0) {
         /*
          * shark is allowed to be created manually, and disallowed to be dropped,
          * so prohibit creation during upgrade, avoid deletion during rollback.
+         * Similarly, the dolphin is not allowed to be created manually during upgrade.
          */
         ereport(ERROR,
             (errmsg("create extension \"%s\" is not supported during upgrade", stmt->extname)));
@@ -2069,6 +2091,8 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     ScanKeyData key[1];
     SysScanDesc extScan;
     HeapTuple extTup;
+    HeapTuple newExtTup;
+    ItemPointerData extTupTid;
     Datum arrayDatum;
     Datum elementDatum;
     int arrayLength;
@@ -2122,11 +2146,12 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
-
     if (!HeapTupleIsValid(extTup)) /* should not happen */
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("extension with oid %u does not exist", u_sess->cmd_cxt.CurrentExtensionObject)));
+
+    extTupTid = extTup->t_self;
 
     rc = memset_s(repl_val, sizeof(repl_val), 0, sizeof(repl_val));
     securec_check(rc, "\0", "\0");
@@ -2210,10 +2235,11 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
     repl_val[Anum_pg_extension_extcondition - 1] = PointerGetDatum(a);
     repl_repl[Anum_pg_extension_extcondition - 1] = true;
 
-    extTup = (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
+    newExtTup =
+        (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
 
-    simple_heap_update(extRel, &extTup->t_self, extTup);
-    CatalogUpdateIndexes(extRel, extTup);
+    CatalogTupleUpdate(extRel, &extTupTid, newExtTup);
+    tableam_tops_free_tuple(newExtTup);
 
     systable_endscan(extScan);
 
@@ -2235,6 +2261,8 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
     ScanKeyData key[1];
     SysScanDesc extScan;
     HeapTuple extTup;
+    HeapTuple newExtTup;
+    ItemPointerData extTupTid;
     Datum arrayDatum;
     int arrayLength;
     int arrayIndex;
@@ -2253,10 +2281,11 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
     extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
-
     if (!HeapTupleIsValid(extTup)) /* should not happen */
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("extension with oid %u does not exist", extensionoid)));
+
+    extTupTid = extTup->t_self;
 
     /* Search extconfig for the tableoid */
     arrayDatum = tableam_tops_tuple_getattr(extTup, Anum_pg_extension_extconfig, RelationGetDescr(extRel), &isnull);
@@ -2358,10 +2387,11 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
     }
     repl_repl[Anum_pg_extension_extcondition - 1] = true;
 
-    extTup = (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
+    newExtTup =
+        (HeapTuple) tableam_tops_modify_tuple(extTup, RelationGetDescr(extRel), repl_val, repl_null, repl_repl);
 
-    simple_heap_update(extRel, &extTup->t_self, extTup);
-    CatalogUpdateIndexes(extRel, extTup);
+    CatalogTupleUpdate(extRel, &extTupTid, newExtTup);
+    tableam_tops_free_tuple(newExtTup);
 
     systable_endscan(extScan);
 
@@ -2428,7 +2458,6 @@ ObjectAddress AlterExtensionNamespace(List* names, const char* newschema)
     extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
-
     if (!HeapTupleIsValid(extTup)) /* should not happen */
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("extension with oid %u does not exist", extensionOid)));
@@ -2785,7 +2814,7 @@ static void ApplyExtensionUpdates(
 
         /*
          * Update prior-version name and loop around.  Since
-         * execute_sql_string did a final CommandCounterIncrement, we can
+         * ExecuteSqlString did a final CommandCounterIncrement, we can
          * update the pg_extension row again.
          */
         oldVersionName = versionName;

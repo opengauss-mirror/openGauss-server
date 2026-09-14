@@ -89,6 +89,7 @@ extern void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber he
 
 extern void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks);
 extern void FreeSpaceMapVacuum(Relation rel);
+extern void FreeSpaceMapVacuumRange(Relation rel, BlockNumber start, BlockNumber end);
 extern void UpdateFreeSpaceMap(Relation rel, BlockNumber firtsBlkNum, BlockNumber lastBlkNum, Size freespace,
     bool search = true);
 extern BlockNumber FreeSpaceMapCalTruncBlkNo(BlockNumber relBlkNo);

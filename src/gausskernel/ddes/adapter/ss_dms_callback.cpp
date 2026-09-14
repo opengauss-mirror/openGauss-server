@@ -634,6 +634,7 @@ static int SetPrimaryIdOnStandby(int primary_id, unsigned long long list_stable)
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         ReleaseResource();
+        FlushErrorState();
         ret = DMS_ERROR;
     }
     PG_END_TRY();
@@ -719,7 +720,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     RelFileNode relfilenode = tag->rnode;
     bool get_lock = false;
     DMSWaiteventTarget target;
-    bool waitevent_started = false;
+    volatile bool waitEventStarted = false;
 
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(relfilenode)) {
@@ -747,7 +748,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             target.page.buffer = buf_id + 1;
             target.page.mode = mode;
             pgstat_report_dms_waitevent(WAIT_EVENT_DCS_TRANSFER_PAGE, &target);
-            waitevent_started = true;
+            waitEventStarted = true;
 
             buf_desc = GetBufferDescriptor(buf_id);
             if (IsSegmentBufferID(buf_id)) {
@@ -833,11 +834,12 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         ReleaseResource();
+        FlushErrorState();
         ret = DMS_ERROR;
     }
     PG_END_TRY();
 
-    if (waitevent_started) {
+    if (waitEventStarted) {
         pgstat_report_dms_waitevent(WAIT_EVENT_END);
     }
     return ret;
@@ -1727,7 +1729,7 @@ static BufferDesc* SSGetBufferDesc(char *pageid)
 {
     int buf_id;
     BufferTag *tag = (BufferTag *)pageid;
-    BufferDesc *buf_desc = NULL;
+    BufferDesc* volatile buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
     uint32 hash = BufTableHashCode(tag);
     bool retry = false;
@@ -1768,9 +1770,11 @@ static BufferDesc* SSGetBufferDesc(char *pageid)
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         ReleaseResource();
+        FlushErrorState();
+        buf_desc = NULL;
     }
     PG_END_TRY();
-    return buf_desc;
+    return (BufferDesc*)buf_desc;
 }
 
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
@@ -2628,6 +2632,7 @@ void DmsThreadDeinit()
     }
     PG_CATCH();
     {
+        FlushErrorState();
         ThreadExitCXX(0);
     }
     PG_END_TRY();

@@ -619,8 +619,8 @@ static bool GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, Memo
             /* add current parentRel into fakeRelationTable */
             Oid baseRelOid = partid_get_parentid(parentPartOid);
             Relation baseRel = relation_open(baseRelOid, lmode);
-            res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, baseRel, parentPartOid, INVALID_PARTITION_NO,
-                &parentRel, &parentPartition, lmode);
+            res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, baseRel, &parentPartOid,
+                INVALID_PARTITION_NO, &parentRel, &parentPartition, lmode);
             relation_close(baseRel, NoLock);
         }
         if (res) {
@@ -644,9 +644,8 @@ static bool GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMO
 
     Relation parentRel = gpiScan->parentRelation;
     /* Save search fake relation in gpiScan->fakeRelation */
-    res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, parentRel, currPartOid, INVALID_PARTITION_NO,
-        &gpiScan->fakePartRelation, &partition, lmode);
-
+    res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, parentRel, &currPartOid,
+        INVALID_PARTITION_NO, &gpiScan->fakePartRelation, &partition, lmode);
     if (!res) {
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR),
                         errmsg("partition %u does not exist on relation \"%s\" when search the fake relation for GPI",

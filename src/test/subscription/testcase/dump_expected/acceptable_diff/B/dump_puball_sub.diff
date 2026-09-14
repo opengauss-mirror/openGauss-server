@@ -1,0 +1,8 @@
+13,19d12
+< SET dolphin.sql_mode = 'sql_mode_full_group,pipes_as_concat,ansi_quotes,pad_char_to_full_length';
+< SET dolphin.lower_case_table_names = 0;
+< SET dolphin.use_const_value_as_colname = on;
+< SET dolphin.transform_unknown_param_type_as_column_type_first = on;
+< SET b_compatibility_user_host_auth = on;
+< SET b_format_behavior_compat_options = '';
+< SET enable_set_variable_b_format = on;

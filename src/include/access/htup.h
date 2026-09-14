@@ -779,6 +779,9 @@ inline HeapTuple heaptup_alloc(Size size)
 #define XLH_UPDATE_CONTAINS_NEW_TUPLE		   (1<<4)
 #define XLH_UPDATE_PREFIX_FROM_OLD			   (1<<5)
 #define XLH_UPDATE_SUFFIX_FROM_OLD			   (1<<6)
+#ifdef ENABLE_NEON
+#define XLH_UPDATE_CONTAINS_CHANGED_ATTRS      (1<<7)
+#endif
 
 /* convenience macro for checking whether any form of old tuple was logged */
 #define XLH_UPDATE_CONTAINS_OLD					   \

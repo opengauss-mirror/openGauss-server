@@ -122,7 +122,7 @@ void SetUpBgWorkerTxnEnvironment()
 
     /* transaction id. */
     SetNextTransactionId(bwc->transactionCxt.txnId, false);
-    StreamTxnContextSetTransactionState(&bwc->transactionCxt);
+    StreamTxnContextSetTransactionState(&bwc->transactionCxt, nullptr);
 
     /* snapshot. */
     Snapshot snapshot = CopySnapshotByCurrentMcxt(bwc->transactionCxt.snapshot);

@@ -237,6 +237,7 @@ gms_xmldom为openGauss内置基于PL/Python语言实现，将底层的Python XML
 5. 安装openGauss后，环境变量`LD_LIBRARY_PATH`中需新增目录`$GAUSSHOME/python/lib64`
 6. openGauss的小型化版本不支持`plpython3u`插件，也无法使用`gms_xmldom API package`
 7. plpython3u插件不支持`set schema`操作， 任何相关操作均会报错，显示不支持
+8. `gms_xmldom`基于Python实现，使用前需确保数据库所使用的字符集为**Python可识别的字符集**（如`UTF-8`、`GBK`等）。若数据库字符集不被Python识别（如部分自定义或特殊字符集），XML文档的解析、节点操作及输出将失败或出现乱码，无法正常使用。可通过查询`server_encoding`、`client_encoding`确认当前字符集，建议将数据库字符集设置为`UTF-8`
 
 ## gms_xmldom 安装
 

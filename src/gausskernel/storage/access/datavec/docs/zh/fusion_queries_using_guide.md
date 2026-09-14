@@ -163,16 +163,16 @@ LIMIT 2;
 
 在上述SQL查询中：
 
-- `to_tsvector@@to_tsquery`: `@@`是openGauss的全文检索匹配算子，当`tsvector`（docunment）匹配到`tsquery`（query）时返回true。
+- `to_tsvector@@to_tsquery`: `@@`是openGauss的全文检索匹配算子，当`tsvector`（document）匹配到`tsquery`（query）时返回true。
 - `ts_rank(to_tsvector, to_tsquery, integer)`：openGauss提供了两个预置的[排序方法](https://docs.opengauss.org/zh/docs/latest/sql_reference/ranking_search_results.html)（`ts_rank`， `ts_rank_cd`），可将相关性最高的文档排在前面。同时，通过设置`integer`类型的标准化选项来定义文档长度的影响程度。
 
 综合以上步骤，即可实现高效的全文检索。
 
 ## 4. 双路召回
 
-双路召回（Dual Retrival）是一种结合了向量检索与全文检索的多维数据召回策略。
+双路召回（Dual Retrieval）是一种结合了向量检索与全文检索的多维数据召回策略。
 
-在传统的单一检索方式中，面对查询内容过于复杂或嵌入模型表现不佳的情况，检索结果往往难以另使用者满意。因此，双路召回策略通过结合两种不同类型的检索技术，弥补了单一检索策略的不足，从而实现更全面和灵活的数据召回。
+在传统的单一检索方式中，面对查询内容过于复杂或嵌入模型表现不佳的情况，检索结果往往难以令使用者满意。因此，双路召回策略通过结合两种不同类型的检索技术，弥补了单一检索策略的不足，从而实现更全面和灵活的数据召回。
 
 在具体实现过程中，向量检索用于捕捉数据间的相似性，而全文检索则补充了基于关键字的召回能力。
 

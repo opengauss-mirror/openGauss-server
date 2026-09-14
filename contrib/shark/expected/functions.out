@@ -1,5 +1,6 @@
 create schema functions_test;
 set search_path = 'functions_test';
+set xact_abort off;
 -- test @@rowcount
 create table t1 (c1 int);
 select @@rowcount;
@@ -1877,6 +1878,96 @@ select dateadd(mm,2,time'23:20:20');
  Thu Mar 01 23:20:20 1900
 (1 row)
 
+select dateadd(null,1,'2023/3/31');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(qq,null,'2023/3/31');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null);
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(null,1,date'1998-01-30');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(null,1,timestamp'1997-12-31 23:59:59');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(null,1,timestamptz'1997-12-31 23:59:59');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(null,1,time'23:20:20');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(null,1,timetz '23:20:20');
+ERROR:  Invalid parameter 1 specified for dateadd.
+CONTEXT:  referenced column: dateadd
+select dateadd(qq,null,date'1998-01-30');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,null,timestamp'1997-12-31 23:59:59');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,null,timestamptz'1997-12-31 23:59:59');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,null,time'23:20:20');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,null,timetz '23:20:20');
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null::date);
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null::timestamp);
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null::timestamptz);
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null::time);
+ dateadd 
+---------
+ 
+(1 row)
+
+select dateadd(qq,1,null::timetz);
+ dateadd 
+---------
+ 
+(1 row)
+
 select dateadd('',1,'2023/3/31');
 ERROR:  unrecognized role option ""
 CONTEXT:  referenced column: dateadd
@@ -2456,3 +2547,4 @@ select len('aa'::varbinary);
    2
 (1 row)
 
+reset xact_abort;

@@ -30,6 +30,7 @@
 #include "pgstat.h"
 #include "postmaster/pagewriter.h"
 #include "storage/barrier.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/smgr/smgr.h"
@@ -2534,12 +2535,12 @@ static uint32 get_candidate_buf_and_flush_list(uint32 start, uint32 end, uint32 
             }
         }
         /* Dirty read, pinned buffer, skip */
-        if (BUF_STATE_GET_REFCOUNT(local_buf_state) > 0) {
+        if (IsBufferRefCountGreaterThanZero(local_buf_state, buf_desc->buf_id)) {
             continue;
         }
 
         local_buf_state = LockBufHdr(buf_desc);
-        if (BUF_STATE_GET_REFCOUNT(local_buf_state) > 0) {
+        if (IsBufferRefCountGreaterThanZero(local_buf_state, buf_desc->buf_id)) {
             goto UNLOCK;
         }
 
@@ -2611,7 +2612,7 @@ static void push_to_candidate_list(BufferDesc *buf_desc)
     uint64 buf_state = pg_atomic_read_u64(&buf_desc->state);
     bool emptyUsageCount = (!NEED_CONSIDER_USECOUNT || BUF_STATE_GET_USAGECOUNT(buf_state) == 0);
 
-    if (BUF_STATE_GET_REFCOUNT(buf_state) > 0 || !emptyUsageCount) {
+    if (IsBufferRefCountGreaterThanZero(buf_state, buf_id) || !emptyUsageCount) {
         return;
     }
 
@@ -2619,7 +2620,7 @@ static void push_to_candidate_list(BufferDesc *buf_desc)
         buf_state = LockBufHdr(buf_desc);
         if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] == false) {
             emptyUsageCount = (!NEED_CONSIDER_USECOUNT || BUF_STATE_GET_USAGECOUNT(buf_state) == 0);
-            if (BUF_STATE_GET_REFCOUNT(buf_state) == 0 && emptyUsageCount && !(buf_state & BM_DIRTY)) {
+            if (IsBufferRefCountZero(buf_state, buf_id) && emptyUsageCount && !(buf_state & BM_DIRTY)) {
                 if (buf_id < NvmBufferStartID) {
                     candidate_buf_push(&pgwr->normal_list, buf_id);
                 } else if (buf_id < SegmentBufferStartID) {

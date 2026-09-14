@@ -82,6 +82,7 @@ typedef struct {
 
 /*
  * working state for accumArrayResult() and friends
+ * note that the input must be scalars (legal array elements)
  */
 typedef struct ArrayBuildState {
     MemoryContext mcontext; /* where all the temp stuff is kept */
@@ -94,6 +95,35 @@ typedef struct ArrayBuildState {
     bool typbyval;
     char typalign;
 } ArrayBuildState;
+
+/*
+ * working state for accumArrayResultArr() and friends
+ * note that the input must be arrays, and the same array type is returned
+ */
+typedef struct ArrayBuildStateArr {
+    MemoryContext mcontext; /* where all the temp stuff is kept */
+    char* data;             /* accumulated data */
+    bits8* nullbitmap;      /* bitmap of is-null flags, or NULL if none */
+    int abytes;             /* allocated length of "data" */
+    int nbytes;             /* number of bytes used so far */
+    int aitems;             /* allocated length of bitmap (in elements) */
+    int nitems;             /* total number of elements in result */
+    int ndims;              /* current dimensions of result */
+    int dims[MAXDIM];
+    int lbs[MAXDIM];
+    Oid array_type;   /* data type of the arrays */
+    Oid element_type; /* data type of the array elements */
+} ArrayBuildStateArr;
+
+/*
+ * working state for accumArrayResultAny() and friends
+ * these functions handle both cases
+ */
+typedef struct ArrayBuildStateAny {
+    /* Exactly one of these is not NULL: */
+    ArrayBuildState* scalarstate;
+    ArrayBuildStateArr* arraystate;
+} ArrayBuildStateAny;
 
 /*
  * structure to cache type metadata needed for array manipulation
@@ -240,12 +270,22 @@ extern ArrayType* construct_empty_array(Oid elmtype);
 extern void deconstruct_array(ArrayType* array, Oid elmtype, int elmlen, bool elmbyval, char elmalign, Datum** elemsp,
     bool** nullsp, int* nelemsp);
 extern bool array_contains_nulls(ArrayType* array);
+extern ArrayBuildState* initArrayResult(Oid element_type, MemoryContext rcontext);
 extern ArrayBuildState* accumArrayResult(
     ArrayBuildState* astate, Datum dvalue, bool disnull, Oid element_type, MemoryContext rcontext);
 extern Datum makeArrayResult(ArrayBuildState* astate, MemoryContext rcontext);
 extern Datum makeMdArrayResult(
     ArrayBuildState* astate, int ndims, int* dims, int* lbs, MemoryContext rcontext, bool release);
+extern ArrayBuildStateArr* initArrayResultArr(Oid array_type, Oid element_type, MemoryContext rcontext);
+extern ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue, bool disnull, Oid array_type,
+                                               MemoryContext rcontext);
+extern Datum makeArrayResultArr(ArrayBuildStateArr* astate, MemoryContext rcontext, bool release);
 
+extern ArrayBuildStateAny* initArrayResultAny(Oid input_type, MemoryContext rcontext);
+extern ArrayBuildStateAny* accumArrayResultAny(ArrayBuildStateAny* astate, Datum dvalue, bool disnull, Oid input_type,
+                                               MemoryContext rcontext);
+extern Datum makeArrayResultAny(ArrayBuildStateAny *astate,
+				   MemoryContext rcontext, bool release);
 extern ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim, ArrayMetaState *mstate = NULL);
 extern bool array_iterate(ArrayIterator iterator, Datum* value, bool* isnull);
 extern void array_free_iterator(ArrayIterator iterator);
@@ -276,6 +316,8 @@ extern ArrayType* create_singleton_array(
 
 extern Datum array_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum array_agg_finalfn(PG_FUNCTION_ARGS);
+extern Datum array_agg_array_transfn(PG_FUNCTION_ARGS);
+extern Datum array_agg_array_finalfn(PG_FUNCTION_ARGS);
 
 /*
  * prototypes for functions defined in array_typanalyze.c

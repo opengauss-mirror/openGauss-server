@@ -164,6 +164,7 @@ typedef struct StreamSharedContext {
     StringInfo** messages;
     DataStatus** dataStatus;
     bool** is_connect_end;
+    bool* is_producer_complete;
     int* scanLoc;
     TcpStreamKey key_s;
     bool vectorized;
@@ -349,6 +350,12 @@ public:
     /* Wait all thread in the node group to quit. */
     void quitSyncPoint();
 
+    /* Wait until all producer threads have unregistered at the quit point. */
+    void waitProducerReadyForQuit();
+
+    /* Check whether every top-consumer stream has received end-of-stream. */
+    bool allTopConsumersComplete();
+
     /* Push a stream pair. */
     StreamPair* pushStreamPair(StreamKey key, List* producer, List* consumer);
 
@@ -407,6 +414,8 @@ public:
     pthread_rwlock_t combid_lock;
 
     bool m_is_dml;
+
+    int m_producer_dop;
 
     /* MPP with-recursive support */
     static void SyncConsumerNextPlanStep(int controller_plannodeid, int step);

@@ -10,6 +10,11 @@ function test_1() {
 	exec_sql $db $pub_node1_port "CREATE DATABASE $case_db WITH encoding 'UTF8'"
 	exec_sql $db $sub_node1_port "CREATE DATABASE $case_db WITH LC_CTYPE 'en_US' encoding 'LATIN1' lc_collate 'en_US'"
 
+	exec_sql $case_db $pub_node1_port "alter database $case_db set d_format_behavior_compat_options = '';"
+	exec_sql $case_db $sub_node1_port "alter database $case_db set d_format_behavior_compat_options = '';"
+	exec_sql $case_db $pub_node1_port "alter database $case_db set b_format_behavior_compat_options = '';"
+	exec_sql $case_db $sub_node1_port "alter database $case_db set b_format_behavior_compat_options = '';"
+
 	exec_sql $case_db $pub_node1_port "CREATE TABLE test1 (a int, b text);"
 	exec_sql $case_db $sub_node1_port "CREATE TABLE test1 (a int, b text);"
 

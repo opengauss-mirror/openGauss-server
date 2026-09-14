@@ -110,7 +110,7 @@ sections:
           - label: 因CheckOs检测项不通过导致预安装失败问题
             href: ./pre_installation_failure_due_to_checkos_check_not_passing.md
           - label: 因OpenSSL异常工作导致安装失败问题
-            href: ./installation_failure_due to_openssl_malfunction.md
+            href: ./installation_failure_due_to_openssl_malfunction.md
           - label: 因xml参数缺失或写入错误导致的预安装失败问题
             href: ./pre_installation_failure_caused_by_missing_or_incorrectly_written_xml_parameters.md
           - label: 因安装目录已存在导致的安装已存在问题
@@ -147,7 +147,7 @@ sections:
         sections:
           - label: 因hostname文件权限异常导致设置参数失败的问题
             href: ./failure_to_set_parameters_due_to_abnormal_hostname_file_permissions.md
-          - label: 因 pg_hba.confg 中参数配置问题导致启动或重启集群失败的问题
+          - label: 因 pg_hba.conf 中参数配置问题导致启动或重启集群失败的问题
             href: ./cluster_startup_failure_due_to_incorrect_parameters_in_pg_hba_conf.md
           - label: 因postgres.conf中参数不符合标准导致启动或重启集群失败的问题
             href: ./cluster_startup_failure_due_to_incorrect_parameters_in_postgres_conf.md
@@ -204,7 +204,7 @@ sections:
           - label: 因心跳超时导致节点被踢出的问题
             href: ./node_being_kicked_out_due_to_heartbeat_timeout.md
           - label: 因端口冲突导致DMS初始化失败的问题
-            href: ./dms_initialization_failure_due_to_port_conflic.md
+            href: ./dms_initialization_failure_due_to_port_conflict.md
           - label: 因本地磁盘空间不足导致业务执行失败的问题
             href: ./business_execution_failure_due_to_insufficient_local_disk_space.md
           - label: 因按需回放阶段发生故障导致回放模式变更为极致RTO的问题

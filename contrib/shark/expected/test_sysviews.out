@@ -1169,18 +1169,11 @@ where s.nspname = 'sys_view_test_02';
 (1 row)
 
 select sid, mode, status, status2, crdate, reserved, category, cmplevel, filename, version
-from sys.sysdatabases;
+from sys.sysdatabases where name = current_database();
  sid | mode | status | status2 |          crdate          |         reserved         | category | cmplevel | filename | version 
 -----+------+--------+---------+--------------------------+--------------------------+----------+----------+----------+---------
   10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
-(8 rows)
+(1 row)
 
 select name, schema_id, principal_id
 from sys.schemas where schema_id < 10000 order by schema_id;

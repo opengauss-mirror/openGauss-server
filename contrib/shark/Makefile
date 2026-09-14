@@ -11,6 +11,27 @@ DATA_built = shark--3.0.sql
 DATA = shark--3.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--3.0.sql rollback_script/shark--3.0--2.0.sql rollback_script/shark--2.0--1.0.sql upgrade_script/shark--2.0--2.0.1.sql rollback_script/shark--2.0.1--2.0.sql
 REGRESS = dummy
 
+ifeq (,$(wildcard ../../src/Makefile.global))
+-include ../../cmake_check.mk
+endif
+
+ifneq ($(CMAKE_CHECK_BUILD_DIR),)
+regress_home = $(CMAKE_CHECK_SOURCE_DIR)/src/test/regress
+p = 25632
+REGRESS_OPTS = --dbname=contrib_regression -c 0 -d 1 -r 1 -p $(p) --single_node -w --keep_last_data=false \
+               --schedule=$(CMAKE_CHECK_INPUT_DIR)/parallel_schedule           \
+               --regconf=$(regress_home)/regress.conf                          \
+               --temp-config=$(regress_home)/make_fastcheck_postgresql.conf    \
+               --dbcmpt=D --abs_gausshome=$(CMAKE_CHECK_INSTALL_PREFIX)
+CMAKE_CHECK_PREP = shark-prepare-check
+include ../../cmake/check/contrib-regress.mk
+
+.PHONY: shark-prepare-check
+shark-prepare-check:
+	chmod +x ./smartmatch.pl
+
+else
+
 OBJS = sharksysfuncs.o shark.o dbcc.o varlena.o sqlvariant.o datefuncs.o uuidfuncs.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
@@ -115,3 +136,5 @@ $(PLDIR)/pl_unreserved_kwlist_d.h: $(PLDIR)/pl_unreserved_kwlist.h $(GEN_KEYWORD
 
 all:
 	chmod +x ./smartmatch.pl
+
+endif

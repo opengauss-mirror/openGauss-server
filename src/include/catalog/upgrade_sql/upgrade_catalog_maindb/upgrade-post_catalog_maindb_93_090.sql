@@ -523,3 +523,31 @@ BEGIN
         GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     END IF;
 END$$;
+
+-- 9. 升级 coverage.proc_coverage：将旧版 relkind='S' 的序列重建为 'z'
+DO $$
+DECLARE
+    ans boolean;
+BEGIN
+    SELECT CASE WHEN count(*)=1 THEN true ELSE false END
+      FROM pg_catalog.pg_class c, pg_catalog.pg_namespace n
+     WHERE c.relname='proc_coverage_coverage_id_seq'
+       AND n.nspname='coverage'
+       AND c.relnamespace=n.oid
+       AND c.relkind='S' INTO ans;
+    IF ans = true THEN
+        DROP TABLE IF EXISTS coverage.proc_coverage;
+        DROP SEQUENCE IF EXISTS coverage.proc_coverage_coverage_id_seq;
+        CREATE SEQUENCE coverage.proc_coverage_coverage_id_seq START 1;
+        CREATE UNLOGGED TABLE coverage.proc_coverage(
+            coverage_id bigint NOT NULL DEFAULT nextval('coverage.proc_coverage_coverage_id_seq'::regclass),
+            pro_oid oid NOT NULL,
+            pro_name text NOT NULL,
+            db_name text NOT NULL,
+            pro_querys text NOT NULL,
+            pro_canbreak bool[] NOT NULL,
+            coverage int[] NOT NULL
+        ) WITH (orientation=row, compression=no);
+        REVOKE ALL on table coverage.proc_coverage FROM public;
+    END IF;
+END$$;

@@ -44,7 +44,7 @@ sections:
           - label: 使用指导
             href: ./bm25_usage_guide.md
           - label: 参数介绍与调优
-            href: ../database_reference/bm25_full_text_retrieval_index_parameters.md
+            href: ./bm25_full_text_retrieval_index_parameters.md
       - label: GIN索引
         sections:
           - label: 介绍

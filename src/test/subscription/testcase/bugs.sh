@@ -9,6 +9,9 @@ function test_1() {
     exec_sql $db $pub_node1_port "CREATE DATABASE $case_db"
     exec_sql $db $sub_node1_port "CREATE DATABASE $case_db"
 
+    exec_sql $db $pub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+    exec_sql $db $sub_node1_port "ALTER DATABASE $case_db SET dolphin.sql_mode='sql_mode_full_group,pipes_as_concat,ansi_quotes,no_zero_date,pad_char_to_full_length'"
+
     # BUG1: coredump when apply null value into not null column.
     # Create some preexisting content on publisher
     exec_sql $case_db $pub_node1_port "CREATE TABLE tab_rep (a int primary key, b text)"

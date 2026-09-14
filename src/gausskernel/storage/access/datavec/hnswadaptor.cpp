@@ -102,9 +102,14 @@ int pq_open_dl(void **lib_handle, char *symbol)
 
 void pq_close_dl(void *lib_handle)
 {
-#ifndef WIN32
-    (void)dlclose(lib_handle);
-#endif
+    /*
+     * libkvecturbo depends on libgomp. In memcheck builds, dlclose during
+     * postmaster shutdown makes libgomp initialization memory unreachable to LSan.
+     * Keep the library loaded until process exit, matching its postmaster lifetime.
+     * The same rule applies to all builds: unloading here can block in the glibc
+     * loader lock while the process is already shutting down.
+     */
+    (void)lib_handle;
 }
 
 int pq_load_symbols(char *lib_dl_path)

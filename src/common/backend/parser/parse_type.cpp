@@ -777,13 +777,20 @@ Oid LookupCollation(ParseState* pstate, List* collnames, int location)
     return colloid;
 }
 
-Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation,
-    bool is_bin_type, Oid rel_coll_oid)
+Oid get_column_def_collation_b_format(ColumnDef* coldef, Oid typeOid, Oid typcollation, bool is_bin_type,
+                                      Oid rel_coll_oid)
 {
-    if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) &&
-        !targetissqlvariant(typeOid) && !type_is_enum(typeOid) && !type_is_set(typeOid)) {
-        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("type %s not support set charset", format_type_be(typeOid))));
+    if (DB_IS_CMPT(D_FORMAT)) {
+        if (coldef->typname->charset != PG_INVALID_ENCODING && !IsDSupportCharsetType(typeOid)) {
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("type %s not support set charset", format_type_be(typeOid))));
+        }
+    } else {
+        if (coldef->typname->charset != PG_INVALID_ENCODING && !IsSupportCharsetType(typeOid) &&
+            !type_is_enum(typeOid) && !type_is_set(typeOid)) {
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("type %s not support set charset", format_type_be(typeOid))));
+        }
     }
 
     Oid result = InvalidOid;
@@ -1842,6 +1849,21 @@ bool IsBinaryType(Oid typid)
     }
     return ((typid) == BLOBOID ||
             (typid) == BYTEAOID);
+}
+
+bool IsBinaryTypeWithCollation(Oid typid)
+{
+    /* Keep this check local: IsBinaryType() can be overridden by an extension
+     * hook and must not broaden the D-format compatibility exception. */
+    if (typid == BLOBOID || typid == BYTEAOID) {
+        return true;
+    }
+
+    if (u_sess->attr.attr_sql.shark && u_sess->hook_cxt.getVarbinaryOidHook != NULL) {
+        Oid varbinaryOid = ((GetVarbinaryOidHookType)u_sess->hook_cxt.getVarbinaryOidHook)();
+        return OidIsValid(varbinaryOid) && typid == varbinaryOid;
+    }
+    return false;
 }
 
 void check_type_supports_multi_charset(Oid typid, bool allow_array)

@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "file.h"
 #include "configuration.h"
@@ -29,10 +30,38 @@ static pgBackup* get_oldest_backup(timelineInfo *tlinfo);
 static const char *backupModes[] = {"", "PTRACK", "FULL"};
 static pgBackup *readBackupControlFile(const char *path);
 
-static bool exit_hook_registered = false;
 static parray *lock_files = NULL;
 
 static void uncompress_decrypt_directory(const char *instance_name_str);
+static parray *g_legacyMaterializedDirs = NULL;
+
+/* exit status a shell uses when a command cannot be executed */
+#define EXEC_NOT_FOUND_STATUS 127
+
+static void RunTarExtract(const char *tarPath)
+{
+    pid_t pid;
+    int   status;
+
+    (void) fflush(NULL);
+    pid = fork();
+    if (pid < 0) {
+        elog(ERROR, "Cannot fork tar process: %s", gs_strerror(errno));
+    }
+
+    if (pid == 0) {
+        execlp("tar", "tar", "-xPf", tarPath, (char *) NULL);
+        _exit(EXEC_NOT_FOUND_STATUS);
+    }
+
+    if (waitpid(pid, &status, 0) != pid) {
+        elog(ERROR, "Cannot wait for tar process: %s", gs_strerror(errno));
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        elog(ERROR, "tar failed while extracting legacy encrypted backup \"%s\"", tarPath);
+    }
+}
+
 
 static int grab_excl_lock_file(const char *backup_dir, const char *backup_id, bool strict);
 static int grab_shared_lock_file(pgBackup *backup);
@@ -1059,6 +1088,9 @@ get_backup_filelist(pgBackup *backup, bool strict)
     char    backup_filelist_path[MAXPGPATH];
 
     join_path_components(backup_filelist_path, backup->root_dir, DATABASE_FILE_LIST);
+    if (backup->encrypt_version > 0) {
+        EncryptVerifyControlMac(backup->root_dir);
+    }
     files = dir_read_file_list(NULL, NULL, backup_filelist_path, FIO_BACKUP_HOST, backup->content_crc);
 
     /* redundant sanity? */
@@ -2328,6 +2360,10 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
         deparse_compress_alg(backup->compress_alg));
     fio_fprintf(out, "compress-level = %d\n", backup->compress_level);
     fio_fprintf(out, "from-replica = %s\n", backup->from_replica ? "true" : "false");
+    if (backup->encrypt_version > 0) {
+        fio_fprintf(out, "encrypt-version = %u\n", backup->encrypt_version);
+        fio_fprintf(out, "encrypt-algorithm = %s\n", backup->encryptAlgorithm);
+    }
 
     fio_fprintf(out, "\n#Compatibility\n");
     fio_fprintf(out, "block-size = %u\n", backup->block_size);
@@ -2403,6 +2439,15 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
     if (backup->parent_backup != 0)
         fio_fprintf(out, "parent-backup-id = '%s'\n", base36enc(backup->parent_backup));
 
+    /*
+     * Written only for cumulative incremental backups: absent key means
+     * differential, and old gs_probackup versions merely warn on unknown keys.
+     */
+    if (backup->backup_mode == BACKUP_MODE_DIFF_PTRACK &&
+        backup->incrementalType == INCR_TYPE_CUMULATIVE) {
+        fio_fprintf(out, "incremental-type = 'cumulative'\n");
+    }
+
     /* print external directories list */
     if (backup->external_dir_str)
         fio_fprintf(out, "external-dirs = '%s'\n", backup->external_dir_str);
@@ -2432,6 +2477,10 @@ write_backup(pgBackup *backup, bool strict)
     char    path_temp[MAXPGPATH];
     char    buf[4096];
     int nRet = 0;
+
+    if (backup->encrypt_version > 0) {
+        EncryptPrepareMetadataUpdate(backup->root_dir);
+    }
 
     my_pid = getpid();
     join_path_components(path, backup->root_dir, BACKUP_CONTROL_FILE);
@@ -2476,6 +2525,10 @@ write_backup(pgBackup *backup, bool strict)
         elog(ERROR, "Cannot rename file \"%s\" to \"%s\": %s",
         path_temp, path, strerror(errno));
 
+    if (backup->encrypt_version > 0 && EncryptDirIsEncrypted(backup->root_dir)) {
+        EncryptRefreshControlMac(backup->root_dir);
+    }
+
     if (current.media_type == MEDIA_TYPE_OSS) {
         uploadConfigFile(path, path);
     }
@@ -2490,9 +2543,10 @@ void flush_and_close_file(pgBackup *backup, bool sync, FILE *out, char *control_
         elog(ERROR, "Cannot flush file list \"%s\": %s",
          control_path_temp, strerror(errno));
 
-    if (sync && fsync(fileno(out)) < 0)
+    if (sync && EncFsyncStream(out) < 0) {
         elog(ERROR, "Cannot sync file list \"%s\": %s",
          control_path_temp, strerror(errno));
+    }
 
     if (fclose(out) != 0)
         elog(ERROR, "Cannot close file list \"%s\": %s",
@@ -2534,7 +2588,8 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
     nRet = snprintf_s(control_path_temp, sizeof(control_path_temp), sizeof(control_path_temp) - 1, "%s.tmp", control_path);
     securec_check_ss_c(nRet, "\0", "\0");
 
-    out = fopen(control_path_temp, PG_BINARY_W);
+    /* the file list names every file of the cluster, so it is encrypted too */
+    out = EncFopen(control_path_temp, PG_BINARY_W);
     if (out == NULL)
         elog(ERROR, "Cannot open file list \"%s\": %s", control_path_temp,
          strerror(errno));
@@ -2714,10 +2769,12 @@ readBackupControlFile(const char *path)
     char    *stop_lsn = NULL;
     char    *status = NULL;
     char    *parent_backup = NULL;
+    char    *incrementalTypeStr = NULL;
     char    *merge_dest_backup = NULL;
     char    *program_version = NULL;
     char    *server_version = NULL;
     char    *compress_alg = NULL;
+    char    *encryptAlgorithm = NULL;
 	char    *recovery_name = NULL;
     int     parsed_options;
     char    *storage_type = NULL;
@@ -2748,9 +2805,12 @@ readBackupControlFile(const char *path)
         {'b', 0, "stream",				&backup->stream, SOURCE_FILE_STRICT},
         {'s', 0, "status",				&status, SOURCE_FILE_STRICT},
         {'s', 0, "parent-backup-id",	&parent_backup, SOURCE_FILE_STRICT},
+        {'s', 0, "incremental-type",    &incrementalTypeStr, SOURCE_FILE_STRICT},
         {'s', 0, "merge-dest-id",		&merge_dest_backup, SOURCE_FILE_STRICT},
         {'s', 0, "compress-alg",		&compress_alg, SOURCE_FILE_STRICT},
         {'u', 0, "compress-level",		&backup->compress_level, SOURCE_FILE_STRICT},
+        {'u', 0, "encrypt-version",     &backup->encrypt_version, SOURCE_FILE_STRICT},
+        {'s', 0, "encrypt-algorithm",   &encryptAlgorithm, SOURCE_FILE_STRICT},
         {'b', 0, "from-replica",		&backup->from_replica, SOURCE_FILE_STRICT},
         {'s', 0, "external-dirs",		&backup->external_dir_str, SOURCE_FILE_STRICT},
         {'s', 0, "note",				&backup->note, SOURCE_FILE_STRICT},
@@ -2833,13 +2893,28 @@ readBackupControlFile(const char *path)
         backup->parent_backup = base36dec(parent_backup);
     }
 
-    if (merge_dest_backup)
-    {
+    if (incrementalTypeStr) {
+        if (pg_strcasecmp(incrementalTypeStr, "cumulative") == 0) {
+            backup->incrementalType = INCR_TYPE_CUMULATIVE;
+        } else if (pg_strcasecmp(incrementalTypeStr, "differential") != 0) {
+            elog(WARNING, "Invalid INCREMENTAL_TYPE \"%s\" in control file \"%s\", "
+                 "assuming differential", incrementalTypeStr, path);
+        }
+        free(incrementalTypeStr);
+    }
+
+    if (merge_dest_backup) {
         backup->merge_dest_backup = base36dec(merge_dest_backup);
     }
 
-    if (program_version)
-    {
+    if (encryptAlgorithm) {
+        rc = strncpy_s(backup->encryptAlgorithm, sizeof(backup->encryptAlgorithm),
+                       encryptAlgorithm, sizeof(backup->encryptAlgorithm) - 1);
+        securec_check_c(rc, "", "");
+        free(encryptAlgorithm);
+    }
+
+    if (program_version) {
         rc = strncpy_s(backup->program_version, sizeof(backup->program_version),program_version,
             sizeof(backup->program_version) - 1);
         securec_check_c(rc, "", "");
@@ -3036,6 +3111,8 @@ pgBackupInit(pgBackup *backup)
 
     backup->compress_alg = COMPRESS_ALG_DEFAULT;
     backup->compress_level = COMPRESS_LEVEL_DEFAULT;
+    backup->encrypt_version = 0;
+    backup->encryptAlgorithm[0] = '\0';
 
     backup->block_size = BLCKSZ;
     backup->wal_block_size = XLOG_BLCKSZ;
@@ -3044,6 +3121,7 @@ pgBackupInit(pgBackup *backup)
     backup->stream = false;
     backup->from_replica = false;
     backup->parent_backup = INVALID_BACKUP_ID;
+    backup->incrementalType = INCR_TYPE_DIFFERENTIAL;
     backup->merge_dest_backup = INVALID_BACKUP_ID;
     backup->parent_backup_link = NULL;
     backup->program_version[0] = '\0';
@@ -3375,12 +3453,11 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
     DIR *data_dir = NULL;
     struct dirent *data_ent = NULL;
     uint key_len = 0;
-    uint hmac_len = MAX_HMAC_LEN;
+    size_t hmac_len = MAX_HMAC_LEN;
     uint dec_buffer_len = 0;
-    uint out_buffer_len = MAX_CRYPTO_MODULE_LEN;
+    size_t out_buffer_len = MAX_CRYPTO_MODULE_LEN;
     long int enc_file_pos = 0;
     long int enc_file_len = 0;
-    char sys_cmd[MAXPGPATH] = {0};
     char* key = NULL;
     unsigned char hmac_read_buffer[MAX_HMAC_LEN +1] = {0};
     unsigned char hmac_cal_buffer[MAX_HMAC_LEN +1] = {0};
@@ -3485,7 +3562,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                     }
 
                     rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
-                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer,
+                                &out_buffer_len, NULL);
                     if(rc != 1) {
                         crypto_get_errmsg_use(NULL, errmsg);
                         pg_free(key);
@@ -3513,7 +3591,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                     }
 
                     rc = crypto_encrypt_decrypt_use(crypto_module_keyctx, 0, (unsigned char*)dec_buffer, dec_buffer_len,
-                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer, (size_t*)&out_buffer_len, NULL);
+                                (unsigned char*)encrypt_salt, MAX_IV_LEN, (unsigned char*)out_buffer,
+                                &out_buffer_len, NULL);
                     if(rc != 1) {
                         pg_free(key);
                         crypto_get_errmsg_use(NULL, errmsg);
@@ -3521,7 +3600,8 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
                         elog(ERROR, ("failed to decrypt enc_backup_file, errmsg: %s"), errmsg);
                     }
 
-                    rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len, hmac_cal_buffer, (size_t*)&hmac_len);
+                    rc = crypto_hmac_use(crypto_hmac_keyctx, (unsigned char*)out_buffer, out_buffer_len,
+                        hmac_cal_buffer, &hmac_len);
                     if(rc != 1) {
                         pg_free(key);
                         crypto_get_errmsg_use(NULL, errmsg);
@@ -3541,25 +3621,28 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
             fclose(enc_backup_fd);
             clearCrypto(crypto_module_session, crypto_module_keyctx, crypto_hmac_keyctx);
 
-            rc = sprintf_s(sys_cmd, MAXPGPATH, "tar -xPf %s/%s.tar", backup_instance_path, data_ent->d_name);
-
-            if (!is_valid_cmd(sys_cmd)) {
-                elog(ERROR, "cmd is rejected");
-                return;
+            RunTarExtract(dec_backup_file);
+            if (unlink(dec_backup_file) != 0) {
+                elog(ERROR, "Cannot remove legacy temporary tar file \"%s\": %s",
+                     dec_backup_file, gs_strerror(errno));
             }
-            system(sys_cmd);
-            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
-            securec_check(rc, "\0", "\0");
 
-            rc = sprintf_s(sys_cmd, MAXPGPATH, "rm -rf %s/%s.tar", backup_instance_path, data_ent->d_name);
-
-            if (!is_valid_cmd(sys_cmd)) {
-                elog(ERROR, "cmd is rejected");
-                return;
+            size_t nameLen = strlen(data_ent->d_name);
+            if (nameLen <= strlen("_enc")) {
+                elog(ERROR, "Invalid legacy encrypted backup name \"%s\"", data_ent->d_name);
             }
-            system(sys_cmd);
-            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
-            securec_check(rc, "\0", "\0");
+
+            char materialized_dir[MAXPGPATH];
+            rc = snprintf_s(materialized_dir, sizeof(materialized_dir),
+                            sizeof(materialized_dir) - 1, "%s/%.*s",
+                            backup_instance_path, (int) (nameLen - strlen("_enc")),
+                            data_ent->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            if (g_legacyMaterializedDirs == NULL) {
+                g_legacyMaterializedDirs = parray_new();
+            }
+            parray_append(g_legacyMaterializedDirs, pgut_strdup(materialized_dir));
             enc_flag = true;
         }
     }
@@ -3571,85 +3654,24 @@ static void uncompress_decrypt_directory(const char *instance_name_str)
     pg_free(key);
 }
 
-/*
- * Function: delete_one_instance_backup_directory
- *
- * Return:
- *  void
- */
-static void delete_one_instance_backup_directory(char *instance_name_str)
-{
-    char backup_instance_path[MAXPGPATH];
-    DIR *data_dir = NULL;
-    struct dirent *data_ent = NULL;
-    char sys_cmd[MAXPGPATH] = {0};
-
-    errno_t rc = sprintf_s(backup_instance_path, MAXPGPATH, "%s/%s/%s",
-                                    backup_path, BACKUPS_DIR, instance_name_str);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    data_dir = fio_opendir(backup_instance_path, FIO_BACKUP_HOST);
-    if (data_dir == NULL)
-    {
-        elog(ERROR, "cannot open directory \"%s\": %s", backup_instance_path,
-                strerror(errno));
-        return;
-    }
-
-    for (;(data_ent = fio_readdir(data_dir)) != NULL; errno = 0)
-    {
-        if (IsDir(backup_instance_path, data_ent->d_name, FIO_BACKUP_HOST) && data_ent->d_name[0] != '.') {
-            error_t rc = sprintf_s(sys_cmd, MAXPGPATH, "rm %s/%s -rf", backup_instance_path,data_ent->d_name);
-            securec_check_ss_c(rc, "\0", "\0");
-            if (!is_valid_cmd(sys_cmd)) {
-                elog(ERROR, "cmd is rejected");
-                return;
-            }
-
-            system(sys_cmd);
-            rc = memset_s(sys_cmd, MAXPGPATH,0, MAXPGPATH);
-            securec_check(rc, "\0", "\0");
-        }
-    }
-
-    if (data_dir) {
-        fio_closedir(data_dir);
-        data_dir = NULL;
-    }
-
-}
-
-/*
- * Function: delete_backup_directory
- * Description:
- *
- * Input:
- *  char *instance_name
- * Return:
- *  void
- */
+/* Remove only legacy backup directories materialized by this process. */
 void delete_backup_directory(char *instance_name_str)
 {
-    int i = 0;
-    if(NULL == encrypt_dev_params || !enc_flag) {
+    (void) instance_name_str;
+
+    if (g_legacyMaterializedDirs == NULL) {
         return;
     }
 
-    if (instance_name_str == NULL) {
-        parray *instances = catalog_get_instance_list();
-
-        for (i = 0; i < parray_num(instances); i++)
-        {
-            InstanceConfig *instance = (InstanceConfig *)parray_get(instances, i);
-            delete_one_instance_backup_directory(instance->name);
+    for (size_t i = 0; i < parray_num(g_legacyMaterializedDirs); i++) {
+        char *path = (char *) parray_get(g_legacyMaterializedDirs, i);
+        if (!pgut_rmtree(path, true, true)) {
+            elog(ERROR, "Cannot remove materialized legacy backup directory \"%s\"", path);
         }
-        parray_walk(instances, pfree);
-        parray_free(instances);
-
-        return;
+        pg_free(path);
     }
 
-    delete_one_instance_backup_directory(instance_name_str);
-
+    parray_free(g_legacyMaterializedDirs);
+    g_legacyMaterializedDirs = NULL;
+    enc_flag = false;
 }
-

@@ -160,8 +160,14 @@ function(add_cmd_gen_when_configure _target_name src_list)
         execute_process(
             COMMAND ${CMAKE_SOURCE_DIR}/${openGauss}/cmake/src/buildfunction.sh --runscript ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} "${before_cmd}" "${main_cmd}" "${thread_cmd}" "${after_cmd}"
             WORKING_DIRECTORY ${work_dir}
+            RESULT_VARIABLE command_result
             OUTPUT_VARIABLE LAST_CMD_RST
+            ERROR_VARIABLE LAST_CMD_ERROR
         )
+        if(NOT command_result EQUAL 0)
+            message(FATAL_ERROR
+                "Configure-time generator ${_target_name} failed in ${work_dir}: ${LAST_CMD_ERROR}")
+        endif()
     endforeach()
     endif()
 endfunction(add_cmd_gen_when_configure)
@@ -198,7 +204,7 @@ ENDMACRO(CHECK_CC_ENABLE)
 
 function(GET_VERSIONSTR_FROMGIT ret)
     set(PG_VERSION "9.2.4")
-    set(OPENGAUSS_VERSION "7.0.0-RC3")
+    set(OPENGAUSS_VERSION "7.0.0")
     execute_process(COMMAND gcc -dumpmachine OUTPUT_VARIABLE host OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND g++ --version OUTPUT_VARIABLE cc_version OUTPUT_STRIP_TRAILING_WHITESPACE)
     string(REGEX REPLACE "\n.*" "" cc_string "${cc_version}")

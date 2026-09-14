@@ -277,6 +277,56 @@ select * from dual;
 \! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
 
+-- clean
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS retry_flag;
+DROP FUNCTION IF EXISTS f_retry_insert();
+DROP PROCEDURE IF EXISTS flip_retry_flag();
+
+CREATE TABLE t1 (
+    a  SERIAL    PRIMARY KEY,
+    b  INT       NOT NULL CHECK (b % 2 = 0),
+    c  NUMERIC
+);
+
+-- record current retry count
+CREATE TABLE retry_flag (v TEXT);
+INSERT INTO retry_flag VALUES ('first');
+
+CREATE OR REPLACE PROCEDURE flip_retry_flag()
+IS
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    UPDATE retry_flag SET v = 'done';
+    COMMIT;
+END flip_retry_flag;
+/
+
+-- First throw error: 57P01; Then retry successfully
+CREATE OR REPLACE FUNCTION f_retry_insert() RETURNS TEXT AS $$
+BEGIN
+    IF (SELECT v FROM retry_flag) = 'first' THEN
+        flip_retry_flag();
+        RAISE EXCEPTION 'force gsql retry on first attempt'
+            USING ERRCODE = '57P01';
+    END IF;
+    INSERT INTO t1 (b, c) VALUES (2, 100);
+    RETURN 'ok';
+END;
+$$ LANGUAGE plpgsql;
+
+\set RETRY 5
+SELECT f_retry_insert() as aa \gset
+\echo :aa
+select b as yy from t1 \gset
+select b as ya from t1;
+\echo :yy
+\echo :ya
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS retry_flag;
+DROP FUNCTION IF EXISTS f_retry_insert();
+DROP PROCEDURE IF EXISTS flip_retry_flag();
+
 select 'hello' as var1, 10 as var2
 \gset
 \echo :var1 :var2
@@ -313,6 +363,18 @@ select 10 as test01, 20 as test02 from generate_series(1,3) \gset pref_
 select 10 as test01, 20 as test02 from generate_series(1,0) \gset pref_
 \echo :pref_x :pref_y
 \unset FETCH_COUNT
+
+\parallel on  
+select 1 \g
+select 1 \g /tmp/out.txt
+select 1 \g | cat
+select 1 \gset
+select 1 as c \gset vv
+select 1 as from \gset   
+\parallel off
+
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_core_dump.sql
+\! @abs_bindir@/gsql -p @portstring@ -d postgres -f @abs_srcdir@/data/parallel_without_off.sql
 
 \c regression;
 drop database test_sql;

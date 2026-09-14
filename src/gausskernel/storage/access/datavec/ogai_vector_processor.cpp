@@ -941,6 +941,7 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
     ModelConfig modelConfig;
     errno_t rc = memset_s(&modelConfig, sizeof(modelConfig), 0, sizeof(modelConfig));
     securec_check(rc, "", "");
+    volatile bool caughtError = false;
 
     PG_TRY();
     {
@@ -963,9 +964,12 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
                                   task->taskId, task->pkValue, errMsg);
         securec_check_ss_c(nRet, "", "");
         FreeErrorData(edata);
-        return;
+        caughtError = true;
     }
     PG_END_TRY();
+    if (caughtError) {
+        return;
+    }
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(tmpCtx);
 }
@@ -1350,12 +1354,15 @@ static void OgaiVectorizeExitCleanup(const BgWorkerContext *bwc)
 static bool WorkerProcessOneTask(OgaiVectorizeSharedContext *shared,
                                  uint32 idx, WorkerEmbeddingCache *embCache)
 {
+    MemoryContext oldcontext = CurrentMemoryContext;
+    volatile bool caughtError = false;
     PG_TRY();
     {
         WorkerGenerateEmbedding(&shared->tasks[idx], embCache);
     }
     PG_CATCH();
     {
+        (void)MemoryContextSwitchTo(oldcontext);
         ErrorData *edata = CopyErrorData();
         const char *errMsg = (edata != NULL && edata->message != NULL) ? edata->message : "unknown error";
         FlushErrorState();
@@ -1369,10 +1376,10 @@ static bool WorkerProcessOneTask(OgaiVectorizeSharedContext *shared,
         securec_check_ss_c(nRet, "", "");
         FreeErrorData(edata);
         ResetWorkerEmbeddingCache(embCache);
-        return true;
+        caughtError = true;
     }
     PG_END_TRY();
-    return false;
+    return caughtError;
 }
 
 static void InternalParallelVectorize()

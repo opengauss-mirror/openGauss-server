@@ -440,6 +440,8 @@ Datum bm25_scores_textarr(PG_FUNCTION_ARGS);
 Datum bm25_scores_text(PG_FUNCTION_ARGS);
 Datum bm25_shard_stat(PG_FUNCTION_ARGS);
 Datum bm25_table_stat(PG_FUNCTION_ARGS);
+Datum bm25_table_stat_2(PG_FUNCTION_ARGS);
+Datum bm25_table_stat_3(PG_FUNCTION_ARGS);
 
 extern IndexBuildResult* bm25build_internal(Relation heap, Relation index, IndexInfo *indexInfo);
 extern void bm25rescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);

@@ -30,6 +30,7 @@
 #include "catalog/storage_xlog.h"
 #include "commands/tablespace.h"
 #include "executor/executor.h"
+#include "storage/buf/buf_group_ref.h"
 #include "storage/smgr/segment.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/batch_redo.h"
@@ -638,8 +639,18 @@ static void redo_atomic_xlog(XLogReaderState *record)
 static void redo_seghead_extend(XLogReaderState *record)
 {
     RedoBufferInfo redo_buf;
+    RedoBufferTag dataBlockInfo;
 
-    RedoBufferTag dataBlockInfo = redo_buf.blockinfo;
+    if (!XLogRecGetBlockTag(record,
+                            XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID,
+                            &dataBlockInfo.rnode,
+                            &dataBlockInfo.forknum,
+                            &dataBlockInfo.blkno,
+                            &dataBlockInfo.pblk)) {
+        ereport(PANIC,
+                (errmsg("failed to locate segment extend data block with ID %d",
+                        XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID)));
+    }
 
     XLogRedoAction redo_action = XLogReadBufferForRedo(record, XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, &redo_buf);
     if (redo_action == BLK_NEEDS_REDO) {
@@ -658,7 +669,10 @@ static void redo_seghead_extend(XLogReaderState *record)
         bool compress = dataBlockInfo.rnode.opt != 0 && dataBlockInfo.forknum == MAIN_FORKNUM;
         if (compress) {
             SMgrRelation reln = smgropen(dataBlockInfo.rnode, InvalidBackendId);
+            SMgrOpenSpace(reln);
+            SegmentCheck(reln->seg_space != NULL);
             SegUpdatePca(reln, dataBlockInfo.forknum, dataBlockInfo.blkno, seghead);
+            smgrclose(reln);
         }
 
         PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
@@ -863,7 +877,7 @@ static void redo_new_page(XLogReaderState *record)
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
         UnpinBuffer(buf_desc, true);
         buf_state = LockBufHdr(buf_desc);
-        if (BUF_STATE_GET_REFCOUNT(buf_state) > 0) {
+        if (IsBufferRefCountGreaterThanZero(buf_state, buf_desc->buf_id)) {
             UnlockBufHdr(buf_desc, buf_state);
             ereport(WARNING, (errmodule(MOD_SEGMENT_PAGE),
                               errmsg("[COPY_EXTENT] block %u has reference count, skip evict buffer",

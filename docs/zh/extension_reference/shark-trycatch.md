@@ -28,22 +28,67 @@ shark实现了一种与异常处理的类似的错误处理机制，当TRY控制
 
 ## 示例
 
-```
-opengauss=# create table test_3(a int);
-opengauss=# begin try;
-opengauss=# insert into test_3 values(2);
-opengauss=# select 1/0;
+```sql
+openGauss=# create database testd dbcompatibility = 'D';
+CREATE DATABASE
+openGauss=# \c testd
+Non-SSL connection (SSL connection is recommended when requiring high-security)
+You are now connected to database "testd" as user "omm".
+testd=# create extension shark;
+CREATE EXTENSION
+testd=# set xact_abort = off;
+SET
+testd=# create table test_3(a int);
+CREATE TABLE
+testd=# begin try;
+BEGIN TRY
+testd=# insert into test_3 values(2);
+INSERT 0 1
+testd=# select 1/0;
 ERROR:  division by zero
-opengauss=# end try begin catch;
-opengauss=# insert into test_3 values(3);
-opengauss=# select 1/0;
+testd=# end try begin catch;
+END TRY BEGIN CATCH
+testd=# insert into test_3 values(3);
+NOTICE:  current try block is successfully, commands ignored until end of catch block
+testd=# select 1/0;
+NOTICE:  current try block is successfully, commands ignored until end of catch block
+testd=# select * from test_3;
+NOTICE:  current try block is successfully, commands ignored until end of catch block
+testd=# end catch;
+END CATCH
+testd=# select * from test_3;
+ a
+---
+ 2
+(1 row)
+
+testd=# drop table test_3;
+DROP TABLE
+testd=# set xact_abort = on;
+SET
+testd=# create table test_3(a int);
+CREATE TABLE
+testd=# begin try;
+BEGIN TRY
+testd=# insert into test_3 values(2);
+INSERT 0 1
+testd=# select 1/0;
 ERROR:  division by zero
-opengauss=# select * from test_3;
+testd=# end try begin catch;
+END TRY BEGIN CATCH
+testd=# insert into test_3 values(3);
+INSERT 0 1
+testd=# select 1/0;
+ERROR:  division by zero
+testd=# select * from test_3;
 ERROR:  current catch block is failed, commands ignored until end of catch block
-opengauss=# end catch;
-opengauss=# select * from test_3;
+testd=# end catch;
+ROLLBACK
+testd=# select * from test_3;
  a
 ---
 (0 rows)
 
+testd=# drop table test_3;
+DROP TABLE
 ```

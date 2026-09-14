@@ -135,9 +135,17 @@ static void HeapParallelscanStartblockInit(HeapScanDesc scan);
 static BlockNumber HeapParallelscanNextpage(HeapScanDesc scan);
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options);
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf, HeapTuple newtup,
-    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared, char relreplident);
+    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared, char relreplident
+#ifdef ENABLE_NEON
+    , uint16 nchanged_attrs, AttrNumber *changed_attrs
+#endif
+    );
 static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitmapset* key_attrs, Bitmapset* id_attrs,
     bool* satisfies_hot, bool *satisfies_key, bool* satisfies_id, HeapTuple oldtup, HeapTuple newtup, char* page);
+#ifdef ENABLE_NEON
+static uint16 HeapComputeChangedAttrs(Relation relation, HeapTuple oldtup, HeapTuple newtup, char *page,
+    AttrNumber *changed_attrs);
+#endif
 static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool* copy, char *relreplident);
 static void SkipToNewPage(
     HeapScanDesc scan, ScanDirection dir, BlockNumber page, bool* finished, bool* isValidRelationPage);
@@ -2975,6 +2983,9 @@ BulkInsertState GetBulkInsertState(void)
     bistate = (BulkInsertState)palloc(sizeof(BulkInsertStateData));
     bistate->strategy = GetAccessStrategy(BAS_BULKWRITE);
     bistate->current_buf = InvalidBuffer;
+    bistate->next_free = InvalidBlockNumber;
+    bistate->last_free = InvalidBlockNumber;
+    bistate->already_extended_by = 0;
     return bistate;
 }
 
@@ -4154,6 +4165,28 @@ static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId
     }
 }
 
+static int
+heap_multi_insert_pages(HeapTuple *heaptuples, int done, int ntuples, Size saveFreeSpace)
+{
+	size_t		page_avail = BLCKSZ - SizeOfHeapPageHeaderData - saveFreeSpace;
+	int			npages = 1;
+
+	for (int i = done; i < ntuples; i++)
+	{
+		size_t		tup_sz = sizeof(ItemIdData) + MAXALIGN(heaptuples[i]->t_len);
+
+		if (page_avail < tup_sz)
+		{
+			npages++;
+			page_avail = BLCKSZ - SizeOfHeapPageHeaderData - saveFreeSpace;
+		}
+		page_avail -= tup_sz;
+	}
+
+	return npages;
+}
+
+
 /*
  *	heap_multi_insert	- insert multiple tuple into a heap
  *
@@ -4182,6 +4215,9 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
     BlockNumber rel_end_block = InvalidBlockNumber;
     bool need_tuple_data = RelationIsLogicallyLogged(relation);
     bool need_cids = RelationIsAccessibleInLogicalDecoding(relation);
+    int npages = 0;
+    int npagesUsed = 0;
+    bool startingWithEmptyPage = false;
 
     /* 1. heap bcm-based data replication feature is enable
      * 2. caller doesn't forbid the feature
@@ -4295,6 +4331,22 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
                 buffer = RelationGetNewBufferForBulkInsert(relation, heap_tuples[ndone]->t_len, cmpr_size, bistate);
             } else {
                 /*
+                 * Compute number of pages needed to fit the to-be-inserted tuples in
+                 * the worst case.  This will be used to determine how much to extend
+                 * the relation by in RelationGetBufferForTuple(), if needed.  If we
+                 * filled a prior page from scratch, we can just update our last
+                 * computation, but if we started with a partially filled page,
+                 * recompute from scratch, the number of potentially required pages
+                 * can vary due to tuples needing to fit onto the page, page headers
+                 * etc.
+                 */
+                if (ndone == 0 || !startingWithEmptyPage) {
+                    npages = heap_multi_insert_pages(heap_tuples, ndone, ntuples, save_free_space);
+                    npagesUsed = 0;
+                } else {
+                    npagesUsed++;
+                }
+                /*
                  * Find buffer where at least the next tuple will fit.	If the page is
                  * all-visible, this will also pin the requisite visibility map page.
                  */
@@ -4305,10 +4357,12 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
                     bistate,
                     &vmbuffer,
                     NULL,
-                    rel_end_block);
+                    rel_end_block,
+                    npages - npagesUsed);
             }
         }
         page = BufferGetPage(buffer);
+        startingWithEmptyPage = PageGetMaxOffsetNumber(page) == 0;
         (void)heap_page_prepare_for_xid(relation, buffer, xid, false, page_replication);
 
         /* NO EREPORT(ERROR) from here till changes are logged */
@@ -5008,11 +5062,15 @@ l1:
             bool is_null = false;
             char relreplident;
             Relation rel = heap_open(RelationRelationId, AccessShareLock);
-            Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-            Oid tmpRelid = partid_get_parentid(relid);
-            if (OidIsValid(tmpRelid)) {
-                relid = tmpRelid;
+            Oid relid;
+            if (OidIsValid(relation->grandparentId)) {
+                relid = relation->grandparentId;
+            } else if (OidIsValid(relation->parentId)) {
+                relid = relation->parentId;
+            } else {
+                relid = relation->rd_id;
             }
+
             HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
             if (!HeapTupleIsValid(tuple)) {
                 ereport(ERROR,
@@ -5245,6 +5303,10 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     BlockNumber rel_end_block = InvalidBlockNumber;
     char relreplident;
     LockTupleMode mode;
+#ifdef ENABLE_NEON
+    AttrNumber changed_attrs[MaxHeapAttributeNumber];
+    uint16 nchanged_attrs = 0;
+#endif
     Assert(ItemPointerIsValid(otid));
 
     /* Don't allow any write/lock operator in stream. */
@@ -5915,6 +5977,11 @@ l2:
      */
     bool keyChanged = XLogLogicalInfoActive() ? true : !satisfies_id;
     old_key_tuple = ExtractReplicaIdentity(relation, &oldtup, keyChanged, &old_key_copied, &relreplident);
+#ifdef ENABLE_NEON
+    if (RelationIsLogicallyLogged(relation)) {
+        nchanged_attrs = HeapComputeChangedAttrs(relation, &oldtup, heaptup, page, changed_attrs);
+    }
+#endif
 
     newpage = BufferGetPage(newbuf);
     if (newbuf != buffer) {
@@ -6015,7 +6082,12 @@ l2:
             old_key_tuple,
             all_visible_cleared,
             all_visible_cleared_new,
-            relreplident);
+            relreplident
+#ifdef ENABLE_NEON
+            , nchanged_attrs,
+            changed_attrs
+#endif
+            );
 
         if (newbuf != buffer) {
             PageSetLSN(BufferGetPage(newbuf), recptr);
@@ -6241,6 +6313,28 @@ static bool heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum, HeapTuple tup
         return datumIsEqual(value1, value2, att->attbyval, att->attlen);
     }
 }
+
+#ifdef ENABLE_NEON
+static uint16 HeapComputeChangedAttrs(Relation relation, HeapTuple oldtup, HeapTuple newtup, char *page,
+    AttrNumber *changed_attrs)
+{
+    TupleDesc tupdesc = RelationGetDescr(relation);
+    uint16 nchanged_attrs = 0;
+
+    for (AttrNumber attnum = 1; attnum <= tupdesc->natts; attnum++) {
+        Form_pg_attribute attr = &tupdesc->attrs[attnum - 1];
+
+        if (attr->attisdropped) {
+            continue;
+        }
+        if (!heap_tuple_attr_equals(tupdesc, attnum, oldtup, newtup, page)) {
+            changed_attrs[nchanged_attrs++] = attnum;
+        }
+    }
+
+    return nchanged_attrs;
+}
+#endif
 
 /*
  * Check if the old and new tuples represent a HOT-safe update. To be able
@@ -8566,7 +8660,11 @@ XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer heap_bu
  */
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf,
     HeapTuple newtup, HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared,
-    char relreplident)
+    char relreplident
+#ifdef ENABLE_NEON
+    , uint16 nchanged_attrs, AttrNumber *changed_attrs
+#endif
+    )
 {
     xl_heap_update xlrec;
     xl_heap_header xlhdr;
@@ -8625,6 +8723,9 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     }
     if (need_tuple_data) {
         xlrec.flags |= XLH_UPDATE_CONTAINS_NEW_TUPLE;
+#ifdef ENABLE_NEON
+        xlrec.flags |= XLH_UPDATE_CONTAINS_CHANGED_ATTRS;
+#endif
         if (old_key_tuple) {
             if (relreplident == REPLICA_IDENTITY_FULL)
                 xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_TUPLE;
@@ -8671,6 +8772,15 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     XLogRegisterData((char *)&xlrec, useOldXlog ? SizeOfOldHeapUpdate : SizeOfHeapUpdate);
     CommitSeqNo curCSN = InvalidCommitSeqNo;
     LogCSN(&curCSN);
+
+#ifdef ENABLE_NEON
+    if (xlrec.flags & XLH_UPDATE_CONTAINS_CHANGED_ATTRS) {
+        XLogRegisterData((char *)&nchanged_attrs, sizeof(uint16));
+        if (nchanged_attrs > 0) {
+            XLogRegisterData((char *)changed_attrs, sizeof(AttrNumber) * nchanged_attrs);
+        }
+    }
+#endif
 
     /* We need to log a tuple identity */
     if (need_tuple_data && old_key_tuple) {
@@ -8738,11 +8848,15 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
 
     bool is_null = true;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-    Oid tmpRelid = partid_get_parentid(relid);
-    if (OidIsValid(tmpRelid)) {
-        relid = tmpRelid;
+    Oid relid;
+    if (OidIsValid(relation->grandparentId)) {
+        relid = relation->grandparentId;
+    } else if (OidIsValid(relation->parentId)) {
+        relid = relation->parentId;
+    } else {
+        relid = relation->rd_id;
     }
+
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,

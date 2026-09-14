@@ -352,6 +352,7 @@ typedef struct CachedPlanSource {
     Oid* param_types;            /* array of parameter type OIDs, or NULL */
 	char* param_modes;
     int num_params;              /* length of param_types array */
+    int query_string_mblen;
     ParserSetupHook parserSetup; /* alternative parameter spec method */
     void* parserSetupArg;
     int cursor_options;    /* cursor options used for planning */

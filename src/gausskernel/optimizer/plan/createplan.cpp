@@ -98,6 +98,7 @@ static void adjust_scan_targetlist(ResultPath* best_path, Plan* subplan);
 static Plan* create_projection_plan(PlannerInfo* root, ProjectionPath* best_path);
 static ProjectSet* create_project_set_plan(PlannerInfo* root, ProjectSetPath* best_path);
 static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path);
+static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath);
 static Memoize* create_memoize_plan(PlannerInfo *root, MemoizePath *best_path);//, int flags);
 static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path);
 static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -487,6 +488,15 @@ static void scan_func_rescache_recurse(Path *path, FuncRetCacheWalkerContext *wc
 
             break;
         }
+        case T_Sort:
+        {
+            if (nodeTag(path) == T_PREFIX_SORT_PATH) {
+                PrefixSortPath* spath = (PrefixSortPath*)path;
+                scan_func_rescache_recurse(spath->subpath, wcxt);
+            }
+
+            break;
+        }
         case T_Append:
         {
             AppendPath *apath = (AppendPath *)path;
@@ -670,6 +680,14 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_c
             break;
         case T_Material:
             plan = (Plan*)create_material_plan(root, (MaterialPath*)best_path);
+            break;
+        case T_Sort:
+            if (nodeTag(best_path) != T_PREFIX_SORT_PATH) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("create_plan_recurse: unrecognized sort path type: %d", (int)nodeTag(best_path))));
+            }
+            plan = (Plan*)create_prefix_sort_plan(root, (PrefixSortPath*)best_path);
             break;
         case T_Unique:
             plan = create_unique_plan(root, (UniquePath*)best_path);
@@ -1975,6 +1993,28 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
 
     return plan;
 }
+
+/*
+ * create_prefix_sort_plan
+ *      Build a Sort node that consumes input ordered by a leading prefix.
+ */
+static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath)
+{
+    Plan* subplan = create_plan_recurse(root, bestPath->subpath);
+
+    /* Do not carry unused physical columns into the tuplesort. */
+    disuse_physical_tlist(root, subplan, bestPath->subpath);
+
+    Sort* plan = make_sort_from_pathkeys(
+        root, subplan, bestPath->path.pathkeys, bestPath->limitTuples);
+
+    plan->nPresortedCols = bestPath->nPresortedCols;
+    copy_path_costsize(&plan->plan, (Path*)bestPath);
+    copy_mem_info(&plan->mem_info, &bestPath->memInfo);
+
+    return plan;
+}
+
 /*
  * create_memoize_plan
  *      Create a Memoize plan for 'best_path' and (recursively) plans for its
@@ -8067,6 +8107,7 @@ Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumber* sort
     plan->hasUniqueResults = lefttree->hasUniqueResults;
     plan->dop = lefttree->dop;
     node->numCols = numCols;
+    node->nPresortedCols = 0;
     node->sortColIdx = sortColIdx;
     node->sortOperators = sortOperators;
     node->collations = collations;
@@ -10124,6 +10165,24 @@ static bool has_pcr_idx_in_relation(Relation rel)
     return ans;
 }
 
+bool check_ctid_redis_stream(Plan* plan)
+{
+    if (!IsA(plan, Stream)) {
+        return false;
+    }
+
+    ListCell* tlist = NULL;
+    Var *distri_var = NULL;
+    List* distribute_keys = ((Stream*)plan)->distribute_keys;
+    foreach(tlist, distribute_keys) {
+        distri_var = (Var *)lfirst(tlist);
+        if (distri_var->varattno == SelfItemPointerAttributeNumber) {
+            return true;
+        }
+    }
+
+    return false;
+}
 #ifndef ENABLE_MULTIPLE_NODES
 static bool is_partition_autoextend_table(Relation rel)
 {
@@ -10136,7 +10195,7 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         return false;
     }
     bool unsupport_tabletype = false;
-    Index reidx = (Index)linitial_int((List*)linitial(resultRelations));
+    Index reidx = (Index)linitial_int(resultRelations);
     RangeTblEntry *rte = root->simple_rte_array[reidx];
     Relation rel = relation_open(rte->relid, NoLock);
     if (RELATION_IS_GLOBAL_TEMP(rel) || rte->orientation == REL_COL_ORIENTED ||
@@ -10145,13 +10204,40 @@ static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resu
         /* ubtree pcr index not support smp insert */
         (rte->is_ustore && has_pcr_idx_in_relation(rel)) ||
         /* ustore's sub xact id for smp only supported after upgrade committed. */
-        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM && IsSubTransaction()) ||
+        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM) ||
         /* for ledger table, we cannot accumulate total hash from producer threads */
         rel->rd_isblockchain) {
         unsupport_tabletype = true;
     }
     relation_close(rel, NoLock);
     return unsupport_tabletype;
+}
+
+void check_support_smp_dml_scenario(PlannerInfo *root, Path* path, RedistributeContext *redis_ctx)
+{
+    Query* parse = root->parse;
+    List *resultRelations = parse->resultRelations;
+    List *returningLists = parse->returningList;
+    UpsertExpr *upsertClause = parse->upsertClause;
+    bool is_replace = parse->isReplace;
+
+    bool unuse_vec_engine = false;
+    bool unsupport_tabletype = false;
+
+    if (resultRelations != NULL) {
+        unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
+    }
+
+    /* Check if smp dml is supported and if stream redistribute path need to be added. */
+    Index reidx = (Index)linitial_int(root->parse->resultRelations);
+    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
+    optplan_join_path_walker(path, dml_rel, redis_ctx);
+
+    unuse_vec_engine = !u_sess->attr.attr_sql.enable_force_vector_engine &&
+                        u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE;
+
+    root->support_smp_dml_scenario =
+        upsertClause == NULL && returningLists == NIL && unuse_vec_engine && !unsupport_tabletype && !is_replace;
 }
 #endif
 /*
@@ -10188,11 +10274,6 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     bool is_dml_smp = false;
     int dml_dop = OPTPLAN_DEFAULT_DOP;
 #endif
-#ifndef ENABLE_MULTIPLE_NODES
-    bool enable_smp = false;
-
-    bool unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
-#endif
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -10209,16 +10290,14 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     total_size = 0;
 
 #ifndef ENABLE_MULTIPLE_NODES
-    enable_smp = u_sess->attr.attr_sql.enable_force_smp;
+    bool enable_smp = u_sess->attr.attr_sql.enable_force_smp;
 
     /*
      * Modify table only support parallel iud operation.
      * If the subplan already parallelize, add local gather on modifytable node.
 
      */
-    if (u_sess->attr.attr_sql.enable_smp_dml &&
-        (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) &&
-        upsertClause == NULL && returningLists == NIL && !unsupport_tabletype) {
+    if (u_sess->attr.attr_sql.enable_smp_dml && IS_CMDTYPE_DML(operation) && root->support_smp_dml_scenario) {
         if (u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP || enable_smp) {
             if (list_length(subplans) == 1) {
                 Plan* subplan = (Plan*)linitial(subplans);

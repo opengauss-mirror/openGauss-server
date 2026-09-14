@@ -464,10 +464,78 @@ select array_length(array[[1,2,3], [4,5,6]], 1);
 select array_length(array[[1,2,3], [4,5,6]], 2);
 select array_length(array[[1,2,3], [4,5,6]], 3);
 
+-- array_agg(anynonarray)
 select array_agg(unique1) from (select unique1 from tenk1 where unique1 < 15 order by unique1) ss;
 select array_agg(ten) from (select ten from tenk1 where unique1 < 15 order by unique1) ss;
 select array_agg(nullif(ten, 4)) from (select ten from tenk1 where unique1 < 15 order by unique1) ss;
 select array_agg(unique1) from tenk1 where unique1 < -15;
+
+-- array_agg(anyarray)
+select array_agg(ar)
+  from (values ('{1,2}'::int[]), ('{3,4}'::int[])) v(ar);
+select array_agg(distinct ar order by ar desc)
+  from (select array[i / 2] from generate_series(1,10) a(i)) b(ar);
+select array_agg(ar)
+  from (select array_agg(array[i, i+1, i-1])
+        from generate_series(1,2) a(i)) b(ar);
+select array_agg(array[i+1.2, i+1.3, i+1.4]) from generate_series(1,3) g(i);
+select array_agg(array['Hello', i::text]) from generate_series(9,11) g(i);
+select array_agg(array[i, nullif(i, 3), i+1]) from generate_series(1,4) g(i);
+-- errors
+select array_agg('{}'::int[]) from generate_series(1,2);
+select array_agg(null::int[]) from generate_series(1,2);
+select array_agg(ar)
+  from (values ('{1,2}'::int[]), ('{3}'::int[])) v(ar);
+-- array(select array-value ...)
+select array(select array[i,i/2] from generate_series(1,5) i);
+select array(select array['Hello', i::text] from generate_series(9,11) i);
+
+-- dimensionality
+select array_agg(i) from generate_series(1, 2) as i;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i)
+select array_agg(a) from d1;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i),
+      d2 as (select array_agg(a) as a from d1)
+select array_agg(a) from d2;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i),
+      d2 as (select array_agg(a) as a from d1),
+      d3 as (select array_agg(a) as a from d2)
+select array_agg(a) from d3;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i),
+      d2 as (select array_agg(a) as a from d1),
+      d3 as (select array_agg(a) as a from d2),
+      d4 as (select array_agg(a) as a from d3)
+select array_agg(a) from d4;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i),
+      d2 as (select array_agg(a) as a from d1),
+      d3 as (select array_agg(a) as a from d2),
+      d4 as (select array_agg(a) as a from d3),
+      d5 as (select array_agg(a) as a from d4)
+select array_agg(a) from d5;
+with d1 as (select array_agg(i) as a from generate_series(1, 2) as i),
+      d2 as (select array_agg(a) as a from d1),
+      d3 as (select array_agg(a) as a from d2),
+      d4 as (select array_agg(a) as a from d3),
+      d5 as (select array_agg(a) as a from d4),
+      d6 as (select array_agg(a) as a from d5)
+select array_agg(a) from d6;
+
+-- group by aggregate
+select 
+    dept,
+    array_agg(array[name, salary::text] order by name) as member_salary_pairs
+from (values
+    ('develop', 'Alice', 15000),
+    ('develop', 'Bob',   18000),
+    ('product', 'Carol', 16000)
+) as t(dept, name, salary)
+group by dept;
+select 
+    (n % 3) as group_id,
+    array_agg(n order by n) as nums,
+    array_agg(array[n::text, (n*n)::text] order by n) as num_squares
+from generate_series(1, 10) as n
+group by group_id;
 
 select unnest(array[1,2,3]);
 select * from unnest(array[1,2,3]);

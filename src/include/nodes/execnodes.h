@@ -2763,6 +2763,7 @@ typedef struct SortState {
     bool datumSort;       /* Datum sort instead of tuple sort? */
     int64 bound_Done;     /* value of bound we did the sort with */
     void* tuplesortstate; /* private state of tuplesort.c */
+    struct SortSupportData* presortedKeys; /* comparators for the input's ordered prefix */
     int32 local_work_mem; /* work_mem local for this sort */
     int sortMethodId;     /* sort method for explain */
     int spaceTypeId;      /* space type for explain */
@@ -2872,6 +2873,8 @@ typedef struct AggState {
     AggStatePerGroup all_pergroups; /* array of first ->pergroups, than * ->hash_pergroup */
 
     TupleTableSlot* ndp_slot; /* slot for load ndp data */
+    int64 agg_input_rownum; /* per-input ordinal for ROWNUM-in-agg-arg */
+    bool   has_rownum_arg;   /* true if targetlist/qual references ROWNUM */
 } AggState;
 
 /* ----------------

@@ -150,6 +150,7 @@ StreamProducer::StreamProducer(
     initStringInfo(&m_tupleBuffer);
     initStringInfo(&m_tupleBufferWithCheck);
     m_producer_undozone = NULL;
+    m_need_copyback_undozone = false;
 
     /* use the origianl exec_nodes to setup bucketmap for redistribution case */
     if (EXEC_IN_RECURSIVE_MODE(snode) && snode->origin_consumer_nodes != NULL) {
@@ -308,7 +309,7 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
     m_nodeGroup = u_sess->stream_cxt.global_obj;
     registerGroup();
     m_sync_guc_variables = KNL_UTILS_GUC_FIELD(&u_sess->utils_cxt, sync_guc_variables);
-    m_producer_undozone = (StreamUndoZoneData *)palloc(sizeof(StreamUndoZoneData));
+    m_producer_undozone = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
 
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
@@ -1675,25 +1676,12 @@ void StreamProducer::copy_undozone_from_main_worker(StreamUndoZoneData* undozone
  */
 void StreamProducer::setUpStreamTxnEnvironment()
 {
-    /* undo zone */
-    StreamNodeGroup* stream_node_group = u_sess->stream_cxt.global_obj;
-    Assert(stream_node_group != NULL);
-    if (stream_node_group->get_need_copyback_undozone()) {
-        int rc = memcpy_s(&t_thrd.undo_cxt, sizeof(knl_t_undo_context),
-            &m_producer_undozone->undo_cxt, sizeof(knl_t_undo_context));
-        securec_check(rc, "\0", "\0");
-        TransactionState s = GetCurrentTransactionState();
-        rc = memcpy_s(s, sizeof(TransactionStateData),
-            &m_producer_undozone->trans_mgr_ptr, sizeof(TransactionStateData));
-        securec_check(rc, "\0", "\0");
-    }
-
     /*  resotre transaction context. */
     StreamRestoreTxnContext(&m_streamTxnCxt);
 
     /*  transaction id. */
     SetNextTransactionId(m_streamTxnCxt.txnId, false);
-    StreamTxnContextSetTransactionState(&m_streamTxnCxt);
+    StreamTxnContextSetTransactionState(&m_streamTxnCxt, this);
 
     /*  snapshot. */
     copySnapShot();

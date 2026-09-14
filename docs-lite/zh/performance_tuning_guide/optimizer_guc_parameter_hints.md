@@ -17,22 +17,27 @@ set(param value)
 - 目前支持使用Hint设置生效的参数有
     - 布尔类：
 
-        enable\_bitmapscan, enable\_hashagg, enable\_hashjoin, enable\_indexscan, enable\_indexonlyscan, enable\_material, enable\_mergejoin, enable\_nestloop, enable\_index\_nestloop, enable\_seqscan, enable\_sort, enable\_tidscan，partition\_iterator\_elimination，partition\_page\_estimation, var\_eq\_const\_selectivity, enable\_functional\_dependency, enable\_inner\_unique\_opt
+        enable\_bitmapscan, enable\_hashagg, enable\_hashjoin, enable\_indexscan, enable\_indexonlyscan, enable\_material, enable\_mergejoin, enable\_nestloop, enable\_index\_nestloop, enable\_seqscan, enable\_sort, enable\_tidscan，partition\_iterator\_elimination，partition\_page\_estimation, var\_eq\_const\_selectivity, enable\_functional\_dependency, enable\_inner\_unique\_opt, enable\_broadcast, enable\_fast\_query\_shipping, enable\_force\_smp, enable\_imcsscan, enable\_remotegroup, enable\_remotejoin, enable\_remotelimit, enable\_remotesort, enable\_smp\_dml, enable\_sortgroup\_agg, enable\_stream\_operator, enable\_stream\_recursive, enable\_trigger\_shipping
 
     - 整形类：
 
-        query\_dop
+        query\_dop, best\_agg\_plan, effective\_cache\_size
 
     - 浮点类：
 
-        cost\_weight\_index, default\_limit\_rows, seq\_page\_cost, random\_page\_cost, cpu\_tuple\_cost, cpu\_index\_tuple\_cost, cpu\_operator\_cost, effective\_cache\_size
+        cost\_weight\_index, default\_limit\_rows, seq\_page\_cost, random\_page\_cost, cpu\_tuple\_cost, cpu\_index\_tuple\_cost, cpu\_operator\_cost
 
     - 枚举类型：
 
-        try\_vector\_engine\_strategy
+        try\_vector\_engine\_strategy, rewrite\_rule
+
+    - 字符串类型：
+
+        node\_name
 
 >[!NOTE]说明
 >
+>- 部分参数仅在特定部署形态或编译选项下可用。如果当前实例不支持某参数，使用该参数的Hint时会输出参数无法识别的告警，且不会影响查询执行的正确性。
 >- 设置不在白名单中的参数，参数取值不合法，或hint语法错误时，不会影响查询执行的正确性。使用explain\(verbose on\)执行可以看到hint解析错误的报错提示。
 >- GUC参数的hint只在最外层查询生效——子查询内的GUC参数hint不生效。
 >- 视图定义内的GUC参数hint不生效。

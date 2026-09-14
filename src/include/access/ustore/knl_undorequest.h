@@ -84,7 +84,7 @@ void ReportFailedRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRec
 bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr,
     bool isTopTxn, bool isVerify, bool is_async_rollback);
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr, UndoSlotPtr slotPtr,
-    bool nopartial, UndoPersistence plevel, bool is_async_rollback, undo::TransactionSlot *slot);
+bool nopartial, UndoPersistence plevel, bool is_async_rollback, undo::TransactionSlot *slot, bool need_check_rollback);
 void ExecuteUndoActionsPage(UndoRecPtr urp, Relation relation, Buffer buf, TransactionId xid);
 int UHeapUndoActions(URecVector *urecvector, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
     BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid, bool is_sync_rollback);

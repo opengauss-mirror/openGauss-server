@@ -207,6 +207,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
         arg->stop_lsn = backup->stop_lsn;
         arg->checksum_version = backup->checksum_version;
         arg->backup_version = parse_program_version(backup->program_version);
+        arg->encrypt_version = backup->encrypt_version;
         arg->external_prefix = external_prefix;
         arg->hdr_map = &(backup->hdr_map);
         /* By default there are some error */
@@ -391,9 +392,10 @@ pgBackupValidateFiles(void *arg)
                 continue;
         }
 
-        /* no point in trying to open empty file */
-        if (file->write_size == 0)
+        /* Encrypted empty files still carry an authenticated container header. */
+        if (file->write_size == 0 && arguments->encrypt_version == 0) {
             continue;
+        }
 
         if (file->external_dir_num)
         {
@@ -419,7 +421,8 @@ pgBackupValidateFiles(void *arg)
             break;
         }
 
-        if (file->write_size != st.st_size)
+        /* encrypted files carry a container header and a tag per chunk */
+        if (enc_expected_disk_size(file_fullpath, file->write_size) != st.st_size)
         {
             elog(WARNING, "Invalid size of backup file \"%s\" : " INT64_FORMAT ". Expected %lu",
                  file_fullpath, (unsigned long) st.st_size, file->write_size);

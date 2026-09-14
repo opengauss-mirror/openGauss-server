@@ -105,6 +105,8 @@ static void merge_rename(pgBackup *dest_backup,
                          parray *full_externals,
                          parray *parent_chain);
 static void forward_compatibility_check(parray *parent_chain);
+static void CheckMergeSiblings(parray *backups, pgBackup *fullBackup, pgBackup *destBackup);
+static void OrphanDanglingBackups(void);
 
 /*
  * Implementation of MERGE command.
@@ -139,9 +141,9 @@ do_merge(time_t backup_id)
 
     /* Find destination backup */
     dest_backup = find_dest_backup(backups, backup_id);
-
-    if (dest_backup == NULL)
+    if (dest_backup == NULL) {
         elog(ERROR, "Target backup %s was not found", base36enc(backup_id));
+    }
 
     /* It is possible to use FULL backup as target backup for merge.
     * There are two possible cases:
@@ -156,23 +158,21 @@ do_merge(time_t backup_id)
     *   PAGE1_1 MISSING/DELETING <-
     *   FULL1   MERGED/MERGING
     */
-    if (dest_backup->backup_mode == BACKUP_MODE_FULL)
-    {
+    if (dest_backup->backup_mode == BACKUP_MODE_FULL) {
         full_backup = dest_backup;
         dest_backup = NULL;
         elog(INFO, "Merge target backup %s is full backup",
             base36enc(full_backup->start_time));
 
         /* sanity */
-        if (full_backup->status == BACKUP_STATUS_DELETING)
+        if (full_backup->status == BACKUP_STATUS_DELETING) {
             elog(ERROR, "Backup %s has status: %s",
                 base36enc(full_backup->start_time),
                 status2str(full_backup->status));
+        }
 
         dest_backup = check_dest_backup(backups, full_backup);
-    }
-    else
-    {
+    } else {
         /*
         * Legal Case #1:
         *   PAGE2 OK <- target
@@ -204,32 +204,46 @@ do_merge(time_t backup_id)
         */
 
         if (dest_backup->status == BACKUP_STATUS_MERGING ||
-            dest_backup->status == BACKUP_STATUS_DELETING)
+            dest_backup->status == BACKUP_STATUS_DELETING) {
             elog(WARNING, "Rerun unfinished merge for backup %s",
                 base36enc(dest_backup->start_time));
+        }
 
         full_backup = find_full_backup(dest_backup, backups);
     }
 
     /* sanity */
-    if (full_backup == NULL)
+    if (full_backup == NULL) {
         elog(ERROR, "Parent full backup for the given backup %s was not found",
             base36enc(backup_id));
+    }
 
     /* At this point NULL as dest_backup is allowed only in case of full backup
     * having status MERGED */
-    if (dest_backup == NULL && full_backup->status != BACKUP_STATUS_MERGED)
+    if (dest_backup == NULL && full_backup->status != BACKUP_STATUS_MERGED) {
         elog(ERROR, "Cannot run merge for full backup %s",
             base36enc(full_backup->start_time));
+    }
 
     /* sanity */
     if (full_backup->status != BACKUP_STATUS_OK &&
         full_backup->status != BACKUP_STATUS_DONE &&
         /* It is possible that previous merging was interrupted */
         full_backup->status != BACKUP_STATUS_MERGED &&
-        full_backup->status != BACKUP_STATUS_MERGING)
+        full_backup->status != BACKUP_STATUS_MERGING) {
         elog(ERROR, "Backup %s has status: %s",
             base36enc(full_backup->start_time), status2str(full_backup->status));
+    }
+
+    /*
+     * Cumulative incremental backups allow a FULL backup to have several
+     * direct children. In-place merge rewrites the FULL backup, so merging
+     * is only allowed into the newest branch; older sibling branches become
+     * unrestorable and are marked ORPHAN after the merge.
+     */
+    if (dest_backup != NULL) {
+        CheckMergeSiblings(backups, full_backup, dest_backup);
+    }
 
     handle_incr_chains(dest_backup, merge_list);
 
@@ -243,8 +257,12 @@ do_merge(time_t backup_id)
     merge_chain(merge_list, full_backup, dest_backup);
 
     pgBackupValidate(full_backup, NULL);
-    if (full_backup->status == BACKUP_STATUS_CORRUPT)
+    if (full_backup->status == BACKUP_STATUS_CORRUPT) {
         elog(ERROR, "Merging of backup %s failed", base36enc(backup_id));
+    }
+
+    /* sibling branches of the consumed FULL backup are now unrestorable */
+    OrphanDanglingBackups();
 
     /* cleanup */
     parray_walk(backups, pgBackupFree);
@@ -252,6 +270,92 @@ do_merge(time_t backup_id)
     parray_free(merge_list);
 
     elog(INFO, "Merge of backup %s completed", base36enc(backup_id));
+}
+
+/*
+ * With cumulative incremental backups a FULL backup may have several direct
+ * children. Since merge consumes the FULL backup in place, it is only allowed
+ * when dest is the newest among those children: merging an older child would
+ * silently invalidate newer restore points. Older siblings are reported here
+ * and marked ORPHAN by OrphanDanglingBackups() once the merge is done.
+ */
+static void CheckMergeSiblings(parray *backups, pgBackup *fullBackup, pgBackup *destBackup)
+{
+    size_t i;
+
+    for (i = 0; i < parray_num(backups); i++) {
+        pgBackup   *backup = (pgBackup *) parray_get(backups, i);
+        pgBackup   *walker;
+        bool        onDestChain = false;
+
+        if (backup->parent_backup != fullBackup->start_time) {
+            continue;
+        }
+
+        if (backup->status != BACKUP_STATUS_OK &&
+            backup->status != BACKUP_STATUS_DONE) {
+            continue;
+        }
+
+        /* skip ancestors of dest (including dest itself) */
+        for (walker = destBackup; walker != NULL; walker = walker->parent_backup_link) {
+            if (walker->start_time == backup->start_time) {
+                onDestChain = true;
+                break;
+            }
+        }
+        if (onDestChain) {
+            continue;
+        }
+
+        if (backup->start_time > destBackup->start_time) {
+            char *destId = base36enc_dup(destBackup->start_time);
+            char *fullId = base36enc_dup(fullBackup->start_time);
+
+            elog(ERROR, "Cannot merge backup %s into FULL backup %s: "
+                 "newer backup %s also depends on this FULL backup. "
+                 "Merge the newest one instead, or delete it first",
+                 destId, fullId, base36enc(backup->start_time));
+        }
+
+        elog(WARNING, "Backup %s (with descendants) also depends on FULL backup %s "
+             "and will be marked as ORPHAN after the merge",
+             base36enc(backup->start_time), base36enc_dup(fullBackup->start_time));
+    }
+}
+
+/*
+ * Mark as ORPHAN every OK/DONE backup whose parent no longer exists in the
+ * catalog (e.g. sibling branches whose FULL backup was consumed by merge).
+ */
+static void OrphanDanglingBackups(void)
+{
+    parray *backups = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
+    size_t  i;
+
+    for (i = 0; i < parray_num(backups); i++) {
+        pgBackup   *backup = (pgBackup *) parray_get(backups, i);
+        if (backup->parent_backup == INVALID_BACKUP_ID) {
+            continue;
+        }
+
+        if (backup->status != BACKUP_STATUS_OK &&
+            backup->status != BACKUP_STATUS_DONE) {
+            continue;
+        }
+
+        if (find_dest_backup(backups, backup->parent_backup) != NULL) {
+            continue;
+        }
+
+        backup->status = BACKUP_STATUS_ORPHAN;
+        write_backup(backup, true);
+        elog(WARNING, "Backup %s is marked as ORPHAN: its parent %s no longer exists",
+             base36enc_dup(backup->start_time), base36enc(backup->parent_backup));
+    }
+
+    parray_walk(backups, pgBackupFree);
+    parray_free(backups);
 }
 
 static pgBackup* find_dest_backup(parray *backups, time_t backup_id)
@@ -1003,10 +1107,15 @@ static void merge_rename(pgBackup *dest_backup,
     */
     if (dest_backup)
     {
+        char *oldRoot = pgut_strdup(full_backup->root_dir);
+
         elog(LOG, "Rename %s to %s", full_backup->root_dir, dest_backup->root_dir);
         if (rename(full_backup->root_dir, dest_backup->root_dir) == -1)
             elog(ERROR, "Could not rename directory \"%s\" to \"%s\": %s",
                 full_backup->root_dir, dest_backup->root_dir, strerror(errno));
+
+        EncryptBackupRenamed(oldRoot, dest_backup->root_dir);
+        pg_free(oldRoot);
 
         /* update root_dir after rename */
         pg_free(full_backup->root_dir);
@@ -1420,7 +1529,7 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
     securec_check_ss_c(nRet, "\0", "\0");
 
     /* open temp file */
-    out = fopen(to_fullpath_tmp1, PG_BINARY_W);
+    out = EncFopenStaged(to_fullpath_tmp1);
     if (out == NULL)
         elog(ERROR, "Cannot open merge target file \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
@@ -1431,8 +1540,11 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
                       use_bitmap, NULL, InvalidXLogRecPtr, NULL,
                       /* when retrying merge header map cannot be trusted */
                       is_retry ? false : true);
+    if (!EncSealStagedFile(out, to_fullpath_tmp1)) {
+        elog(ERROR, "Cannot seal merge staging file \"%s\"", to_fullpath_tmp1);
+    }
     if (fclose(out) != 0)
-        elog(ERROR, "Cannot close file \"%s\": %s",
+        elog(ERROR, "Cannot close anonymous merge staging file for \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
 
     pg_free(buffer);

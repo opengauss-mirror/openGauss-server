@@ -346,6 +346,8 @@ returns clob
 as $$
     from xml.dom import minidom
     from xml.dom import Node
+    import re
+
     if n["id"] not in GD or not GD[n["id"]]:
         return ""
     domNode = GD[n["id"]]
@@ -359,9 +361,13 @@ as $$
             tarEncoding = domNode.encoding
         cl = domNode.toprettyxml(indent="  ", newl="\n", encoding=tarEncoding)
         cl = cl.decode(encoding=tarEncoding)
-        if domNode.version != None and domNode.version != "1.0":
-            versionInfo = "version=\"" + domNode.version + "\""
-            cl = cl.replace("version=\"1.0\"", versionInfo)
+        if domNode.version != None: 
+            if domNode.version != "1.0":
+                versionInfo = "version=\"" + domNode.version + "\""
+                cl = cl.replace("version=\"1.0\"", versionInfo)
+        else:
+            pattern = r'<\?(?=.*?version).*?\?>'
+            cl = re.sub(pattern, '', cl, flags=re.DOTALL)    
     else:
         cl = domNode.toprettyxml(indent="  ")
     return cl
@@ -371,6 +377,8 @@ create function gms_xmldom.internal_writexml(doc gms_xmldom.DOMDocument, dbencod
 returns clob
 as $$
     from xml.dom import minidom
+    import re
+
     if doc["id"] not in GD or not GD[doc["id"]]:
         return ""
     docNode = GD[doc["id"]]
@@ -382,9 +390,13 @@ as $$
     cl = docNode.toprettyxml(indent="  ", newl="\n", encoding=tarEncoding)
     cl = cl.decode(encoding=tarEncoding)
     #modify version
-    if docNode.version != None and docNode.version != "1.0":
-        versionInfo = "version=\"" + docNode.version + "\""
-        cl = cl.replace("version=\"1.0\"", versionInfo)
+    if docNode.version != None:
+        if docNode.version != "1.0":
+            versionInfo = "version=\"" + docNode.version + "\""
+            cl = cl.replace("version=\"1.0\"", versionInfo)
+    else:
+        pattern = r'<\?(?=.*?version).*?\?>'
+        cl = re.sub(pattern, '', cl, flags=re.DOTALL)
     return cl
 $$ language plpython3u package;
 --gms_xmldom.internal_writexml(DOMNode, number, number, varchar2)
@@ -397,6 +409,8 @@ returns clob
 as $$
     from xml.dom import minidom
     from xml.dom import Node
+    import re
+
     iPflag = int(pflag)
     iIndent = int(indent)
     if iPflag < 0 or iPflag > 72 or iIndent < 0 or iIndent > 12:
@@ -424,9 +438,13 @@ as $$
             tarEncoding = domNode.encoding
         cl = domNode.toprettyxml(indentstr, newl, tarEncoding)
         cl = cl.decode(encoding=tarEncoding)
-        if domNode.version != None and domNode.version != "1.0":
-            versionInfo = "version=\"" + domNode.version + "\""
-            cl = cl.replace("version=\"1.0\"", versionInfo)
+        if domNode.version != None:
+            if domNode.version != "1.0":
+                versionInfo = "version=\"" + domNode.version + "\""
+                cl = cl.replace("version=\"1.0\"", versionInfo)
+        else:
+            pattern = r'<\?(?=.*?version).*?\?>'
+            cl = re.sub(pattern, '', cl, flags=re.DOTALL)
     else:
         cl = domNode.toprettyxml(indentstr, newl)
     return cl
@@ -440,6 +458,8 @@ create function gms_xmldom.internal_writexml(
 returns clob
 as $$
     from xml.dom import minidom
+    import re
+
     iPflag = int(pflag)
     iIndent = int(indent)
     if iPflag < 0 or iPflag > 72 or iIndent < 0 or iIndent > 12:
@@ -465,9 +485,13 @@ as $$
         tarEncoding = docNode.encoding
     cl = docNode.toprettyxml(indentstr, newl, tarEncoding)
     cl = cl.decode(encoding=tarEncoding)
-    if docNode.version != None and docNode.version != "1.0":
-        versionInfo = "version=\"" + docNode.version + "\""
-        cl = cl.replace("version=\"1.0\"", versionInfo)
+    if docNode.version != None:
+        if docNode.version != "1.0":
+            versionInfo = "version=\"" + docNode.version + "\""
+            cl = cl.replace("version=\"1.0\"", versionInfo)
+    else:
+        pattern = r'<\?(?=.*?version).*?\?>'
+        cl = re.sub(pattern, '', cl, flags=re.DOTALL)
     return cl
 $$ language plpython3u package;
 --gms_xmldom.writeToClob(DOMNode, clob)

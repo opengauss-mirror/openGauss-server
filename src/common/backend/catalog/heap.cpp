@@ -2655,6 +2655,10 @@ Node* GetColumnRef(Node* key, bool* isExpr, bool* isFunc)
                     break;
             }
             break;
+        case T_TypeCast:
+            *isExpr = true;
+            result = GetColumnRef(((TypeCast*)key)->arg, isExpr, isFunc);
+            break;
         default:
             break;
     }
@@ -6102,7 +6106,10 @@ void heapDropPartition(Relation relation, Partition part)
         /*
          * Schedule unlinking of the relation's physical files at commit.
          */
-        RelationDropStorage(partRel);
+        if (OidIsValid(RelationGetRelFileNode(partRel))) {
+            RelationDropStorage(partRel);
+        }
+        
         releaseDummyRelation(&partRel);
     }
 

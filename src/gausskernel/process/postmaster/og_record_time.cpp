@@ -263,7 +263,7 @@ const char* OgTimeDataFormatHelper::format(const OgTimeDataVo& vo)
 {
     int ret = snprintf_s(format_str, DEFAULT_FORMAT_LENGTH, DEFAULT_FORMAT_LENGTH - 1,
             "rd:{id=%lld,s=%lld,e=%lld,t=%lld,d=%d,na=%s}", vo.id, vo.begin,
-            vo.end == 0 ? GetCurrentTimestamp(): vo.end, vo.end == 0 ? 0 : vo.total(),
+            vo.end == 0 ? GetCurrentStatTime(): vo.end, vo.end == 0 ? 0 : vo.total(),
             vo.depth, og_record_time_type_str(vo.record_type));
     securec_check_ss(ret, "\0", "\0");
     return format_str;
@@ -328,7 +328,7 @@ void OgRecordOperator::enter(const RecordType& record_type)
         base_record.record_type = record_type;
     }
     if (!base_record.record_type.is_root_type()) {
-        base_record.begin = (int64)GetCurrentTimestamp();
+        base_record.begin = (int64)GetCurrentStatTime();
     }
     og_record_report_start(base_record);
 }
@@ -536,7 +536,7 @@ void OgRecordStat::report_start(const OgTimeDataVo& data_record)
     records_stack.top().depth = increment_depth();
     log_vo("begin", records_stack.top());
     if (data_record.record_type.is_root_type()) {
-        records_stack.top().begin = GetCurrentTimestamp();
+        records_stack.top().begin = GetCurrentStatTime();
     }
 }
 
@@ -558,11 +558,11 @@ void OgRecordStat::report_end(const OgTimeDataVo& record)
     time_vo.record_type = record.record_type;
     if (time_vo.record_type.is_root_type()) {
         // We don't want debug time calc in root type.
-        time_vo.end = GetCurrentTimestamp();
+        time_vo.end = GetCurrentStatTime();
         log_vo("  end", time_vo);
     } else {
         log_vo("  end", time_vo);
-        time_vo.end = GetCurrentTimestamp();
+        time_vo.end = GetCurrentStatTime();
     }
     OgTimeDataVo& parent_time_vo = records_stack.top();
     int64 cost = time_vo.cost();
@@ -579,7 +579,7 @@ void OgRecordStat::report_duplicate(OgTimeDataVo& record)
     Assert(record.record_type.get_record_time_type() == NET_INFO);
     log_vo("duplicate", record);
     if (record.end == 0) {
-        record.end = GetCurrentTimestamp();
+        record.end = GetCurrentStatTime();
     }
     update_record_time(record.record_type, record.cost());
 }
@@ -651,7 +651,7 @@ bool OgRecordStat::start_first_record_opt()
         while (!pre_records_stack.empty()) {
             OgTimeDataVo& vo = pre_records_stack.top();
             pre_records_stack.pop();
-            vo.begin = GetCurrentTimestamp();
+            vo.begin = GetCurrentStatTime();
             vo.other_cost = 0;
             report_start(vo);
         }
@@ -665,7 +665,7 @@ bool OgRecordStat::free_first_record_opt()
     if(already_start()) {
         int64 record_id = first_record_opt.get_record_id();
         while (records_stack.size() > 2 && (records_stack.top().id != record_id)) {
-            records_stack.top().end = GetCurrentTimestamp();
+            records_stack.top().end = GetCurrentStatTime();
             pre_records_stack.push(records_stack.top());
             log_vo("free_head", records_stack.top());
             report_end(records_stack.top());

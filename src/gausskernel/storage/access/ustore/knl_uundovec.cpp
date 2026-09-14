@@ -383,6 +383,22 @@ UndoRecordSize URecVector::LastRecordSize()
     return lastRecordSize;
 }
 
+static void ReleaseUndoRecordBuffer(UndoRecord* urec, Buffer* buffer)
+{
+    if (!BufferIsValid(urec->Buff())) {
+        return;
+    }
+    if (urec->Buff() == *buffer) {
+        *buffer = InvalidBuffer;
+    }
+    if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+        GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
+        LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
+    }
+    ReleaseBuffer(urec->Buff());
+    urec->SetBuff(InvalidBuffer);
+}
+
 static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
 {
     /*
@@ -398,6 +414,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     uint32 saveCritSectionCount = t_thrd.int_cxt.CritSectionCount;
     MemoryContext currentContext = CurrentMemoryContext;
+    volatile bool discardRecord = false;
     PG_TRY();
     {
         t_thrd.undo_cxt.fetchRecord = true;
@@ -411,29 +428,22 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
     {
         MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
         t_thrd.int_cxt.CritSectionCount = saveCritSectionCount;
-        if (BufferIsValid(urec->Buff())) {
-            if (urec->Buff() == *buffer) {
-                *buffer = InvalidBuffer;
-            }
-            if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
-                GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
-                LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
-            }
-            ReleaseBuffer(urec->Buff());
-            urec->SetBuff(InvalidBuffer);
-        }
+        ReleaseUndoRecordBuffer(urec, buffer);
         state = undo::CheckUndoRecordValid(urec->Urp(), false, NULL);
         if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
             t_thrd.undo_cxt.fetchRecord = false;
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             FlushErrorState();
-            return false;
+            discardRecord = true;
         } else {
             (void)MemoryContextSwitchTo(oldContext);
             PG_RE_THROW();
         }
     }
     PG_END_TRY();
+    if (discardRecord) {
+        return false;
+    }
     t_thrd.undo_cxt.fetchRecord = false;
     *buffer = urec->Buff();
     urec->SetBuff(InvalidBuffer);
@@ -575,9 +585,12 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
 
     bool need_alloc_zone_for_stream =
         IsUnderPostmaster && !RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery && StreamThreadAmI();
+    undo::UndoZone *uzone = nullptr;
     if (need_alloc_zone_for_stream) {
-        TransactionId fxid = GetCurrentTransactionId();
+        TransactionId fxid = GetTopTransactionId();
         undo::AllocateUndoZone(fxid);
+        uzone = undo::UndoZoneGroup::GetUndoZone(t_thrd.undo_cxt.zids[upersistence], true);
+        uzone->set_max_xid(fxid);
         pg_memory_barrier();
     }
 

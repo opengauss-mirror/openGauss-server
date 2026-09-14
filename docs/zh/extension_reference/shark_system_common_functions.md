@@ -231,6 +231,9 @@
     示例：
     
     ```
+    set datestyle='Postgres, MDY';
+    SET
+    
     select dateadd(hh,1,timestamp'1997-12-31 23:59:59');
              dateadd          
     --------------------------

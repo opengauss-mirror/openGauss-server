@@ -46,7 +46,7 @@ test: extract_pushdown_or_clause
 test: workload_manager
 
 test: spm_adaptive_gplan
-#test: smp smp_cursor parallel_enable_function
+test: smp smp_cursor parallel_enable_function
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix chr_gbk insert_date_to_date
@@ -421,6 +421,8 @@ test: gpi_hw_partition_vacuum_full_01
 test: gpi_alter_partition
 test: gpi_alter_partition_with_update
 # test: gpi_merge_partitions
+test: gpi_merge_upsert_concurrent
+test: gpi_merge_upsert_subpartition
 
 # global temporary table tests
 test: gtt_stats
@@ -549,7 +551,7 @@ test: vec_prepare_001 vec_prepare_002
 test: vec_prepare_003
 
 #test sort optimize
-test: sort_optimize_row sort_optimize_column sort_optimize_001
+test: sort_optimize_row sort_optimize_column sort_optimize_001 prefix_sort
 #test early free
 test: early_free
 #test sublink enhanced, including pullup-non-correlated-sublink and winmagic
@@ -1068,6 +1070,7 @@ test: row_compression/pg_table_size row_compression/unsupported_feature row_comp
 test: row_compression/twophase
 test: row_compression/row_compress_feature pldebugger_shutdown
 test: row_compression/row_compression_basebackup
+test: row_compression/cfs_upgrade_compatibility
 test: component_view_enhancements single_node_user_mapping
 # reindex concurrently
 #test: reindex_concurrently

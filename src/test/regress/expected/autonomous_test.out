@@ -2271,3 +2271,65 @@ NOTICE:  drop cascades to function public.proc()
 drop function f2();
 drop function f0();
 reset behavior_compat_options;
+--test pkg init with auto trans in parent session
+create table t1(c1 int);
+create or replace function func1() return int as
+    pragma autonomous_transaction;
+begin
+return 1;
+end;
+/
+create or replace function func2() return int as
+f_v int;
+begin
+select count(*) into f_v from t1;
+if f_v = 0 then
+  return f_v;
+end if;
+f_v := func1();
+return 1;
+exception when others then
+raise info 'func2 exception:%',sqlerrm;
+return 10;
+end;
+/
+create or replace package pkg is
+spec_v int:=func2();
+end pkg;
+/
+create or replace package body pkg is
+body_v int;
+end pkg;
+/
+create or replace function func3() return int as
+f_v int;
+begin
+f_v := pkg.spec_v;
+return 1;
+end;
+/
+create or replace procedure proc_main() as
+pragma autonomous_transaction;
+f_v int;
+begin
+f_v := func3();
+insert into t1 values(1);
+exception when others then
+raise info 'proc_main exception:%',sqlerrm;
+end;
+/
+delete  t1;
+alter package pkg compile;
+ERROR:  This operation is not supported.
+call proc_main();
+ proc_main
+-----------
+
+(1 row)
+
+drop procedure proc_main;
+drop function func3();
+drop package pkg;
+drop function func2();
+drop function func1();
+drop table t1;

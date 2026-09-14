@@ -181,32 +181,6 @@ static void doGrantStmt(GrantStmt*stmt, const char* query_string,
                         bool is_top_level);
 
 /* local function declarations */
-static void ProcessUtilitySlow(Node *parsetree,
-                   const char *queryString,
-                   ParamListInfo params,
-                   DestReceiver *dest,
-#ifdef PGXC
-                   bool sent_to_remote,
-#endif /* PGXC */
-                   char *completionTag,
-                   ProcessUtilityContext context,
-                   bool isCTAS);
-static void ExecDropStmt(DropStmt *parse_tree, const char *query_string,
-#ifdef PGXC
-                        bool sent_to_remote,
-#endif /* PGXC */
-                        bool is_top_level);
-static ObjectAddress doRenameStmt(RenameStmt*parse_tree, const char* query_string, 
-#ifdef PGXC
-                        bool sent_to_remote,
-#endif /* PGXC */
-                        bool is_top_level); 
-static void doGrantStmt(GrantStmt*stmt, const char* query_string, 
-#ifdef PGXC
-                        bool sent_to_remote,
-#endif /* PGXC */
-                        bool is_top_level);
-
 static RemoteQueryExecType ExecUtilityFindNodes(ObjectType object_type, Oid rel_id, bool* is_temp);
 static RemoteQueryExecType exec_utility_find_nodes_relkind(Oid rel_id, bool* is_temp);
 static RemoteQueryExecType get_nodes_4_comment_utility(CommentStmt* stmt, bool* is_temp, ExecNodes** exec_nodes);
@@ -2424,6 +2398,62 @@ void ReindexCommand(ReindexStmt* stmt, bool is_top_level)
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized object type: %d", (int)stmt->kind)));
         } break;
     }
+}
+
+static void ExecReindexStmt(ReindexStmt* stmt, const char* queryString,
+#ifdef PGXC
+    bool sent_to_remote,
+#endif
+    bool isTopLevel)
+{
+    RemoteQueryExecType exec_type;
+    bool isTemp = false;
+
+    if (stmt->concurrent) {
+        PreventTransactionChain(isTopLevel, "REINDEX CONCURRENTLY");
+    }
+
+    pgstat_set_io_state(IOSTATE_WRITE);
+#ifdef PGXC
+    if (IS_PGXC_COORDINATOR) {
+        char* first_exec_node = find_first_exec_cn();
+        bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+        if (stmt->relation) {
+            Oid rel_id = RangeVarGetRelid(stmt->relation, AccessShareLock, false);
+            if (OidIsValid(rel_id)) {
+                exec_type = ExecUtilityFindNodes(stmt->kind, rel_id, &isTemp);
+                UnlockRelationOid(rel_id, AccessShareLock);
+            } else {
+                exec_type = EXEC_ON_NONE;
+            }
+        } else {
+            exec_type = EXEC_ON_ALL_NODES;
+        }
+
+        queryString = ConstructMesageWithMemInfo(queryString, stmt->memUsage);
+        if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node &&
+            (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_COORDS)) {
+            ExecUtilityStmtOnNodes_ParallelDDLMode(queryString, NULL, sent_to_remote,
+                stmt->kind == OBJECT_DATABASE, EXEC_ON_COORDS, false, first_exec_node, (Node*)stmt);
+        }
+
+        ReindexCommand(stmt, isTopLevel);
+
+        if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node &&
+            (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_DATANODES)) {
+            ExecUtilityStmtOnNodes_ParallelDDLMode(queryString, NULL, sent_to_remote,
+                stmt->kind == OBJECT_DATABASE, EXEC_ON_DATANODES, false, first_exec_node, (Node*)stmt);
+        } else {
+            ExecUtilityStmtOnNodes(queryString, NULL, sent_to_remote,
+                stmt->kind == OBJECT_DATABASE, exec_type, false, (Node*)stmt);
+        }
+    } else {
+        ReindexCommand(stmt, isTopLevel);
+    }
+#else
+    ReindexCommand(stmt, isTopLevel);
+#endif
 }
 
 /* Called by standard_ProcessUtility() for the cases TRANS_STMT_BEGIN and TRANS_STMT_START */
@@ -4993,69 +5023,19 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
         }
         case T_ReindexStmt: {
             ReindexStmt* stmt = (ReindexStmt*)parse_tree;
-            RemoteQueryExecType exec_type;
-            bool is_temp = false;
-
-            /* use for reindex concurrent */
-            if(stmt->concurrent)
-                PreventTransactionChain(is_top_level,"REINDEX CONCURRENTLY");
-                
-            pgstat_set_io_state(IOSTATE_WRITE);
+            if (stmt->is_alter_index_rebuild) {
+                ProcessUtilitySlow(parse_tree, query_string, params, dest,
 #ifdef PGXC
-            if (IS_PGXC_COORDINATOR) {
-                char* first_exec_node = find_first_exec_cn();
-                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
-
-                if (stmt->relation) {
-                    Oid rel_id = InvalidOid;
-                    rel_id = RangeVarGetRelid(stmt->relation, AccessShareLock, false);
-                    if (OidIsValid(rel_id)) {
-                        exec_type = ExecUtilityFindNodes(stmt->kind, rel_id, &is_temp);
-                        UnlockRelationOid(rel_id, AccessShareLock);
-                    } else
-                        exec_type = EXEC_ON_NONE;
-                } else
-                    exec_type = EXEC_ON_ALL_NODES;
-
-                query_string = ConstructMesageWithMemInfo(query_string, stmt->memUsage);
-                /*
-                 * If I am the main execute CN but not CCN,
-                 * Notify the CCN to create firstly, and then notify other CNs except me.
-                 */
-                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node &&
-                    (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_COORDS)) {
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(query_string,
-                        NULL,
-                        sent_to_remote,
-                        stmt->kind == OBJECT_DATABASE,
-                        EXEC_ON_COORDS,
-                        false,
-                        first_exec_node,
-                        (Node*)stmt);
-                }
-
-                ReindexCommand(stmt, is_top_level);
-
-                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node &&
-                    (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_DATANODES)) {
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(query_string,
-                        NULL,
-                        sent_to_remote,
-                        stmt->kind == OBJECT_DATABASE,
-                        EXEC_ON_DATANODES,
-                        false,
-                        first_exec_node,
-                        (Node*)stmt);
-                } else {
-                    ExecUtilityStmtOnNodes(
-                        query_string, NULL, sent_to_remote, stmt->kind == OBJECT_DATABASE, exec_type, false, (Node*)stmt);
-                }
-            } else {
-                ReindexCommand(stmt, is_top_level);
-            }
-#else
-        ReindexCommand(stmt, is_top_level);
+                    sent_to_remote,
 #endif
+                    completion_tag, context, isCTAS);
+            } else {
+                ExecReindexStmt(stmt, query_string,
+#ifdef PGXC
+                    sent_to_remote,
+#endif
+                    is_top_level);
+            }
         } break;
 
 #ifdef PGXC
@@ -5327,6 +5307,26 @@ ProcessUtilitySlow(Node *parse_tree,
 #endif
             } break;
 
+            case T_ReindexStmt: {
+                ReindexStmt* stmt = (ReindexStmt*)parse_tree;
+
+                if (!stmt->is_alter_index_rebuild)
+                    elog(ERROR, "unexpected REINDEX statement in ProcessUtilitySlow");
+
+                if ((stmt->kind != OBJECT_INDEX && stmt->kind != OBJECT_INDEX_PARTITION) ||
+                    stmt->relation == NULL)
+                    elog(ERROR, "unsupported ALTER INDEX REBUILD target");
+
+                address.classId = RelationRelationId;
+                address.objectId = RangeVarGetRelid(stmt->relation, NoLock, false);
+                address.objectSubId = 0;
+                ExecReindexStmt(stmt, query_string,
+#ifdef PGXC
+                    sent_to_remote,
+#endif
+                    is_top_level);
+            } break;
+
             case T_AlterTableStmt: {
                 AlterTableStmt* atstmt = (AlterTableStmt*)parse_tree;
                 LOCKMODE lockmode;
@@ -5531,9 +5531,10 @@ ProcessUtilitySlow(Node *parse_tree,
                 break;
  
             case T_AlterExtensionStmt:
-#ifdef PGXC
-                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
-#endif /* PGXC */
+#ifdef ENABLE_MULTIPLE_NODES
+                if (g_instance.role != VSINGLENODE)
+                    FEATURE_NOT_PUBLIC_ERROR("ALTER EXTENSION is not supported in multiple-node mode.");
+#endif
                 address = ExecAlterExtensionStmt((AlterExtensionStmt*)parse_tree);
 #ifdef PGXC
                 if (IS_PGXC_COORDINATOR)
@@ -5543,9 +5544,10 @@ ProcessUtilitySlow(Node *parse_tree,
 
  
             case T_AlterExtensionContentsStmt:
-#ifdef PGXC
-                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
-#endif /* PGXC */
+#ifdef ENABLE_MULTIPLE_NODES
+                if (g_instance.role != VSINGLENODE)
+                    FEATURE_NOT_PUBLIC_ERROR("ALTER EXTENSION is not supported in multiple-node mode.");
+#endif
                 address = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parse_tree, NULL);
 
 #ifdef PGXC
@@ -9628,7 +9630,10 @@ const char* CreateCommandTag(Node* parse_tree)
 #endif
 
         case T_ReindexStmt:
-            tag = "REINDEX";
+            /* ALTER INDEX ... REBUILD is represented by ReindexStmt, but
+             * must retain the ALTER INDEX command tag so DDL event triggers
+             * and logical DDL deparse can process it. */
+            tag = ((ReindexStmt*)parse_tree)->is_alter_index_rebuild ? "ALTER INDEX" : "REINDEX";
             break;
 
         case T_CreateConversionStmt:

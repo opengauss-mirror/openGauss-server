@@ -442,7 +442,7 @@ openGauss=# SELECT ARRAY[1,2,3]::numeric[]::vector;
 ```
 
 >[!NOTE]说明
-只有当注明转换向量类型维度时，如`ARRAY[1,2,3]::vector(3)`，会在转换时对前置类型进行维度效验。
+只有当注明转换向量类型维度时，如`ARRAY[1,2,3]::vector(3)`，会在转换时对前置类型进行维度校验。
 
 #### Vector 转 Int Array
 

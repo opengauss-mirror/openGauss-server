@@ -219,6 +219,15 @@ drop table if exists book;
 NOTICE:  table "book" does not exist, skipping
 CREATE TABLE book
 (
+    bookId int NOT NULL PRIMARY KEY IDENTITY(0,-1),  -- should success
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
     bookId tinyint NOT NULL PRIMARY KEY IDENTITY(255,256), 
     bookname NVARCHAR(50), 
     author NVARCHAR(50)
@@ -265,7 +274,7 @@ ERROR:  Identity column 'bookid' data type invalid.
 CREATE TABLE book(id serial, bookId int identity default 5, bookname char(20));
 NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq" for serial column "book.id"
 NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
-ERROR:  multiple default values specified for column "bookid" of table "book"
+ERROR:  both default and identity specified for column "bookid" of table "book"
 LINE 1: CREATE TABLE book(id serial, bookId int identity default 5, ...
                                                          ^
 CREATE TABLE t_identity(id serial, col int identity(5,10), col2 text)

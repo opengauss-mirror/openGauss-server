@@ -23,6 +23,9 @@
 /* GUC parameters */
 #define DEFAULT_CURSOR_TUPLE_FRACTION 0.1
 
+#define IS_CMDTYPE_DML(commaandType) (commaandType == CMD_UPDATE || commaandType == CMD_DELETE || \
+    commaandType == CMD_MERGE || commaandType == CMD_INSERT)
+
 typedef enum { OP_HASHJOIN, OP_HASHAGG, OP_SORT, OP_MATERIAL } OpType;
 
 typedef enum AggOrientation {
@@ -123,6 +126,7 @@ extern Node* find_qualify_equal_class(PlannerInfo* root, Node* expr, List* targe
 extern List* confirm_distribute_key(PlannerInfo* root, Plan* plan, List* distribute_keys);
 extern bool check_dsitribute_key_in_targetlist(PlannerInfo* root, List* distribute_keys, List* targetlist);
 extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type, int newcol = 0);
+
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,

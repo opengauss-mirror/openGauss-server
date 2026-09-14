@@ -251,6 +251,9 @@ static inline bool fast_bind_text_input(Oid ptype, char* pstring, Datum* pval)
         case TIMESTAMPOID:
             *pval = input_timestamp_in(pstring, InvalidOid, -1, false);
             return true;
+        case VARCHAROID:
+            *pval = (Datum)varchar_input(pstring, strlen(pstring), -1);
+            return true;
         default:
             return false;
     }
@@ -4934,6 +4937,11 @@ void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, Par
         (*params)->uParamInfo = DEFUALT_INFO;
         (*params)->numParams = numParams;
         (*params)->params_lazy_bind = false;
+        for (int i = 0; i < numParams; i++) {
+            (*params)->params[i].m_cached_finfo = NULL;
+            (*params)->params[i].m_cached_typinput = InvalidOid;
+            (*params)->params[i].m_cached_typioparam = InvalidOid;
+        }
     }
 
     MemoryContextSwitchTo(valueCtx);
@@ -5018,15 +5026,53 @@ void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, Par
                 pstring = pg_client_to_server(pbuf.data, plength);
             }
 
+            Datum pval_out = 0;
+            ParamExternData* prm = &((*params)->params[paramno]);
 #ifndef ENABLE_MULTIPLE_NODES
             if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
-                pval = bind_text_input_call(ptype, pstring);
+                if (pstring == NULL) {
+                    pval_out = (Datum)0;
+                } else if (fast_bind_text_input(ptype, pstring, &pval_out)) {
+                    /* fast path, nothing to do */
+                } else {
+                    Oid typinput;
+                    Oid typioparam;
+                    if (prm->ptype == ptype && prm->m_cached_typinput != InvalidOid &&
+                        prm->m_cached_typioparam != InvalidOid) {
+                        /* ptype unchanged and cache available: reuse cached values */
+                        typinput = prm->m_cached_typinput;
+                        typioparam = prm->m_cached_typioparam;
+                    } else {
+                        getTypeInputInfo(ptype, &typinput, &typioparam);
+                        prm->m_cached_typinput = typinput;
+                        prm->m_cached_typioparam = typioparam;
+                    }
+                    pval_out = OidInputFunctionCallCache(typinput, pstring, typioparam, -1, prm->m_cached_finfo);
+                }
             } else {
-                pval = (Datum)0;
+                pval_out = (Datum)0;
             }
 #else
-            pval = bind_text_input_call(ptype, pstring);
+            if (pstring == NULL) {
+                pval_out = (Datum)0;
+            } else if (fast_bind_text_input(ptype, pstring, &pval_out)) {
+                /* fast path, nothing to do */
+            } else {
+                Oid typinput;
+                Oid typioparam;
+                if (prm->ptype == ptype && prm->m_cached_finfo != NULL) {
+                    /* ptype unchanged and cache available: reuse cached values */
+                    typinput = prm->m_cached_typinput;
+                    typioparam = prm->m_cached_typioparam;
+                } else {
+                    getTypeInputInfo(ptype, &typinput, &typioparam);
+                    prm->m_cached_typinput = typinput;
+                    prm->m_cached_typioparam = typioparam;
+                }
+                pval_out = OidInputFunctionCallCache(typinput, pstring, typioparam, -1, prm->m_cached_finfo);
+            }
 #endif
+            pval = pval_out;
             /* Free result of encoding conversion, if any */
             if (pstring != NULL && pstring != pbuf.data) {
                 pfree(pstring);
@@ -5179,7 +5225,7 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
     t_thrd.postgres_cxt.cur_command_tag = transform_node_tag(psrc->raw_parse_tree);
 
-    pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+    pgstat_report_activity(STATE_RUNNING, psrc->query_string, psrc->query_string_mblen);
     instr_stmt_report_start_time();
 
     set_ps_display("BIND", false);
@@ -8436,6 +8482,8 @@ void deal_fronted_lost()
 
     if (IS_THREAD_POOL_WORKER) {
         (void)gs_signal_block_sigusr2();
+        /* for the corner case: got a unexpected X/EOF in a xact */
+        LWLockReleaseAll();
         t_thrd.threadpool_cxt.worker->CleanUpSession(false);
         (void)gs_signal_unblock_sigusr2();
         return;
@@ -9517,6 +9565,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 set_ps_display("idle in transaction", false);
                 pgstat_report_activity(STATE_IDLEINTRANSACTION, NULL);
             } else {
+                if (notifyInterruptPending) {
+                    ProcessNotifyInterrupt();
+                }
                 ProcessCompletedNotifies();
                 pgstat_report_stat(false);
 
@@ -11731,13 +11782,9 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     portal = CreatePortal("", true, true);
 
     MemoryContext oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
-    const char* saved_stmt_name = NULL;
     const char* cur_stmt_name = NULL;
-    if (ENABLE_CN_GPC) {
-        saved_stmt_name = (stmt_name[0] != '\0') ? pstrdup(stmt_name) : NULL;
-        cur_stmt_name = psrc->gpc.status.IsPrivatePlan() ? psrc->stmt_name : saved_stmt_name;
-    } else {
-        cur_stmt_name = psrc->stmt_name;
+    if (stmt_name[0] != '\0') {
+        cur_stmt_name = pstrdup(stmt_name);
     }
     (void)MemoryContextSwitchTo(oldContext);
 

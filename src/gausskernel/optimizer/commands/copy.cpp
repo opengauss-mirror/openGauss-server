@@ -113,6 +113,8 @@
 #include "parser/parse_coerce.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_type.h"
+#include "port/pg_bitutils.h"
+#include "port/simd.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/ts_store_insert.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -317,6 +319,7 @@ static void RemoteExportFlushData(CopyState cstate);
 
 static bool CopyReadLine(CopyState cstate);
 static bool CopyReadLineText(CopyState cstate);
+static bool CopyReadLineTextScalar(CopyState cstate);
 static void bulkload_set_readattrs_func(CopyState cstate);
 static void bulkload_init_time_format(CopyState cstate);
 static Datum CopyReadBinaryAttribute(
@@ -2835,6 +2838,12 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     /* init default CopyGetData function */
     cstate->copyGetDataFunc = CopyGetDataDefault;
     cstate->readlineFunc = CopyReadLineText;
+#ifndef USE_NO_SIMD
+    /* SIMD line scanning is the default on architectures that provide it. */
+    cstate->simd_enabled = true;
+#else
+    cstate->simd_enabled = false;
+#endif
     /* set attributes reading functions */
     bulkload_set_readattrs_func(cstate);
     /* parse time format specified by user */
@@ -3390,7 +3399,7 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
                     * progress.
                     */
                     PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
-                                                 ++processed);
+                                              ++processed);
                 }
 
                 scan_handler_tbl_endscan(scandesc);
@@ -4023,15 +4032,10 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
 
     /* step 1: open PARTITION relation */
     if (isPartitional) {
-        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
-            estate->es_query_cxt,
-            resultRelationDesc,
-            bulk->partOid,
-            RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
-                                                           GetCurrentPartitionNo(bulk->partOid),
-            &heaprel,
-            &partition,
-            RowExclusiveLock);
+        int partitionNo = RelationIsSubPartitioned(resultRelationDesc) ? GetCurrentSubPartitionNo(bulk->partOid) :
+                                                                        GetCurrentPartitionNo(bulk->partOid);
+        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
+            resultRelationDesc, &bulk->partOid, partitionNo, &heaprel, &partition, RowExclusiveLock);
         if (!res) {
             return;
         }
@@ -4585,9 +4589,7 @@ uint64 CopyFrom(CopyState cstate)
         bool is_EOF = false;
         bool has_hash = false;
         uint64 res_hash = 0;
-
-
-    retry_copy:
+        volatile bool retryCurrentRow = false;
 
         CHECK_FOR_INTERRUPTS();
 
@@ -4616,7 +4618,7 @@ uint64 CopyFrom(CopyState cstate)
             {
                 if (TrySaveImportError(cstate)) {
                     resetPerTupCxt = true;
-                    goto retry_copy;
+                    retryCurrentRow = true;
                 } else {
                     ereport(LOG,
                         (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("An error in Copy From cannot be catched.")));
@@ -4625,6 +4627,9 @@ uint64 CopyFrom(CopyState cstate)
             }
 
             PG_END_TRY();
+            if (retryCurrentRow) {
+                continue;
+            }
 #endif
             if (unlikely(is_EOF))
                 break;
@@ -4640,7 +4645,7 @@ uint64 CopyFrom(CopyState cstate)
                     {
                         if (TrySaveImportError(cstate)) {
                             resetPerTupCxt = true;
-                            goto retry_copy;
+                            retryCurrentRow = true;
                         } else {
                             ereport(LOG,
                                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4650,15 +4655,23 @@ uint64 CopyFrom(CopyState cstate)
                     }
 
                     PG_END_TRY();
-
-                    if (!is_EOF) {
-                        if (cstate->rel->rd_att->constr)
-                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-
-                        ++processed;
-                    } else {
+                    if (retryCurrentRow) {
                         break;
                     }
+
+                    if (is_EOF) {
+                        break;
+                    }
+
+                    if (cstate->rel->rd_att->constr) {
+                        CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                    }
+
+                    PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                              ++processed);
+                }
+                if (retryCurrentRow) {
+                    continue;
                 }
 
                 // we will reset and free all the used memory after inserting,
@@ -4674,7 +4687,10 @@ uint64 CopyFrom(CopyState cstate)
                      * 1. tuple numbers ( <= maxValuesCount );
                      * 2. memroy batchRowsPtr is using;
                      */
-                    for (int i = 0; i < maxValuesCount; ++i) {
+                    int i;
+                    Size tuple_size;
+
+                    for (i = 0; i < maxValuesCount; ++i) {
                         PG_TRY();
                         {
                             is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -4684,7 +4700,7 @@ uint64 CopyFrom(CopyState cstate)
                         {
                             if (TrySaveImportError(cstate)) {
                                 resetPerTupCxt = true;
-                                goto ctore_non_partition_retry_copy;
+                                retryCurrentRow = true;
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4694,23 +4710,30 @@ uint64 CopyFrom(CopyState cstate)
                         }
 
                         PG_END_TRY();
+                        if (retryCurrentRow) {
+                            break;
+                        }
 
-                        if (!is_EOF) {
-                            if (cstate->rel->rd_att->constr)
-                                CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-
-                            Size tuple_size = batchRowsPtr->calculate_tuple_size(tupDesc, values, nulls);
-                            if ((BULKLOAD_MAX_MEMSIZE - batchRowsPtr->m_using_blocks_total_rawsize) < tuple_size) {
-                                cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
-                                batchRowsPtr->reset(true);
-                                i = 0;
-                            }
-
-                            ++processed;
-                            if (batchRowsPtr->append_one_tuple(values, nulls, tupDesc))
-                                break;
-                        } else {
+                        if (is_EOF) {
                             cstoreInsert->SetEndFlag();
+                            break;
+                        }
+
+                        if (cstate->rel->rd_att->constr) {
+                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                        }
+
+                        tuple_size = batchRowsPtr->calculate_tuple_size(tupDesc, values, nulls);
+                        if ((BULKLOAD_MAX_MEMSIZE - batchRowsPtr->m_using_blocks_total_rawsize) < tuple_size) {
+                            cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
+                            batchRowsPtr->reset(true);
+                            i = 0; /* next bacth */
+                        }
+
+                        PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                                  ++processed);
+
+                        if (batchRowsPtr->append_one_tuple(values, nulls, tupDesc)) {
                             break;
                         }
                     }
@@ -4719,8 +4742,6 @@ uint64 CopyFrom(CopyState cstate)
                     // so make resetPerTupCxt true.
                     // reset batchRowsPtr at the start of new loop.
                     //
-                    ctore_non_partition_retry_copy:
-
                     cstoreInsert->BatchInsert(batchRowsPtr, hi_options);
                     resetPerTupCxt = true;
                     if (cstoreInsert->IsEnd())
@@ -4728,8 +4749,9 @@ uint64 CopyFrom(CopyState cstate)
 
                     continue;
                 } else {
+                    int i;
                     bool endFlag = false;
-                    for (int i = 0; i < maxValuesCount; ++i) {
+                    for (i = 0; i < maxValuesCount; ++i) {
                         PG_TRY();
                         {
                             is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -4739,7 +4761,7 @@ uint64 CopyFrom(CopyState cstate)
                         {
                             if (TrySaveImportError(cstate)) {
                                 resetPerTupCxt = true;
-                                goto retry_copy;
+                                retryCurrentRow = true;
                             } else {
                                 ereport(LOG,
                                     (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4749,17 +4771,25 @@ uint64 CopyFrom(CopyState cstate)
                         }
 
                         PG_END_TRY();
+                        if (retryCurrentRow) {
+                            break;
+                        }
 
-                        if (!is_EOF) {
-                            if (cstate->rel->rd_att->constr)
-                                CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
-                            cstorePartitionInsert->BatchInsert(values, nulls, hi_options);
-                            ++processed;
-                        } else {
+                        if (is_EOF) {
                             endFlag = true;
                             cstorePartitionInsert->EndBatchInsert();
                             break;
                         }
+
+                        if (cstate->rel->rd_att->constr) {
+                            CStoreCopyConstraintsCheck(resultRelInfo, values, nulls, estate);
+                        }
+                        cstorePartitionInsert->BatchInsert(values, nulls, hi_options);
+                        PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
+                                                  ++processed);
+                    }
+                    if (retryCurrentRow) {
+                        continue;
                     }
 
                     resetPerTupCxt = true;
@@ -4783,7 +4813,7 @@ uint64 CopyFrom(CopyState cstate)
                     {
                         if(TrySaveImportError(cstate)) {
                             resetPerTupCxt = true;
-                            goto retry_copy;
+                            retryCurrentRow = true;
                         } else {
                             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                                     errmsg("An error in Copy From cannot be catched.")));
@@ -4792,6 +4822,9 @@ uint64 CopyFrom(CopyState cstate)
                     }
 
                     PG_END_TRY();
+                    if (retryCurrentRow) {
+                        break;
+                    }
                     if (!is_EOF) {
                         tsstoreInsert->batch_insert(values, nulls, hi_options, false);
                     } else {
@@ -4799,6 +4832,9 @@ uint64 CopyFrom(CopyState cstate)
                         tsstoreInsert->end_batch_insert();
                         break;
                     }
+                }
+                if (retryCurrentRow) {
+                    continue;
                 }
                 resetPerTupCxt = true;
                 if (true == endFlag) {
@@ -4852,7 +4888,7 @@ uint64 CopyFrom(CopyState cstate)
                             }
                         }
                         resetPerTupCxt = true;
-                        goto retry_copy;
+                        retryCurrentRow = true;
                     } else {
                         ereport(LOG,
                             (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4862,10 +4898,14 @@ uint64 CopyFrom(CopyState cstate)
                 }
 
                 PG_END_TRY();
+                if (retryCurrentRow) {
+                    continue;
+                }
 
                 if (is_EOF) {
                     break;
                 }
+
             }
         }
 
@@ -4988,7 +5028,7 @@ uint64 CopyFrom(CopyState cstate)
                 if (slot1 != NULL) {
                     /* count only tuples not suppressed by FDW. */
                     PgStatProgressUpdateParam(PROGRESS_COPY_TUPLES_PROCESSED,
-                                                 ++processed);
+                                              ++processed);
                 }
             } else if (!skip_tuple) {
                 /*
@@ -5793,6 +5833,8 @@ void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
                 bucketId, NULL, NULL);
+            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, (HeapTuple)bufferedTuples[i],
+                recheckIndexes);
             list_free(recheckIndexes);
         }
     } else if (resultRelInfo->ri_TrigDesc != NULL && resultRelInfo->ri_TrigDesc->trig_insert_after_row) {
@@ -7239,10 +7281,103 @@ retry:
     return result;
 }
 
+static inline bool CopyCanCheckEndOfCopy(CopyState cstate)
+{
+    return !cstate->is_useeof && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
+        cstate->copy_dest != COPY_FILE;
+}
+
+#ifndef USE_NO_SIMD
+/*
+ * Scan chunks that cannot affect line parsing and stop at the first byte that
+ * needs the scalar state machine.  Once a non-EOL special byte is seen, the
+ * command stays on the scalar path to avoid penalizing escape-heavy input.
+ */
+template <bool csv_mode>
+static inline FORCE_INLINE bool CopyReadLineTextSIMDHelper(
+    CopyState cstate, bool* hit_eof, int* raw_buf_ptr_out)
+{
+    char* copyRawBuf = cstate->raw_buf;
+    int rawBufPtr = cstate->raw_buf_index;
+    int copyBufLen = cstate->raw_buf_len;
+    const Vector8 nl_vec = vector8_broadcast('\n');
+    const Vector8 cr_vec = vector8_broadcast('\r');
+    const bool checkHighbit = cstate->encoding_embeds_ascii || cstate->file_encoding == PG_GBK ||
+        cstate->file_encoding == PG_GB18030;
+    bool result = false;
+
+    for (;;) {
+        Vector8 chunk;
+        Vector8 match;
+        uint32 mask;
+
+        if (copyBufLen - rawBufPtr < (int)sizeof(Vector8)) {
+            if (rawBufPtr > cstate->raw_buf_index) {
+                CopyAppendLineData(
+                    cstate, cstate->raw_buf + cstate->raw_buf_index, rawBufPtr - cstate->raw_buf_index);
+                cstate->raw_buf_index = rawBufPtr;
+            }
+
+            if (!CopyLoadRawBuf(cstate)) {
+                *hit_eof = true;
+            }
+            rawBufPtr = 0;
+            copyBufLen = cstate->raw_buf_len;
+
+            if (copyBufLen <= 0) {
+                result = true;
+                break;
+            }
+        }
+
+        if (copyBufLen - rawBufPtr < (int)sizeof(Vector8)) {
+            break;
+        }
+
+        vector8_load(&chunk, (const uint8*)&copyRawBuf[rawBufPtr]);
+        match = vector8_eq(chunk, nl_vec);
+        match = vector8_or(match, vector8_eq(chunk, cr_vec));
+        if (csv_mode) {
+            const char quote = cstate->quote[0];
+            const char escape = cstate->escape[0];
+
+            match = vector8_or(match, vector8_eq(chunk, vector8_broadcast(quote)));
+            if (quote != escape)
+                match = vector8_or(match, vector8_eq(chunk, vector8_broadcast(escape)));
+            if (CopyCanCheckEndOfCopy(cstate))
+                match = vector8_or(match, vector8_eq(chunk, vector8_broadcast('\\')));
+        } else {
+            match = vector8_or(match, vector8_eq(chunk, vector8_broadcast('\\')));
+        }
+
+        mask = vector8_highbit_mask(match);
+        if (checkHighbit)
+            mask |= vector8_highbit_mask(chunk);
+
+        if (mask != 0) {
+            char c;
+
+            rawBufPtr += pg_rightmost_one_pos32(mask);
+            c = copyRawBuf[rawBufPtr];
+            if (c != '\n' && c != '\r') {
+                cstate->simd_enabled = false;
+                cstate->readlineFunc = CopyReadLineTextScalar;
+            }
+            break;
+        }
+
+        rawBufPtr += sizeof(Vector8);
+    }
+
+    *raw_buf_ptr_out = rawBufPtr;
+    return result;
+}
+#endif /* !USE_NO_SIMD */
+
 /*
  * CopyReadLineText - inner loop of CopyReadLine for text mode
  */
-template <bool csv_mode>
+template <bool csv_mode, bool simd_mode>
 static bool CopyReadLineTextTemplate(CopyState cstate)
 {
     char* copy_raw_buf = NULL;
@@ -7292,8 +7427,26 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
      * For a little extra speed within the loop, we copy raw_buf and
      * raw_buf_len into local variables.
      */
-    copy_raw_buf = cstate->raw_buf;
     raw_buf_ptr = cstate->raw_buf_index;
+
+#ifndef USE_NO_SIMD
+    if (simd_mode) {
+        bool simdHitEof = false;
+        int simdRawBufPtr = 0;
+
+        result = CopyReadLineTextSIMDHelper<csv_mode>(cstate, &simdHitEof, &simdRawBufPtr);
+        hit_eof = simdHitEof;
+        raw_buf_ptr = simdRawBufPtr;
+        first_char_in_line = cstate->line_buf.len == 0 && raw_buf_ptr == cstate->raw_buf_index;
+
+        if (result) {
+            REFILL_LINEBUF;
+            return result;
+        }
+    }
+#endif /* !USE_NO_SIMD */
+
+    copy_raw_buf = cstate->raw_buf;
     copy_buf_len = cstate->raw_buf_len;
 
     for (;;) {
@@ -7517,7 +7670,7 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
          *  would lead to format disorientation and cause import error when
          *  importing from file.
          */
-        if (!cstate->is_useeof && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && cstate->copy_dest != COPY_FILE) {
+        if (CopyCanCheckEndOfCopy(cstate)) {
             if (c == '\\' && (!csv_mode || first_char_in_line)) {
                 char c2;
 
@@ -7674,12 +7827,32 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
 
 static bool CopyReadLineText(CopyState cstate)
 {
+#ifndef USE_NO_SIMD
+    if (cstate->simd_enabled && cstate->fileformat != FORMAT_FIXED && cstate->eol_type != EOL_UD) {
+        switch (cstate->fileformat) {
+            case FORMAT_CSV:
+                return CopyReadLineTextTemplate<true, true>(cstate);
+            case FORMAT_TEXT:
+                return CopyReadLineTextTemplate<false, true>(cstate);
+            default:
+                break;
+        }
+    }
+#endif
+
+    cstate->simd_enabled = false;
+    cstate->readlineFunc = CopyReadLineTextScalar;
+    return CopyReadLineTextScalar(cstate);
+}
+
+static bool CopyReadLineTextScalar(CopyState cstate)
+{
     switch (cstate->fileformat) {
         case FORMAT_CSV:
-            return CopyReadLineTextTemplate<true>(cstate);
+            return CopyReadLineTextTemplate<true, false>(cstate);
         case FORMAT_TEXT:
         case FORMAT_FIXED:
-            return CopyReadLineTextTemplate<false>(cstate);
+            return CopyReadLineTextTemplate<false, false>(cstate);
         default:
             Assert(false);
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid file format")));
@@ -7749,6 +7922,7 @@ static int CopyReadAttributesTextT(CopyState cstate)
     int numattrs = list_length(cstate->attnumlist);
     int proc_col_num = 0;
     int max_filler_index = numattrs + list_length(cstate->filler_col_list);
+    int encoding = GetDatabaseEncoding();
 
     cstate->has_extra_data = false;
     cstate->ignored_extra_has_data = false;
@@ -7855,7 +8029,7 @@ static int CopyReadAttributesTextT(CopyState cstate)
                 found_delim = true;
                 break;
             }
-            if (PG_GB18030 == GetDatabaseEncoding() || PG_GB18030_2022 == GetDatabaseEncoding()) {
+            if (PG_GB18030 == encoding || PG_GB18030_2022 == encoding) {
                 if (pos == byte_count) {
                     unsigned char c1 = (unsigned char)(c);
                     if (c1 < (unsigned char)0x80) {
@@ -7973,7 +8147,7 @@ static int CopyReadAttributesTextT(CopyState cstate)
              * Here we have one that does not correctly identifies delimiter because of the nature
              * of GBK encoding. It is fixed by skipping the second char when we encounter a GBK 2-byte.
              */
-            if ((PG_GBK == GetDatabaseEncoding()) && IS_HIGHBIT_SET(c)) {
+            if ((PG_GBK == encoding) && IS_HIGHBIT_SET(c)) {
                 /*
                  * We don't do encoding validation check here because we already went through
                  * the test in pg_any_to_server
