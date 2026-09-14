@@ -123,6 +123,8 @@
     示例：
 
 ```
+    openGauss=#SET XACT_ABORT = ON;
+    SET
     openGauss=#CREATE TABLE test(a int);
     openGauss=#CREATE OR REPLACE PROCEDURE p1()
                AS
@@ -158,7 +160,9 @@
     NOTICE:  ERROR_PROCEDURE() is p1()
     NOTICE:  ERROR_LINE() is 2
     NOTICE:  ERROR_MESSAGE() is division by zero
-
+    openGauss=#RESET XACT_ABORT;
+    RESET
+    
 ```
 
 - ident_current(table_or_view)
