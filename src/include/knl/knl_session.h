@@ -1772,6 +1772,8 @@ typedef struct knl_u_plpgsql_context {
 
     Oid ActiveLobToastOid;
     struct ExceptionContext* cur_exception_cxt;
+    int trycatch_depth;
+    bool in_extension_create;
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
     bool is_insert_gs_source; /* is doing insert gs_source? */
