@@ -151,6 +151,20 @@ Page DiskAnnInitRegisterPage(Relation index, Buffer buf)
     return page;
 }
 
+/* magic / version sanity check shared by every meta page reader */
+static void DiskAnnCheckMetaHeader(Relation index, uint32 magic, uint32 version)
+{
+    if (unlikely(magic != DISKANN_MAGIC_NUMBER)) {
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("\"%s\" is not a diskann index", RelationGetRelationName(index))));
+    }
+    if (unlikely(version != DISKANN_VERSION && version != DISKANN_VERSION_V2)) {
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("diskann index \"%s\" has unsupported format version %u, REINDEX it",
+                               RelationGetRelationName(index), version)));
+    }
+}
+
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta)
 {
     Buffer buf;
@@ -163,9 +177,29 @@ void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta)
     Size itemsz = sizeof(DiskAnnMetaPageData);
     metapage = (DiskAnnMetaPage)DiskAnnPageGetMeta(page);
     errno_t rc = memcpy_s(meta, itemsz, metapage, itemsz);
-    securec_check(rc, "\0", "\0");
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
     UnlockReleaseBuffer(buf);
+    DiskAnnCheckMetaHeader(index, meta->magicNumber, meta->version);
     return;
+}
+
+/*
+ * Format version stored in the meta page (1 = page format, 2 = RaBitQ). Callbacks
+ * dispatch on this value, never on reloptions: the two may disagree.
+ */
+uint32 DiskAnnGetFormatVersion(Relation index)
+{
+    Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    DiskAnnMetaPage metapage = (DiskAnnMetaPage)DiskAnnPageGetMeta(page);
+    uint32 magic = metapage->magicNumber;
+    uint32 version = metapage->version;
+    UnlockReleaseBuffer(buf);
+    DiskAnnCheckMetaHeader(index, magic, version);
+    return version;
 }
 
 void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const
