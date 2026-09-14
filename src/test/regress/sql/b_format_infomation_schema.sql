@@ -259,6 +259,10 @@ CREATE TABLE test_auto_increase (
     username VARCHAR(50) NOT NULL UNIQUE,
     age INT
 );
+select column_name, extra from INFORMATION_SCHEMA.columns where table_name = 'test_auto_increase' order by ordinal_position;
+CREATE TABLE test_decimal_column_type (amount DECIMAL(10,2));
+select column_name, data_type, column_type from INFORMATION_SCHEMA.columns where table_name = 'test_decimal_column_type';
+DROP TABLE test_decimal_column_type;
 select get_auto_increment_nextval(1234, true);
 select auto_increment from  INFORMATION_SCHEMA.tables where table_name = 'test_auto_increase';
 insert into test_auto_increase(username, age) values ('users', 1);

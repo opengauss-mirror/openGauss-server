@@ -777,6 +777,8 @@ CREATE VIEW columns AS
                     ELSE 'USER-DEFINED' END
              ELSE
                CASE WHEN t.typelem <> 0 AND t.typlen = -1 THEN 'ARRAY'
+                    WHEN nt.nspname = 'pg_catalog' AND pg_catalog.current_setting('sql_compatibility') = 'B'
+                        THEN pg_catalog.format_type(a.atttypid, a.atttypmod)
                     WHEN nt.nspname = 'pg_catalog' THEN pg_catalog.format_type(a.atttypid, null)
                     ELSE 'USER-DEFINED' END
              END
@@ -784,7 +786,7 @@ CREATE VIEW columns AS
              AS COLUMN_TYPE,
             CAST(d.description AS information_schema.character_data) AS COLUMN_COMMENT,
             CAST(
-               CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'AUTO_INCREMENT' 
+               CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'auto_increment'
                ELSE
                   CASE WHEN ad.adsrc_on_update is not null THEN CONCAT('DEFAULT_GENERATED on update ', pg_catalog.quote_literal(ad.adsrc_on_update))
                   ELSE null
