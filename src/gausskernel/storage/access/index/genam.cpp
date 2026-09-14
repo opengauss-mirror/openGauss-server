@@ -147,6 +147,19 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan->xs_orderbyvals = NULL;
     scan->xs_orderbynulls = NULL;
 
+    /*
+     * RelationGetIndexScan() deliberately uses palloc(), so newly added
+     * descriptor fields are not implicitly initialized.  Keep the ANN
+     * current-row channel fail-closed for every index AM; DiskANN enables
+     * and publishes it only after the executor explicitly requests reuse.
+     */
+    errno_t rc = memset_s(&scan->xs_ann_orderby, sizeof(scan->xs_ann_orderby),
+        0, sizeof(scan->xs_ann_orderby));
+    securec_check(rc, "\0", "\0");
+    scan->xs_ann_orderby.isnull = true;
+    scan->xs_ann_orderby.quality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+    ItemPointerSetInvalid(&scan->xs_ann_orderby.heap_tid);
+
     return scan;
 }
 

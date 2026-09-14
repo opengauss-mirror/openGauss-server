@@ -22,8 +22,70 @@
 */
 
 #include <algorithm>
+#include <cmath>
 #include "access/datavec/diskann.h"
+#include "access/datavec/utils.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
+
+static void DiskAnnInvalidateOrderByDistance(IndexScanDesc scan)
+{
+    scan->xs_ann_orderby.valid = false;
+    scan->xs_ann_orderby.isnull = true;
+    scan->xs_ann_orderby.value = (Datum)0;
+    scan->xs_ann_orderby.quality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+    scan->xs_ann_orderby.row_token = 0;
+    ItemPointerSetInvalid(&scan->xs_ann_orderby.heap_tid);
+}
+
+/* Convert the already-computed full-vector rerank result to the SQL ORDER
+ * BY distance scale.  No vector is loaded and no distance kernel is called
+ * here. */
+static bool DiskAnnConvertOrderByDistance(DiskAnnScanOpaque so, float rawDistance,
+    DiskAnnDistanceSource source, double* outputDistance,
+    AnnOrderByDistanceQuality* quality)
+{
+    IndexScanDesc scan = so->scan;
+
+    if (scan == NULL || !scan->xs_ann_orderby.requested) {
+        return false;
+    }
+
+    if (so->enablePQ || source != DISKANN_DISTANCE_FULL_INTERNAL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("DiskANN ORDER BY reuse received a distance with unsupported provenance")));
+    }
+
+    if (so->procinfo->fn_oid == L2_FUNC_OID &&
+        scan->xs_ann_orderby.requested_mode >= ANN_ORDERBY_REUSE_EXACT) {
+        if (std::isnan(rawDistance) || rawDistance < 0.0f) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("DiskANN produced a negative squared L2 distance")));
+        }
+        *outputDistance = sqrt((double)rawDistance);
+        *quality = ANN_ORDERBY_DISTANCE_EXACT_L2;
+        scan->xs_ann_orderby.output_conversions++;
+        return true;
+    }
+
+    if (so->procinfo->fn_oid == IP_FUNC_OID && so->normprocinfo != NULL &&
+        scan->xs_ann_orderby.requested_mode == ANN_ORDERBY_REUSE_ALLOW_APPROX) {
+        if (!std::isfinite(rawDistance)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("DiskANN produced a non-finite cosine distance")));
+        }
+        double distance = 1.0 + (double)rawDistance;
+        *outputDistance = Min(Max(distance, 0.0), 2.0);
+        *quality = ANN_ORDERBY_DISTANCE_APPROX_COSINE;
+        scan->xs_ann_orderby.output_conversions++;
+        return true;
+    }
+
+    return false;
+}
 
 static Datum GetScanValue(IndexScanDesc scan)
 {
@@ -62,6 +124,10 @@ void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey
         securec_check(rc, "\0", "\0");
     }
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    so->scanEpoch++;
+    so->rowToken = 0;
+    scan->xs_ann_orderby.scan_epoch = so->scanEpoch;
+    DiskAnnInvalidateOrderByDistance(scan);
     so->curpos = 0;
 }
 
@@ -76,6 +142,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     scan = RelationGetIndexScan(index, nkeys, norderbys);
     so = (DiskAnnScanOpaque)palloc(sizeof(DiskAnnScanOpaqueData));
     so->rel = index;
+    so->scan = scan;
     so->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "DiskANN scan temporary context", ALLOCSET_DEFAULT_SIZES);
     so->nodeSize = metapage.nodeSize;
     so->nexpextedCandidates = 0;
@@ -86,6 +153,8 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
     so->enablePQ = metapage.enablePQ;
+    so->scanEpoch = 0;
+    so->rowToken = 0;
     so->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     DiskPQParams *tmpDiskPQParams = InitDiskPQParamsOnDisk(index, so->procinfo, metapage.dimensions, so->enablePQ);
     if (tmpDiskPQParams != NULL) {
@@ -130,6 +199,10 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
     MemoryContext oldCtx = MemoryContextSwitchTo(so->tmpCtx);
 
+    /* Never let a rejected, invisible or exhausted candidate inherit the
+     * previous row's value. */
+    DiskAnnInvalidateOrderByDistance(scan);
+
     Datum value;
 
     /* Safety check */
@@ -154,8 +227,58 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
     bool found = false;
     if (so->curpos < so->ncandidates) {
-        scan->xs_ctup.t_self = so->candidates[so->curpos].heapTid;
+        DiskAnnCandidatesData* cand = &so->candidates[so->curpos];
+        scan->xs_ctup.t_self = cand->heapTid;
         scan->xs_recheck = false;
+        /* [P1-7] exact distance for ORDER BY consumers (non-lossy rerank) */
+        if (scan->numberOfOrderBys > 0) {
+            if (cand->outputDistanceReady &&
+                cand->outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2) {
+                scan->xs_orderbyvals[0] = Float8GetDatum(cand->outputDistance);
+                scan->xs_orderbynulls[0] = false;
+            } else if (cand->outputDistanceReady &&
+                       cand->outputQuality == ANN_ORDERBY_DISTANCE_APPROX_COSINE) {
+                /* Approximate cosine is intentionally confined to the ANN
+                 * channel; it is neither an exact SQL value nor a documented
+                 * lower bound for generic IndexScan reordering. */
+                scan->xs_orderbyvals[0] = (Datum)0;
+                scan->xs_orderbynulls[0] = true;
+            } else {
+                /* Preserve the default-off behavior until the legacy
+                 * DiskANN ORDER BY value contract is changed independently. */
+                scan->xs_orderbyvals[0] = Float8GetDatum(cand->distance);
+                scan->xs_orderbynulls[0] = false;
+            }
+            scan->xs_recheckorderby = false;
+        }
+
+        if (scan->xs_ann_orderby.requested && !cand->outputDistanceReady) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("DiskANN did not prepare the requested ORDER BY distance")));
+        }
+
+        if (scan->xs_ann_orderby.requested) {
+            if (cand->distanceSource != DISKANN_DISTANCE_FULL_INTERNAL ||
+                cand->outputEpoch != so->scanEpoch ||
+                (cand->outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2 &&
+                 scan->xs_ann_orderby.requested_mode < ANN_ORDERBY_REUSE_EXACT) ||
+                (cand->outputQuality == ANN_ORDERBY_DISTANCE_APPROX_COSINE &&
+                 scan->xs_ann_orderby.requested_mode != ANN_ORDERBY_REUSE_ALLOW_APPROX)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("DiskANN ORDER BY candidate metadata is stale or incompatible")));
+            }
+            scan->xs_ann_orderby.value = Float8GetDatum(cand->outputDistance);
+            scan->xs_ann_orderby.isnull = false;
+            scan->xs_ann_orderby.valid = true;
+            scan->xs_ann_orderby.quality = cand->outputQuality;
+            scan->xs_ann_orderby.scan_epoch = so->scanEpoch;
+            scan->xs_ann_orderby.row_token = ++so->rowToken;
+            scan->xs_ann_orderby.heap_tid = cand->heapTid;
+            scan->xs_ann_orderby.publications++;
+        }
+
         so->curpos++;
         found = true;
     }
@@ -179,6 +302,7 @@ void diskannsearch(DiskAnnScanOpaque so)
 
     for (size_t i = 0; i < queue->size(); i++) {
         queue->_data[i].distance = GetDistance(so, queue->_data[i].id, NULL, NULL);
+        so->scan->xs_ann_orderby.full_distance_evaluations++;
     }
 
     qsort(&(queue->_data[0]), queue->size(), sizeof(Neighbor), CmpNeighborInfo);
@@ -192,8 +316,36 @@ void diskannsearch(DiskAnnScanOpaque so)
             continue;
         }
 
+        bool hasNewTuple = false;
         for (size_t j = 0; j < queue->_data[i].heaptidsLength; j++) {
-            DiskAnnCandidatesData candidate = {.id = queue->_data[i].id, .heapTid = queue->_data[i].heaptids[j]};
+            DiskAnnCandidatesData identity = {.id = queue->_data[i].id,
+                                              .heapTid = queue->_data[i].heaptids[j]};
+            if (!searchedResults->contains(identity)) {
+                hasNewTuple = true;
+                break;
+            }
+        }
+        if (!hasNewTuple) {
+            continue;
+        }
+
+        double outputDistance = 0.0;
+        AnnOrderByDistanceQuality outputQuality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+        DiskAnnDistanceSource distanceSource = DISKANN_DISTANCE_FULL_INTERNAL;
+        bool outputDistanceReady = DiskAnnConvertOrderByDistance(
+            so, queue->_data[i].distance, distanceSource,
+            &outputDistance, &outputQuality);
+
+        for (size_t j = 0; j < queue->_data[i].heaptidsLength; j++) {
+            /* [P1-7] carry the exact distance for ORDER BY consumers */
+            DiskAnnCandidatesData candidate = {.id = queue->_data[i].id,
+                                               .heapTid = queue->_data[i].heaptids[j],
+                                               .distance = (double)queue->_data[i].distance,
+                                               .outputDistance = outputDistance,
+                                               .outputDistanceReady = outputDistanceReady,
+                                               .outputQuality = outputQuality,
+                                               .distanceSource = distanceSource,
+                                               .outputEpoch = outputDistanceReady ? so->scanEpoch : 0};
             if (!searchedResults->contains(candidate)) {
                 searchedResults->push_back(candidate);
             }
@@ -381,4 +533,3 @@ DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber verte
     iter->nextVertex = InvalidBlockNumber;
     return iter;
 }
-

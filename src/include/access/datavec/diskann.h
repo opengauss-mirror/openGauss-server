@@ -102,6 +102,7 @@ typedef struct BlockNumberHashEntry {
 #define DiskAnnBench(name, code) (code)
 #endif
 
+
 #define DiskAnnPageGetMeta(page) ((DiskAnnMetaPageData*)PageGetContents(page))
 #define DiskAnnPageGetNode(itup) ((DiskAnnNodePage)((char*)(itup) + IndexTupleSize(itup)))
 #define DiskAnnPageGetOpaque(page) ((DiskAnnPageOpaque)PageGetSpecialPointer(page))
@@ -468,9 +469,31 @@ struct DiskAnnIdxScanData {
     float distance;
 };
 
+/* Provenance is deliberately independent of output readiness and quality.
+ * A numeric value alone cannot tell whether it came from the graph-search
+ * estimate, PQ, or the final full-vector distance. */
+enum DiskAnnDistanceSource {
+    DISKANN_DISTANCE_UNKNOWN = 0,
+    DISKANN_DISTANCE_SEARCH_ESTIMATE,
+    DISKANN_DISTANCE_PQ_ESTIMATE,
+    DISKANN_DISTANCE_FULL_INTERNAL
+};
+
 struct DiskAnnCandidatesData {
     BlockNumber id;
     ItemPointerData heapTid;
+    /*
+     * [P1-7] Exact distance carried with the candidate so gettuple can fill
+     * xs_orderbyvals and the executor can verify ORDER BY monotonicity
+     * (design doc 9.4/16.2). Stored as double; the producing GetDistance
+     * is float today - a full double rerank is a separate change.
+     */
+    double distance;
+    double outputDistance;
+    bool outputDistanceReady;
+    AnnOrderByDistanceQuality outputQuality;
+    DiskAnnDistanceSource distanceSource;
+    uint64 outputEpoch;
     bool operator==(const DiskAnnCandidatesData &other) const
     {
         return this->id == other.id && this->heapTid == other.heapTid;
@@ -479,6 +502,7 @@ struct DiskAnnCandidatesData {
 
 struct DiskAnnScanOpaqueData {
     Relation rel;
+    IndexScanDesc scan;
     MemoryContext tmpCtx;
     uint32_t nodeSize;
     uint32_t nexpextedCandidates;
@@ -497,6 +521,10 @@ struct DiskAnnScanOpaqueData {
 
     bool enablePQ;
     DiskPQParams params;
+
+    /* Monotonically advances on rescan; tags every published row value. */
+    uint64 scanEpoch;
+    uint64 rowToken;
 
     blockhash_hash *blocks;
     VectorList<BlockNumber> frozenBlks;
@@ -697,4 +725,3 @@ void LoadPQInfo(Relation index, dataT *&data, BlockNumber startBlkno, uint16 nbl
 }
 
 #endif
-
