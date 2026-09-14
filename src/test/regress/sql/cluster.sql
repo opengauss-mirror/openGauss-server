@@ -198,6 +198,14 @@ cluster clstr_temp using clstr_temp_pkey;
 select * from clstr_temp;
 drop table clstr_temp;
 
+-- USTORE tables do not support CLUSTER, including the concurrent path.
+RESET SESSION AUTHORIZATION;
+CREATE TABLE clstr_ustore (a int PRIMARY KEY, b int) WITH (storage_type=ustore);
+CREATE INDEX clstr_ustore_b_idx ON clstr_ustore(b);
+CLUSTER clstr_ustore USING clstr_ustore_b_idx; -- ERROR
+CLUSTER CONCURRENTLY clstr_ustore USING clstr_ustore_b_idx; -- ERROR
+DROP TABLE clstr_ustore;
+
 -- clean up
 \c -
 RESET SESSION AUTHORIZATION;
