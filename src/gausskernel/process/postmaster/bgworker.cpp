@@ -519,6 +519,37 @@ loop:
     BgworkerCleanupSharedContext();
 }
 
+/*
+ * Return the slots of workers that already finished (TERMINATED / FAILED)
+ * to the free list WITHOUT touching the shared context, so a multi-phase
+ * leader can launch the next round without pinning 2x/3x pool slots. Meant
+ * to run right after BgworkerListWaitFinish reported every participant done;
+ * the shared context stays owned by the leader (BgworkerListSyncQuit would
+ * pfree it).
+ */
+void BgworkerListRecycleFinished()
+{
+    slist_mutable_iter iter;
+
+    slist_foreach_modify(iter, &t_thrd.bgworker_cxt.bgwlist) {
+        BackgroundWorker *bgw = slist_container(BackgroundWorker, rw_lnode, iter.cur);
+        if (bgw->bgw_status == BGW_FAILED || bgw->bgw_status == BGW_TERMINATED) {
+            slist_delete_current(&iter);
+            pthread_mutex_lock(&g_instance.bgw_base_lock);
+            BgworkerPutBackToFreeList(bgw);
+            pthread_mutex_unlock(&g_instance.bgw_base_lock);
+        }
+    }
+
+    if (slist_is_empty(&t_thrd.bgworker_cxt.bgwlist) && t_thrd.bgworker_cxt.bgwcontext != NULL) {
+        BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.bgwcontext;
+        if (!(bwc->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD)) {
+            /* bgshared is the caller's; databaseName lives in the transaction context */
+            pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
+        }
+    }
+}
+
 static inline void CleanupUnstartBgworkers(int nunstarts)
 {
     slist_mutable_iter iter;
