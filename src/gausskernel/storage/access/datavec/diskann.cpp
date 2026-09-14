@@ -332,7 +332,7 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
         DiskANNGetMetaPageInfo(index, &metapage);
     }
 
-    DiskAnnGraphStore* graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    DiskAnnGraphStore* graphStore = New(CurrentMemoryContext) DiskAnnPageGraphStore(index);
     DiskAnnGraph graph(index, metapage.dimensions, metapage.frozenBlkno[0], graphStore);
     graph.Link(blkno, metapage.indexSize, false);
 
