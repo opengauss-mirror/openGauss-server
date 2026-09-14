@@ -263,13 +263,13 @@ opengauss_setup_hba_conf() {
                 fi
                 echo "host all all 0.0.0.0/0 $GS_HOST_AUTH_METHOD"
                 echo "host replication gaussdb 0.0.0.0/0 md5"
-                if [ -n "$SERVER_MODE" ]; then
+                if [ -n "$SERVER_MODE" ] && [ -n "$OG_SUBNET" ]; then
                     # physical HA streams as user omm; host all does not cover database=replication
                     echo "host replication omm $OG_SUBNET trust"
                     echo "host replication repuser $OG_SUBNET trust"
                 fi
         } >> "$PGDATA/pg_hba.conf"
-        if [ -n "$SERVER_MODE" ]; then
+        if [ -n "$SERVER_MODE" ] && [ -n "$OG_SUBNET" ]; then
             sed -i "/# IPv6 local connections:/a host all omm $OG_SUBNET trust" $PGDATA/pg_hba.conf
         fi
 }
@@ -343,7 +343,7 @@ docker_temp_server_start() {
 
         PGUSER="${PGUSER:-$GS_USER}" \
         gs_ctl -D "$PGDATA" \
-                -w start $@
+                -w start -o "$*"
 }
 
 # stop postgresql server after done setting up user and running scripts
