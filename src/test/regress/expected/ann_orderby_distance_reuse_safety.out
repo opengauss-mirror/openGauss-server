@@ -1,0 +1,296 @@
+-- DiskANN ORDER BY distance reuse: execution-lifetime and safety boundaries.
+SET client_min_messages = warning;
+DROP SCHEMA IF EXISTS ann_orderby_reuse_safety_test CASCADE;
+CREATE SCHEMA ann_orderby_reuse_safety_test;
+SET search_path = ann_orderby_reuse_safety_test, public;
+CREATE TABLE ann_safety_t
+(
+    id integer PRIMARY KEY,
+    title text,
+    embedding vector(4)
+);
+INSERT INTO ann_safety_t
+SELECT g,
+       'row-' || g,
+       ('[' || (g + 1) || ',' || (g * 2 + 3) || ',' ||
+        (g * 3 + 5) || ',' || (g * 4 + 7) || ']')::vector
+FROM generate_series(1, 40) g;
+CREATE INDEX ann_safety_l2_idx ON ann_safety_t
+USING diskann (embedding vector_l2_ops) WITH (index_size = 16);
+CREATE INDEX ann_safety_cos_idx ON ann_safety_t
+USING diskann (embedding vector_cosine_ops) WITH (index_size = 16);
+ANALYZE ann_safety_t;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_expr_fusion = off;
+-- A saved all-mode plan must choose one policy before returning its first
+-- row.  Switching to l2 makes the entire later execution evaluate
+-- the original SQL expression; it must not mix exact and approximate rows.
+SET ann_orderby_distance_reuse = 'all';
+PREPARE ann_cached_cosine AS
+SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+       id, embedding <=> '[11,23,35,47]'::vector AS distance
+FROM ann_safety_t
+ORDER BY embedding <=> '[11,23,35,47]'::vector
+LIMIT 3;
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+EXECUTE ann_cached_cosine;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Limit (actual rows=3 loops=1)
+   Output: id, ((embedding <=> '[11,23,35,47]'::vector))
+   ->  Ann Index Scan using ann_safety_cos_idx on ann_orderby_reuse_safety_test.ann_safety_t (actual rows=3 loops=1)
+         Output: id, ((embedding <=> '[11,23,35,47]'::vector))
+         Order By: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+--? Total runtime: .* ms
+(6 rows)
+
+SET ann_orderby_distance_reuse = l2;
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+EXECUTE ann_cached_cosine;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Limit (actual rows=3 loops=1)
+   Output: id, ((embedding <=> '[11,23,35,47]'::vector))
+   ->  Ann Index Scan using ann_safety_cos_idx on ann_orderby_reuse_safety_test.ann_safety_t (actual rows=3 loops=1)
+         Output: id, ((embedding <=> '[11,23,35,47]'::vector))
+         Order By: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+--? Total runtime: .* ms
+(6 rows)
+
+DEALLOCATE ann_cached_cosine;
+-- Once a cursor has begun its scan, a GUC change between FETCH commands
+-- must not change that active scan's distance policy.
+SET ann_orderby_distance_reuse = cosine;
+START TRANSACTION;
+DECLARE ann_distance_cursor NO SCROLL CURSOR FOR
+SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+       id, embedding <=> '[11,23,35,47]'::vector AS distance
+FROM ann_safety_t
+ORDER BY embedding <=> '[11,23,35,47]'::vector
+LIMIT 4;
+FETCH 1 FROM ann_distance_cursor;
+ id | distance 
+----+----------
+ 10 |        0
+(1 row)
+
+SET ann_orderby_distance_reuse = off;
+FETCH 3 FROM ann_distance_cursor;
+ id |       distance       
+----+----------------------
+ 11 | 4.76837158203125e-07
+  9 | 7.15255737304688e-07
+ 12 | 1.72853469848633e-06
+(3 rows)
+
+CLOSE ann_distance_cursor;
+COMMIT;
+-- A correlated subplan drives a real executor rescan with a different
+-- query vector on each outer row.  Epoch/token state must be reset.
+CREATE TABLE ann_query_t (qid integer PRIMARY KEY, q vector(4));
+INSERT INTO ann_query_t VALUES
+    (1, '[6,13,20,27]'),
+    (2, '[31,63,95,127]');
+SET ann_orderby_distance_reuse = l2;
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+SELECT q.qid,
+       (SELECT /*+ indexscan(t ann_safety_l2_idx) */ t.id
+        FROM ann_safety_t t
+        ORDER BY t.embedding <-> q.q
+        LIMIT 1) AS nearest_id
+FROM ann_query_t q
+ORDER BY q.qid;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using ann_query_t_pkey on ann_orderby_reuse_safety_test.ann_query_t q (actual rows=2 loops=1)
+   Output: q.qid, (SubPlan 1)
+   SubPlan 1
+     ->  Limit (actual rows=2 loops=2)
+           Output: t.id, ((t.embedding <-> $0))
+           ->  Ann Index Scan using ann_safety_l2_idx on ann_orderby_reuse_safety_test.ann_safety_t t (actual rows=2 loops=2)
+                 Output: t.id, ((t.embedding <-> q.q))
+                 Order By: (t.embedding <-> q.q)
+--? Total runtime: .* ms
+(9 rows)
+
+SELECT q.qid,
+       (SELECT /*+ indexscan(t ann_safety_l2_idx) */ t.id
+        FROM ann_safety_t t
+        ORDER BY t.embedding <-> q.q
+        LIMIT 1) AS nearest_id
+FROM ann_query_t q
+ORDER BY q.qid;
+ qid | nearest_id 
+-----+------------
+   1 |          5
+   2 |         30
+(2 rows)
+
+-- Updating a non-indexed column creates the ordinary HOT-visible-row shape.
+-- The published root TID may differ in offset, but cannot cross heap blocks.
+UPDATE ann_safety_t SET title = 'hot-updated' WHERE id = 10;
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+SELECT /*+ indexscan(ann_safety_t ann_safety_l2_idx) */
+       id, embedding <-> '[11,23,35,47]'::vector AS distance
+FROM ann_safety_t
+ORDER BY embedding <-> '[11,23,35,47]'::vector
+LIMIT 1;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Limit (actual rows=1 loops=1)
+   Output: id, ((embedding <-> '[11,23,35,47]'::vector))
+   ->  Ann Index Scan using ann_safety_l2_idx on ann_orderby_reuse_safety_test.ann_safety_t (actual rows=1 loops=1)
+         Output: id, ((embedding <-> '[11,23,35,47]'::vector))
+         Order By: (ann_safety_t.embedding <-> '[11,23,35,47]'::vector)
+--? Total runtime: .* ms
+(6 rows)
+
+-- One graph node may own several heap TIDs.  It performs one scalar
+-- conversion and publishes the same value separately for all eight rows.
+CREATE TABLE ann_duplicate_t
+(
+    id integer PRIMARY KEY,
+    embedding vector(4)
+);
+INSERT INTO ann_duplicate_t
+SELECT g, '[10,20,30,40]'::vector FROM generate_series(1, 8) g;
+INSERT INTO ann_duplicate_t VALUES (9, '[100,200,300,400]');
+CREATE INDEX ann_duplicate_idx ON ann_duplicate_t
+USING diskann (embedding vector_l2_ops) WITH (index_size = 16);
+ANALYZE ann_duplicate_t;
+EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
+SELECT /*+ indexscan(ann_duplicate_t ann_duplicate_idx) */
+       id, embedding <-> '[10,20,30,40]'::vector AS distance
+FROM ann_duplicate_t
+ORDER BY embedding <-> '[10,20,30,40]'::vector
+LIMIT 8;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Limit (actual rows=8 loops=1)
+   Output: id, ((embedding <-> '[10,20,30,40]'::vector))
+   ->  Ann Index Scan using ann_duplicate_idx on ann_orderby_reuse_safety_test.ann_duplicate_t (actual rows=8 loops=1)
+         Output: id, ((embedding <-> '[10,20,30,40]'::vector))
+         Order By: (ann_duplicate_t.embedding <-> '[10,20,30,40]'::vector)
+--? Total runtime: .* ms
+(6 rows)
+
+SELECT count(*) AS duplicate_rows,
+       count(DISTINCT distance) AS duplicate_distances
+FROM (
+    SELECT /*+ indexscan(ann_duplicate_t ann_duplicate_idx) */
+           id, embedding <-> '[10,20,30,40]'::vector AS distance
+    FROM ann_duplicate_t
+    ORDER BY embedding <-> '[10,20,30,40]'::vector
+    LIMIT 8
+) s;
+ duplicate_rows | duplicate_distances 
+----------------+---------------------
+              8 |                   1
+(1 row)
+
+-- AnnIndexScan is shared by multiple ANN AMs.  HNSW must never receive the
+-- DiskANN-only reference display.
+CREATE INDEX ann_safety_hnsw_idx ON ann_safety_t
+USING hnsw (embedding vector_l2_ops) WITH (m = 4, ef_construction = 10);
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT /*+ indexscan(ann_safety_t ann_safety_hnsw_idx) */
+       id, embedding <-> '[11,23,35,47]'::vector AS distance
+FROM ann_safety_t
+ORDER BY embedding <-> '[11,23,35,47]'::vector
+LIMIT 3;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Limit
+   Output: id, ((embedding <-> '[11,23,35,47]'::vector))
+   ->  Ann Index Scan using ann_safety_hnsw_idx on ann_orderby_reuse_safety_test.ann_safety_t
+         Output: id, (embedding <-> '[11,23,35,47]'::vector)
+         Order By: (ann_safety_t.embedding <-> '[11,23,35,47]'::vector)
+(5 rows)
+
+-- Approximate cosine is legal for projection/sort/limit, but not when the
+-- projected value acquires DISTINCT or GROUP BY semantics.  Before the
+-- consumer-chain guard this fixture collapsed 40 exact groups to 27.
+SET ann_orderby_distance_reuse = cosine;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT DISTINCT distance
+FROM (
+    SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+           embedding <=> '[11,23,35,47]'::vector AS distance
+    FROM ann_safety_t
+    ORDER BY embedding <=> '[11,23,35,47]'::vector
+    LIMIT 40
+) s
+ORDER BY distance;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Unique
+   Output: ((ann_safety_t.embedding <=> '[11,23,35,47]'::vector))
+   ->  Limit
+         Output: ((ann_safety_t.embedding <=> '[11,23,35,47]'::vector))
+         ->  Ann Index Scan using ann_safety_cos_idx on ann_orderby_reuse_safety_test.ann_safety_t
+               Output: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+               Order By: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+(7 rows)
+
+SELECT count(*) AS distinct_distance_groups
+FROM (
+    SELECT DISTINCT distance
+    FROM (
+        SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+               embedding <=> '[11,23,35,47]'::vector AS distance
+        FROM ann_safety_t
+        ORDER BY embedding <=> '[11,23,35,47]'::vector
+        LIMIT 40
+    ) ordered_rows
+) distinct_rows;
+ distinct_distance_groups 
+--------------------------
+                       40
+(1 row)
+
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT distance, count(*)
+FROM (
+    SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+           embedding <=> '[11,23,35,47]'::vector AS distance
+    FROM ann_safety_t
+    ORDER BY embedding <=> '[11,23,35,47]'::vector
+    LIMIT 40
+) s
+GROUP BY distance
+ORDER BY distance;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: ((ann_safety_t.embedding <=> '[11,23,35,47]'::vector)), count(*)
+   Group By Key: ((ann_safety_t.embedding <=> '[11,23,35,47]'::vector))
+   ->  Limit
+         Output: ((ann_safety_t.embedding <=> '[11,23,35,47]'::vector))
+         ->  Ann Index Scan using ann_safety_cos_idx on ann_orderby_reuse_safety_test.ann_safety_t
+               Output: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+               Order By: (ann_safety_t.embedding <=> '[11,23,35,47]'::vector)
+(8 rows)
+
+SELECT count(*) AS grouped_distances, max(group_size) AS max_group_size
+FROM (
+    SELECT distance, count(*) AS group_size
+    FROM (
+        SELECT /*+ indexscan(ann_safety_t ann_safety_cos_idx) */
+               embedding <=> '[11,23,35,47]'::vector AS distance
+        FROM ann_safety_t
+        ORDER BY embedding <=> '[11,23,35,47]'::vector
+        LIMIT 40
+    ) ordered_rows
+    GROUP BY distance
+) groups;
+ grouped_distances | max_group_size 
+-------------------+----------------
+                40 |              1
+(1 row)
+
+RESET ann_orderby_distance_reuse;
+RESET enable_expr_fusion;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+DROP SCHEMA ann_orderby_reuse_safety_test CASCADE;

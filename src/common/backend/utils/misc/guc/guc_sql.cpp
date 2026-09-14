@@ -366,6 +366,14 @@ static const struct config_enum_entry hnsw_iterative_scan_options[] = {
     {NULL, 0, false}
 };
 
+static const struct config_enum_entry ann_orderby_distance_reuse_options[] = {
+    {"off", ANN_ORDERBY_REUSE_OFF, false},
+    {"l2", ANN_ORDERBY_REUSE_L2, false},
+    {"cosine", ANN_ORDERBY_REUSE_COSINE, false},
+    {"all", ANN_ORDERBY_REUSE_ALL, false},
+    {NULL, 0, false}
+};
+
 static const struct config_enum_entry hybrid_recall_parallel_mode_options[] = {
     {"off", HYBRID_RECALL_PARALLEL_OFF, false},
     {"auto", HYBRID_RECALL_PARALLEL_AUTO, false},
@@ -3841,6 +3849,20 @@ static void InitSqlConfigureNamesEnum()
             &u_sess->datavec_ctx.hnsw_iterative_scan,
             HNSW_ITERATIVE_SCAN_RELAXED,
             hnsw_iterative_scan_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"ann_orderby_distance_reuse",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Controls reuse of DiskANN's computed ORDER BY distance."),
+            gettext_noop("Off recomputes the SQL expression; l2 reuses exact L2 values; "
+                         "cosine permits DiskANN's approximate normalized cosine value; "
+                         "all enables both.")},
+            &u_sess->attr.attr_sql.ann_orderby_distance_reuse,
+            ANN_ORDERBY_REUSE_OFF,
+            ann_orderby_distance_reuse_options,
             NULL,
             NULL,
             NULL},

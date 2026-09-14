@@ -58,7 +58,7 @@ static bool DiskAnnConvertOrderByDistance(DiskAnnScanOpaque so, float rawDistanc
     }
 
     if (so->procinfo->fn_oid == L2_FUNC_OID &&
-        scan->xs_ann_orderby.requested_mode >= ANN_ORDERBY_REUSE_EXACT) {
+        (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_L2) != 0) {
         if (std::isnan(rawDistance) || rawDistance < 0.0f) {
             ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
@@ -71,7 +71,7 @@ static bool DiskAnnConvertOrderByDistance(DiskAnnScanOpaque so, float rawDistanc
     }
 
     if (so->procinfo->fn_oid == IP_FUNC_OID && so->normprocinfo != NULL &&
-        scan->xs_ann_orderby.requested_mode == ANN_ORDERBY_REUSE_ALLOW_APPROX) {
+        (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_COSINE) != 0) {
         if (!std::isfinite(rawDistance)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
@@ -262,9 +262,9 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
             if (cand->distanceSource != DISKANN_DISTANCE_FULL_INTERNAL ||
                 cand->outputEpoch != so->scanEpoch ||
                 (cand->outputQuality == ANN_ORDERBY_DISTANCE_EXACT_L2 &&
-                 scan->xs_ann_orderby.requested_mode < ANN_ORDERBY_REUSE_EXACT) ||
+                 (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_L2) == 0) ||
                 (cand->outputQuality == ANN_ORDERBY_DISTANCE_APPROX_COSINE &&
-                 scan->xs_ann_orderby.requested_mode != ANN_ORDERBY_REUSE_ALLOW_APPROX)) {
+                 (scan->xs_ann_orderby.requested_mode & ANN_ORDERBY_REUSE_COSINE) == 0)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
                      errmsg("DiskANN ORDER BY candidate metadata is stale or incompatible")));

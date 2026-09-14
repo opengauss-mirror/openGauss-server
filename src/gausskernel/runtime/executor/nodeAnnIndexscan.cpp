@@ -64,10 +64,10 @@ static AnnOrderByRef* AnnIndexFindOrderByRef(AnnIndexScan* plan)
 static bool AnnIndexReuseModeAllows(int mode, AnnOrderByDistanceQuality quality)
 {
     if (quality == ANN_ORDERBY_DISTANCE_EXACT_L2) {
-        return mode >= ANN_ORDERBY_REUSE_EXACT;
+        return (mode & ANN_ORDERBY_REUSE_L2) != 0;
     }
     if (quality == ANN_ORDERBY_DISTANCE_APPROX_COSINE) {
-        return mode == ANN_ORDERBY_REUSE_ALLOW_APPROX;
+        return (mode & ANN_ORDERBY_REUSE_COSINE) != 0;
     }
     return false;
 }

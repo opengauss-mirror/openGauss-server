@@ -293,6 +293,7 @@ typedef struct knl_session_attr_sql {
     bool enable_hybrid_recall;
     bool hybrid_recall_log_summary;
     int vectorEngineStrategy;
+    int ann_orderby_distance_reuse;
     int hybrid_recall_parallel_mode;
     int gms_stats_history_retention;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))

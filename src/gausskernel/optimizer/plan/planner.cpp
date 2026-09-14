@@ -687,10 +687,11 @@ static bool rewrite_ann_orderby_distance_walker(Node* node, void* context)
                 /* PQ is excluded until its final rerank/value provenance is
                  * independently covered by the reuse contract. */
                 if (operatorShapeMatches && (opts == NULL || !opts->enablePQ)) {
-                    if (distanceProc == L2_FUNC_OID &&
+                    if ((walkerCxt->mode & ANN_ORDERBY_REUSE_L2) != 0 &&
+                        distanceProc == L2_FUNC_OID &&
                         distanceOp->opno == VECTOR_L2_DISTANCE_OPERATOR_OID) {
                         quality = ANN_ORDERBY_DISTANCE_EXACT_L2;
-                    } else if (walkerCxt->mode == ANN_ORDERBY_REUSE_ALLOW_APPROX &&
+                    } else if ((walkerCxt->mode & ANN_ORDERBY_REUSE_COSINE) != 0 &&
                                walkerCxt->approximatePlanSafe &&
                                distanceProc == IP_FUNC_OID && OidIsValid(normProc) &&
                                distanceOp->opno == VECTOR_COSINE_DISTANCE_OPERATOR_OID) {
