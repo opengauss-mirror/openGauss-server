@@ -971,6 +971,33 @@ int DiskAnnGetPqM(Relation index)
     return opts ? opts->pqM : GENERIC_DEFAULT_PQ_M;
 }
 
+/*
+ * Get whether the RaBitQ format (version 2) is requested
+ */
+bool DiskAnnEnableRabitq(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->enableRabitq : GENERIC_DEFAULT_ENABLE_RABITQ;
+}
+
+/*
+ * Get the PCA output dimension (0 = no reduction)
+ */
+int DiskAnnGetPcaDim(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->pcaDim : DISKANN_DEFAULT_PCA_DIM;
+}
+
+/*
+ * Get the RaBitQ bits per dimension
+ */
+int DiskAnnGetRabitqBits(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->rabitqBits : DISKANN_DEFAULT_RABITQ_BITS;
+}
+
 bool IsMarkDeleted(Relation index, BlockNumber master)
 {
     bool masterIsVacuumDeleted = false;

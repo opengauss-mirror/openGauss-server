@@ -55,8 +55,11 @@
 #define DISKANN_MAX_DEGREE 96
 #define DISKANN_MAX_PQM 192
 
-/* RaBitQ format: meta page version */
+/* RaBitQ format (version 2) options */
 #define DISKANN_VERSION_V2 2
+#define DISKANN_DEFAULT_PCA_DIM 0
+#define DISKANN_PCA_MIN_TRAIN_ROWS 16384
+#define DISKANN_DEFAULT_RABITQ_BITS 1
 
 #define FROZEN_POINT_SIZE 1
 #define DISKANN_DISTANCE_THRESHOLD (1e-9)
@@ -315,6 +318,9 @@ typedef struct DiskAnnOptions {
     bool enablePQ;
     int pqM;    /* number of subquantizer */
     int pqKsub; /* number of centroids for each subquantizer */
+    bool enableRabitq;  /* on: RaBitQ format (version 2); off: page format (version 1) */
+    int pcaDim;         /* PCA output dimension, 0 = no reduction */
+    int rabitqBits;     /* RaBitQ bits per dimension, 1 or 2 */
 } DiskAnnOptions;
 
 typedef struct DiskAnnEdgePageData {
@@ -739,6 +745,9 @@ void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* est
 /* PQ related functions */
 bool DiskAnnEnablePQ(Relation index);
 int DiskAnnGetPqM(Relation index);
+bool DiskAnnEnableRabitq(Relation index);
+int DiskAnnGetPcaDim(Relation index);
+int DiskAnnGetRabitqBits(Relation index);
 DiskPQParams *InitDiskPQParams(DiskAnnBuildState *buildstate);
 void DiskAnnCreatePQPages(DiskAnnBuildState *buildstate);
 void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,

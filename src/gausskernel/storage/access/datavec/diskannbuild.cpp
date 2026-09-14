@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "storage/freespace.h"
 #include "access/datavec/diskann.h"
+#include "access/datavec/diskannv2.h"
 #include "access/generic_xlog.h"
 #include "access/tableam.h"
 #include "postmaster/bgworker.h"
@@ -930,6 +931,11 @@ IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo
     IndexBuildResult* result;
     DiskAnnBuildState buildstate;
 
+    if (DiskAnnEnableRabitq(index)) {
+        /* RaBitQ format (version 2) */
+        return DiskAnnV2BuildIndex(heap, index, indexInfo);
+    }
+
     BuildIndex(heap, index, indexInfo, &buildstate, MAIN_FORKNUM);
 
     result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
@@ -943,6 +949,11 @@ void diskannbuildempty_internal(Relation index)
 {
     IndexInfo* indexInfo = BuildIndexInfo(index);
     DiskAnnBuildState buildstate;
+
+    if (DiskAnnEnableRabitq(index)) {
+        DiskAnnV2BuildEmptyIndex(index);
+        return;
+    }
 
     BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM);
 }

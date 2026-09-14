@@ -1754,6 +1754,8 @@ void* MemoryContextAllocHugeZeroDebug(MemoryContext context, Size size, const ch
     if (unlikely(STATEMENT_MAX_MEM)) {
         MemoryContextCheckSessionMemory(context, size, file, line);
     }
+    MemSetAligned(ret, 0, size);
+
     InsertMemoryAllocInfo(ret, context, file, line, size);
 
     return ret;

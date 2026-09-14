@@ -281,4 +281,8 @@ void DiskAnnV2ReadGraphSlot(Relation index, const DiskAnnV2Meta* meta, uint32 no
 
 bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args);
 
+/* build (diskannv2build.cpp) */
+IndexBuildResult* DiskAnnV2BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo);
+void DiskAnnV2BuildEmptyIndex(Relation index);
+
 #endif /* DISKANNV2_H */
