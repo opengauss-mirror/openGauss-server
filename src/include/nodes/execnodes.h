@@ -2186,7 +2186,25 @@ typedef struct AnnIndexScanState {
     Relation iss_CurrentIndexPartition;
     double annCount; // limitValue/selectvity
     int64 limitCount;
+    /* Current heap row's value copied from IndexScanDesc.xs_ann_orderby. */
+    Datum iss_AnnOrderByValue;
+    bool iss_AnnOrderByIsNull;
+    bool iss_AnnOrderByValid;
+    AnnOrderByDistanceQuality iss_AnnOrderByQuality;
+    AnnOrderByDistanceQuality iss_AnnOrderByExpectedQuality;
+    uint64 iss_AnnOrderByEpoch;
+    uint64 iss_AnnOrderByRowToken;
+    uint64 iss_AnnOrderByReads;
+    uint64 iss_AnnOrderByFallbacks;
 } AnnIndexScanState;
+
+/* Shared private payload used by recursive and flattened evaluation of an
+ * AnnOrderByRef. */
+typedef struct AnnOrderByRefExprRuntime {
+    AnnIndexScanState* scanstate;
+    ExprState* fallback;
+    AnnOrderByDistanceQuality quality;
+} AnnOrderByRefExprRuntime;
 
 /* ----------------
  * [P0-1] HybridRecallState - executor state for the two-branch fusion

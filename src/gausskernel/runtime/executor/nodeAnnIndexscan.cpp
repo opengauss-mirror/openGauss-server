@@ -26,6 +26,7 @@
 #include "access/relscan.h"
 #include "access/tableam.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/pg_type.h"
 #include "commands/cluster.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeIndexscan.h"
@@ -33,6 +34,7 @@
 #include "storage/tcap.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -45,6 +47,107 @@
 static TupleTableSlot* ExecAnnIndexScan(PlanState* state);
 static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node);
 static void ExecInitNextPartitionForAnnIndexScan(AnnIndexScanState* node);
+
+static AnnOrderByRef* AnnIndexFindOrderByRef(AnnIndexScan* plan)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, plan->scan.plan.targetlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (IsA(tle->expr, AnnOrderByRef)) {
+            return (AnnOrderByRef*)tle->expr;
+        }
+    }
+    return NULL;
+}
+
+static bool AnnIndexReuseModeAllows(int mode, AnnOrderByDistanceQuality quality)
+{
+    if (quality == ANN_ORDERBY_DISTANCE_EXACT_L2) {
+        return mode >= ANN_ORDERBY_REUSE_EXACT;
+    }
+    if (quality == ANN_ORDERBY_DISTANCE_APPROX_COSINE) {
+        return mode == ANN_ORDERBY_REUSE_ALLOW_APPROX;
+    }
+    return false;
+}
+
+/* Revalidate the physical index opened for this execution.  A saved plan's
+ * AnnOrderByRef is only a request; it must not authorize an unrelated ANN
+ * AM, PQ index, non-vector opclass, or changed support procedure. */
+static AnnOrderByDistanceQuality AnnIndexRuntimeDistanceQuality(IndexScanDesc scan)
+{
+    if (scan == NULL || scan->indexRelation == NULL ||
+        scan->indexRelation->rd_rel->relam != DISKANN_AM_OID ||
+        TupleDescAttr(scan->indexRelation->rd_att, 0)->atttypid != VECTOROID ||
+        RELATION_HAS_BUCKET(scan->indexRelation)) {
+        return ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+    }
+
+    DiskAnnOptions* opts = (DiskAnnOptions*)scan->indexRelation->rd_options;
+    if (opts != NULL && opts->enablePQ) {
+        return ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+    }
+
+    Oid distanceProc = index_getprocid(scan->indexRelation, 1, DISKANN_DISTANCE_PROC);
+    if (distanceProc == L2_FUNC_OID) {
+        return ANN_ORDERBY_DISTANCE_EXACT_L2;
+    }
+    if (distanceProc == IP_FUNC_OID &&
+        OidIsValid(index_getprocid(scan->indexRelation, 1, DISKANN_NORM_PROC))) {
+        return ANN_ORDERBY_DISTANCE_APPROX_COSINE;
+    }
+    return ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+}
+
+static void AnnIndexInvalidateOrderByValue(AnnIndexScanState* node)
+{
+    node->iss_AnnOrderByValid = false;
+    node->iss_AnnOrderByIsNull = true;
+    node->iss_AnnOrderByValue = (Datum)0;
+    node->iss_AnnOrderByQuality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+}
+
+/* Bind the AM channel only after the heap access layer has produced a visible
+ * tuple.  Epoch/token checks prevent rescan and stale-row reuse; HOT members
+ * intentionally do not require physical TID equality with the index root. */
+static void AnnIndexBindOrderByValue(AnnIndexScanState* node, IndexScanDesc scan)
+{
+    AnnOrderByDistanceChannel* channel = &scan->xs_ann_orderby;
+    uint64 previousEpoch = node->iss_AnnOrderByEpoch;
+    uint64 previousToken = node->iss_AnnOrderByRowToken;
+
+    AnnIndexInvalidateOrderByValue(node);
+    /* A cached plan may be executed after the GUC has been lowered.  That
+     * choice is made once in ExecInitAnnIndexScan; every row then uses the
+     * fallback expression and the AM channel stays unrequested. */
+    if (node->iss_AnnOrderByExpectedQuality == ANN_ORDERBY_DISTANCE_UNAVAILABLE) {
+        return;
+    }
+
+    /* Once reuse is selected for this scan, a missing or stale publication
+     * is an AM/executor contract violation.  Falling back for only this row
+     * could mix distance scales in a Merge Append. */
+    if (!channel->requested || !channel->valid || channel->isnull ||
+        channel->quality != node->iss_AnnOrderByExpectedQuality ||
+        channel->scan_epoch == 0 || channel->row_token == 0 ||
+        !ItemPointerIsValid(&channel->heap_tid) ||
+        !ItemPointerIsValid(&scan->xs_ctup.t_self) ||
+        ItemPointerGetBlockNumber(&channel->heap_tid) !=
+            ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) ||
+        (channel->scan_epoch == previousEpoch && channel->row_token <= previousToken)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("DiskANN did not publish a valid ORDER BY distance for the current row")));
+    }
+
+    node->iss_AnnOrderByValue = channel->value;
+    node->iss_AnnOrderByIsNull = false;
+    node->iss_AnnOrderByValid = true;
+    node->iss_AnnOrderByQuality = channel->quality;
+    node->iss_AnnOrderByEpoch = channel->scan_epoch;
+    node->iss_AnnOrderByRowToken = channel->row_token;
+}
 
 /* ----------------------------------------------------------------
  *		AnnIndexNext
@@ -93,6 +196,8 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
     while (true) {
         CHECK_FOR_INTERRUPTS();
 
+        AnnIndexInvalidateOrderByValue(node);
+
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
         if (isUstore) {
             if (!IndexGetnextSlot(scandesc, direction, slot, &node->ss.ps.state->have_current_xact_date)) {
@@ -116,6 +221,8 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
                 false);                 /* don't pfree */
         }
 
+        AnnIndexBindOrderByValue(node, indexScan);
+
         /*
          * If the index was lossy, we have to recheck the index quals using
          * the fetched tuple.
@@ -125,6 +232,7 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
             ResetExprContext(econtext);
             if (!ExecQual(node->indexqualorig, econtext, false)) {
                 /* Fails recheck, so drop it and loop back for another */
+                AnnIndexInvalidateOrderByValue(node);
                 InstrCountFiltered2(node, 1);
                 continue;
             }
@@ -205,6 +313,7 @@ static TupleTableSlot* ExecAnnIndexScan(PlanState* state)
  */
 void ExecReScanAnnIndexScan(AnnIndexScanState* node)
 {
+    AnnIndexInvalidateOrderByValue(node);
     /*
      * For recursive-stream rescan, if number of RuntimeKeys not euqal zero,
      * just return without rescan.
@@ -519,6 +628,10 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
     index_state->ss.partScanDirection = node->indexorderdir;
     index_state->ss.ps.ExecProcNode = ExecAnnIndexScan;
     index_state->annCount = node->annCount;
+    index_state->iss_AnnOrderByExpectedQuality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+    index_state->iss_AnnOrderByEpoch = 0;
+    index_state->iss_AnnOrderByRowToken = 0;
+    AnnIndexInvalidateOrderByValue(index_state);
     /*
      * Miscellaneous initialization
      *
@@ -658,6 +771,28 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
 
     /* deal with partition info */
     ExecInitAnnIndexRelation(index_state, estate, eflags);
+
+    /* Request the dedicated AM channel only when this execution's GUC still
+     * satisfies the quality encoded by the post-setrefs reference. */
+    AnnOrderByRef* orderByRef = AnnIndexFindOrderByRef(node);
+    if (orderByRef != NULL && index_state->iss_ScanDesc != NULL) {
+        AnnOrderByDistanceQuality quality = (AnnOrderByDistanceQuality)orderByRef->quality;
+        IndexScanDesc scanDesc = GetIndexScanDesc(index_state->iss_ScanDesc);
+        AnnOrderByDistanceQuality runtimeQuality = AnnIndexRuntimeDistanceQuality(scanDesc);
+        bool runtimeShapeSupported = !node->is_ustore &&
+            !node->scan.isPartTbl && node->scan.plan.dop <= 1 &&
+            !ScanDirectionIsBackward(node->indexorderdir) &&
+            index_state->ss.ss_currentRelation != NULL &&
+            !RELATION_HAS_BUCKET(index_state->ss.ss_currentRelation);
+
+        if (runtimeShapeSupported && runtimeQuality == quality &&
+            AnnIndexReuseModeAllows(u_sess->attr.attr_sql.ann_orderby_distance_reuse, quality)) {
+            scanDesc->xs_ann_orderby.requested = true;
+            scanDesc->xs_ann_orderby.requested_mode =
+                u_sess->attr.attr_sql.ann_orderby_distance_reuse;
+            index_state->iss_AnnOrderByExpectedQuality = quality;
+        }
+    }
 
     /*
      * If no run-time keys to calculate, go ahead and pass the scankeys to the
