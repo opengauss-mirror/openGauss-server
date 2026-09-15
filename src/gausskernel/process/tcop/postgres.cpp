@@ -9104,6 +9104,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* Since not using PG_TRY, must reset error stack by hand */
         u_sess->plsql_cxt.cur_exception_cxt = NULL;
+        u_sess->plsql_cxt.trycatch_depth = 0;
+        u_sess->plsql_cxt.in_extension_create = false;
         u_sess->plsql_cxt.is_exec_autonomous = false;
         t_thrd.log_cxt.error_context_stack = NULL;
         t_thrd.log_cxt.call_stack = NULL;
