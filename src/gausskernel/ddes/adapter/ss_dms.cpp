@@ -156,6 +156,7 @@ int ss_dms_func_init()
 #endif
 
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_imcstore_delta));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_mes_shm_to_tcp_fallback));
 
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
@@ -476,4 +477,12 @@ int dms_request_imcstore_delta(dms_context_t *dms_ctx, unsigned int tableid, uns
     unsigned char* bitmap, unsigned long long *delta_max)
 {
     return g_ss_dms_func.dms_request_imcstore_delta(dms_ctx, tableid, rowgroup, bitmap, delta_max);
+}
+
+int dms_request_mes_shm_to_tcp_fallback(int notify_peers)
+{
+    if (!SS_DMS_FUNC_AVAILABLE(dms_request_mes_shm_to_tcp_fallback)) {
+        return DMS_ERROR;
+    }
+    return g_ss_dms_func.dms_request_mes_shm_to_tcp_fallback(notify_peers);
 }
