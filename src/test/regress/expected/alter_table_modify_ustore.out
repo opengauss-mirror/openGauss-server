@@ -3162,6 +3162,20 @@ SELECT * FROM "test_modify_view_f1f2F3";
 
 DROP VIEW "test_modify_view_f1f2F3";
 DROP TABLE test_at_modify_view_column CASCADE;
+-- test deferrable constraint using an existing index
+CREATE TABLE test_at_modify_deferrable (a int, b int) WITH(STORAGE_TYPE=USTORE);
+CREATE UNIQUE INDEX test_at_modify_deferrable_idx ON test_at_modify_deferrable(a);
+ALTER TABLE test_at_modify_deferrable ADD CONSTRAINT test_at_modify_deferrable_pkey PRIMARY KEY USING INDEX test_at_modify_deferrable_idx DEFERRABLE INITIALLY DEFERRED; -- ERROR
+ERROR:  Ustore table does not support to set deferrable.
+DETAIL:  N/A
+DROP TABLE test_at_modify_deferrable;
+-- The same restriction applies to temporary USTORE tables.
+CREATE TEMP TABLE test_at_modify_deferrable_temp (a int, b int) WITH(STORAGE_TYPE=USTORE);
+CREATE UNIQUE INDEX test_at_modify_deferrable_temp_idx ON test_at_modify_deferrable_temp(a);
+ALTER TABLE test_at_modify_deferrable_temp ADD CONSTRAINT test_at_modify_deferrable_temp_pkey PRIMARY KEY USING INDEX test_at_modify_deferrable_temp_idx DEFERRABLE INITIALLY DEFERRED; -- ERROR
+ERROR:  Ustore table does not support to set deferrable.
+DETAIL:  N/A
+DROP TABLE test_at_modify_deferrable_temp;
 -- END
 RESET CURRENT_SCHEMA;
 DROP SCHEMA atbdb_ustore_schema CASCADE;

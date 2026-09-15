@@ -15701,6 +15701,17 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
     Assert(OidIsValid(index_oid));
     Assert(stmt->isconstraint);
 
+    /* Ustore tables do not support deferrable constraints. */
+    if (rel->rd_tam_ops == TableAmUstore && stmt->deferrable == true) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_COMMAND),
+                errmsg("Ustore table does not support to set deferrable."),
+                errdetail("N/A"),
+                errcause("feature not supported"),
+                erraction("check constraints of columns")));
+    }
+
     indexRel = index_open(index_oid, AccessShareLock);
 
     indexName = pstrdup(RelationGetRelationName(indexRel));
