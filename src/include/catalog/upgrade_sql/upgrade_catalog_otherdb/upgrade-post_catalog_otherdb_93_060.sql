@@ -1,6 +1,6 @@
 DO $upgrade$
 BEGIN
-IF working_version_num() < 92988 then
+IF working_version_num() < 92985 then
 
 DROP TYPE IF EXISTS pg_catalog.halfvec CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8306, 8309, b;
