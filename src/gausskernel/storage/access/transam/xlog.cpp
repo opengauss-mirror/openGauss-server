@@ -456,7 +456,7 @@ static void UBWarmupSetClog(TransactionId xid, CLogXidStatus status);
 static void UBWarmupSetCsnlog(TransactionId xid, CommitSeqNo csn);
 static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, TimestampTz stopTime);
 static bool ShouldWarmupClogCsnlogInStartupXLOG(void);
-static void UBWarmupClogCsnlogSlru(void);
+static void UBWarmupClogCsnlogShmem(void);
 
 /* XLOG scaling: start */
 static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata, XLogRecPtr StartPos,
@@ -9444,6 +9444,7 @@ static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, Timestamp
 static bool ShouldWarmupClogCsnlogInStartupXLOG(void)
 {
     return ENABLE_DMS && IsUnderPostmaster && ENABLE_UB && SS_REFORM_REFORMER &&
+           g_instance.attr.attr_storage.dms_attr.init_clog_size > 0 &&
            g_instance.dms_cxt.SSRecoveryInfo.startup_reform && t_thrd.role == STARTUP &&
            !SS_PRIMARY_DEMOTING;
 }
@@ -9454,7 +9455,7 @@ static bool ShouldWarmupClogCsnlogInStartupXLOG(void)
  * to disk, so the read range should follow each log's own retention rule
  * instead of only what is currently on disk.
  */
-static void UBWarmupClogCsnlogSlru(void)
+static void UBWarmupClogCsnlogShmem(void)
 {
     /*
      * XID roles in this warmup scan:
@@ -11801,7 +11802,7 @@ void StartupXLOG(void)
     }
 
     if (ShouldWarmupClogCsnlogInStartupXLOG()) {
-        UBWarmupClogCsnlogSlru();
+        UBWarmupClogCsnlogShmem();
     }
 
     /* notify the PM to synchronize */
