@@ -1481,6 +1481,83 @@ void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus sta
     }
 }
 
+static inline CLogXidStatus UBCLogGetStatusFromPage(const char *page, TransactionId xid)
+{
+    int byteno = TransactionIdToByte(xid);
+    uint32 bshift = TransactionIdToBIndex(xid) * CLOG_BITS_PER_XACT;
+    const unsigned char *byteptr = (const unsigned char *)(page + byteno);
+
+    return (*byteptr >> bshift) & CLOG_XACT_BITMASK;
+}
+
+static void UBCLogBufferSetPage(UBCLogBuffer *clogBuf, const char *page, TransactionId firstXid, uint32 rowCount)
+{
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        for (uint32 i = 0; i < rowCount; i++) {
+            TransactionId xid = firstXid + i;
+            CLogXidStatus status = UBCLogGetStatusFromPage(page, xid);
+            uint64 slot_idx = UBCLogCalSlotIndex(xid);
+            uint16 timeline = (uint16)UBCLogExpectedTimeline(xid);
+
+            clogBuf->slots[slot_idx].store(UBCLogSlotMake(status, timeline), std::memory_order_release);
+        }
+        /* One persistence barrier per SLRU page instead of one per xid. */
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(ERROR, (errmsg("[SIGBUS] fault captured in UBCLogBufferSetPage, first_xid=%lu, rows=%u",
+                                (unsigned long)firstXid, rowCount)));
+    }
+}
+
+bool UBCLogBufferWarmupRange(TransactionId startXid, TransactionId endXid, UBTxnCacheWarmupStats *stats)
+{
+    TransactionId xid = startXid;
+    char page[BLCKSZ];
+
+    if (stats == nullptr) {
+        ereport(ERROR, (errmsg("UB CLOG warmup statistics pointer is null")));
+    }
+    if (TransactionIdPrecedes(startXid, endXid) &&
+        (!UBCLogIsValidXid(startXid) || !UBCLogIsValidXid(endXid - 1))) {
+        ereport(ERROR, (errmsg("UB CLOG warmup range exceeds the cache timeline capacity")));
+    }
+
+    while (TransactionIdPrecedes(xid, endXid)) {
+        if (!ENABLE_UB) {
+            return false;
+        }
+
+        int64 pageno = (int64)TransactionIdToPage(xid);
+        uint32 pageOffset = TransactionIdToPgIndex(xid);
+        uint64 rowsLeft = (uint64)(endXid - xid);
+        uint32 rowCount = (uint32)Min((uint64)(CLOG_XACTS_PER_PAGE - pageOffset), rowsLeft);
+        Assert(rowCount > 0);
+        int slotno = SimpleLruReadPage_ReadOnly(ClogCtl(pageno), pageno, xid);
+        errno_t rc = memcpy_s(page, BLCKSZ, ClogCtl(pageno)->shared->page_buffer[slotno], BLCKSZ);
+        securec_check(rc, "", "");
+        LWLockRelease(SimpleLruGetBankLock(ClogCtl(pageno), pageno));
+
+        if (!ENABLE_UB) {
+            return false;
+        }
+        UBCLogBuffer *clogBuf = (UBCLogBuffer *)g_instance.shmem_cxt.UBClogBufPtr;
+        if (clogBuf == nullptr || !ENABLE_UB) {
+            return false;
+        }
+        UBCLogBufferSetPage(clogBuf, page, xid, rowCount);
+        stats->pages++;
+        stats->rows += rowCount;
+        xid += rowCount;
+    }
+
+    return true;
+}
+
 size_t UBCLogBufferSize(void)
 {
     return sizeof(UBCLogBuffer);

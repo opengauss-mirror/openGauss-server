@@ -13,6 +13,7 @@
 #define CLOG_H
 
 #include "access/xlogreader.h"
+#include "access/ubmem_buf.h"
 #include "lib/stringinfo.h"
 #include <atomic>
 
@@ -150,6 +151,7 @@ static inline bool UBCLogIsValidXid(TransactionId xid)
 
 extern void UBCLogBufferInit(UBCLogBuffer *buf);
 extern void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus status);
+extern bool UBCLogBufferWarmupRange(TransactionId startXid, TransactionId endXid, UBTxnCacheWarmupStats *stats);
 extern size_t UBCLogBufferSize(void);
 extern void UBCLogShmemInit(void);
 extern bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status);
