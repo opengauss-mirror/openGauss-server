@@ -1,6 +1,6 @@
 DO $upgrade$
 BEGIN
-IF working_version_num() < 92988 then
+IF working_version_num() < 92985 then
 
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_ops USING btree CASCADE;
 DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_ops USING btree CASCADE;

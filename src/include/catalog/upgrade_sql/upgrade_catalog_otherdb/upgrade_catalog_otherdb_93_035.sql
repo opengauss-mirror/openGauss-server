@@ -4,7 +4,7 @@ DECLARE
 BEGIN
     -- Only block upgrades from versions before the CFS on-disk layout backport (6.0.6+).
     -- Versions >= 92990 include the aligned CFS format and can upgrade safely.
-    IF working_version_num() < 92990 THEN
+    IF working_version_num() < 92985 THEN
         SELECT COUNT(*) INTO compressed_relation_count
         FROM (
             SELECT reloptions

@@ -1,6 +1,6 @@
 DO $upgrade$
 BEGIN
-IF working_version_num() < 92987 then
+IF working_version_num() < 92985 then
 
 DECLARE
 cnt int;
