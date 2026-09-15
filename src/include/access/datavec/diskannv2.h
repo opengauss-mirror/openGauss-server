@@ -373,6 +373,7 @@ uint32 DiskAnnV2PublishFirstNode(Relation index, uint32 nodeId);
 void DiskAnnV2EnsureNodeCapacity(Relation index, uint64 requiredSlots);
 uint32 DiskAnnV2GraphSlotsOnPage(const DiskAnnV2Meta* meta, uint32 nodeId);
 bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args);
+bool DiskAnnV2NormalizeVector(const float* src, int dim, float* out);
 
 /* build (diskannv2build.cpp) */
 IndexBuildResult* DiskAnnV2BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo);
@@ -391,5 +392,12 @@ IndexScanDesc DiskAnnV2BeginScan(Relation index, int nkeys, int norderbys);
 void DiskAnnV2Rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);
 bool DiskAnnV2GetTuple(IndexScanDesc scan, ScanDirection dir);
 void DiskAnnV2EndScan(IndexScanDesc scan);
+
+/* insert (diskannv2insert.cpp) */
+bool DiskAnnV2Insert(Relation index, Datum* values, const bool* isnull, ItemPointer heapTid, Relation heap);
+
+/* vacuum (diskannv2vacuum.cpp) */
+IndexBulkDeleteResult* DiskAnnV2BulkDelete(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
+                                           IndexBulkDeleteCallback callback, void* callbackState);
 
 #endif /* DISKANNV2_H */

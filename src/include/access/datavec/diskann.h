@@ -58,8 +58,13 @@
 /* RaBitQ format (version 2) options */
 #define DISKANN_VERSION_V2 2
 #define DISKANN_DEFAULT_PCA_DIM 0
+#define DISKANN_MIN_PCA_DIM 0
+#define DISKANN_MAX_PCA_DIM (DISKANN_MAX_DIM - 1)
+#define DISKANN_PCA_MIN_OUT_DIM 8
 #define DISKANN_PCA_MIN_TRAIN_ROWS 16384
 #define DISKANN_DEFAULT_RABITQ_BITS 1
+#define DISKANN_MIN_RABITQ_BITS 1
+#define DISKANN_MAX_RABITQ_BITS 2
 
 #define FROZEN_POINT_SIZE 1
 #define DISKANN_DISTANCE_THRESHOLD (1e-9)
@@ -321,6 +326,7 @@ typedef struct DiskAnnOptions {
     bool enableRabitq;  /* on: RaBitQ format (version 2); off: page format (version 1) */
     int pcaDim;         /* PCA output dimension, 0 = no reduction */
     int rabitqBits;     /* RaBitQ bits per dimension, 1 or 2 */
+    bool rabitqBitsSet; /* whether rabitq_bits was given explicitly */
 } DiskAnnOptions;
 
 typedef struct DiskAnnEdgePageData {
@@ -730,6 +736,7 @@ void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 n
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
 uint32 DiskAnnGetFormatVersion(Relation index);
+uint32 DiskAnnPeekFormatVersion(Relation index); /* no upgrade gate (DELETE mark-dead) */
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
 void diskannbuildempty_internal(Relation index);
@@ -763,6 +770,9 @@ int DiskAnnGetPqM(Relation index);
 bool DiskAnnEnableRabitq(Relation index);
 int DiskAnnGetPcaDim(Relation index);
 int DiskAnnGetRabitqBits(Relation index);
+void DiskAnnValidateRabitqOptions(Relation index, int dim, double reltuples);
+/* upgrade gate: the RaBitQ format (version 2) needs workingVersionNum >= DISKANN_RABITQ_VERSION_NUM */
+void DiskAnnCheckRabitqVersion(void);
 DiskPQParams *InitDiskPQParams(DiskAnnBuildState *buildstate);
 void DiskAnnCreatePQPages(DiskAnnBuildState *buildstate);
 void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,

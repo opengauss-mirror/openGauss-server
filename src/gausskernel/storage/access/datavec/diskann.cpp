@@ -21,10 +21,11 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "access/datavec/diskannv2.h"
 #include "access/reloptions.h"
-#include "storage/freespace.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
+#include "storage/freespace.h"
 #include "utils/guc.h"
 #include "utils/selfuncs.h"
 #include "access/datavec/diskann.h"
@@ -56,10 +57,21 @@ static void diskanncostestimate_internal(PlannerInfo* root, IndexPath* path, dou
     securec_check_c(rc, "\0", "\0");
 
     index = index_open(path->indexinfo->indexoid, NoLock);
-
+    bool rabitq = DiskAnnEnableRabitq(index); /* reloptions only: a partitioned parent index has no meta page */
     index_close(index, NoLock);
 
-    costs.numIndexTuples = path->indexinfo->tuples;
+    if (rabitq) {
+        /*
+         * RaBitQ format: a scan expands about diskann_probes nodes of degree
+         * DISKANN_V2_DEGREE and never touches the rest of the index, so charge
+         * that many tuples (as HNSW does) instead of the whole index; with the
+         * full tuple count a 10M-row index loses to a sequential scan.
+         */
+        double visited = (double)Max(u_sess->datavec_ctx.diskann_probes, 1) * DISKANN_V2_DEGREE;
+        costs.numIndexTuples = Min(visited, path->indexinfo->tuples);
+    } else {
+        costs.numIndexTuples = path->indexinfo->tuples;
+    }
 
     genericcostestimate(root, path, loopCount, costs.numIndexTuples, &costs.indexStartupCost, &costs.indexTotalCost,
                         &costs.indexSelectivity, &costs.indexCorrelation);
@@ -79,7 +91,11 @@ static bytea* diskannoptions_internal(Datum reloptions, bool validate)
     static const relopt_parse_elt tab[] = {
         {"index_size", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, indexSize)},
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enablePQ)},
-        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)}};
+        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)},
+        {"enable_rabitq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enableRabitq)},
+        {"pca_dim", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pcaDim)},
+        {"rabitq_bits", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, rabitqBits),
+         offsetof(DiskAnnOptions, rabitqBitsSet)}};
 
     relopt_value* options;
     int numoptions;
@@ -313,6 +329,10 @@ Datum diskannendscan(PG_FUNCTION_ARGS)
 bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, ItemPointer heap_tid, Relation heap,
                             IndexUniqueCheck checkUnique)
 {
+    if (DiskAnnGetFormatVersion(index) == DISKANN_VERSION_V2) {
+        return DiskAnnV2Insert(index, values, isnull, heap_tid, heap);
+    }
+
     Datum dst = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     Vector* value = (Vector*)DatumGetPointer(dst);
 
@@ -341,10 +361,29 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
 IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
                                                   IndexBulkDeleteCallback callback, void* callbackState)
 {
+    if (DiskAnnGetFormatVersion(info->index) == DISKANN_VERSION_V2) {
+        return DiskAnnV2BulkDelete(info, stats, callback, callbackState);
+    }
     return NULL;
 }
 IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats)
 {
+    if (DiskAnnGetFormatVersion(info->index) == DISKANN_VERSION_V2) {
+        /*
+         * RaBitQ format: no page reclamation. Report the relation size; when
+         * bulkdelete did not run (no dead tuples) count nodes from the meta page
+         * instead of sweeping the graph pages.
+         */
+        if (!stats) {
+            DiskAnnV2Meta meta;
+            stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+            DiskAnnV2GetMetaSnapshot(info->index, &meta);
+            stats->num_index_tuples = (double)meta.nextNodeId;
+            stats->estimated_count = false;
+        }
+        stats->num_pages = RelationGetNumberOfBlocks(info->index);
+        return stats;
+    }
     if (!stats) {
         stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
     }

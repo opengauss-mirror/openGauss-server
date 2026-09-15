@@ -291,27 +291,11 @@ typedef struct DiskAnnV2BuildState {
     uint32 frozen;
 
     /* graph construction through DiskAnnGraph::Link */
-    double* norms; /* nnodes squared norms for ComputeL2DistanceFast (instance memory) */
-    /*
-     * cosine opclass: 1 / |raw vector| per node (instance memory, nodeCap), taken
-     * during the scan. The scan normalizes with it and the buffer-pool source
-     * re-normalizes a re-read raw vector with the very same factor
-     * (NormalizeVector), so both sources yield the bitwise-equal vector
-     * without recomputing the norm per read. NULL for L2 / IP.
-     */
-    float* invNorms;
+    double* norms;  /* nnodes squared norms for ComputeL2DistanceFast (instance memory) */
     float* normBuf; /* dimIn scratch: normalized vector of the row being scanned */
 
     MemoryContext buildCtx;
 } DiskAnnV2BuildState;
-
-/* cosine opclass: out = raw * inv, the one arithmetic every vector source uses */
-static inline void NormalizeVector(const float* raw, float inv, int dim, float* out)
-{
-    for (int i = 0; i < dim; i++) {
-        out[i] = raw[i] * inv;
-    }
-}
 
 static inline DiskAnnV2CodeSlot* BuildCodeSlot(const DiskAnnV2BuildState* state, uint32 nodeId)
 {
@@ -322,10 +306,10 @@ static inline DiskAnnV2CodeSlot* BuildCodeSlot(const DiskAnnV2BuildState* state,
 
 /*
  * Buffer-pool source: the vector of node `id` (first TID) into `out`, with the
- * same preprocessing as the heap scan: the raw vector is read back and, for
- * the cosine opclass, scaled by the node's scan-time 1 / |x| (no norm is
- * recomputed per read). Under the ShareLock of CREATE INDEX every TID the
- * scan handed out is still there, so a miss is an error.
+ * same preprocessing the heap scan applied (DiskAnnV2NormalizeVector for the
+ * cosine opclass), so both sources yield the bitwise-equal vector. Under the
+ * ShareLock of CREATE INDEX every TID the scan handed out is still there, so a
+ * miss is an error.
  */
 static void FetchNodeVector(const DiskAnnV2BuildState* state, uint32 id, float* out)
 {
@@ -334,16 +318,13 @@ static void FetchNodeVector(const DiskAnnV2BuildState* state, uint32 id, float* 
     hv.heap = state->heap;
     hv.tid = tid;
     hv.attno = state->attno;
-    hv.normalize = false;
+    hv.normalize = state->normalize;
     hv.dim = state->dimIn;
     hv.out = out;
     if (!DiskAnnV2HeapVector(&hv)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("diskann: heap row (%u,%u) of node %u vanished during the index build",
                                ItemPointerGetBlockNumber(tid), ItemPointerGetOffsetNumber(tid), id)));
-    }
-    if (state->normalize) {
-        NormalizeVector(out, state->invNorms[id], state->dimIn, out);
     }
 }
 
@@ -380,11 +361,6 @@ static void NodesEnsure(DiskAnnV2BuildState* state, uint32 need)
         state->norms = (state->norms == NULL) ? (double*)palloc_huge(instCtx, normBytes)
                                               : (double*)repalloc_huge(state->norms, normBytes);
     }
-    if (state->normalize) {
-        Size invBytes = sizeof(float) * (Size)newCap;
-        state->invNorms = (state->invNorms == NULL) ? (float*)palloc_huge(instCtx, invBytes)
-                                                    : (float*)repalloc_huge(state->invNorms, invBytes);
-    }
     state->nodeCap = newCap;
 }
 
@@ -410,9 +386,8 @@ static void SampleVector(DiskAnnV2BuildState* state, const float* x)
     }
 }
 
-/* one indexed row (x = indexed vector, inv = 1 / |raw| for cosine):
- * merge into a bitwise-equal node or open a new one */
-static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x, float inv)
+/* one indexed row (x = preprocessed vector): merge into a bitwise-equal node or open a new one */
+static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x)
 {
     uint64 h = HashVector(x, state->dimIn);
     DiskAnnV2DupTable* t = &state->dup;
@@ -442,9 +417,6 @@ static void AddRow(DiskAnnV2BuildState* state, ItemPointer tid, const float* x, 
             acc += (double)x[c] * x[c];
         }
         state->norms[nodeId] = acc;
-    }
-    if (state->normalize) {
-        state->invNorms[nodeId] = inv;
     }
     state->tids[(Size)nodeId * DISKANN_HEAPTIDS] = *tid;
     state->ntids[nodeId] = 1;
@@ -481,24 +453,13 @@ static void BuildCallback(Relation index, HeapTuple hup, Datum* values, const bo
     }
     MemoryContextSwitchTo(oldCtx);
 
-    /*
-     * cosine opclass: skip zero vectors, index x * (1 / |x|). The factor is kept
-     * per node so the buffer-pool source reproduces the same floats from the
-     * raw row (FetchNodeVector) without recomputing the norm.
-     */
+    /* cosine opclass: index the normalized vector, skip zero vectors */
     const float* x = vec->x;
-    float inv = 0.0f;
     if (state->normalize) {
-        double sq = 0;
-        for (int i = 0; i < state->dimIn; i++) {
-            sq += (double)vec->x[i] * vec->x[i];
-        }
-        if (sq <= 0) {
+        if (!DiskAnnV2NormalizeVector(vec->x, state->dimIn, state->normBuf)) {
             MemoryContextReset(state->rowCtx);
             return;
         }
-        inv = (float)(1.0 / sqrt(sq));
-        NormalizeVector(vec->x, inv, state->dimIn, state->normBuf);
         x = state->normBuf;
     }
 
@@ -508,7 +469,7 @@ static void BuildCallback(Relation index, HeapTuple hup, Datum* values, const bo
     if (state->samples != NULL) {
         SampleVector(state, x);
     }
-    AddRow(state, tid, x, inv);
+    AddRow(state, tid, x);
     state->reltuples += 1;
 
     MemoryContextReset(state->rowCtx);
@@ -1016,7 +977,6 @@ typedef struct DiskAnnV2BuildShared {
     uint16* gcount;
     slock_t* locks;
     double* norms;
-    float* invNorms;
 
     /* buffer-pool vector source: workers open the heap themselves (a Relation is not shared across threads) */
     bool inMemory;
@@ -1054,7 +1014,6 @@ static void WorkerInitState(DiskAnnV2BuildState* st, DiskAnnV2BuildShared* share
     st->gcount = shared->gcount;
     st->locks = shared->locks;
     st->norms = shared->norms;
-    st->invNorms = shared->invNorms;
     st->inMemory = shared->inMemory;
     st->normalize = shared->normalize;
     st->attno = shared->attno;
@@ -1165,7 +1124,6 @@ static void FillShared(DiskAnnV2BuildShared* shared, const DiskAnnV2BuildState* 
     shared->graph = state->graph;
     shared->gcount = state->gcount;
     shared->norms = state->norms;
-    shared->invNorms = state->invNorms;
     shared->inMemory = state->inMemory;
     shared->normalize = state->normalize;
     shared->attno = state->attno;
@@ -1387,10 +1345,15 @@ static void InitBuildState(DiskAnnV2BuildState* state, Relation heap, Relation i
     /* vector source; the init fork of an unlogged index has no rows and needs neither */
     state->inMemory = u_sess->datavec_ctx.diskann_build_in_memory;
     state->attno = (indexInfo != NULL) ? indexInfo->ii_KeyAttrNumbers[0] : 0;
-    if (!state->inMemory && indexInfo != NULL && (state->attno <= 0 || indexInfo->ii_Expressions != NIL)) {
+    /*
+     * No original vectors are stored: the rerank, the buffer-pool source and
+     * the insert-time duplicate check all read the indexed column back from
+     * the heap by attribute number, which an expression index has none of.
+     */
+    if (indexInfo != NULL && (state->attno <= 0 || indexInfo->ii_Expressions != NIL)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("diskann buffer-pool build mode does not support expression indexes"),
-                        errhint("SET diskann_build_in_memory = on.")));
+                        errmsg("diskann rabitq format does not support expression indexes"),
+                        errhint("Index the vector column directly, or leave enable_rabitq off.")));
     }
 
     int pcaDim = DiskAnnGetPcaDim(index);
@@ -1409,7 +1372,6 @@ static void FreeSharedArrays(DiskAnnV2BuildState* state)
     pfree_ext(state->gcount);
     pfree_ext(state->locks);
     pfree_ext(state->norms);
-    pfree_ext(state->invNorms);
 }
 
 static void PrepareScan(DiskAnnV2BuildState* state)
@@ -1511,6 +1473,9 @@ static double BuildCore(DiskAnnV2BuildState* state, const DiskAnnV2Meta* meta, D
         heapTuples = tableam_index_build_scan(state->heap, state->index, state->indexInfo, true, BuildCallback,
                                               (void*)state, NULL);
     }
+
+    /* training-sample check for an explicit pca_dim (row count is known only now) */
+    DiskAnnValidateRabitqOptions(state->index, state->dimIn, state->reltuples);
 
     TrainTransform(state);
     DiskAnnV2WriteTransform(state->index, MAIN_FORKNUM, state->vt, xformExt);
