@@ -227,8 +227,11 @@ void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, cons
         cudescScan = (CUDescScan*)New(CurrentMemoryContext) CUDescScan(heapRel);
     }
 
-    BTCheckElement element;
-    is_unique = SearchBufferAndCheckUnique(index, itup, UNIQUE_CHECK_YES, heapRel, NULL, NULL, cudescScan, &element);
+    BTCheckElement element = {0};
+    element.itup = itup;
+    element.itemsz = MAXALIGN(IndexTupleSize(itup));
+    is_unique = SearchBufferAndCheckUnique(
+        index, itup, UNIQUE_CHECK_YES, heapRel, NULL, NULL, cudescScan, &element, values, isnull);
 
     buf = element.buffer;
     stack = element.btStack;

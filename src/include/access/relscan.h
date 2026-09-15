@@ -89,6 +89,9 @@ typedef struct HeapScanDescData {
     /* scan direction value for bulk read */
     ScanDirection bulk_scan_direction;
 
+    /* highest block number hinted to OS via posix_fadvise prefetch */
+    BlockNumber rs_prefetch_upto;
+
     /* this must be the end of this sturcture */
     HeapTupleHeaderData rs_ctbuf_hdr;
 } HeapScanDescData;

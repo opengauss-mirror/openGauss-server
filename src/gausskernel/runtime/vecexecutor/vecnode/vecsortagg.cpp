@@ -319,8 +319,8 @@ void SortAggRunner::FreeSortGrpMem(int num)
          * we don't need to free the memory. Because this memory is in ecxt_per_tuple_memory, they will
          * be automatic reset.
          */
-        final_flinfo = m_runtime->aggInfo[i].vec_final_function.flinfo;
-        agg_flinfo = m_runtime->aggInfo[i].vec_agg_function.flinfo;
+        final_flinfo = m_runtime->aggInfo[i].vec_final_function->flinfo;
+        agg_flinfo = m_runtime->aggInfo[i].vec_agg_function->flinfo;
         type_id = agg_flinfo->fn_rettype;
 
         if (final_flinfo != NULL && ((type_id == INT8ARRAYOID) || (type_id == FLOAT8ARRAYOID))) {

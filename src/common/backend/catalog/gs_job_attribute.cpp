@@ -1015,19 +1015,19 @@ char *create_inline_program(Datum job_name, Datum job_type, Datum job_action, Da
     securec_check(rc, "\0", "\0");
 
     static const short nrgs_program = 6;
-    FunctionCallInfoData fcinfo_program;
-    InitFunctionCallInfoData(fcinfo_program, NULL, nrgs_program, InvalidOid, NULL, NULL);
-    rc = memset_s(fcinfo_program.arg, nrgs_program * sizeof(Datum), 0, nrgs_program * sizeof(Datum));
+    LOCAL_FCINFO(fcinfo_program, 6);
+    InitFunctionCallInfoData(*fcinfo_program, NULL, nrgs_program, InvalidOid, NULL, NULL);
+    rc = memset_s(fcinfo_program->args, nrgs_program * sizeof(NullableDatum), 0, nrgs_program * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(fcinfo_program.argnull, nrgs_program * sizeof(bool), 0, nrgs_program * sizeof(bool));
+    rc = memset_s(fcinfo_program->args, nrgs_program * sizeof(NullableDatum), 0, nrgs_program * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    fcinfo_program.arg[0] = CStringGetTextDatum(program_name);  /* program_name */
-    fcinfo_program.arg[1] = job_type;                           /* program_type */
-    fcinfo_program.arg[2] = job_action;                         /* program_action */
-    fcinfo_program.arg[3] = num_of_args;                        /* number_of_arguments */
-    fcinfo_program.arg[4] = enabled;                            /* enabled */
-    fcinfo_program.argnull[5] = true;                           /* comments */
-    create_program_internal(&fcinfo_program, true);
+    fcinfo_program->args[0].value = CStringGetTextDatum(program_name);  /* program_name */
+    fcinfo_program->args[1].value = job_type;                           /* program_type */
+    fcinfo_program->args[2].value = job_action;                         /* program_action */
+    fcinfo_program->args[3].value = num_of_args;                        /* number_of_arguments */
+    fcinfo_program->args[4].value = enabled;                            /* enabled */
+    fcinfo_program->args[5].isnull = true;                           /* comments */
+    create_program_internal(fcinfo_program, true);
 
     return program_name;
 }
@@ -1269,33 +1269,33 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     pfree_ext(c_program_name);
 
     static const short nrgs_job = 19;
-    FunctionCallInfoData fcinfo_job;
-    InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
-    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    LOCAL_FCINFO(fcinfo_job, 19);
+    InitFunctionCallInfoData(*fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
 
-    fcinfo_job.arg[0] = job_name;               /* job_name */
-    fcinfo_job.arg[1] = program_name;           /* program_name */
-    fcinfo_job.arg[2] = schedule_name;          /* schedule_name */
-    fcinfo_job.arg[3] = PG_GETARG_DATUM(7);     /* job_class */
-    fcinfo_job.arg[4] = enabled;                /* enabled */
-    fcinfo_job.arg[5] = PG_GETARG_DATUM(9);     /* auto_drop */
-    fcinfo_job.arg[6] = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* comments */
-    fcinfo_job.arg[7] = Datum(0);               /* job_style */
-    fcinfo_job.arg[8] = PG_ARGISNULL(11) ? Datum(0) : PG_GETARG_DATUM(11);    /* credential_name */
-    fcinfo_job.arg[9] = PG_ARGISNULL(12) ? Datum(0) : PG_GETARG_DATUM(12);    /* destination_name */
-    fcinfo_job.arg[10] = CharGetDatum(JOB_INTYPE_PLAIN); /* job_intype */
-    fcinfo_job.arg[11] = TimeStampTzToText(start_date); /* start_date */
-    fcinfo_job.arg[12] = repeat_interval;       /* repeat_interval */
-    fcinfo_job.arg[13] = TimeStampTzToText(end_date); /* end_date */
-    fcinfo_job.arg[14] = job_action;            /* job action */
-    fcinfo_job.arg[15] = job_type;              /* job type */
-    fcinfo_job.argnull[16] = true;
-    fcinfo_job.argnull[17] = true;
-    fcinfo_job.argnull[18] = true;
-    create_job_raw(&fcinfo_job);
+    fcinfo_job->args[0].value = job_name;               /* job_name */
+    fcinfo_job->args[1].value = program_name;           /* program_name */
+    fcinfo_job->args[2].value = schedule_name;          /* schedule_name */
+    fcinfo_job->args[3].value = PG_GETARG_DATUM(7);     /* job_class */
+    fcinfo_job->args[4].value = enabled;                /* enabled */
+    fcinfo_job->args[5].value = PG_GETARG_DATUM(9);     /* auto_drop */
+    fcinfo_job->args[6].value = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* comments */
+    fcinfo_job->args[7].value = Datum(0);               /* job_style */
+    fcinfo_job->args[8].value = PG_ARGISNULL(11) ? Datum(0) : PG_GETARG_DATUM(11);    /* credential_name */
+    fcinfo_job->args[9].value = PG_ARGISNULL(12) ? Datum(0) : PG_GETARG_DATUM(12);    /* destination_name */
+    fcinfo_job->args[10].value = CharGetDatum(JOB_INTYPE_PLAIN); /* job_intype */
+    fcinfo_job->args[11].value = TimeStampTzToText(start_date); /* start_date */
+    fcinfo_job->args[12].value = repeat_interval;       /* repeat_interval */
+    fcinfo_job->args[13].value = TimeStampTzToText(end_date); /* end_date */
+    fcinfo_job->args[14].value = job_action;            /* job action */
+    fcinfo_job->args[15].value = job_type;              /* job type */
+    fcinfo_job->args[16].isnull = true;
+    fcinfo_job->args[17].isnull = true;
+    fcinfo_job->args[18].isnull = true;
+    create_job_raw(fcinfo_job);
 }
 
 /*
@@ -1381,35 +1381,35 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
     static const short nrgs_job = 19;
-    FunctionCallInfoData fcinfo_job;
-    InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
-    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    LOCAL_FCINFO(fcinfo_job, 19);
+    InitFunctionCallInfoData(*fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
 
-    fcinfo_job.arg[0] = PG_GETARG_DATUM(0);     /* job_name */
-    fcinfo_job.arg[1] = program_name;           /* program_name */
-    fcinfo_job.arg[2] = schedule_name;          /* schedule_name */
-    fcinfo_job.arg[3] = PG_GETARG_DATUM(3);     /* job_class */
-    fcinfo_job.arg[4] = PG_GETARG_DATUM(4);     /* enabled */
-    fcinfo_job.arg[5] = PG_GETARG_DATUM(5);     /* auto_drop */
-    fcinfo_job.arg[6] = PG_ARGISNULL(6) ? Datum(0) : PG_GETARG_DATUM(6);     /* comments */
-    fcinfo_job.arg[7] = PG_GETARG_DATUM(7);     /* job_style */
-    fcinfo_job.arg[8] = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* credential_name */
-    fcinfo_job.arg[9] = PG_ARGISNULL(9) ? Datum(0) : PG_GETARG_DATUM(9);     /* destination_name */
-    fcinfo_job.arg[10] = CharGetDatum(JOB_INTYPE_SCHEDULE_PROGRAM); /* job_intype */
+    fcinfo_job->args[0].value = PG_GETARG_DATUM(0);     /* job_name */
+    fcinfo_job->args[1].value = program_name;           /* program_name */
+    fcinfo_job->args[2].value = schedule_name;          /* schedule_name */
+    fcinfo_job->args[3].value = PG_GETARG_DATUM(3);     /* job_class */
+    fcinfo_job->args[4].value = PG_GETARG_DATUM(4);     /* enabled */
+    fcinfo_job->args[5].value = PG_GETARG_DATUM(5);     /* auto_drop */
+    fcinfo_job->args[6].value = PG_ARGISNULL(6) ? Datum(0) : PG_GETARG_DATUM(6);     /* comments */
+    fcinfo_job->args[7].value = PG_GETARG_DATUM(7);     /* job_style */
+    fcinfo_job->args[8].value = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* credential_name */
+    fcinfo_job->args[9].value = PG_ARGISNULL(9) ? Datum(0) : PG_GETARG_DATUM(9);     /* destination_name */
+    fcinfo_job->args[10].value = CharGetDatum(JOB_INTYPE_SCHEDULE_PROGRAM); /* job_intype */
 
     /* pg_job */
-    fcinfo_job.arg[11] = start_date;            /* start_date */
-    fcinfo_job.arg[12] = repeat_interval;       /* repeat_interval */
-    fcinfo_job.arg[13] = end_date;              /* end_date */
-    fcinfo_job.arg[14] = job_action;            /* job action */
-    fcinfo_job.arg[15] = job_type;              /* job type */
-    fcinfo_job.argnull[16] = true;
-    fcinfo_job.argnull[17] = true;
-    fcinfo_job.argnull[18] = true;
-    create_job_raw(&fcinfo_job);
+    fcinfo_job->args[11].value = start_date;            /* start_date */
+    fcinfo_job->args[12].value = repeat_interval;       /* repeat_interval */
+    fcinfo_job->args[13].value = end_date;              /* end_date */
+    fcinfo_job->args[14].value = job_action;            /* job action */
+    fcinfo_job->args[15].value = job_type;              /* job type */
+    fcinfo_job->args[16].isnull = true;
+    fcinfo_job->args[17].isnull = true;
+    fcinfo_job->args[18].isnull = true;
+    create_job_raw(fcinfo_job);
 }
 
 /*
@@ -1435,35 +1435,35 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
     static const short nrgs_job = 19;
-    FunctionCallInfoData fcinfo_job;
-    InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
-    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    LOCAL_FCINFO(fcinfo_job, 19);
+    InitFunctionCallInfoData(*fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    rc = memset_s(fcinfo_job->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
 
-    fcinfo_job.arg[0] = job_name;               /* job_name */
-    fcinfo_job.arg[1] = program_name;           /* program_name */
-    fcinfo_job.arg[2] = schedule_name;          /* schedule_name */
-    fcinfo_job.arg[3] = PG_GETARG_DATUM(5);     /* job_class */
-    fcinfo_job.arg[4] = PG_GETARG_DATUM(6);     /* enabled */
-    fcinfo_job.arg[5] = PG_GETARG_DATUM(7);     /* auto_drop */
-    fcinfo_job.arg[6] = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* comments */
-    fcinfo_job.arg[7] = PG_GETARG_DATUM(9);     /* job_style */
-    fcinfo_job.arg[8] = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* credential_name */
-    fcinfo_job.arg[9] = PG_ARGISNULL(11) ? Datum(0) : PG_GETARG_DATUM(11);    /* destination_name */
-    fcinfo_job.arg[10] = CharGetDatum(JOB_INTYPE_PROGRAM); /* job_intype */
+    fcinfo_job->args[0].value = job_name;               /* job_name */
+    fcinfo_job->args[1].value = program_name;           /* program_name */
+    fcinfo_job->args[2].value = schedule_name;          /* schedule_name */
+    fcinfo_job->args[3].value = PG_GETARG_DATUM(5);     /* job_class */
+    fcinfo_job->args[4].value = PG_GETARG_DATUM(6);     /* enabled */
+    fcinfo_job->args[5].value = PG_GETARG_DATUM(7);     /* auto_drop */
+    fcinfo_job->args[6].value = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* comments */
+    fcinfo_job->args[7].value = PG_GETARG_DATUM(9);     /* job_style */
+    fcinfo_job->args[8].value = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* credential_name */
+    fcinfo_job->args[9].value = PG_ARGISNULL(11) ? Datum(0) : PG_GETARG_DATUM(11);    /* destination_name */
+    fcinfo_job->args[10].value = CharGetDatum(JOB_INTYPE_PROGRAM); /* job_intype */
 
     /* pg_job */
-    fcinfo_job.arg[11] = TimeStampTzToText(start_date); /* start_date */
-    fcinfo_job.arg[12] = repeat_interval;               /* repeat_interval */
-    fcinfo_job.arg[13] = TimeStampTzToText(end_date);   /* end_date */
-    fcinfo_job.arg[14] = job_action;                    /* job action */
-    fcinfo_job.arg[15] = job_type;                      /* job type */
-    fcinfo_job.argnull[16] = true;
-    fcinfo_job.argnull[17] = true;
-    fcinfo_job.argnull[18] = true;
-    create_job_raw(&fcinfo_job);
+    fcinfo_job->args[11].value = TimeStampTzToText(start_date); /* start_date */
+    fcinfo_job->args[12].value = repeat_interval;               /* repeat_interval */
+    fcinfo_job->args[13].value = TimeStampTzToText(end_date);   /* end_date */
+    fcinfo_job->args[14].value = job_action;                    /* job action */
+    fcinfo_job->args[15].value = job_type;                      /* job type */
+    fcinfo_job->args[16].isnull = true;
+    fcinfo_job->args[17].isnull = true;
+    fcinfo_job->args[18].isnull = true;
+    create_job_raw(fcinfo_job);
 }
 
 /*
@@ -1491,31 +1491,31 @@ void create_job_4_internal(PG_FUNCTION_ARGS)
     pfree_ext(c_program_name);
 
     static const short nrgs_job = 19;
-    FunctionCallInfoData fcinfo_job;
-    InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    LOCAL_FCINFO(fcinfo_job, 19);
+    InitFunctionCallInfoData(*fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
 
-    fcinfo_job.arg[0] = job_name;               /* job_name */
-    fcinfo_job.arg[1] = program_name;           /* program_name */
-    fcinfo_job.arg[2] = schedule_name;          /* schedule_name */
-    fcinfo_job.arg[3] = PG_GETARG_DATUM(5);     /* job_class */
-    fcinfo_job.arg[4] = enabled;                /* enabled */
-    fcinfo_job.arg[5] = PG_GETARG_DATUM(7);     /* auto_drop */
-    fcinfo_job.arg[6] = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* comments */
-    fcinfo_job.arg[7] = Datum(0);               /* job_style */
-    fcinfo_job.arg[8] = PG_ARGISNULL(9) ? Datum(0) : PG_GETARG_DATUM(9);     /* credential_name */
-    fcinfo_job.arg[9] = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* destination_name */
-    fcinfo_job.arg[10] = CharGetDatum(JOB_INTYPE_SCHEDULE); /* job_intype */
+    fcinfo_job->args[0].value = job_name;               /* job_name */
+    fcinfo_job->args[1].value = program_name;           /* program_name */
+    fcinfo_job->args[2].value = schedule_name;          /* schedule_name */
+    fcinfo_job->args[3].value = PG_GETARG_DATUM(5);     /* job_class */
+    fcinfo_job->args[4].value = enabled;                /* enabled */
+    fcinfo_job->args[5].value = PG_GETARG_DATUM(7);     /* auto_drop */
+    fcinfo_job->args[6].value = PG_ARGISNULL(8) ? Datum(0) : PG_GETARG_DATUM(8);     /* comments */
+    fcinfo_job->args[7].value = Datum(0);               /* job_style */
+    fcinfo_job->args[8].value = PG_ARGISNULL(9) ? Datum(0) : PG_GETARG_DATUM(9);     /* credential_name */
+    fcinfo_job->args[9].value = PG_ARGISNULL(10) ? Datum(0) : PG_GETARG_DATUM(10);    /* destination_name */
+    fcinfo_job->args[10].value = CharGetDatum(JOB_INTYPE_SCHEDULE); /* job_intype */
 
     /* pg_job */
-    fcinfo_job.arg[11] = start_date;            /* start_date */
-    fcinfo_job.arg[12] = repeat_interval;       /* repeat_interval */
-    fcinfo_job.arg[13] = end_date;              /* end_date */
-    fcinfo_job.arg[14] = job_action;            /* job action */
-    fcinfo_job.arg[15] = job_type;              /* job type */
-    fcinfo_job.argnull[16] = true;
-    fcinfo_job.argnull[17] = true;
-    fcinfo_job.argnull[18] = true;
-    create_job_raw(&fcinfo_job);
+    fcinfo_job->args[11].value = start_date;            /* start_date */
+    fcinfo_job->args[12].value = repeat_interval;       /* repeat_interval */
+    fcinfo_job->args[13].value = end_date;              /* end_date */
+    fcinfo_job->args[14].value = job_action;            /* job action */
+    fcinfo_job->args[15].value = job_type;              /* job type */
+    fcinfo_job->args[16].isnull = true;
+    fcinfo_job->args[17].isnull = true;
+    fcinfo_job->args[18].isnull = true;
+    create_job_raw(fcinfo_job);
 }
 
 /*

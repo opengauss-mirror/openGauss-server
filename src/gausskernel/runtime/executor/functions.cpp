@@ -972,8 +972,8 @@ static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fci
         for (i = 0; i < nargs; i++) {
             ParamExternData* prm = &param_li->params[i];
 
-            prm->value = fcinfo->arg[i];
-            prm->isnull = fcinfo->argnull[i];
+            prm->value = fcinfo->args[i].value;
+            prm->isnull = fcinfo->args[i].isnull;
             prm->pflags = 0;
             prm->ptype = fcache->pinfo->argtypes[i];
             prm->tabInfo = NULL;

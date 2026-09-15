@@ -139,7 +139,7 @@ public:
     // down side has pop all data?
     bool m_noInput;
 
-    FunctionCallInfoData* m_windowFunc;
+    FunctionCallInfoData** m_windowFunc;
 
     int m_winFuns;
 

@@ -3392,23 +3392,23 @@ static void* readtup_alloc(Tuplesortstate *state, Size tuplen)
  */
 static inline Datum myFunctionCall2Coll(FmgrInfo* flinfo, Oid collation, Datum arg1, Datum arg2)
 {
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
     Datum result;
 
-    InitFunctionCallInfoData(fcinfo, flinfo, 2, collation, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, flinfo, 2, collation, NULL, NULL);
 
-    fcinfo.arg[0] = arg1;
-    fcinfo.arg[1] = arg2;
-    fcinfo.argnull[0] = false;
-    fcinfo.argnull[1] = false;
+    fcinfo->args[0].value = arg1;
+    fcinfo->args[1].value = arg2;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].isnull = false;
 
-    result = FunctionCallInvoke(&fcinfo);
+    result = FunctionCallInvoke(fcinfo);
 
     /* Check for null result, since caller is clearly not expecting one */
-    if (fcinfo.isnull) {
+    if (fcinfo->isnull) {
         ereport(ERROR,
             (errmodule(MOD_EXECUTOR),
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("function %u returned NULL", fcinfo.flinfo->fn_oid))));
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("function %u returned NULL", fcinfo->flinfo->fn_oid))));
     }
 
     return result;

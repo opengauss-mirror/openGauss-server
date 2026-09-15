@@ -1293,7 +1293,15 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
         } else
 #endif
             if (useHeapMultiInsert) {
-                TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_ops);
+                DistInsertSelectState* distState = (DistInsertSelectState*)state;
+                TupleTableSlot* tmp_slot = distState->tmp_slot;
+                if (tmp_slot == NULL) {
+                    tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor,
+                                                        false, result_relation_desc->rd_tam_ops);
+                    distState->tmp_slot = tmp_slot;
+                } else {
+                    ExecClearTuple(tmp_slot);
+                }
 
                 bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
                 Oid targetOid = InvalidOid;
@@ -1306,7 +1314,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 } else {
                     targetOid = RelationGetRelid(result_relation_desc);
                 }
-                bulk = findBulk(((DistInsertSelectState *)state)->mgr, targetOid, bucket_id, &to_flush);
+                bulk = findBulk(distState->mgr, targetOid, bucket_id, &to_flush);
 
                 if (to_flush) {
                     if (is_partition_rel && need_flush) {
@@ -1317,9 +1325,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                                     tmpCopyFromMemCxt->chunk[i]->partOid);
                         }
                     }
-                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
-                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid,
-                        options, result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate);
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, distState->mgr,
+                        distState->pcState, estate->es_output_cid,
+                        options, result_rel_info, tmp_slot, distState->bistate);
                 }
 
                 /* check and record insertion into user chain table */
@@ -1340,12 +1348,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                                     tmpCopyFromMemCxt->chunk[i]->partOid);
                         }
                     }
-                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
-                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid, options,
-                        result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate);
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, distState->mgr,
+                        distState->pcState, estate->es_output_cid, options,
+                        result_rel_info, tmp_slot, distState->bistate);
                 }
-
-                ExecDropSingleTupleTableSlot(tmp_slot);
             } else if (state->mt_upsert->us_action != UPSERT_NONE && result_rel_info->ri_NumIndices > 0) {
                 TupleTableSlot* returning = NULL;
                 bool updated = false;
@@ -4526,6 +4532,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     if (node->is_dist_insertselect) {
         DistInsertSelectState* distInsertSelectState = (DistInsertSelectState*)mt_state;
         distInsertSelectState->rows = 0;
+        distInsertSelectState->tmp_slot = NULL;
         distInsertSelectState->insert_mcxt = AllocSetContextCreate(CurrentMemoryContext,
             "Insert into Select",
             ALLOCSET_DEFAULT_MINSIZE,
@@ -4743,9 +4750,14 @@ void ExecEndModifyTable(ModifyTableState* node)
     }
 
     if (IsA(node, DistInsertSelectState)) {
-        deinitCopyFromManager(((DistInsertSelectState*)node)->mgr);
-        ((DistInsertSelectState*)node)->mgr = NULL;
-        FreeBulkInsertState(((DistInsertSelectState*)node)->bistate);
+        DistInsertSelectState* distState = (DistInsertSelectState*)node;
+        deinitCopyFromManager(distState->mgr);
+        distState->mgr = NULL;
+        FreeBulkInsertState(distState->bistate);
+        if (distState->tmp_slot != NULL) {
+            ExecDropSingleTupleTableSlot(distState->tmp_slot);
+            distState->tmp_slot = NULL;
+        }
     }
 
     if (node->errorRel != NULL)

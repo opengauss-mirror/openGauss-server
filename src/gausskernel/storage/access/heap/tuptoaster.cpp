@@ -182,6 +182,60 @@ struct varlena *heap_tuple_untoast_attr(struct varlena *attr, ScalarVector *arr)
     return attr;
 }
 
+struct varlena *heap_tuple_untoast_attr_buffered(struct varlena *attr, void *buffer, Size bufsize)
+{
+    if (VARATT_IS_EXTERNAL_ONDISK_B(attr)) {
+        attr = toast_fetch_datum(attr);
+        if (VARATT_IS_COMPRESSED(attr)) {
+            PGLZ_Header *tmp = (PGLZ_Header *)attr;
+            Size rawsize = PGLZ_RAW_SIZE(tmp) + VARHDRSZ;
+
+            if (rawsize <= bufsize) {
+                attr = (struct varlena *)buffer;
+            } else {
+                attr = (struct varlena *)palloc(rawsize);
+            }
+            SET_VARSIZE(attr, rawsize);
+            pglz_decompress(tmp, VARDATA(attr));
+            pfree(tmp);
+        }
+    } else if (VARATT_IS_EXTERNAL_INDIRECT(attr)) {
+        struct varatt_indirect redirect;
+        VARATT_EXTERNAL_GET_POINTER(redirect, attr);
+        attr = (struct varlena *)redirect.pointer;
+        Assert(!VARATT_IS_EXTERNAL_INDIRECT(attr));
+        attr = heap_tuple_untoast_attr_buffered(attr, buffer, bufsize);
+    } else if (VARATT_IS_COMPRESSED(attr)) {
+        PGLZ_Header *tmp = (PGLZ_Header *)attr;
+        Size rawsize = PGLZ_RAW_SIZE(tmp) + VARHDRSZ;
+
+        if (rawsize <= bufsize) {
+            attr = (struct varlena *)buffer;
+        } else {
+            attr = (struct varlena *)palloc(rawsize);
+        }
+        SET_VARSIZE(attr, rawsize);
+        pglz_decompress(tmp, VARDATA(attr));
+    } else if (VARATT_IS_SHORT(attr) && !VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+        Size data_size = VARSIZE_SHORT(attr) - VARHDRSZ_SHORT;
+        Size new_size = data_size + VARHDRSZ;
+        struct varlena *new_attr;
+        errno_t rc = EOK;
+
+        if (new_size <= bufsize) {
+            new_attr = (struct varlena *)buffer;
+        } else {
+            new_attr = (struct varlena *)palloc(new_size);
+        }
+        SET_VARSIZE(new_attr, new_size);
+        rc = memcpy_s(VARDATA(new_attr), new_size, VARDATA_SHORT(attr), data_size);
+        securec_check(rc, "", "");
+        attr = new_attr;
+    }
+
+    return attr;
+}
+
 /* ----------
  * heap_tuple_untoast_attr_slice -
  *

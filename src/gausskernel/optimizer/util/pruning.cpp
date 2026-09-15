@@ -3165,30 +3165,31 @@ static Datum partitionTransformDatumForExpr(Expr* expr, AttrNumber varattno, Con
     if (IsA(expr, FuncExpr)|| IsA(expr, OpExpr)) {
         Datum result = (Datum)0;
         FmgrInfo flinfo;
-        FunctionCallInfoData fcinfo;
+        FunctionCallInfo fcinfo = NULL;
         int i = 0;
         ListCell* arg = NULL;
         List* args = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->args : ((OpExpr*)expr)->args;
         Oid functionId = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
         Oid inputcollid = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
         fmgr_info(functionId, &flinfo);
-        InitFunctionCallInfoData(fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
-        fcinfo.can_ignore = false;
+        fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(list_length(args)));
+        InitFunctionCallInfoData(*fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
+        fcinfo->can_ignore = false;
         foreach (arg, args) {
             Expr* tmp =  (Expr*)lfirst(arg);
-            fcinfo.arg[i] = partitionTransformDatumForExpr(tmp, varattno, value, ret);
-            fcinfo.argnull[i] = false;
+            fcinfo->args[i].value = partitionTransformDatumForExpr(tmp, varattno, value, ret);
+            fcinfo->args[i].isnull = false;
             if (*ret == false) {
                 break;
             }
             i++;
         }
         if (ret) {
-            result = FunctionCallInvoke(&fcinfo);
-            if (fcinfo.isnull) {
+            result = FunctionCallInvoke(fcinfo);
+            if (fcinfo->isnull) {
                 *ret = false;
             }
-            FreeFunctionCallInfoData(fcinfo);
+            FreeFunctionCallInfoData(*fcinfo);
             return result;
         }
     }
@@ -3202,7 +3203,7 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
     PartitionMap *partMap = context->relation->partMap;
     ListCell* arg = NULL;
     FmgrInfo flinfo;
-    FunctionCallInfoData fcinfo;
+    FunctionCallInfo fcinfo = NULL;
     bool ret = true;
     volatile bool transformFailed = false;
     int i = 0;
@@ -3212,12 +3213,13 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
         Oid functionId = IsA(expr, FuncExpr) ? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
         Oid inputcollid = IsA(expr, FuncExpr) ? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
         fmgr_info(functionId, &flinfo);
-        InitFunctionCallInfoData(fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
-        fcinfo.can_ignore = false;
+        fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(list_length(args)));
+        InitFunctionCallInfoData(*fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
+        fcinfo->can_ignore = false;
         foreach (arg, args) {
             Expr* tmp = (Expr*)lfirst(arg);
-            fcinfo.arg[i] = partitionTransformDatumForExpr(tmp, varattno, value, &ret);
-            fcinfo.argnull[i] = false;
+            fcinfo->args[i].value = partitionTransformDatumForExpr(tmp, varattno, value, &ret);
+            fcinfo->args[i].isnull = false;
             if (ret == false) {
                 break;
             }
@@ -3225,9 +3227,9 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
         }
         if (ret) {
             PartKeyExprResult partKeyExprTuple;
-            partKeyExprTuple.value = FunctionCallInvoke(&fcinfo);
-            partKeyExprTuple.isNull = fcinfo.isnull;
-            if (fcinfo.isnull) {
+            partKeyExprTuple.value = FunctionCallInvoke(fcinfo);
+            partKeyExprTuple.isNull = fcinfo->isnull;
+            if (fcinfo->isnull) {
                 ret = false;
             } else {
                 transformDatum2ConstForPartKeyExpr((PartitionMap*)partMap, &partKeyExprTuple, value);
@@ -3243,6 +3245,6 @@ bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, 
     if (transformFailed) {
         ret = false;
     }
-    FreeFunctionCallInfoData(fcinfo);
+    FreeFunctionCallInfoData(*fcinfo);
     return ret;
 }

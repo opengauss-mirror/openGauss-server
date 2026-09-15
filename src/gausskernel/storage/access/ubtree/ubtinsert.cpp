@@ -472,7 +472,8 @@ void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page page)
  *		successful UNIQUE_CHECK_YES or UNIQUE_CHECK_EXISTING call, but
  *		that's just a coding artifact.)
  */
-bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel)
+bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    Datum *itup_values, const bool *itup_isnull)
 {
     bool is_unique = false;
     BTScanInsert itupKey;
@@ -491,7 +492,7 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("relation or rd_rel is NULL")));
     }
     /* we need an insertion scan key to do our search, so build one */
-    itupKey = UBTreeMakeScanKey(rel, itup);
+    itupKey = UBTreeMakeScanKey(rel, itup, itup_values, itup_isnull);
     GPIScanDesc gpiScan = NULL;
 
     if (RelationIsGlobalIndex(rel)) {

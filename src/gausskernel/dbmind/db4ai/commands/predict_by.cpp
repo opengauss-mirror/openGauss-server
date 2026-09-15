@@ -100,9 +100,16 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
     }
 
     int var_args_size = PG_NARGS() - 1;
-    Datum *var_args = &fcinfo->arg[1]; // We skip the model name
-    bool *nulls = &fcinfo->argnull[1];
-    Oid *types = &fcinfo->argTypes[1];
+
+    /* Compute concrete types from expression tree (VARIADIC "any" resolves to actual types) */
+    Oid *types = (Oid*)palloc(var_args_size * sizeof(Oid));
+    Datum *var_args = (Datum*)palloc(var_args_size * sizeof(Datum));
+    bool *nulls = (bool*)palloc(var_args_size * sizeof(bool));
+    for (int i = 0; i < var_args_size; i++) {
+        types[i] = get_fn_expr_argtype(fcinfo->flinfo, i + 1);
+        var_args[i] = fcinfo->args[i + 1].value;
+        nulls[i] = fcinfo->args[i + 1].isnull;
+    }
 
     PredictionByData *prediction_by_data;
     if (fcinfo->flinfo->fn_extra != NULL) {
@@ -128,7 +135,9 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
 
     Datum result = prediction_by_data->api->predict(prediction_by_data->algorithm, prediction_by_data->model_predictor,
                                                     var_args, nulls, types, var_args_size);
-
+    pfree(types);
+    pfree(var_args);
+    pfree(nulls);
     PG_RETURN_DATUM(result);
 }
 

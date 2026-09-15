@@ -1172,11 +1172,16 @@ typedef struct BTOrderedIndexListElement {
 } BTOrderedIndexListElement;
 
 typedef struct BTCheckElement {
+    IndexTuple itup;
+    Size itemsz;
     Buffer buffer;
     BTStack btStack;
     BTScanInsert itup_key;
     OffsetNumber offset;
     int posting_off;
+    bool bounds_valid;
+    OffsetNumber low;
+    OffsetNumber stricthigh;
     int indnkeyatts;
     bool useFastPath;
     BlockNumber targetBlock;
@@ -1396,17 +1401,19 @@ extern Datum btmerge(PG_FUNCTION_ARGS);
 /*
  * prototypes for functions in nbtinsert.c
  */
-extern bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
+extern bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern OffsetNumber BTFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
     bool *newitemonleft, IndexTuple newitem);
 extern Buffer _bt_getstackbuf(Relation rel, BTStack stack);
 extern void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
-extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
-    OffsetNumber offset, BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
+extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, BTCheckElement* element,
+    IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
     CBIScanDesc cbiScan, CUDescScan* cudesc);
 extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
-    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element);
+    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern bool CheckPartitionIsInvisible(GPIScanDesc gpiScan);
 
 /*
@@ -1442,6 +1449,7 @@ extern BTStack _bt_search(Relation rel, BTScanInsert key, Buffer* bufP, int acce
 extern Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack, int access,
                             BlockNumber parallel_end);
 extern OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *posting_off);
+extern void _bt_binsrch_insert(Relation rel, BTCheckElement* element);
 extern int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
@@ -1456,7 +1464,8 @@ extern int _bt_getrootheight(Relation rel);
 /*
  * prototypes for functions in nbtutils.c
  */
-extern BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup);
+extern BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern ScanKey _bt_mkscankey_nodata(Relation rel);
 extern void _bt_freeskey(ScanKey skey);
 extern void _bt_freestack(BTStack stack);

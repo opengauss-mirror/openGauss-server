@@ -662,6 +662,123 @@ OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *postin
     return OffsetNumberPrev(low);
 }
 
+/*
+ *  _bt_binsrch_insert() -- Cacheable, incremental leaf page binary search.
+ *
+ * Like _bt_binsrch(), but with support for caching the binary search
+ * bounds.  Only used during insertion, and only on the leaf page that it
+ * looks like caller will insert tuple on.  Exclusive-locked and pinned
+ * leaf page is contained within element->buffer.
+ *
+ * Caches the bounds fields in the element for use by caller's subsequent
+ * calls.  Callers that use these fields directly must be prepared for the
+ * case where low and/or stricthigh are not on the same page (one or both
+ * exceed maxoff for the page).  The case where there are no items on the
+ * page (high < low) makes bounds invalid.
+ *
+ * Caller is responsible for invalidating bounds when it modifies the page
+ * before calling here a second time, and for dealing with posting list
+ * tuple matches (callers can use element->posting_off to determine which
+ * existing heap TID will need to be replaced by a posting list split).
+ */
+void _bt_binsrch_insert(Relation rel, BTCheckElement* element)
+{
+    BTScanInsert key = element->itup_key;
+    Page page;
+    BTPageOpaqueInternal opaque;
+    OffsetNumber low;
+    OffsetNumber high;
+    OffsetNumber stricthigh;
+    int32 result;
+    int32 cmpval;
+
+    page = BufferGetPage(element->buffer);
+    opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+    Assert(P_ISLEAF(opaque));
+    Assert(!key->nextkey);
+    Assert(element->posting_off == 0);
+
+    if (!element->bounds_valid) {
+        /* Start new binary search */
+        low = P_FIRSTDATAKEY(opaque);
+        high = PageGetMaxOffsetNumber(page);
+    } else {
+        /* Restore result of previous binary search against same page */
+        low = element->low;
+        high = element->stricthigh;
+    }
+
+    /* If there are no keys on the page, return the first available slot */
+    if (unlikely(high < low)) {
+        /* Caller can't reuse bounds */
+        element->low = InvalidOffsetNumber;
+        element->stricthigh = InvalidOffsetNumber;
+        element->bounds_valid = false;
+        element->offset = low;
+        return;
+    }
+
+    /*
+     * Binary search to find the first key on the page >= scan key. (nextkey
+     * is always false when inserting).
+     */
+    if (!element->bounds_valid) {
+        high++; /* establish the loop invariant for high */
+    }
+    stricthigh = high; /* high initially strictly higher */
+
+    cmpval = 1; /* !nextkey comparison value */
+
+    while (high > low) {
+        OffsetNumber mid = (uint16)(((uint32)low + (uint32)high) >> 1);
+
+        result = _bt_compare(rel, key, page, mid);
+
+        if (result >= cmpval) {
+            low = mid + 1;
+        } else {
+            high = mid;
+            if (result != 0) {
+                stricthigh = high;
+            }
+        }
+
+        /*
+         * If tuple at offset located by binary search is a posting list whose
+         * TID range overlaps with caller's scantid, perform posting list
+         * binary search to set posting_off for caller.  Caller must split the
+         * posting list when posting_off is set.  This should happen
+         * infrequently.
+         */
+        if (unlikely(result == 0 && key->scantid != NULL)) {
+            /*
+             * posting_off should never be set more than once per leaf page
+             * binary search.  That would mean that there are duplicate table
+             * TIDs in the index, which is never okay.  Check for that here.
+             */
+            if (element->posting_off != 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INDEX_CORRUPTED),
+                         errmsg_internal("table tid from new index tuple (%u,%u) cannot find insert offset "
+                                         "between offsets %u and %u of block %u in index \"%s\"",
+                                         ItemPointerGetBlockNumber(key->scantid),
+                                         ItemPointerGetOffsetNumber(key->scantid),
+                                         low, stricthigh,
+                                         BufferGetBlockNumber(element->buffer),
+                                         RelationGetRelationName(rel))));
+            }
+
+            element->posting_off = btree_binsrch_posting(key, page, mid);
+        }
+    }
+
+    element->low = low;
+    element->stricthigh = stricthigh;
+    element->bounds_valid = true;
+    element->offset = low;
+}
+
 /* ----------
  *	_bt_compare() -- Compare scankey to a particular tuple on the page.
  *
@@ -695,12 +812,8 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
     int num_compare_keys;
     int num_tuple_attrs;
     int32 result;
-    /*
-     * Check tuple has correct number of attributes.
-     */
-    if (!u_sess->attr.attr_common.enable_indexscan_optimization) {
-        _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
-    }
+
+    Assert(_bt_check_natts(rel, key->heapkeyspace, page, offnum));
 
     /*
      * Force result ">" if target item is first data item on an internal page

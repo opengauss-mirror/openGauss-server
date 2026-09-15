@@ -68,8 +68,9 @@ typedef struct {
 } FindSplitData;
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
-static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, BTScanInsert itup_key,
-                              IndexTuple newtup, bool checking_unique_flag, int *posting_off, BTStack stack, Relation heapRel);
+static void _bt_search_insert(Relation rel, BTCheckElement* element);
+static void _bt_findinsertloc(Relation rel, BTCheckElement* element,
+                              bool checking_unique_flag, Relation heapRel);
 static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
                            OffsetNumber newitemoff, int posting_off, bool split_only_page, bool useFastPath);
 static Buffer _bt_split(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
@@ -80,13 +81,12 @@ static void _bt_checksplitloc(FindSplitData *state, OffsetNumber firstoldonright
                               int dataitemstoleft, Size firstoldonrightsz);
 static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off);
 static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
-static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
-static void btree_find_insert_page_by_heaptid(Relation rel, Buffer *buf_ptr, Relation heap_rel, BTStack stack,
-                                              BTScanInsert itup_key, IndexTuple newtup, Size itemsz, bool *moved_right, bool *vacuumed,
-                                              bool checking_unique_flag);
-static void btree_find_insert_page_old(Relation rel, Buffer *buf_ptr, Relation heap_rel, BTStack stack,
-                                       BTScanInsert itup_key, Size itemsz, bool *moved_right, bool *vacuumed);
-static void btree_page_step_right(Relation rel, Buffer *buf_ptr, BTStack stack);  
+static void _bt_vacuum_one_page(Relation rel, BTCheckElement* element, Relation heapRel);
+static void btree_find_insert_page_by_heaptid(Relation rel, BTCheckElement* element, Relation heap_rel,
+                                              bool *moved_right, bool *vacuumed, bool checking_unique_flag);
+static void btree_find_insert_page_old(Relation rel, BTCheckElement* element, Relation heap_rel,
+                                       bool *moved_right, bool *vacuumed);
+static void btree_page_step_right(Relation rel, BTCheckElement* element);
 static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead,
                              CUDescScan* cudescScan);
 
@@ -108,15 +108,13 @@ static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapsh
  *		successful UNIQUE_CHECK_YES or UNIQUE_CHECK_EXISTING call, but
  *		that's just a coding artifact.)
  */
-bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel)
+bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    Datum *itup_values, const bool *itup_isnull)
 {
     bool is_unique = false;
     bool checkingunique = (checkUnique != UNIQUE_CHECK_NO);
     BTScanInsert itup_key;
     BTStack stack = NULL;
-    Buffer buf;
-    OffsetNumber offset;
-    int posting_off;
     Oid indexHeapRelOid = InvalidOid;
     Relation indexHeapRel = NULL;
     Partition part = NULL;
@@ -150,14 +148,19 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     }
 
     BTCheckElement element;
+    element.itup = itup;
+    element.itemsz = MAXALIGN(IndexTupleSize(itup));
+    element.bounds_valid = false;
+    element.low = InvalidOffsetNumber;
+    element.stricthigh = InvalidOffsetNumber;
+    element.posting_off = 0;
+    element.buffer = InvalidBuffer;
+    element.offset = InvalidOffsetNumber;
     is_unique = SearchBufferAndCheckUnique(rel, itup, checkUnique, heapRel,
-        gpiScan, cbiScan, cudescScan, &element);
+        gpiScan, cbiScan, cudescScan, &element, itup_values, itup_isnull);
 
     itup_key = element.itup_key;
     stack = element.btStack;
-    buf = element.buffer;
-    offset = element.offset;
-    posting_off = element.posting_off;
 
     if (checkUnique != UNIQUE_CHECK_EXISTING) {
         /*
@@ -169,13 +172,14 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
          * This reasoning also applies to INCLUDE indexes, whose extra
          * attributes are not considered part of the key space.
          */
-        CheckForSerializableConflictIn(rel, NULL, buf);
+        CheckForSerializableConflictIn(rel, NULL, element.buffer);
         /* do the insertion */
-        _bt_findinsertloc(rel, &buf, &offset, itup_key, itup, checkingunique, &posting_off, stack, heapRel);
-        _bt_insertonpg(rel, itup_key, buf, InvalidBuffer, stack, itup, offset, posting_off, false, element.useFastPath);
+        _bt_findinsertloc(rel, &element, checkingunique, heapRel);
+        _bt_insertonpg(rel, element.itup_key, element.buffer, InvalidBuffer, element.btStack, element.itup,
+            element.offset, element.posting_off, false, element.useFastPath);
     } else {
         /* just release the buffer */
-        _bt_relbuf(rel, buf);
+        _bt_relbuf(rel, element.buffer);
     }
     /* be tidy */
     if (stack) {
@@ -206,26 +210,85 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     return is_unique;
 }
 
+/*
+ *  _bt_search_insert() -- Find the leaf page to insert on.
+ *
+ * Searches for the leaf page that the new tuple belongs on, using the
+ * fastpath optimization if possible.  On exit, element->buffer contains
+ * an exclusive-locked leaf page and element->btStack contains the descent
+ * stack (NULL when fastpath succeeds).
+ */
+static void _bt_search_insert(Relation rel, BTCheckElement* element)
+{
+    Assert(element->buffer == InvalidBuffer);
+    Assert(!element->bounds_valid);
+    Assert(element->posting_off == 0);
+
+    if (RelationGetTargetBlock(rel) != InvalidBlockNumber) {
+        element->buffer = ReadBuffer(rel, RelationGetTargetBlock(rel));
+        if (ConditionalLockBuffer(element->buffer)) {
+            Page page;
+            BTPageOpaqueInternal opaque;
+
+            _bt_checkpage(rel, element->buffer);
+            page = BufferGetPage(element->buffer);
+            opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+            if (P_RIGHTMOST(opaque) &&
+                P_ISLEAF(opaque) &&
+                !P_IGNORE(opaque) &&
+                PageGetFreeSpace(page) > element->itemsz &&
+                PageGetMaxOffsetNumber(page) >= P_HIKEY &&
+                _bt_compare(rel, element->itup_key, page, P_HIKEY) > 0) {
+                /*
+                 * The right-most block should never have incomplete split. But
+                 * be paranoid and check for it anyway.
+                 */
+                Assert(!P_INCOMPLETE_SPLIT(opaque));
+                element->useFastPath = true;
+                element->btStack = NULL;
+                return;
+            }
+
+            _bt_relbuf(rel, element->buffer);
+        } else {
+            ReleaseBuffer(element->buffer);
+        }
+
+        RelationSetTargetBlock(rel, InvalidBlockNumber);
+    }
+
+    element->useFastPath = false;
+    element->btStack = _bt_search(rel, element->itup_key, &element->buffer, BT_WRITE);
+}
+
 bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
-    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element)
+    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element,
+    Datum *itup_values, const bool *itup_isnull)
 {
     bool is_unique = false;
+    bool checkingunique = (checkUnique != UNIQUE_CHECK_NO);
     int indnkeyatts;
     BTScanInsert itup_key;
-    BTStack stack = NULL;
-    Buffer buf;
-    OffsetNumber offset;
-    bool fastpath = false;
-    int posting_off = 0;
 
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     Assert(indnkeyatts != 0);
     /* we need an insertion scan key to do our search, so build one */
-    itup_key = _bt_mkscankey(rel, itup);
+    itup_key = _bt_mkscankey(rel, itup, itup_values, itup_isnull);
 
-    if (checkUnique != UNIQUE_CHECK_NO && itup_key->heapkeyspace) {
-        itup_key->scantid = NULL;
+    if (checkingunique) {
+        if (!itup_key->anynullkeys) {
+            if (itup_key->heapkeyspace) {
+                itup_key->scantid = NULL;
+            }
+        } else {
+            Assert(checkUnique != UNIQUE_CHECK_EXISTING);
+            checkingunique = false;
+            is_unique = true;
+        }
     }
+    element->itup_key = itup_key;
+    element->indnkeyatts = indnkeyatts;
     /*
      * It's very common to have an index on an auto-incremented or
      * monotonically increasing value. In such cases, every insertion happens
@@ -246,74 +309,8 @@ bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck 
      * chances to finding an insertion place in this page.
      */
 top:
-    fastpath = false;
+    _bt_search_insert(rel, element);
 
-    offset = InvalidOffsetNumber;
-    if (RelationGetTargetBlock(rel) != InvalidBlockNumber) {
-        Size            itemsz;
-        Page            page;
-        BTPageOpaqueInternal    lpageop;
-
-        /*
-         * Conditionally acquire exclusive lock on the buffer before doing any
-         * checks. If we don't get the lock, we simply follow slowpath. If we
-         * do get the lock, this ensures that the index state cannot change, as
-         * far as the rightmost part of the index is concerned.
-         */
-        buf = ReadBuffer(rel, RelationGetTargetBlock(rel));
-
-        if (ConditionalLockBuffer(buf)) {
-            _bt_checkpage(rel, buf);
-
-            page = BufferGetPage(buf);
-
-            lpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(page);
-            itemsz = IndexTupleSize(itup);
-            itemsz = MAXALIGN(itemsz);  /* be safe, PageAddItem will do this
-                                         * but we need to be consistent */
-
-            /*
-             * Check if the page is still the rightmost leaf page, has enough
-             * free space to accommodate the new tuple, no split is in progress
-             * and the scankey is greater than or equal to the first key on the
-             * page.
-             */
-            if (P_ISLEAF(lpageop) && P_RIGHTMOST(lpageop) && !P_IGNORE(lpageop) && (PageGetFreeSpace(page) > itemsz) &&
-                PageGetMaxOffsetNumber(page) >= P_FIRSTDATAKEY(lpageop) &&
-                _bt_compare(rel, itup_key, page, P_FIRSTDATAKEY(lpageop)) > 0) {
-                /*
-                 * The right-most block should never have incomplete split. But
-                 * be paranoid and check for it anyway.
-                 */
-                Assert(!P_INCOMPLETE_SPLIT(lpageop));
-                fastpath = true;
-            } else {
-                _bt_relbuf(rel, buf);
-
-                /*
-                 * Something did not workout. Just forget about the cached
-                 * block and follow the normal path. It might be set again if
-                 * the conditions are favourble.
-                 */
-                RelationSetTargetBlock(rel, InvalidBlockNumber);
-            }
-        } else {
-            ReleaseBuffer(buf);
-
-            /*
-             * If someone's holding a lock, it's likely to change anyway,
-             * so don't try again until we get an updated rightmost leaf.
-             */
-            RelationSetTargetBlock(rel, InvalidBlockNumber);
-        }
-    }
-    if (!fastpath) {
-        /*
-         * Find the first page containing this key.  Buffer returned by
-         * _bt_search() is locked in exclusive mode.
-         */
-        stack = _bt_search(rel, itup_key, &buf, BT_WRITE);
-    }
     /*
      * If we're not allowing duplicates, make sure the key isn't already in
      * the index.
@@ -335,36 +332,33 @@ top:
      * let the tuple in and return false for possibly non-unique, or true for
      * definitely unique.
      */
-    if (checkUnique != UNIQUE_CHECK_NO) {
+    if (checkingunique) {
         TransactionId xwait;
 
-        offset = _bt_binsrch(rel, itup_key, buf, &posting_off);
-        xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_key, checkUnique, &is_unique, gpiScan, cbiScan,
+        _bt_binsrch_insert(rel, element);
+
+        xwait = _bt_check_unique(rel, itup, heapRel, element, checkUnique, &is_unique, gpiScan, cbiScan,
                                  cudescScan);
 
         if (TransactionIdIsValid(xwait)) {
             /* Have to wait for the other guy ... */
-            _bt_relbuf(rel, buf);
+            _bt_relbuf(rel, element->buffer);
             XactLockTableWait(xwait);
             /* start over... */
-            if (stack) {
-                _bt_freestack(stack);
+            if (element->btStack) {
+                _bt_freestack(element->btStack);
             }
+            element->buffer = InvalidBuffer;
+            element->btStack = NULL;
             goto top;
+        }
+
+        /* Uniqueness established -- restore heap tid as scantid */
+        if (itup_key->heapkeyspace) {
+            itup_key->scantid = &itup->t_tid;
         }
     }
 
-    if (checkUnique != UNIQUE_CHECK_NO && itup_key->heapkeyspace) {
-        itup_key->scantid = &itup->t_tid;
-    }
-
-    element->btStack = stack;
-    element->itup_key = itup_key;
-    element->buffer = buf;
-    element->offset = offset;
-    element->posting_off = posting_off;
-    element->indnkeyatts = indnkeyatts;
-    element->useFastPath = fastpath;
     element->targetBlock = RelationGetTargetBlock(rel);
 
     return is_unique;
@@ -386,15 +380,18 @@ top:
  * set *is_unique to false if there is a potential conflict, and the
  * core code must redo the uniqueness check later.
  */
-TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan, CBIScanDesc cbiScan,
+TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, BTCheckElement* element,
+    IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan, CBIScanDesc cbiScan,
     CUDescScan* cudescScan)
 {
     int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     SnapshotData SnapshotDirty;
     OffsetNumber maxoff;
+    OffsetNumber offset;
     Page page;
     BTPageOpaqueInternal opaque;
+    Buffer buf = element->buffer;
+    BTScanInsert itup_key = element->itup_key;
     Buffer nbuf = InvalidBuffer;
     bool found = false;
     Relation tarRel = heapRel;
@@ -413,6 +410,8 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
 
+    offset = element->offset;
+
     /*
      * Scan over all equal tuples, looking for live conflicts.
      */
@@ -428,6 +427,26 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
          * examine it...
          */
         if (offset <= maxoff) {
+            /*
+             * Fastpath: In most cases, we can use cached search bounds to
+             * limit our consideration to items that are definitely
+             * duplicates.  This fastpath doesn't apply when the original page
+             * is empty, or when initial offset is past the end of the
+             * original page, which may indicate that we need to examine a
+             * second or subsequent page.
+             *
+             * Note that this optimization allows us to avoid calling
+             * _bt_isequal() directly when there are no duplicates, as long as
+             * the offset where the key will go is not at the end of the page.
+             */
+            if (nbuf == InvalidBuffer && offset == element->stricthigh) {
+                Assert(element->bounds_valid);
+                Assert(element->low >= P_FIRSTDATAKEY(opaque));
+                Assert(element->low <= element->stricthigh);
+                Assert(_bt_compare(rel, itup_key, page, offset) < 0);
+                break;
+            }
+
             /*
              * We can skip items that are marked killed.
              *
@@ -545,6 +564,7 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                     if (TransactionIdIsValid(xwait)) {
                         if (nbuf != InvalidBuffer)
                             _bt_relbuf(rel, nbuf);
+                        element->bounds_valid = false;
                         /* Tell _bt_doinsert to wait... */
                         return xwait;
                     }
@@ -595,6 +615,8 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                     if (nbuf != InvalidBuffer)
                         _bt_relbuf(rel, nbuf);
                     _bt_relbuf(rel, buf);
+                    element->buffer = InvalidBuffer;
+                    element->bounds_valid = false;
 
                     {
                         Datum values[INDEX_MAX_KEYS];
@@ -683,7 +705,8 @@ next:
             offset = P_FIRSTDATAKEY(opaque);
 
             cur_posting_pos = 0;
-			in_posting = false;
+            in_posting = false;
+            /* Don't invalidate binary search bounds */
         }
     }
 
@@ -732,25 +755,27 @@ next:
  *		newtup is the new tuple we're inserting, and scankey is an insertion
  *		type scan key for it.
  */
-static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, BTScanInsert itup_key,
-                              IndexTuple newtup, bool checking_unique_flag, int *posting_off, BTStack stack, Relation heapRel)
+static void _bt_findinsertloc(Relation rel, BTCheckElement* element,
+                              bool checking_unique_flag, Relation heapRel)
 {
-    Buffer buf = *bufptr;
+    BTScanInsert itup_key = element->itup_key;
+    Buffer buf = element->buffer;
     Page page = BufferGetPage(buf);
 
-    Size itemsz = MAXALIGN(IndexTupleDSize(*newtup));
+    Size itemsz = element->itemsz;
     if (unlikely(itemsz > (Size)BTREE_MAX_ITEM_SIZE(page))) {
-        btree_check_third_page(rel, heapRel, itup_key->heapkeyspace, page, newtup);
+        btree_check_third_page(rel, heapRel, itup_key->heapkeyspace, page, element->itup);
     }
 
     bool moved_right = false;
     bool vacuumed = false;
     if (itup_key->heapkeyspace) {
-        btree_find_insert_page_by_heaptid(rel, &buf, heapRel, stack, itup_key, newtup, itemsz, &moved_right, &vacuumed, checking_unique_flag);
+        btree_find_insert_page_by_heaptid(rel, element, heapRel, &moved_right, &vacuumed, checking_unique_flag);
     } else {
-        btree_find_insert_page_old(rel, &buf, heapRel, stack, itup_key, itemsz, &moved_right, &vacuumed);
+        btree_find_insert_page_old(rel, element, heapRel, &moved_right, &vacuumed);
     }
 
+    buf = element->buffer;
     page = BufferGetPage(buf);
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -762,35 +787,33 @@ static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offset
      * around making the hint invalid. If we didn't move right or can't use
      * the hint, find the position by searching.
      */
-    OffsetNumber firstlegaloff = *offsetptr;
-    OffsetNumber newitemoff;
+    OffsetNumber firstlegaloff = element->offset;
     if (itup_key->heapkeyspace) {
-        newitemoff = _bt_binsrch(rel, itup_key, buf, posting_off);
+        _bt_binsrch_insert(rel, element);
     } else if (moved_right) {
-        newitemoff = P_FIRSTDATAKEY(opaque);
+        element->offset = P_FIRSTDATAKEY(opaque);
     } else if (firstlegaloff != InvalidOffsetNumber && !vacuumed &&
-               (firstlegaloff > PageGetMaxOffsetNumber(page) || _bt_compare(rel, itup_key, page, firstlegaloff) <= 0))
-        newitemoff = firstlegaloff;
-    else
-        newitemoff = _bt_binsrch(rel, itup_key, buf, posting_off);
-
-    if (*posting_off == -1) {
-
-		_bt_vacuum_one_page(rel, buf, heapRel);
-
-		*posting_off = 0;
-		newitemoff = _bt_binsrch(rel, itup_key, buf, posting_off);
+               (firstlegaloff > PageGetMaxOffsetNumber(page) || _bt_compare(rel, itup_key, page, firstlegaloff) <= 0)) {
+        element->offset = firstlegaloff;
+    } else {
+        _bt_binsrch_insert(rel, element);
     }
 
-    *bufptr = buf;
-    *offsetptr = newitemoff;
+    if (element->posting_off == -1) {
+
+                _bt_vacuum_one_page(rel, element, heapRel);
+
+                element->posting_off = 0;
+                _bt_binsrch_insert(rel, element);
+    }
 }
 
-static void btree_find_insert_page_by_heaptid(Relation rel, Buffer *buf_ptr, Relation heap_rel, BTStack stack,
-                                              BTScanInsert itup_key, IndexTuple newtup, Size itemsz, bool *moved_right, bool *vacuumed,
-                                              bool checking_unique_flag)
+static void btree_find_insert_page_by_heaptid(Relation rel, BTCheckElement* element, Relation heap_rel,
+                                              bool *moved_right, bool *vacuumed, bool checking_unique_flag)
 {
-    Buffer buf = *buf_ptr;
+    BTScanInsert itup_key = element->itup_key;
+    Size itemsz = element->itemsz;
+    Buffer buf = element->buffer;
     Page page = BufferGetPage(buf);
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     bool uniquedup = false;
@@ -799,11 +822,34 @@ static void btree_find_insert_page_by_heaptid(Relation rel, Buffer *buf_ptr, Rel
     Assert(itup_key->scantid != NULL);
 
     if (checking_unique_flag) {
-        while(!P_RIGHTMOST(opaque) && _bt_compare(rel, itup_key, page, P_HIKEY) > 0) {
-            btree_page_step_right(rel, &buf, stack);
+        if (element->bounds_valid && element->low < element->stricthigh) {
+            uniquedup = true;
+        }
+
+        for (;;) {
+            /*
+             * Does the new tuple belong on this page?
+             *
+             * If there is at least one tuple on the page that goes after
+             * the tuple we're inserting, then we know the tuple belongs
+             * on this page.  We can skip the high key check.
+             */
+            if (element->bounds_valid &&
+                element->low <= element->stricthigh &&
+                element->stricthigh <= PageGetMaxOffsetNumber(page)) {
+                break;
+            }
+
+            if (P_RIGHTMOST(opaque) ||
+                _bt_compare(rel, itup_key, page, P_HIKEY) <= 0) {
+                break;
+            }
+
+            btree_page_step_right(rel, element);
             *moved_right = true;
             *vacuumed = false;
 
+            buf = element->buffer;
             page = BufferGetPage(buf);
             opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -812,36 +858,51 @@ static void btree_find_insert_page_by_heaptid(Relation rel, Buffer *buf_ptr, Rel
     }
 
     if (PageGetFreeSpace(page) < itemsz && P_ISLEAF(opaque) && P_HAS_GARBAGE(opaque)) {
-        _bt_vacuum_one_page(rel, buf, heap_rel);
+        _bt_vacuum_one_page(rel, element, heap_rel);
         *vacuumed = true;
 
         uniquedup = true;
     }
 
     if (PageGetFreeSpace(page) < itemsz && itup_key->allequalimage && btree_do_dedup(heap_rel, rel) && (!checking_unique_flag || uniquedup)) {
-        btree_dedup_page(rel, heap_rel, buf, newtup, itemsz);
+        btree_dedup_page(rel, heap_rel, buf, element->itup, itemsz);
+        element->bounds_valid = false;
     }
 
-    *buf_ptr = buf;
+    element->buffer = buf;
 }
 
-static void btree_find_insert_page_old(Relation rel, Buffer *buf_ptr, Relation heap_rel, BTStack stack,
-                                       BTScanInsert itup_key, Size itemsz, bool *moved_right, bool *vacuumed)
+static void btree_find_insert_page_old(Relation rel, BTCheckElement* element, Relation heap_rel,
+                                       bool *moved_right, bool *vacuumed)
 {
-    Buffer buf = *buf_ptr;
+    BTScanInsert itup_key = element->itup_key;
+    Size itemsz = element->itemsz;
+    Buffer buf = element->buffer;
     Page page = BufferGetPage(buf);
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
     Assert(P_ISLEAF(opaque) && !P_INCOMPLETE_SPLIT(opaque));
     Assert(itup_key->scantid == NULL);
 
+    /*----------
+     * This is a !heapkeyspace (version 2 or 3) index.
+     *
+     * If the new key is equal to one or more existing keys, keep scanning
+     * right until we
+     *   (a) find a page with enough free space,
+     *   (b) reach the last page where the tuple can legally go, or
+     *   (c) get tired of searching.
+     * (c) uses a random choice (0.99 probability of moving right) to
+     * prevent O(N^2) behavior with many equal keys.
+     *----------
+     */
     while (PageGetFreeSpace(page) < itemsz) {
         /*
          * before considering moving right, see if we can obtain enough space
          * by erasing LP_DEAD items
          */
         if (P_ISLEAF(opaque) && P_HAS_GARBAGE(opaque)) {
-            _bt_vacuum_one_page(rel, buf, heap_rel);
+            _bt_vacuum_one_page(rel, element, heap_rel);
             /*
              * remember that we vacuumed this page, because that makes the
              * hint supplied by the caller invalid
@@ -853,30 +914,43 @@ static void btree_find_insert_page_old(Relation rel, Buffer *buf_ptr, Relation h
         }
 
         /*
-         * nope, so check conditions (b) and (c) enumerated above
+         * The earlier _bt_check_unique() call may have established a strict
+         * upper bound on the offset for the new item.  If it's not the last
+         * item of the page (i.e. if there is at least one tuple on the page
+         * that's greater than the tuple we're inserting to) then we know the
+         * tuple belongs on this page.  We can skip the high key check.
          */
+        if (element->bounds_valid &&
+            element->low <= element->stricthigh &&
+            element->stricthigh <= PageGetMaxOffsetNumber(page)) {
+            break;
+        }
+
+        /* check conditions (b) and (c) enumerated above */
         if (P_RIGHTMOST(opaque) || _bt_compare(rel, itup_key, page, P_HIKEY) != 0 ||
             random() <= (MAX_RANDOM_VALUE / 100))
             break;
         /* step right to next non-dead page */
-        btree_page_step_right(rel, &buf, stack);
+        btree_page_step_right(rel, element);
         *moved_right = true;
         *vacuumed = false;
 
+        buf = element->buffer;
         page = BufferGetPage(buf);
         opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     }
 
-    *buf_ptr = buf;
+    element->buffer = buf;
 }
 
-static void btree_page_step_right(Relation rel, Buffer *buf_ptr, BTStack stack)
+static void btree_page_step_right(Relation rel, BTCheckElement* element)
 {
     Page page;
     BTPageOpaqueInternal lpageop;
     Buffer rbuf;
     BlockNumber rblkno;
-    Buffer buf = *buf_ptr;
+    Buffer buf = element->buffer;
+    BTStack stack = element->btStack;
 
     page = BufferGetPage(buf);
     lpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -911,7 +985,8 @@ static void btree_page_step_right(Relation rel, Buffer *buf_ptr, BTStack stack)
     }
     _bt_relbuf(rel, buf);
 
-    *buf_ptr = rbuf;
+    element->buffer = rbuf;
+    element->bounds_valid = false;
 }
 
 /*
@@ -2553,11 +2628,12 @@ static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int key
  * must be exclusive-locked, but unlike a real VACUUM, we don't need a
  * super-exclusive "cleanup" lock (see nbtree/README).
  */
-static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
+static void _bt_vacuum_one_page(Relation rel, BTCheckElement* element, Relation heapRel)
 {
     OffsetNumber deletable[MaxIndexTuplesPerPage];
     int ndeletable = 0;
     OffsetNumber offnum, minoff, maxoff;
+    Buffer buffer = element->buffer;
     Page page = BufferGetPage(buffer);
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -2577,6 +2653,7 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
             (void)log_heap_cleanup_info(&(rel->rd_node), u_sess->utils_cxt.RecentGlobalXmin);
         }
         _bt_delitems_delete(rel, buffer, deletable, ndeletable, heapRel);
+        element->bounds_valid = false;
     }
     /*
      * Note: if we didn't find any LP_DEAD items, then the page's

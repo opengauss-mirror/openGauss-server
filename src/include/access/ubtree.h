@@ -630,7 +630,8 @@ typedef RpSortData ItemIdSortData;
 /*
  * prototypes for functions in ubtinsert.cpp
  */
-extern bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
+extern bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 
 extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del_blknos = NULL);
@@ -672,7 +673,8 @@ extern bool UBTreeGetTupleInternal(IndexScanDesc scan, ScanDirection dir);
 /*
  * prototypes for functions in ubtutils.cpp
  */
-extern BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup);
+extern BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
     ScanDirection dir, bool* continuescan, bool *needRecheck);
 template<typename Opaque> void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page,

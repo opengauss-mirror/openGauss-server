@@ -260,6 +260,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
      *	 3: Has nulls or var-widths BEFORE att.
      */
     data_off = IndexInfoFindDataOffset(tup->t_info);
+    const bool has_nulls = IndexTupleHasNulls(tup);
 
     attnum--;
 
@@ -268,7 +269,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
      *
      * check to see if desired att is null
      */
-    if (IndexTupleHasNulls(tup)) {
+    if (has_nulls) {
         /* XXX "knows" t_bits are just after fixed tuple header! */
         bp = (bits8*)((char*)tup + sizeof(IndexTupleData));
 
@@ -362,6 +363,17 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
     } else {
         bool usecache = true;
         int i;
+        int start_i = 0;
+
+        /*
+         * The walk always starts at the beginning of the tuple data.  A cached
+         * resume position cannot be reused across calls: the pointer identity
+         * check on the tuple is not reliable, because a freed tuple can be
+         * palloc'd again at the same address with different contents, which
+         * would make the walk resume from a stale offset and read out of
+         * bounds.
+         */
+        off = 0;
 
         /*
          * Now we know that we have to walk the tuple CAREFULLY.  But we still
@@ -373,9 +385,8 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
          * storage and no alignment padding either.  We can use/set
          * attcacheoff until we reach either a null or a var-width attribute.
          */
-        off = 0;
-        for (i = 0;; i++) { /* loop exit is at "break" */
-            if (IndexTupleHasNulls(tup) && att_isnull(i, bp)) {
+        for (i = start_i;; i++) { /* loop exit is at "break" */
+            if (has_nulls && att_isnull(i, bp)) {
                 usecache = false;
                 continue; /* this cannot be the target att */
             }

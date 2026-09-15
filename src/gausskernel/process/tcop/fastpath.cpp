@@ -262,7 +262,7 @@ int HandleFunctionRequest(StringInfo msgBuf)
 {
     Oid fid;
     AclResult aclresult;
-    FunctionCallInfoData fcinfo;
+    FunctionCallInfo fcinfo = NULL;
     int16 rformat;
     Datum retval;
     struct fp_info my_fp;
@@ -330,6 +330,10 @@ int HandleFunctionRequest(StringInfo msgBuf)
     fip = &my_fp;
     fetch_fp_info(fid, fip);
 
+    /* Allocate fcinfo sized for the function's declared arity (was a 0-slot LOCAL_FCINFO) */
+    int nargs_cap = (fip->flinfo.fn_nargs > 0) ? fip->flinfo.fn_nargs : FUNC_MAX_ARGS;
+    fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(nargs_cap));
+
     /* Log as soon as we have the function OID and name */
     if (u_sess->attr.attr_common.log_statement == LOGSTMT_ALL) {
         ereport(LOG, (errmsg("fastpath function call: \"%s\" (OID %u)", fip->fname, fid)));
@@ -355,12 +359,12 @@ int HandleFunctionRequest(StringInfo msgBuf)
      * functions can't be called this way.  Perhaps we should pass
      * DEFAULT_COLLATION_OID, instead?
      */
-    InitFunctionCallInfoData(fcinfo, &fip->flinfo, fip->flinfo.fn_nargs, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, &fip->flinfo, fip->flinfo.fn_nargs, InvalidOid, NULL, NULL);
 
     if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3)
-        rformat = parse_fcall_arguments(msgBuf, fip, &fcinfo);
+        rformat = parse_fcall_arguments(msgBuf, fip, fcinfo);
     else
-        rformat = parse_fcall_arguments_20(msgBuf, fip, &fcinfo);
+        rformat = parse_fcall_arguments_20(msgBuf, fip, fcinfo);
 
     /* Verify we reached the end of the message where expected. */
     pq_getmsgend(msgBuf);
@@ -372,8 +376,8 @@ int HandleFunctionRequest(StringInfo msgBuf)
     if (fip->flinfo.fn_strict) {
         int i;
 
-        for (i = 0; i < fcinfo.nargs; i++) {
-            if (fcinfo.argnull[i]) {
+        for (i = 0; i < fcinfo->nargs; i++) {
+            if (fcinfo->args[i].isnull) {
                 callit = false;
                 break;
             }
@@ -382,16 +386,16 @@ int HandleFunctionRequest(StringInfo msgBuf)
 
     if (callit) {
         /* Okay, do it ... */
-        retval = FunctionCallInvoke(&fcinfo);
+        retval = FunctionCallInvoke(fcinfo);
     } else {
-        fcinfo.isnull = true;
+        fcinfo->isnull = true;
         retval = (Datum)0;
     }
 
     /* ensure we do at least one CHECK_FOR_INTERRUPTS per function call */
     CHECK_FOR_INTERRUPTS();
 
-    SendFunctionResult(retval, fcinfo.isnull, fip->rettype, rformat);
+    SendFunctionResult(retval, fcinfo->isnull, fip->rettype, rformat);
 
     /* We no longer need the snapshot */
     PopActiveSnapshot();
@@ -469,9 +473,9 @@ static int16 parse_fcall_arguments(StringInfo msgBuf, struct fp_info* fip, Funct
 
         argsize = pq_getmsgint(msgBuf, 4);
         if (argsize == -1) {
-            fcinfo->argnull[i] = true;
+            fcinfo->args[i].isnull = true;
         } else {
-            fcinfo->argnull[i] = false;
+            fcinfo->args[i].isnull = false;
             if (argsize < 0 || argsize > MAX_ARG_SIZE)
                 ereport(ERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -507,7 +511,7 @@ static int16 parse_fcall_arguments(StringInfo msgBuf, struct fp_info* fip, Funct
             else
                 pstring = pg_client_to_server(abuf.data, argsize);
 
-            fcinfo->arg[i] = OidInputFunctionCall(typinput, pstring, typioparam, -1);
+            fcinfo->args[i].value = OidInputFunctionCall(typinput, pstring, typioparam, -1);
             /* Free result of encoding conversion, if any */
             if (pstring != NULL && pstring != abuf.data)
                 pfree_ext(pstring);
@@ -524,7 +528,7 @@ static int16 parse_fcall_arguments(StringInfo msgBuf, struct fp_info* fip, Funct
             else
                 bufptr = &abuf;
 
-            fcinfo->arg[i] = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
+            fcinfo->args[i].value = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
 
             /* Trouble if it didn't eat the whole buffer */
             if (argsize != -1 && abuf.cursor != abuf.len)
@@ -581,11 +585,11 @@ static int16 parse_fcall_arguments_20(StringInfo msgBuf, struct fp_info* fip, Fu
 
         argsize = pq_getmsgint(msgBuf, 4);
         if (argsize == -1) {
-            fcinfo->argnull[i] = true;
-            fcinfo->arg[i] = OidReceiveFunctionCall(typreceive, NULL, typioparam, -1);
+            fcinfo->args[i].isnull = true;
+            fcinfo->args[i].value = OidReceiveFunctionCall(typreceive, NULL, typioparam, -1);
             continue;
         }
-        fcinfo->argnull[i] = false;
+        fcinfo->args[i].isnull = false;
         if (argsize < 0 || argsize > MAX_ARG_SIZE)
             ereport(ERROR,
                 (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -595,7 +599,7 @@ static int16 parse_fcall_arguments_20(StringInfo msgBuf, struct fp_info* fip, Fu
         resetStringInfo(&abuf);
         appendBinaryStringInfo(&abuf, pq_getmsgbytes(msgBuf, argsize), argsize);
 
-        fcinfo->arg[i] = OidReceiveFunctionCall(typreceive, &abuf, typioparam, -1);
+        fcinfo->args[i].value = OidReceiveFunctionCall(typreceive, &abuf, typioparam, -1);
 
         /* Trouble if it didn't eat the whole buffer */
         if (abuf.cursor != abuf.len)

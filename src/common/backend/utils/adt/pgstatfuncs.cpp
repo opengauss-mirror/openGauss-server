@@ -10103,20 +10103,20 @@ Datum table_data_skewness(PG_FUNCTION_ARGS)
 
     int bucketIndex;
 
-    FunctionCallInfoData funcinfo;
+    LOCAL_FCINFO(funcinfo, 3);
 
-    InitFunctionCallInfoData(funcinfo, NULL, 3, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(*funcinfo, NULL, 3, InvalidOid, NULL, NULL);
 
-    funcinfo.arg[0] = array;
-    funcinfo.arg[1] = CharGetDatum(flag);
-    funcinfo.arg[2] = Int32GetDatum(u_sess->exec_cxt.global_bucket_cnt);
-    funcinfo.argnull[0] = false;
-    funcinfo.argnull[1] = false;
-    funcinfo.argnull[2] = false;
+    funcinfo->args[0].value = array;
+    funcinfo->args[1].value = CharGetDatum(flag);
+    funcinfo->args[2].value = Int32GetDatum(u_sess->exec_cxt.global_bucket_cnt);
+    funcinfo->args[0].isnull = false;
+    funcinfo->args[1].isnull = false;
+    funcinfo->args[2].isnull = false;
 
-    bucketIndex = getbucketbycnt(&funcinfo);
+    bucketIndex = getbucketbycnt(funcinfo);
 
-    if (funcinfo.isnull) {
+    if (funcinfo->isnull) {
         attnum = 0;
     } else {
         attnum = u_sess->exec_cxt.global_bucket_map[bucketIndex];

@@ -106,7 +106,7 @@ static ExprDoneCond ExecEvalFuncArgs(
         if (has_refcursor && argstate->resultType == REFCURSOROID)
             econtext->is_cursor = true;
 
-        fcinfo->arg[i] = ExecEvalExpr(argstate, econtext, &fcinfo->argnull[i]);
+        fcinfo->args[i].value = ExecEvalExpr(argstate, econtext, &fcinfo->args[i].isnull);
         ExecTableOfIndexInfo execTableOfIndexInfo;
         initExecTableOfIndexInfo(&execTableOfIndexInfo, econtext);
         ExecEvalParamExternTableOfIndex((Node*)argstate->expr, &execTableOfIndexInfo);
@@ -123,11 +123,10 @@ static ExprDoneCond ExecEvalFuncArgs(
 
         if (has_refcursor && econtext->is_cursor && plpgsql_var_dno != NULL) {
             plpgsql_var_dno[i] = econtext->dno;
-            CopyCursorInfoData(&fcinfo->refcursor_data.argCursor[i], &econtext->cursor_data);
+            CopyCursorInfoData(&fcinfo->extra->refcursor_data.argCursor[i], &econtext->cursor_data);
         }
-        fcinfo->argTypes[i] = argstate->resultType;
         econtext->is_cursor = false;
-        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+        if (is_huge_clob(argstate->resultType, fcinfo->args[i].isnull, fcinfo->args[i].value)) {
             is_have_huge_clob = true;
         }
         i++;
@@ -173,7 +172,7 @@ FuncExprState *ExecInitFunctionResultSet(Expr *expr, ExprContext *econtext, Plan
     /* shouldn't get here unless the selected function returns set */
     Assert(state->func.fn_retset);
 
-    state->has_refcursor = func_has_refcursor_args(state->func.fn_oid, &state->fcinfo_data);
+    state->has_refcursor = func_has_refcursor_args(state->func.fn_oid, state->fcinfo_data);
     
     return state;
 }
@@ -203,7 +202,8 @@ Datum ExecMakeFunctionResultSet(FuncExprState *fcache, ExprContext *econtext, Me
     int			i;
     int* var_dno = NULL;
     bool has_refcursor = fcache->has_refcursor;
-    int has_cursor_return = fcache->fcinfo_data.refcursor_data.return_number;
+    int has_cursor_return = (fcache->fcinfo_data->extra != NULL) ?
+        fcache->fcinfo_data->extra->refcursor_data.return_number : 0;
 
     econtext->plpgsql_estate = plpgsql_estate;
     plpgsql_estate = NULL;
@@ -260,19 +260,19 @@ restart:
 	 * previous call (ie, we are continuing the evaluation of a set-valued
 	 * function).  Otherwise, collect the current argument values into fcinfo.
      */
-    fcinfo = &fcache->fcinfo_data;
+    fcinfo = fcache->fcinfo_data;
 
     if (has_cursor_return) {
         /* init returnCursor to store out-args cursor info on ExprContext*/
-        fcinfo->refcursor_data.returnCursor =
-            (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
-    } else {
-        fcinfo->refcursor_data.returnCursor = NULL;
+        fcinfo->extra->refcursor_data.returnCursor =
+            (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->extra->refcursor_data.return_number);
+    } else if (fcinfo->extra != NULL) {
+        fcinfo->extra->refcursor_data.returnCursor = NULL;
     }
 
     if (has_refcursor) {
         /* init argCursor to store in-args cursor info on ExprContext*/
-        fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
+        fcinfo->extra->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
         var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
         for (i = 0; i < fcinfo->nargs; i++) {
             var_dno[i] = -1;
@@ -315,7 +315,7 @@ restart:
     callit = true;
     if (fcache->func.fn_strict) {
         for (i = 0; i < fcinfo->nargs; i++) {
-            if (fcinfo->argnull[i]) {
+            if (fcinfo->args[i].isnull) {
                 callit = false;
                 break;
             }
@@ -346,7 +346,7 @@ restart:
         for (i = 0; i < fcinfo->nargs; i++) {
             if (var_dno[i] >= 0) {
                 int dno = var_dno[i];
-                Cursor_Data* cursor_data = &fcinfo->refcursor_data.argCursor[i];
+                Cursor_Data* cursor_data = &fcinfo->extra->refcursor_data.argCursor[i];
 #ifdef USE_ASSERT_CHECKING
                 PLpgSQL_datum* datum = estate->datums[dno];
 #endif
@@ -357,7 +357,7 @@ restart:
             }
         }
 
-        if (fcinfo->refcursor_data.return_number > 0) {
+        if (fcinfo->extra->refcursor_data.return_number > 0) {
             /* copy function returns cursor option info.
              * for simple expr in exec_eval_expr, we can not get the result type,
              * so cursor_return_data mallocs here.
@@ -365,15 +365,15 @@ restart:
             if (estate->cursor_return_data == NULL && estate->tuple_store_cxt != NULL) {
                 MemoryContext oldcontext = MemoryContextSwitchTo(estate->tuple_store_cxt);
                 estate->cursor_return_data =
-                    (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
-                estate->cursor_return_numbers = fcinfo->refcursor_data.return_number;
+                    (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->extra->refcursor_data.return_number);
+                estate->cursor_return_numbers = fcinfo->extra->refcursor_data.return_number;
                 (void)MemoryContextSwitchTo(oldcontext);
             }
 
             if (estate->cursor_return_data != NULL) {
-                for (i = 0; i < fcinfo->refcursor_data.return_number; i++) {
+                for (i = 0; i < fcinfo->extra->refcursor_data.return_number; i++) {
                     int rc = memcpy_s(&estate->cursor_return_data[i], sizeof(Cursor_Data),
-                                      &fcinfo->refcursor_data.returnCursor[i], sizeof(Cursor_Data));
+                                      &fcinfo->extra->refcursor_data.returnCursor[i], sizeof(Cursor_Data));
                     securec_check(rc, "\0", "\0");
                 }
             }
@@ -430,7 +430,16 @@ restart:
                         (int) rsinfo.returnMode)));
 
     if (has_refcursor) {
-        pfree_ext(fcinfo->refcursor_data.argCursor);
+        if (fcinfo->extra != NULL) {
+            if (fcinfo->extra->refcursor_data.argCursor != NULL) {
+                pfree_ext(fcinfo->extra->refcursor_data.argCursor);
+                fcinfo->extra->refcursor_data.argCursor = NULL;
+            }
+            if (fcinfo->extra->refcursor_data.returnCursor != NULL) {
+                pfree_ext(fcinfo->extra->refcursor_data.returnCursor);
+                fcinfo->extra->refcursor_data.returnCursor = NULL;
+            }
+        }
         pfree_ext(var_dno);
     }
 

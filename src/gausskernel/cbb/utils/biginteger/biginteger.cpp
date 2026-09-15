@@ -442,18 +442,17 @@ Datum bi128add128(Numeric larg, Numeric rarg, bictl* ctl)
         /* fall through */
         default:
             /* result is out of int128 bound, call numeric_add calculate */
-            Datum args[2];
-            FunctionCallInfoData finfo;
-            finfo.arg = &args[0];
-            args[0] = (Datum)makeNumericNormal(larg);
-            args[1] = (Datum)makeNumericNormal(rarg);
+            LOCAL_FCINFO(finfo, 2);
+            finfo->extra = NULL;
+            finfo->args[0].value = (Datum)makeNumericNormal(larg);
+            finfo->args[1].value = (Datum)makeNumericNormal(rarg);
             /* For agg addiotion operation, ctl isn't NULL, assign value directly. */
             if (use_ctl) {
-                Datum res = numeric_add(&finfo);
+                Datum res = numeric_add(finfo);
                 ctl->store_pos = replaceVariable(ctl->context, ctl->store_pos, res);
                 return (Datum)0;
             } else { /* For normal addiotion operation, ctl is NULL, palloc memory for result. */
-                return numeric_add(&finfo);
+                return numeric_add(finfo);
             }
     }
 }
@@ -555,12 +554,11 @@ Datum bi128sub128(Numeric larg, Numeric rarg, bictl* ctl)
         /* fall through */
         default:
             /* result is out of int128 bound, call numeric_sub calculate */
-            Datum args[2];
-            FunctionCallInfoData finfo;
-            finfo.arg = &args[0];
-            args[0] = (Datum)makeNumericNormal(larg);
-            args[1] = (Datum)makeNumericNormal(rarg);
-            return numeric_sub(&finfo);
+            LOCAL_FCINFO(finfo, 2);
+            finfo->extra = NULL;
+            finfo->args[0].value = (Datum)makeNumericNormal(larg);
+            finfo->args[1].value = (Datum)makeNumericNormal(rarg);
+            return numeric_sub(finfo);
     }
 }
 
@@ -629,12 +627,11 @@ Datum bi128mul128(Numeric larg, Numeric rarg, bictl* ctl)
         return makeNumeric128(result, resScale);
     } else {
         /* result is out of int128 bound, call numeric_mul calculate */
-        Datum args[2];
-        FunctionCallInfoData finfo;
-        finfo.arg = &args[0];
-        args[0] = (Datum)makeNumericNormal(larg);
-        args[1] = (Datum)makeNumericNormal(rarg);
-        return numeric_mul(&finfo);
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
+        finfo->args[0].value = (Datum)makeNumericNormal(larg);
+        finfo->args[1].value = (Datum)makeNumericNormal(rarg);
+        return numeric_mul(finfo);
     }
 }
 
@@ -718,12 +715,11 @@ Datum bi64div64(Numeric larg, Numeric rarg, bictl* ctl)
     }
 
     /* result is out of int128 bound, call numeric_div calculate */
-    Datum args[2];
-    FunctionCallInfoData finfo;
-    finfo.arg = &args[0];
-    args[0] = (Datum)makeNumericNormal(larg);
-    args[1] = (Datum)makeNumericNormal(rarg);
-    return numeric_div(&finfo);
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
+    finfo->args[0].value = (Datum)makeNumericNormal(larg);
+    finfo->args[1].value = (Datum)makeNumericNormal(rarg);
+    return numeric_div(finfo);
 }
 
 /*
@@ -827,12 +823,11 @@ Datum bi128div128(Numeric larg, Numeric rarg, bictl* ctl)
     }
 
     /* result is out of int128 bound, call numeric_div calculate */
-    Datum args[2];
-    FunctionCallInfoData finfo;
-    finfo.arg = &args[0];
-    args[0] = (Datum)makeNumericNormal(larg);
-    args[1] = (Datum)makeNumericNormal(rarg);
-    return numeric_div(&finfo);
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
+    finfo->args[0].value = (Datum)makeNumericNormal(larg);
+    finfo->args[1].value = (Datum)makeNumericNormal(rarg);
+    return numeric_div(finfo);
 }
 
 /*
@@ -1236,12 +1231,11 @@ Datum bi128cmp128_smaller(Numeric larg, Numeric rarg, bictl* ctl)
         /* leftval_scaled or rightval_scaled must be out of int128 bound */
         default:  // BI_LEFT_OUT_OF_BOUND | BI_RIGHT_OUT_OF_BOUND
             /* can't compare directly, need function call */
-            Datum args[2];
-            FunctionCallInfoData finfo;
-            finfo.arg = &args[0];
-            args[0] = NumericGetDatum(larg);
-            args[1] = NumericGetDatum(rarg);
-            Datum res = numeric_smaller(&finfo);
+            LOCAL_FCINFO(finfo, 2);
+            finfo->extra = NULL;
+            finfo->args[0].value = NumericGetDatum(larg);
+            finfo->args[1].value = NumericGetDatum(rarg);
+            Datum res = numeric_smaller(finfo);
             if (res != ctl->store_pos) {
                 ctl->store_pos = replaceVariable(ctl->context, ctl->store_pos, res);
             }
@@ -1312,12 +1306,11 @@ Datum bi128cmp128_larger(Numeric larg, Numeric rarg, bictl* ctl)
         /* leftval_scaled or rightval_scaled must be out of int128 bound */
         default:  // BI_LEFT_OUT_OF_BOUND | BI_RIGHT_OUT_OF_BOUND
             /* can't compare directly, need function call */
-            Datum args[2];
-            FunctionCallInfoData finfo;
-            finfo.arg = &args[0];
-            args[0] = NumericGetDatum(larg);
-            args[1] = NumericGetDatum(rarg);
-            Datum res = numeric_larger(&finfo);
+            LOCAL_FCINFO(finfo, 2);
+            finfo->extra = NULL;
+            finfo->args[0].value = NumericGetDatum(larg);
+            finfo->args[1].value = NumericGetDatum(rarg);
+            Datum res = numeric_larger(finfo);
             if (res != ctl->store_pos) {
                 /* only update hash table value when res and ctl->store_pos are not equal */
                 ctl->store_pos = replaceVariable(ctl->context, ctl->store_pos, res);
@@ -1543,11 +1536,10 @@ static inline Datum int128_hash_bi(int128 num, int scale)
 static inline Datum call_hash_numeric(Numeric num)
 {
     /* call hash_numeric here */
-    Datum args[1];
-    FunctionCallInfoData finfo;
-    finfo.arg = &args[0];
-    args[0] = NumericGetDatum(num);
-    return hash_numeric(&finfo);
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
+    finfo->args[0].value = NumericGetDatum(num);
+    return hash_numeric(finfo);
 }
 
 /*

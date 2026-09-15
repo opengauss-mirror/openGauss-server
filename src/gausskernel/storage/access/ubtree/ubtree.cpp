@@ -280,9 +280,9 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
         /* reserve space for xmin/xmax */
         Size newsize = IndexTupleSize(itup) + sizeof(ShortTransactionId) * 2;
         IndexTupleSetSize(itup, newsize);
-        result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
+        result = UBTreeDoInsert(rel, itup, checkUnique, heapRel, values, isnull);
     } else {
-        result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel);
+        result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel, values, isnull);
     }
 
     pfree(itup);

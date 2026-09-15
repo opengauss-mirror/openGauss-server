@@ -1253,15 +1253,14 @@ static List* collect_breakable_line_oid(Oid funcOid)
         return NIL;
     }
     /* do the compilation */
-    FunctionCallInfoData fake_fcinfo;
+    LOCAL_FCINFO(fake_fcinfo, 2);
     FmgrInfo flinfo;
-    errno_t rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+    errno_t rc = memset_s(fake_fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
     securec_check(rc, "", "");
     rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
     securec_check(rc, "", "");
-    fake_fcinfo.flinfo = &flinfo;
-    fake_fcinfo.arg = (Datum*)palloc0(sizeof(Datum));
-    fake_fcinfo.arg[0] = ObjectIdGetDatum(funcOid);
+    fake_fcinfo->flinfo = &flinfo;
+    fake_fcinfo->args[0].value = ObjectIdGetDatum(funcOid);
     flinfo.fn_oid = funcOid;
     flinfo.fn_mcxt = CurrentMemoryContext;
     _PG_init();
@@ -1272,9 +1271,9 @@ static List* collect_breakable_line_oid(Oid funcOid)
     PG_TRY();
     {
         if (u_sess->hook_cxt.plsqlCompileHook) {
-            func = ((plsql_compile)u_sess->hook_cxt.plsqlCompileHook)(&fake_fcinfo, true, false);
+            func = ((plsql_compile)u_sess->hook_cxt.plsqlCompileHook)(fake_fcinfo, true, false);
         } else {
-            func = plpgsql_compile(&fake_fcinfo, true);
+            func = plpgsql_compile(fake_fcinfo, true);
         }
     }
     PG_CATCH();

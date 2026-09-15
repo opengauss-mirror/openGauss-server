@@ -4877,8 +4877,8 @@ llvm::Value* VecExprCodeGen::EvalFuncResultCodeGen(
      */
     FunctionCallInfo fcinfo;
     initVectorFcache(funcid, Collation, fcache, CurrentMemoryContext);
-    fcinfo = &fcache->fcinfo_data;
-    Assert(fcinfo->flinfo->vec_fn_addr == NULL);
+    fcinfo = fcache->fcinfo_data;
+    Assert(fcinfo->flinfo->fn_ext == NULL || fcinfo->flinfo->fn_ext->vec_fn_addr == NULL);
 
     /* Records C-function calls in codegen */
     const FmgrBuiltin* fbp = fmgr_isbuiltin(fcinfo->flinfo->fn_oid);
@@ -5093,7 +5093,7 @@ Datum WrapVecStrictOperFunc(FunctionCallInfo fcinfo, Datum* arg, bool* isNull)
      */
     int nargs = fcinfo->nargs;
     for (int i = 0; i < nargs; i++) {
-        fcinfo->arg[i] = arg[i];
+        fcinfo->args[i].value = arg[i];
     }
     /*
      * we should reset then isnull flag here since the pre-defined function use it directly
@@ -5121,8 +5121,8 @@ Datum WrapVecNonStrictOperFunc(FunctionCallInfo fcinfo, Datum* arg, const bool* 
      */
     int nargs = fcinfo->nargs;
     for (int i = 0; i < nargs; i++) {
-        fcinfo->arg[i] = arg[i];
-        fcinfo->argnull[i] = argnull[i];
+        fcinfo->args[i].value = arg[i];
+        fcinfo->args[i].isnull = argnull[i];
     }
 
     fcinfo->isnull = false;

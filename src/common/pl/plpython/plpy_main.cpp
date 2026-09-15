@@ -446,7 +446,7 @@ Datum plpython2_call_handler(PG_FUNCTION_ARGS)
 Datum plpython_inline_handler(PG_FUNCTION_ARGS)
 {
     InlineCodeBlock* codeblock = (InlineCodeBlock*)DatumGetPointer(PG_GETARG_DATUM(0));
-    FunctionCallInfoData fake_fcinfo;
+    LOCAL_FCINFO(fake_fcinfo, 2);
     FmgrInfo flinfo;
     PLyProcedure proc;
     PLyExecutionContext* exec_ctx = NULL;
@@ -463,12 +463,12 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
             elog(ERROR, "SPI_connect failed");
         }
 
-        rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+        rc = memset_s(fake_fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
         securec_check(rc, "\0", "\0");
         rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
         securec_check(rc, "\0", "\0");
 
-        fake_fcinfo.flinfo = &flinfo;
+        fake_fcinfo->flinfo = &flinfo;
         flinfo.fn_oid = InvalidOid;
         flinfo.fn_mcxt = CurrentMemoryContext;
 
@@ -510,7 +510,7 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
     {
         PLy_procedure_compile(&proc, codeblock->source_text);
         exec_ctx->curr_proc = &proc;
-        PLy_exec_function(&fake_fcinfo, &proc);
+        PLy_exec_function(fake_fcinfo, &proc);
 
         if (AUDIT_EXEC_ENABLED) {
             AuditPlpythonFunction(InvalidOid, proc.pyname, AUDIT_OK);

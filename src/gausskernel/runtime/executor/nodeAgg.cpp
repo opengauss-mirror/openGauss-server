@@ -488,7 +488,7 @@ static void initialize_aggregates(AggState* aggstate, AggStatePerAgg peragg, Agg
 static void advance_transition_function(
     AggState* aggstate, AggStatePerAgg peraggstate, AggStatePerGroup pergroupstate)
 {
-    FunctionCallInfo fcinfo = &peraggstate->transfn_fcinfo;
+    FunctionCallInfo fcinfo = peraggstate->transfn_fcinfo;
     MemoryContext oldContext;
     Datum newVal;
 
@@ -504,14 +504,14 @@ static void advance_transition_function(
             Oid aggtranstype = peraggstate->aggref->aggtrantype;
             ListCell* arg = list_head(peraggstate->aggref->args);
             TargetEntry *tle = (TargetEntry *)lfirst(arg);
-            if (fcinfo->argnull[i] && strcmp(get_func_name(peraggstate->aggref->aggfnoid), "bit_and") == 0 &&
+            if (fcinfo->args[i].isnull && strcmp(get_func_name(peraggstate->aggref->aggfnoid), "bit_and") == 0 &&
                 is_binary_type_in_dolphin(aggtranstype) &&
                 pergroupstate->transValueIsNull && IsA(tle->expr, Var)) {
                 Var* var = (Var*)tle->expr;
                 pergroupstate->transValue = get_bit_and_initval(aggtranstype, var->vartypmod);
                 pergroupstate->transValueIsNull = false;
                 return;
-            } else if (fcinfo->argnull[i]) {
+            } else if (fcinfo->args[i].isnull) {
                 return;
             }
         }
@@ -527,7 +527,7 @@ static void advance_transition_function(
              */
             oldContext = MemoryContextSwitchTo(aggstate->aggcontexts[aggstate->current_set]);
             pergroupstate->transValue =
-                datumCopy(fcinfo->arg[1], peraggstate->transtypeByVal, peraggstate->transtypeLen);
+                datumCopy(fcinfo->args[1].value, peraggstate->transtypeByVal, peraggstate->transtypeLen);
             pergroupstate->transValueIsNull = false;
             pergroupstate->noTransValue = false;
             MemoryContextSwitchTo(oldContext);
@@ -553,9 +553,8 @@ static void advance_transition_function(
     /*
      * OK to call the transition function
      */
-    fcinfo->arg[0] = pergroupstate->transValue;
-    fcinfo->argnull[0] = pergroupstate->transValueIsNull;
-    fcinfo->argTypes[0] = InvalidOid;
+    fcinfo->args[0].value = pergroupstate->transValue;
+    fcinfo->args[0].isnull = pergroupstate->transValueIsNull;
     fcinfo->isnull = false; /* just in case transfn doesn't set it */
     fcinfo->can_ignore = aggstate->ss.ps.state->es_plannedstmt->hasIgnore;
 
@@ -621,8 +620,9 @@ static void advance_collection_function(
          * just keep the prior transition value, transValue.
          */
         for (cntArgs = 1; cntArgs <= numArguments; cntArgs++) {
-            if (fcinfo->argnull[cntArgs])
+            if (fcinfo->args[cntArgs].isnull) {
                 return;
+            }
         }
         if (pergroupstate->noCollectValue) {
             /*
@@ -634,7 +634,7 @@ static void advance_collection_function(
              */
             oldContext = MemoryContextSwitchTo(aggstate->aggcontexts[aggstate->current_set]);
             pergroupstate->collectValue =
-                datumCopy(fcinfo->arg[1], peraggstate->transtypeByVal, peraggstate->transtypeLen);
+                datumCopy(fcinfo->args[1].value, peraggstate->transtypeByVal, peraggstate->transtypeLen);
             pergroupstate->collectValueIsNull = false;
             pergroupstate->noCollectValue = false;
             MemoryContextSwitchTo(oldContext);
@@ -658,9 +658,8 @@ static void advance_collection_function(
      * OK to call the collection function
      */
     InitFunctionCallInfoData(*fcinfo, &(peraggstate->collectfn), 2, peraggstate->aggCollation, (Node*)aggstate, NULL);
-    fcinfo->arg[0] = pergroupstate->collectValue;
-    fcinfo->argnull[0] = pergroupstate->collectValueIsNull;
-    fcinfo->argTypes[0] = InvalidOid;
+    fcinfo->args[0].value = pergroupstate->collectValue;
+    fcinfo->args[0].isnull = pergroupstate->collectValueIsNull;
     newVal = FunctionCallInvoke(fcinfo);
 
     /*
@@ -881,15 +880,14 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
             processTuples(aggstate, peraggstate, numGroupingSets, slot, inputoff);
         } else {
             /* We can apply the transition function immediately */
-            FunctionCallInfo fcinfo = &peraggstate->transfn_fcinfo;
+            FunctionCallInfo fcinfo = peraggstate->transfn_fcinfo;
 
             /* Load values into fcinfo */
             /* Start from 1, since the 0th arg will be the transition value */
             Assert(slot->tts_nvalid >= numTransInputs);
             for (i = 0; i < numTransInputs; i++) {
-                fcinfo->arg[i + 1] = slot->tts_values[i + inputoff];
-                fcinfo->argnull[i + 1] = slot->tts_isnull[i + inputoff];
-                fcinfo->argTypes[i + 1] = InvalidOid;
+                fcinfo->args[i + 1].value = slot->tts_values[i + inputoff];
+                fcinfo->args[i + 1].isnull = slot->tts_isnull[i + inputoff];
             }
             for (setno = 0; setno < numGroupingSets; setno++) {
                 AggStatePerGroup pergroupstate = &pergroup[aggno + (setno * numAggs)];
@@ -947,7 +945,7 @@ static void process_ordered_aggregate_single(
     bool isDistinct = (peraggstate->numDistinctCols > 0);
     Datum* newVal = NULL;
     bool* isNull = NULL;
-    FunctionCallInfo fcinfo = &peraggstate->transfn_fcinfo;
+    FunctionCallInfo fcinfo = peraggstate->transfn_fcinfo;
 
     Assert(peraggstate->numDistinctCols < 2);
 
@@ -961,8 +959,8 @@ static void process_ordered_aggregate_single(
                              (Node*)aggstate,
                              NULL);
     /* Load the column into argument 1 (arg 0 will be transition value) */
-    newVal = fcinfo->arg + 1;
-    isNull = fcinfo->argnull + 1;
+    newVal = &fcinfo->args[1].value;
+    isNull = &fcinfo->args[1].isnull;
 
     /*
      * Note: if input type is pass-by-ref, the datums returned by the sort are
@@ -1022,7 +1020,7 @@ static void process_ordered_aggregate_multi(
     AggState* aggstate, AggStatePerAgg peraggstate, AggStatePerGroup pergroupstate)
 {
     MemoryContext workcontext = aggstate->tmpcontext->ecxt_per_tuple_memory;
-    FunctionCallInfo fcinfo = &peraggstate->transfn_fcinfo;
+    FunctionCallInfo fcinfo = peraggstate->transfn_fcinfo;
     TupleTableSlot* slot1 = peraggstate->sortslot;
     TupleTableSlot* slot2 = peraggstate->uniqslot;
     int numTransInputs = peraggstate->numTransInputs;
@@ -1059,8 +1057,8 @@ static void process_ordered_aggregate_multi(
             /* Load values into fcinfo */
             /* Start from 1, since the 0th arg will be the transition value */
             for (i = 0; i < numTransInputs; i++) {
-                fcinfo->arg[i + 1] = slot1->tts_values[i];
-                fcinfo->argnull[i + 1] = slot1->tts_isnull[i];
+                fcinfo->args[i + 1].value = slot1->tts_values[i];
+                fcinfo->args[i + 1].isnull = slot1->tts_isnull[i];
             }
 
             advance_transition_function(aggstate, peraggstate, pergroupstate);
@@ -1104,7 +1102,8 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
     Datum* resultVal, bool* resultIsNull)
 {
     bool anynull = false;
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
+    FunctionCallInfoData* fcinfo_ptr = fcinfo;
     /* record the current passed argument position */
     int args_pos = 1;
     /* For a normal agg only the transition state value being passed to the finalfn */
@@ -1120,21 +1119,29 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
     if (AGGKIND_IS_ORDERED_SET(peraggstate->aggref->aggkind))
         numFinalArgs += peraggstate->numArguments;
 
+    if (numFinalArgs > 2) {
+        fcinfo_ptr = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(numFinalArgs));
+    } else {
+        /* zero flinfo so the fenced-function check cannot read garbage stack data */
+        errno_t rc = memset_sp(fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
+        securec_check(rc, "\0", "\0");
+    }
+
     /* init the number of arguments to a function. */
-    InitFunctionCallInfoArgs(fcinfo, numFinalArgs, 1);
+    InitFunctionCallInfoArgs(*fcinfo_ptr, numFinalArgs, 1);
 
     /*
      * Evaluate any direct arguments for finalfn and load them into function
      * call info.
      */
     foreach (lc, peraggstate->aggrefstate->aggdirectargs) {
-        fcinfo.arg[args_pos] =
-            ExecEvalExpr((ExprState*)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo.argnull[args_pos]);
-        fcinfo.argTypes[args_pos] = ((ExprState*)lfirst(lc))->resultType;
-        if (anynull == true || fcinfo.argnull[args_pos] == true)
+        fcinfo_ptr->args[args_pos].value =
+            ExecEvalExpr((ExprState*)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo_ptr->args[args_pos].isnull);
+        if (anynull == true || fcinfo_ptr->args[args_pos].isnull == true) {
             anynull = true;
-        else
+        } else {
             anynull = false;
+        }
         args_pos++;
     }
 
@@ -1160,30 +1167,28 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
         aggstate->curperagg = peraggstate;
 
         InitFunctionCallInfoData(
-            fcinfo, &(peraggstate->finalfn), numFinalArgs, peraggstate->aggCollation, (Node*)aggstate, NULL);
-        fcinfo.arg[0] = pergroupstate->transValue;
-        fcinfo.argnull[0] = pergroupstate->transValueIsNull;
-        fcinfo.argTypes[0] = InvalidOid;
+            *fcinfo_ptr, &(peraggstate->finalfn), numFinalArgs, peraggstate->aggCollation, (Node*)aggstate, NULL);
+        fcinfo_ptr->args[0].value = pergroupstate->transValue;
+        fcinfo_ptr->args[0].isnull = pergroupstate->transValueIsNull;
         if (anynull == true || pergroupstate->transValueIsNull == true)
             anynull = true;
         else
             anynull = false;
         /* Fill remaining arguments positions with nulls */
         while (args_pos < numFinalArgs) {
-            fcinfo.arg[args_pos] = (Datum)0;
-            fcinfo.argnull[args_pos] = true;
-            fcinfo.argTypes[args_pos] = InvalidOid;
+            fcinfo_ptr->args[args_pos].value = (Datum)0;
+            fcinfo_ptr->args[args_pos].isnull = true;
             args_pos++;
             anynull = true;
         }
 
-        if (fcinfo.flinfo->fn_strict && anynull) {
+        if (fcinfo_ptr->flinfo->fn_strict && anynull) {
             /* don't call a strict function with NULL inputs */
             *resultVal = (Datum)0;
             *resultIsNull = true;
         } else {
-            *resultVal = FunctionCallInvoke(&fcinfo);
-            *resultIsNull = fcinfo.isnull;
+            *resultVal = FunctionCallInvoke(fcinfo_ptr);
+            *resultIsNull = fcinfo_ptr->isnull;
         }
         aggstate->curperagg = NULL;
     } else {
@@ -3463,7 +3468,7 @@ static void initialize_aggregates_flattened(AggState *aggstate, AggStatePerGroup
 static void advance_transition_function_flattened(AggState *aggstate, AggStatePerTrans pertrans,
                                                   AggStatePerGroup pergroupstate)
 {
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     MemoryContext oldContext;
     Datum newVal;
 
@@ -3472,13 +3477,14 @@ static void advance_transition_function_flattened(AggState *aggstate, AggStatePe
         int i;
 
         for (i = 1; i <= numTransInputs; i++) {
-            if (fcinfo->argnull[i]) {
+            if (fcinfo->args[i].isnull) {
                 return;
             }
         }
         if (pergroupstate->noTransValue) {
             oldContext = MemoryContextSwitchTo(aggstate->aggcontexts[aggstate->current_set]);
-            pergroupstate->transValue = datumCopy(fcinfo->arg[1], pertrans->transtypeByVal, pertrans->transtypeLen);
+            pergroupstate->transValue = datumCopy(fcinfo->args[1].value,
+                                                  pertrans->transtypeByVal, pertrans->transtypeLen);
             pergroupstate->transValueIsNull = false;
             pergroupstate->noTransValue = false;
             MemoryContextSwitchTo(oldContext);
@@ -3492,9 +3498,8 @@ static void advance_transition_function_flattened(AggState *aggstate, AggStatePe
     oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
     aggstate->curpertrans = pertrans;
 
-    fcinfo->arg[0] = pergroupstate->transValue;
-    fcinfo->argnull[0] = pergroupstate->transValueIsNull;
-    fcinfo->argTypes[0] = InvalidOid;
+    fcinfo->args[0].value = pergroupstate->transValue;
+    fcinfo->args[0].isnull = pergroupstate->transValueIsNull;
     fcinfo->isnull = false;
 
     Node *origin_fcxt = fcinfo->context;
@@ -3541,7 +3546,7 @@ static void process_ordered_aggregate_single_flattened(AggState *aggstate, AggSt
     MemoryContext workcontext = aggstate->tmpcontext->ecxt_per_tuple_memory;
     MemoryContext oldContext;
     bool isDistinct = (pertrans->numDistinctCols > 0);
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     Datum *newVal = NULL;
     bool *isNull = NULL;
 
@@ -3551,8 +3556,8 @@ static void process_ordered_aggregate_single_flattened(AggState *aggstate, AggSt
 
     InitFunctionCallInfoArgs(*fcinfo, pertrans->numArguments + 1, 1);
 
-    newVal = fcinfo->arg + 1;
-    isNull = fcinfo->argnull + 1;
+    newVal = &fcinfo->args[1].value;
+    isNull = &fcinfo->args[1].isnull;
 
     while (tuplesort_getdatum(pertrans->sortstates[aggstate->current_set], true, newVal, isNull)) {
         MemoryContextReset(workcontext);
@@ -3586,7 +3591,7 @@ static void process_ordered_aggregate_multi_flattened(AggState *aggstate, AggSta
                                             AggStatePerGroup pergroupstate)
 {
     MemoryContext workcontext = aggstate->tmpcontext->ecxt_per_tuple_memory;
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     TupleTableSlot *slot1 = pertrans->sortslot;
     TupleTableSlot *slot2 = pertrans->uniqslot;
     int numTransInputs = pertrans->numTransInputs;
@@ -3613,8 +3618,8 @@ static void process_ordered_aggregate_multi_flattened(AggState *aggstate, AggSta
             InitFunctionCallInfoArgs(*fcinfo, numTransInputs + 1, 1);
 
             for (i = 0; i < numTransInputs; i++) {
-                fcinfo->arg[i + 1] = slot1->tts_values[i];
-                fcinfo->argnull[i + 1] = slot1->tts_isnull[i];
+                fcinfo->args[i + 1].value = slot1->tts_values[i];
+                fcinfo->args[i + 1].isnull = slot1->tts_isnull[i];
             }
 
             advance_transition_function_flattened(aggstate, pertrans, pergroupstate);
@@ -3648,7 +3653,8 @@ static void finalize_aggregate_flattened(AggState *aggstate, AggStatePerAggForFl
                                          AggStatePerGroup pergroupstate, Datum *resultVal, bool *resultIsNull)
 {
     bool anynull = false;
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
+    FunctionCallInfoData *fcinfo_ptr = fcinfo;
     int args_pos = 1;
     int numFinalArgs = 1;
     MemoryContext oldContext;
@@ -3660,13 +3666,20 @@ static void finalize_aggregate_flattened(AggState *aggstate, AggStatePerAggForFl
         numFinalArgs += peragg->numFinalArgs;
     }
 
-    InitFunctionCallInfoArgs(fcinfo, numFinalArgs, 1);
+    if (numFinalArgs > 2) {
+        fcinfo_ptr = (FunctionCallInfoData *)palloc0(SizeForFunctionCallInfo(numFinalArgs));
+    } else {
+        /* zero flinfo so the fenced-function check cannot read garbage stack data */
+        errno_t rc = memset_sp(fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
+        securec_check(rc, "\0", "\0");
+    }
+
+    InitFunctionCallInfoArgs(*fcinfo_ptr, numFinalArgs, 1);
 
     foreach (lc, peragg->aggdirectargs) {
-        fcinfo.arg[args_pos] =
-            ExecEvalExpr((ExprState *)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo.argnull[args_pos], NULL);
-        fcinfo.argTypes[args_pos] = ((ExprState *)lfirst(lc))->resultType;
-        if (anynull == true || fcinfo.argnull[args_pos] == true) {
+        fcinfo_ptr->args[args_pos].value = ExecEvalExpr(
+            (ExprState *)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo_ptr->args[args_pos].isnull, NULL);
+        if (anynull == true || fcinfo_ptr->args[args_pos].isnull == true) {
             anynull = true;
         } else {
             anynull = false;
@@ -3684,30 +3697,29 @@ static void finalize_aggregate_flattened(AggState *aggstate, AggStatePerAggForFl
     if (OidIsValid(peragg->finalfn_oid)) {
         aggstate->curpertrans = pertrans;
 
-        InitFunctionCallInfoData(fcinfo, &(peragg->finalfn), numFinalArgs, pertrans->aggCollation, (Node *)aggstate,
+        InitFunctionCallInfoData(*fcinfo_ptr, &(peragg->finalfn), numFinalArgs,
+                                 pertrans->aggCollation, (Node *)aggstate,
                                  NULL);
-        fcinfo.arg[0] = pergroupstate->transValue;
-        fcinfo.argnull[0] = pergroupstate->transValueIsNull;
-        fcinfo.argTypes[0] = InvalidOid;
+        fcinfo_ptr->args[0].value = pergroupstate->transValue;
+        fcinfo_ptr->args[0].isnull = pergroupstate->transValueIsNull;
         if (anynull == true || pergroupstate->transValueIsNull == true) {
             anynull = true;
         } else {
             anynull = false;
         }
         while (args_pos < numFinalArgs) {
-            fcinfo.arg[args_pos] = (Datum)0;
-            fcinfo.argnull[args_pos] = true;
-            fcinfo.argTypes[args_pos] = InvalidOid;
+            fcinfo_ptr->args[args_pos].value = (Datum)0;
+            fcinfo_ptr->args[args_pos].isnull = true;
             args_pos++;
             anynull = true;
         }
 
-        if (fcinfo.flinfo->fn_strict && anynull) {
+        if (fcinfo_ptr->flinfo->fn_strict && anynull) {
             *resultVal = (Datum)0;
             *resultIsNull = true;
         } else {
-            *resultVal = FunctionCallInvoke(&fcinfo);
-            *resultIsNull = fcinfo.isnull;
+            *resultVal = FunctionCallInvoke(fcinfo_ptr);
+            *resultIsNull = fcinfo_ptr->isnull;
         }
         aggstate->curpertrans = NULL;
     } else {
@@ -3796,9 +3808,6 @@ static void build_pertrans_for_aggref(AggStatePerTrans pertrans, AggState *aggst
                                  aggref->inputcollid, aggtransfn, &transfnexpr);
     fmgr_info(aggtransfn, &pertrans->transfn);
     fmgr_info_set_expr((Node *)transfnexpr, &pertrans->transfn);
-
-    InitFunctionCallInfoData(pertrans->transfn_fcinfo, &pertrans->transfn, pertrans->numTransInputs + 1,
-                             pertrans->aggCollation, (Node *)aggstate, NULL);
 
     if (pertrans->transfn.fn_strict && pertrans->initValueIsNull) {
         if (numArguments <= numDirectArgs || !IsBinaryCoercible(inputTypes[numDirectArgs], aggtranstype)) {
@@ -4204,8 +4213,6 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
         }
 #endif /* PGXC */
         peraggstate->aggCollation = aggref->inputcollid;
-        InitFunctionCallInfoData(peraggstate->transfn_fcinfo, &peraggstate->transfn, peraggstate->numTransInputs + 1,
-                                 peraggstate->aggCollation, (Node *)aggstate, NULL);
         /* get info zbout relevant datatypes */
         get_typlenbyval(aggref->aggtype, &peraggstate->resulttypeLen, &peraggstate->resulttypeByVal);
         get_typlenbyval(aggtranstype, &peraggstate->transtypeLen, &peraggstate->transtypeByVal);
@@ -4353,6 +4360,31 @@ static void exec_lookups_agg(AggState *aggstate, Agg *node, EState *estate)
 
     /* Update numaggs to match number of unique aggregates found */
     aggstate->numaggs = aggno + 1;
+
+    /*
+     * Allocate the per-aggregate transition function-call structs in one
+     * block and point each per-agg register into it.  The FAM-based struct
+     * conversion made these fields pointers, so they need explicit storage.
+     */
+    {
+        Size fcinfo_bytes = 0;
+        FunctionCallInfoData *fcinfo_arena;
+
+        for (int idx = 0; idx < aggstate->numaggs; idx++) {
+            fcinfo_bytes += SizeForFunctionCallInfo(peragg[idx].numTransInputs + 1);
+        }
+        fcinfo_arena = (FunctionCallInfoData *)palloc0(fcinfo_bytes);
+        for (int idx = 0; idx < aggstate->numaggs; idx++) {
+            AggStatePerAgg peraggstate = &peragg[idx];
+            peraggstate->transfn_fcinfo = fcinfo_arena;
+            InitFunctionCallInfoData(*peraggstate->transfn_fcinfo, &peraggstate->transfn,
+                                     peraggstate->numTransInputs + 1,
+                                     peraggstate->aggCollation, (Node *)aggstate, NULL);
+            fcinfo_arena = (FunctionCallInfoData *)((char *)fcinfo_arena +
+                                                    SizeForFunctionCallInfo(peraggstate->numTransInputs + 1));
+        }
+    }
+
     combined_inputeval = NIL;
     column_offset = 0;
     for (int transno = 0; transno < aggstate->numaggs; transno++) {
@@ -4679,9 +4711,6 @@ static void exec_lookups_agg_flattened(AggState *aggstate, Agg *node, EState *es
             if (OidIsValid(collectfn_oid)) {
                 fmgr_info(collectfn_oid, &pertrans->collectfn);
                 pertrans->collectfn.fn_expr = (Node *)collectfnexpr;
-                /* init collectfn_fcinfo*/
-                InitFunctionCallInfoData(pertrans->collectfn_fcinfo, &pertrans->collectfn, pertrans->numTransInputs + 1,
-                                         pertrans->aggCollation, (Node *)aggstate, NULL);
                 pertrans->initCollectValue = initCollectValue;
                 pertrans->initCollectValueIsNull = initCollectValueIsNull;
             }
@@ -4741,6 +4770,41 @@ static void exec_lookups_agg_flattened(AggState *aggstate, Agg *node, EState *es
             exec_agg_finalfn_init(aggstate, node, peragg, pertrans, inputTypes, numArguments);
         }
     }
+
+    /*
+     * Allocate the transition/collection function-call structs in one block
+     * and point the per-trans registers into it.  The FAM-based struct
+     * conversion made these fields pointers, so they need explicit storage.
+     */
+    {
+        Size fcinfo_bytes = 0;
+        FunctionCallInfoData *fcinfo_arena;
+
+        for (int i = 0; i < aggstate->numtrans; i++) {
+            AggStatePerTrans pertrans = &pertransstates[i];
+            fcinfo_bytes += SizeForFunctionCallInfo(pertrans->numTransInputs + 1);
+            if (OidIsValid(pertrans->collectfn.fn_oid)) {
+                fcinfo_bytes += SizeForFunctionCallInfo(pertrans->numTransInputs + 1);
+            }
+        }
+        fcinfo_arena = (FunctionCallInfoData *)palloc0(fcinfo_bytes);
+        for (int i = 0; i < aggstate->numtrans; i++) {
+            AggStatePerTrans pertrans = &pertransstates[i];
+            pertrans->transfn_fcinfo = fcinfo_arena;
+            InitFunctionCallInfoData(*pertrans->transfn_fcinfo, &pertrans->transfn, pertrans->numTransInputs + 1,
+                                     pertrans->aggCollation, (Node *)aggstate, NULL);
+            fcinfo_arena = (FunctionCallInfoData *)((char *)fcinfo_arena +
+                                                    SizeForFunctionCallInfo(pertrans->numTransInputs + 1));
+            if (OidIsValid(pertrans->collectfn.fn_oid)) {
+                pertrans->collectfn_fcinfo = fcinfo_arena;
+                InitFunctionCallInfoData(*pertrans->collectfn_fcinfo, &pertrans->collectfn,
+                                         pertrans->numTransInputs + 1, pertrans->aggCollation, (Node *)aggstate, NULL);
+                fcinfo_arena = (FunctionCallInfoData *)((char *)fcinfo_arena +
+                                                        SizeForFunctionCallInfo(pertrans->numTransInputs + 1));
+            }
+        }
+    }
+
     /*
      * Build expressions doing all the transition work at once. We build a
      * different one for each phase, as the number of transition function

@@ -17199,7 +17199,7 @@ static void validateForeignKeyConstraint(char* conname, Relation rel, Relation p
     scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
     while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-        FunctionCallInfoData fcinfo;
+        LOCAL_FCINFO(fcinfo, 2);
         TriggerData trigdata;
 
         /*
@@ -17207,7 +17207,7 @@ static void validateForeignKeyConstraint(char* conname, Relation rel, Relation p
          *
          * No parameters are passed, but we do set a context
          */
-        rc = memset_s(&fcinfo, sizeof(fcinfo), 0, sizeof(fcinfo));
+        rc = memset_s(&fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
         securec_check(rc, "\0", "\0");
         rc = memset_s(&trigdata, sizeof(trigdata), 0, sizeof(trigdata));
         securec_check(rc, "\0", "\0");
@@ -17223,9 +17223,9 @@ static void validateForeignKeyConstraint(char* conname, Relation rel, Relation p
         trigdata.tg_trigtuplebuf = scan->rs_cbuf;
         trigdata.tg_newtuplebuf = InvalidBuffer;
 
-        fcinfo.context = (Node*)&trigdata;
+        fcinfo->context = (Node*)&trigdata;
 
-        RI_FKey_check_ins(&fcinfo);
+        RI_FKey_check_ins(fcinfo);
     }
 
     tableam_scan_end(scan);
@@ -19926,13 +19926,11 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
                 UserData* newUserdata = GetUserDataFromHTab(newOwnerId, false);
 
                 FunctionCallInfo fcinfo =
-                    (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData) + sizeof(bool) + sizeof(Datum));
+                    (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(1));
 
                 fcinfo->nargs = 1;
-                fcinfo->argnull = (bool*)((char*)fcinfo + sizeof(FunctionCallInfoData));
-                fcinfo->argnull[0] = false;
-                fcinfo->arg = (Datum*)((char*)fcinfo->argnull + sizeof(bool));
-                fcinfo->arg[0] = UInt32GetDatum(relationOid);
+                fcinfo->args[0].isnull = false;
+                fcinfo->args[0].value = UInt32GetDatum(relationOid);
 
                 int64 tableSize = DatumGetInt64(pg_total_relation_size(fcinfo));
 

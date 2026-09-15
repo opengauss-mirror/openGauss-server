@@ -32,11 +32,11 @@ static Oid current_parser_oid = InvalidOid;
     do {                                                 \
         int i;                                           \
         for (i = fcinfo->nargs; i > 0; i--) {            \
-            fcinfo->arg[i] = fcinfo->arg[i - 1];         \
-            fcinfo->argnull[i] = fcinfo->argnull[i - 1]; \
+            fcinfo->args[i].value = fcinfo->args[i - 1].value;         \
+            fcinfo->args[i].isnull = fcinfo->args[i - 1].isnull; \
         }                                                \
-        fcinfo->arg[0] = (argument);                     \
-        fcinfo->argnull[0] = (isnull);                   \
+        fcinfo->args[0].value = (argument);                     \
+        fcinfo->args[0].isnull = (isnull);                   \
         fcinfo->nargs++;                                 \
     } while (0)
 

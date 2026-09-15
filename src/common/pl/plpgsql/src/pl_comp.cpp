@@ -158,21 +158,22 @@ static void check_proc_args_type_match(FunctionCallInfo fcinfo, HeapTuple proc_t
     oidvector* proargs = ProcedureGetArgTypes(proc_tup);
 
     for (short i = 0; i < nargs; i++) {
-        if (IsPolymorphicType(proargs->values[i]) || !OidIsValid(fcinfo->argTypes[i])) {
+        Oid actualType = get_fn_expr_argtype(fcinfo->flinfo, i);
+        if (IsPolymorphicType(proargs->values[i]) || !OidIsValid(actualType)) {
             continue;
         }
 
         if (TypeCategory(proargs->values[i]) == TYPCATEGORY_STRING &&
-            TypeCategory(fcinfo->argTypes[i]) == TYPCATEGORY_STRING) {
+            TypeCategory(actualType) == TYPCATEGORY_STRING) {
             continue;
         }
 
-        if (OidIsValid(get_element_type(fcinfo->argTypes[i])) &&
-            get_element_type(fcinfo->argTypes[i]) == get_element_type(proargs->values[i])) {
+        if (OidIsValid(get_element_type(actualType)) &&
+            get_element_type(actualType) == get_element_type(proargs->values[i])) {
             continue;
         }
 
-        if (fcinfo->argTypes[i] != proargs->values[i]) {
+        if (actualType != proargs->values[i]) {
             ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("type of function %u args have been changed, while the function maybe rebuilt",
                            fcinfo->flinfo->fn_oid)));

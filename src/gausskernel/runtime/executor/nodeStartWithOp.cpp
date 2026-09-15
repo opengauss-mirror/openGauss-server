@@ -960,7 +960,8 @@ bool IsPseudoReturnColumn(const char *colname)
 Datum sys_connect_by_path(PG_FUNCTION_ARGS)
 {
     /* For fastpath call, swinfo won't be initialized, so error it out */
-    if (fcinfo->swinfo.sw_econtext == NULL && fcinfo->swinfo.sw_exprstate == NULL) {
+    if (fcinfo->extra == NULL ||
+        (fcinfo->extra->swinfo.sw_econtext == NULL && fcinfo->extra->swinfo.sw_exprstate == NULL)) {
         elog(ERROR, "Uninitialized swinfo when calling sys_connect_by_path");
     }
 
@@ -1018,7 +1019,8 @@ Datum sys_connect_by_path(PG_FUNCTION_ARGS)
 Datum connect_by_root(PG_FUNCTION_ARGS)
 {
     /* For fastpath call, swinfo won't be initialized, so error it out */
-    if (fcinfo->swinfo.sw_econtext == NULL && fcinfo->swinfo.sw_exprstate == NULL) {
+    if (fcinfo->extra == NULL ||
+        (fcinfo->extra->swinfo.sw_econtext == NULL && fcinfo->extra->swinfo.sw_exprstate == NULL)) {
         elog(ERROR, "Uninitialized swinfo when calling connect_by_root");
     }
 
@@ -1101,8 +1103,8 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
     *isConstArrayList = false;
     List *vars = NIL;
 
-    ExprContext *econtext = (ExprContext *)fcinfo->swinfo.sw_econtext;
-    ExprState   *exprstate = (ExprState *)fcinfo->swinfo.sw_exprstate;
+    ExprContext *econtext = (ExprContext *)fcinfo->extra->swinfo.sw_econtext;
+    ExprState   *exprstate = (ExprState *)fcinfo->extra->swinfo.sw_exprstate;
 
     /* context check */
     Assert (econtext != NULL && exprstate != NULL);
@@ -1112,8 +1114,8 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
      * specified, so the eval-context's argument only have one argument with *Var*
      * node ported
      */
-    if (fcinfo->swinfo.sw_is_flt_frame) {
-        vars = pull_var_clause((Node*)fcinfo->swinfo.sw_exprstate,
+    if (fcinfo->extra->swinfo.sw_is_flt_frame) {
+        vars = pull_var_clause((Node*)fcinfo->extra->swinfo.sw_exprstate,
                                        PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
     } else {
         vars = pull_var_clause((Node*)exprstate->expr,

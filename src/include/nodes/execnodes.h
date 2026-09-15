@@ -437,6 +437,7 @@ struct ExprState {
     ScalarVector tmpVector;
 
     Oid resultType;
+    ScalarVector* vecresult;  /* vectorized result buffer (per-arg in vectorized executor) */
 };
 
 /* ----------------
@@ -1041,11 +1042,19 @@ typedef struct FuncExprState {
     bool shutdown_reg; /* a shutdown callback is registered */
 
     /*
+     * Function result cache (openGauss-specific, moved from FunctionCallInfoData).
+     * fncache points to the cached result entry; arghash stores the CRC32C
+     * of arguments computed during lookup, reused when storing the result.
+     */
+    FuncCache fncache;
+    uint32 arghash;
+
+    /*
      * Call parameter structure for the function.  This has been initialized
      * (by InitFunctionCallInfoData) if func.fn_oid is valid.  It also saves
      * argument values between calls, when setArgsValid is true.
      */
-    FunctionCallInfoData fcinfo_data;
+    FunctionCallInfoData* fcinfo_data;
 
     ScalarVector* tmpVec;
     bool vec_setHasSetArg;	/* some argument returns a set */
@@ -1259,7 +1268,7 @@ typedef struct RowCompareExprState {
     FmgrInfo* funcs; /* array of comparison function info */
     Oid* collations; /* array of collations to use */
 
-    FunctionCallInfoData* cinfo;
+    FunctionCallInfoData** cinfo;
 
     ScalarVector* left_argvec;  /* the left-hand input vector arguments */
     ScalarVector* right_argvec; /* the right-hand input vector arguments */
@@ -1286,7 +1295,7 @@ typedef struct MinMaxExprState {
     List* args;     /* the arguments */
     List* cmpargs;     /* the comparison arguments */
     FmgrInfo cfunc; /* lookup info for comparison func */
-    FunctionCallInfoData cinfo;
+    FunctionCallInfoData** cinfo;
 
     ScalarVector* argvec; /* eval arg results */
     ScalarVector* cmpresult;
@@ -1628,6 +1637,7 @@ typedef struct DistInsertSelectState {
     CopyFromManager mgr;
     BulkInsertState bistate;
     PageCompress* pcState;
+    TupleTableSlot* tmp_slot;
 } DistInsertSelectState;
 
 /* ----------------

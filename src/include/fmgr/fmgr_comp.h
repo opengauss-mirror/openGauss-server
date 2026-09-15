@@ -51,7 +51,7 @@
  * If function is not marked "proisstrict" in pg_proc, it must check for
  * null arguments using this macro.  Do not try to GETARG a null argument!
  */
-#define PG_ARGISNULL(n) (fcinfo->argnull[n])
+#define PG_ARGISNULL(n) (fcinfo->args[n].isnull)
 
 #ifndef FRONTEND_PARSER
 /*
@@ -80,8 +80,11 @@ extern struct varlena* pg_detoast_datum(struct varlena* datum);
 extern struct varlena* pg_detoast_datum_copy(struct varlena* datum);
 extern struct varlena* pg_detoast_datum_slice(struct varlena* datum, int64 first, int32 count);
 extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
+extern struct varlena* pg_detoast_datum_buffered(struct varlena* datum, void *buffer, Size bufsize);
 
 #define PG_DETOAST_DATUM(datum) pg_detoast_datum((struct varlena*)DatumGetPointer(datum))
+#define PG_DETOAST_DATUM_BUFFERED(datum, buf, bufsz) \
+    pg_detoast_datum_buffered((struct varlena*)DatumGetPointer(datum), (buf), (bufsz))
 #define PG_DETOAST_DATUM_COPY(datum) pg_detoast_datum_copy((struct varlena*)DatumGetPointer(datum))
 #define PG_DETOAST_DATUM_SLICE(datum, f, c) \
     pg_detoast_datum_slice((struct varlena*)DatumGetPointer(datum), (int64)(f), (int32)(c))
@@ -105,7 +108,7 @@ extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
 
 /* Macros for fetching arguments of standard types */
 
-#define PG_GETARG_DATUM(n) (fcinfo->arg[n])
+#define PG_GETARG_DATUM(n) (fcinfo->args[n].value)
 #define PG_GETARG_INT32(n) DatumGetInt32(PG_GETARG_DATUM(n))
 #define PG_GETARG_UINT32(n) DatumGetUInt32(PG_GETARG_DATUM(n))
 #define PG_GETARG_INT16(n) DatumGetInt16(PG_GETARG_DATUM(n))

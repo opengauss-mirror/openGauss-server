@@ -48,7 +48,7 @@ static int btree_num_keep_atts(Relation rel, IndexTuple lastleft, IndexTuple fir
  *
  *		The result is intended for use with _bt_compare().
  */
-BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup)
+BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup, Datum *itup_values, const bool *itup_isnull)
 {
     BTScanInsert key;
     TupleDesc itupdesc;
@@ -56,6 +56,8 @@ BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup)
     int indnkeyatts;
     int num_tuple_attrs = itup ? BTREE_TUPLE_GET_NUM_OF_ATTS(itup, rel) : 0;
     int16* indoption = NULL;
+
+    Assert(itup_values == NULL || (itup_isnull != NULL && itup != NULL));
 
     itupdesc = RelationGetDescr(rel);
     indnatts = IndexRelationGetNumberOfAttributes(rel);
@@ -71,20 +73,23 @@ BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup)
      */
     key = (BTScanInsert)palloc(offsetof(BTScanInsertData, scankeys) + indnkeyatts * sizeof(ScanKeyData));
 
-    if (IsSystemRelation(rel) || t_thrd.proc->workingVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM) {
-        key->heapkeyspace = false;
-        key->allequalimage = false;
-    } else if (itup) {
+    if (itup) {
         btree_meta_version(rel, &key->heapkeyspace, &key->allequalimage);
+        key->scantid = key->heapkeyspace ? btree_tuple_get_heap_tid(itup) : NULL;
     } else {
-        key->heapkeyspace = true;
+        if (unlikely(IsSystemRelation(rel) ||
+                     t_thrd.proc->workingVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM)) {
+            key->heapkeyspace = false;
+        } else {
+            key->heapkeyspace = true;
+        }
         key->allequalimage = false;
+        key->scantid = NULL;
     }
 	key->anynullkeys = false;	/* initial assumption */
 	key->nextkey = false;
 	key->pivotsearch = false;
 	key->keysz = Min(indnkeyatts, num_tuple_attrs);
-    key->scantid = key->heapkeyspace && itup ? btree_tuple_get_heap_tid(itup) : NULL;
 
     for (int i = 0; i < indnkeyatts; i++) {
         FmgrInfo* procinfo = NULL;
@@ -92,20 +97,21 @@ BTScanInsert _bt_mkscankey(Relation rel, IndexTuple itup)
         bool null = false;
         uint32 flags;
 
-        /*
-         * We can use the cached (default) support procs since no cross-type
-         * comparison can be needed.
-         */
         procinfo = index_getprocinfo(rel, i + 1, (uint16)BTORDER_PROC);
 
-		if (i < num_tuple_attrs)
-			arg = index_getattr(itup, i + 1, itupdesc, &null);
-		else
-		{
-			arg = (Datum) 0;
-			null = true;
+                if (itup_values && i < num_tuple_attrs) {
+                        arg = itup_values[i];
+                        null = itup_isnull[i];
+                } else if (i < num_tuple_attrs) {
+                    arg = index_getattr(itup, i + 1, itupdesc, &null);
+                } else {
+                    arg = (Datum) 0;
+                    null = true;
 		}
         flags = (null ? SK_ISNULL : 0) | (((uint16)indoption[i]) << SK_BT_INDOPTION_SHIFT);
+        if (null) {
+            key->anynullkeys = true;
+        }
         ScanKeyEntryInitializeWithInfo(&key->scankeys[i], flags, (AttrNumber)(i + 1), InvalidStrategy, InvalidOid,
                                        rel->rd_indcollation[i], procinfo, arg);
     }
@@ -2022,7 +2028,7 @@ IndexTuple btree_truncate(Relation rel, IndexTuple lastleft, IndexTuple firstrig
     Size newsize = MAXALIGN(IndexTupleSize(pivot)) + MAXALIGN(sizeof(ItemPointerData));
     IndexTuple tid_pivot = (IndexTuple)palloc0(newsize);
 
-    errno_t rc = memcpy_s(tid_pivot, newsize, pivot, MAXALIGN(IndexTupleSize(pivot)));
+    const errno_t rc = memcpy_sp(tid_pivot, newsize, pivot, MAXALIGN(IndexTupleSize(pivot)));
     securec_check(rc, "", "");
     pfree(pivot);
 

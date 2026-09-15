@@ -96,4 +96,5 @@ void ScanKeyEntryInitializeWithInfo(ScanKey entry, uint32 flags, AttrNumber attr
     entry->sk_collation = collation;
     entry->sk_argument = argument;
     fmgr_info_copy(&entry->sk_func, finfo, CurrentMemoryContext);
+    optimize_varstr_cmp(&entry->sk_func, collation);
 }

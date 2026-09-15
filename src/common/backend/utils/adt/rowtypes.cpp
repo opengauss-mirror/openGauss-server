@@ -908,7 +908,7 @@ static int record_cmp(FunctionCallInfo fcinfo)
     while (i1 < ncolumns1 || i2 < ncolumns2) {
         TypeCacheEntry* typentry = NULL;
         Oid collation;
-        FunctionCallInfoData locfcinfo;
+        LOCAL_FCINFO(locfcinfo, 2);
         int32 cmpresult;
 
         /*
@@ -974,13 +974,13 @@ static int record_cmp(FunctionCallInfo fcinfo)
             }
 
             /* Compare the pair of elements */
-            InitFunctionCallInfoData(locfcinfo, &typentry->cmp_proc_finfo, 2, collation, NULL, NULL);
-            locfcinfo.arg[0] = values1[i1];
-            locfcinfo.arg[1] = values2[i2];
-            locfcinfo.argnull[0] = false;
-            locfcinfo.argnull[1] = false;
-            locfcinfo.isnull = false;
-            cmpresult = DatumGetInt32(FunctionCallInvoke(&locfcinfo));
+            InitFunctionCallInfoData(*locfcinfo, &typentry->cmp_proc_finfo, 2, collation, NULL, NULL);
+            locfcinfo->args[0].value = values1[i1];
+            locfcinfo->args[1].value = values2[i2];
+            locfcinfo->args[0].isnull = false;
+            locfcinfo->args[1].isnull = false;
+            locfcinfo->isnull = false;
+            cmpresult = DatumGetInt32(FunctionCallInvoke(locfcinfo));
 
             if (cmpresult < 0) {
                 /* arg1 is less than arg2 */
@@ -1132,7 +1132,7 @@ Datum record_eq(PG_FUNCTION_ARGS)
     while (i1 < ncolumns1 || i2 < ncolumns2) {
         TypeCacheEntry* typentry = NULL;
         Oid collation;
-        FunctionCallInfoData locfcinfo;
+        LOCAL_FCINFO(locfcinfo, 2);
         bool oprresult = false;
 
         /*
@@ -1192,13 +1192,13 @@ Datum record_eq(PG_FUNCTION_ARGS)
             }
 
             /* Compare the pair of elements */
-            InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2, collation, NULL, NULL);
-            locfcinfo.arg[0] = values1[i1];
-            locfcinfo.arg[1] = values2[i2];
-            locfcinfo.argnull[0] = false;
-            locfcinfo.argnull[1] = false;
-            locfcinfo.isnull = false;
-            oprresult = DatumGetBool(FunctionCallInvoke(&locfcinfo));
+            InitFunctionCallInfoData(*locfcinfo, &typentry->eq_opr_finfo, 2, collation, NULL, NULL);
+            locfcinfo->args[0].value = values1[i1];
+            locfcinfo->args[1].value = values2[i2];
+            locfcinfo->args[0].isnull = false;
+            locfcinfo->args[1].isnull = false;
+            locfcinfo->isnull = false;
+            oprresult = DatumGetBool(FunctionCallInvoke(locfcinfo));
             if (!oprresult) {
                 result = false;
                 break;

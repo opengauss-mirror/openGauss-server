@@ -3641,12 +3641,11 @@ void HashJoinTbl::matchKey(ScalarVector* val, int rows, int hashValKeyIdx, int k
     ScalarValue* value = val->m_vals;
     uint8* flag = val->m_flag;
     int i;
-    FunctionCallInfoData fc_info;
+    LOCAL_FCINFO(fc_info, 2);
+    fc_info->extra = NULL;
     PGFunction cmp_fun = m_eqfunctions[key_num].fn_addr;
-    Datum args[2];
 
-    fc_info.arg = &args[0];
-    fc_info.flinfo = (m_eqfunctions + key_num);
+    fc_info->flinfo = (m_eqfunctions + key_num);
 
     for (i = 0; i < rows; i++) {
         if (m_keyMatch[i] == true && m_cellCache[i] && NOT_NULL(m_cellCache[i]->m_val[hashValKeyIdx].flag)) {
@@ -3654,9 +3653,9 @@ void HashJoinTbl::matchKey(ScalarVector* val, int rows, int hashValKeyIdx, int k
                 if (simpleType) {
                     m_keyMatch[i] = (innerType)m_cellCache[i]->m_val[hashValKeyIdx].val == (outerType)value[i];
                 } else {
-                    fc_info.arg[0] = value[i];
-                    fc_info.arg[1] = m_cellCache[i]->m_val[hashValKeyIdx].val;
-                    m_keyMatch[i] = cmp_fun(&fc_info);
+                    fc_info->args[0].value = value[i];
+                    fc_info->args[1].value = m_cellCache[i]->m_val[hashValKeyIdx].val;
+                    m_keyMatch[i] = cmp_fun(fc_info);
                 }
             } else {
                 m_keyMatch[i] = false;

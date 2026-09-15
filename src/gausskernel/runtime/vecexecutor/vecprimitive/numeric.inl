@@ -49,10 +49,9 @@ vnumeric_avg_final(PG_FUNCTION_ARGS)
 	ScalarValue*  m_vals = (ScalarValue*)PG_GETARG_DATUM(2);
 	uint8  *m_flag = (uint8*)PG_GETARG_DATUM(3);
 	
-	Datum	  args[2];
-	FunctionCallInfoData finfo;
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 
-	finfo.arg = &args[0];
 	if(singlenode)
 	{
 		if(IS_NULL(cell->m_val[idx].flag))
@@ -61,13 +60,13 @@ vnumeric_avg_final(PG_FUNCTION_ARGS)
 			return (Datum) 0;
 		}
 		
-		args[0] = cell->m_val[idx].val;
+                finfo->args[0].value = cell->m_val[idx].val;
 		if (isTransition)
-			args[1] = makeNumeric64(cell->m_val[idx + 1].val, 0);
+                        finfo->args[1].value = makeNumeric64(cell->m_val[idx + 1].val, 0);
 		else
-			args[1] = cell->m_val[idx+1].val;
+                        finfo->args[1].value = cell->m_val[idx+1].val;
 		
-		*m_vals = numeric_div(&finfo);
+                *m_vals = numeric_div(finfo);
 		SET_NOTNULL(*m_flag);
 	}
 	else
@@ -78,12 +77,16 @@ vnumeric_avg_final(PG_FUNCTION_ARGS)
 			return (Datum) 0;
 		}
 
-		args[1] = cell->m_val[idx].val;
+                finfo->args[1].value = cell->m_val[idx].val;
 		if (isTransition)
-			args[0] = makeNumeric64(cell->m_val[idx + 1].val, 0);
+                        finfo->args[0].value = makeNumeric64(cell->m_val[idx + 1].val, 0);
 		else
-			args[0] = cell->m_val[idx+1].val;
-		*m_vals = PointerGetDatum(construct_array(args, 2, NUMERICOID, -1, false, 'i'));
+                        finfo->args[0].value = cell->m_val[idx+1].val;
+                Datum tmpargs[2];
+                for (int k = 0; k < 2; k++) {
+                    tmpargs[k] = finfo->args[k].value;
+                }
+                *m_vals = PointerGetDatum(construct_array(tmpargs, 2, NUMERICOID, -1, false, 'i'));
 		SET_NOTNULL(*m_flag);
 	}
 
@@ -104,9 +107,9 @@ vnumeric_avg(PG_FUNCTION_ARGS)
 	ScalarValue*  pVal = pVector->m_vals;
 	uint8*		  flag = pVector->m_flag;
 	int			  nrows = pVector->m_rows;
-	Datum 		  args[2];
 	Datum		  result;
-	FunctionCallInfoData finfo;
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 	Datum	      *datumarray = NULL;
 	int			   ndatum;
 	bictl		  ctl;
@@ -114,7 +117,6 @@ vnumeric_avg(PG_FUNCTION_ARGS)
 	uint16		  num1Flags, num2Flags;		// numeric flags of num1 and num2 
 	int			  arg1, arg2, i;
 
-	finfo.arg = &args[0];
 	ctl.context = context;
 
 	for(i = 0 ; i < nrows; i++)
@@ -143,9 +145,9 @@ vnumeric_avg(PG_FUNCTION_ARGS)
 					} 
 					else // call numeric_add
 					{
-						args[0] = NumericGetDatum(leftarg);
-						args[1] = NumericGetDatum(rightarg);
-						result = numeric_add(&finfo);
+                                                finfo->args[0].value = NumericGetDatum(leftarg);
+                                                finfo->args[1].value = NumericGetDatum(rightarg);
+                                                result = numeric_add(finfo);
 						cell->m_val[idx].val = replaceVariable(context, cell->m_val[idx].val, result);
 					}
 					cell->m_val[idx + 1].val++; //count++
@@ -172,9 +174,9 @@ vnumeric_avg(PG_FUNCTION_ARGS)
 					} 
 					else // call numeric_add
 					{
-						args[0] = NumericGetDatum(leftarg);
-						args[1] = NumericGetDatum(rightarg);
-						result = numeric_add(&finfo);
+                                                finfo->args[0].value = NumericGetDatum(leftarg);
+                                                finfo->args[1].value = NumericGetDatum(rightarg);
+                                                result = numeric_add(finfo);
 						cell->m_val[idx].val = replaceVariable(context, cell->m_val[idx].val, result);
 					}
 					
@@ -233,15 +235,15 @@ vsnumeric_avg_final(PG_FUNCTION_ARGS)
 	int 			nrows = pVector->m_rows;
 	uint8*			pflag = &pVector->m_flag[nrows];
 	ScalarValue*	pvals = &pVector->m_vals[nrows];
-	Datum			args[2];
+        NullableDatum           args[2];
 	Datum			*countdata = NULL;
 	Datum			*leftdata = NULL;
 	
 	uint8			leftflag;
 	int				arrIndx,atomIndx;
 
-	FunctionCallInfoData finfo;
-	finfo.arg = &args[0];
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 	nrows = nrows + 1;
 
 	arrIndx = getArrayIndx(dataIdx, data->m_nbit);
@@ -262,11 +264,11 @@ vsnumeric_avg_final(PG_FUNCTION_ARGS)
 			return (Datum) 0;
 		}
 
-		args[0] = *leftdata;
-		args[1] = makeNumeric64(*countdata, 0);
+                finfo->args[0].value = *leftdata;
+                finfo->args[1].value = makeNumeric64(*countdata, 0);
 
 		/* avg result(m_vals) */
-		*pvals = numeric_div(&finfo);
+                *pvals = numeric_div(finfo);
 		SET_NOTNULL(*pflag);
 	}
 	else
@@ -277,10 +279,14 @@ vsnumeric_avg_final(PG_FUNCTION_ARGS)
 			return (Datum) 0;
 		}
 
-		args[1] = *leftdata;
-		args[0] = makeNumeric64(*countdata, 0);
+                finfo->args[1].value = *leftdata;
+                finfo->args[0].value = makeNumeric64(*countdata, 0);
 		
-		*pvals = PointerGetDatum(construct_array(args, 2, NUMERICOID, -1, false, 'i'));
+                Datum tmpargs[2];
+                for (int k = 0; k < 2; k++) {
+                    tmpargs[k] = finfo->args[k].value;
+                }
+                *pvals = PointerGetDatum(construct_array(tmpargs, 2, NUMERICOID, -1, false, 'i'));
 		SET_NOTNULL(*pflag);
 	}
 	return (Datum) 0;
@@ -308,12 +314,13 @@ vsnumeric_avg(PG_FUNCTION_ARGS)
 	ScalarValue*	pVal = pVector->m_vals;
 	uint8*			flag = pVector->m_flag;
 	int				nrows = pVector->m_rows;
-	Datum			args[2];
+        NullableDatum           args[2];
 	Datum			result;
 	Datum			*leftdata = NULL;
 	Datum			*countdata = NULL;
 	uint8			leftflag;
-	FunctionCallInfoData finfo;
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 	bictl			ctl;
 	/* left-hand and right-hand operand of addition */
 	Numeric			leftarg, rightarg;	
@@ -324,7 +331,6 @@ vsnumeric_avg(PG_FUNCTION_ARGS)
 	int				ndatum;
 	int				arrIndx, atomIndx;
 	
-	finfo.arg = &args[0];
 	ctl.context = data->m_cxt;
 
 	for(i = 0 ; i < nrows; i++)
@@ -366,9 +372,9 @@ vsnumeric_avg(PG_FUNCTION_ARGS)
 					else
 					{
 						 /* call numeric_add */
-						args[0] = NumericGetDatum(leftarg);
-						args[1] = NumericGetDatum(rightarg);
-						result = numeric_add(&finfo);
+                                                finfo->args[0].value = NumericGetDatum(leftarg);
+                                                finfo->args[1].value = NumericGetDatum(rightarg);
+                                                result = numeric_add(finfo);
 						leftdata[0] = data -> replaceVariable(leftdata[0], result);
 					}
 					/* add count */
@@ -397,9 +403,9 @@ vsnumeric_avg(PG_FUNCTION_ARGS)
 					else
 					{
 						/* call numeric_add */
-						args[0] = NumericGetDatum(leftarg);
-						args[1] = NumericGetDatum(rightarg);
-						result = numeric_add(&finfo);
+                                                finfo->args[0].value = NumericGetDatum(leftarg);
+                                                finfo->args[1].value = NumericGetDatum(rightarg);
+                                                result = numeric_add(finfo);
 						leftdata[0] = data -> replaceVariable(leftdata[0], result);
 					}
 					
@@ -452,9 +458,8 @@ vnumeric_op(PG_FUNCTION_ARGS)
 	int 		arg1, arg2, i;
 	Numeric		leftarg, rightarg;	// left-hand and right-hand operand of addition	
 	uint16		num1Flags, num2Flags;		// numeric flags of num1 and num2 
-	Datum       args[2];
-	FunctionCallInfoData finfo;
-	finfo.arg = &args[0];
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 
 	if(likely(pselection == NULL))
 	{
@@ -476,9 +481,9 @@ vnumeric_op(PG_FUNCTION_ARGS)
 				} 
 				else // numeric_funcs
 				{
-					args[0] = NumericGetDatum(leftarg);
-					args[1] = NumericGetDatum(rightarg);
-					presult[i] = numericFun(&finfo);
+                                        finfo->args[0].value = NumericGetDatum(leftarg);
+                                        finfo->args[1].value = NumericGetDatum(rightarg);
+                                        presult[i] = numericFun(finfo);
 				}
 				SET_NOTNULL(pflagsRes[i]);
 			}
@@ -511,9 +516,9 @@ vnumeric_op(PG_FUNCTION_ARGS)
 					} 
 					else // numeric_funcs
 					{
-						args[0] = NumericGetDatum(leftarg);
-						args[1] = NumericGetDatum(rightarg);
-						presult[i] = numericFun(&finfo);
+                                                finfo->args[0].value = NumericGetDatum(leftarg);
+                                                finfo->args[1].value = NumericGetDatum(rightarg);
+                                                presult[i] = numericFun(finfo);
 					}
 					SET_NOTNULL(pflagsRes[i]);
 				}
@@ -542,14 +547,13 @@ vnumeric_min_max(PG_FUNCTION_ARGS)
 	ScalarValue*  pVal = pVector->m_vals;
 	uint8*		  flag = pVector->m_flag;
 	int			  nrows = pVector->m_rows;
-	Datum 		  args[2];
 	Datum		  result;
-	FunctionCallInfoData finfo;
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 	Numeric		  leftarg, rightarg;	// left-hand and right-hand operand of addition	
 	uint16		  num1Flags, num2Flags;		// numeric flags of num1 and num2 
 	int			  arg1, arg2, i;
 	bictl		  ctl;
-	finfo.arg = &args[0];
 
 	ctl.context = context;
 
@@ -586,9 +590,9 @@ vnumeric_min_max(PG_FUNCTION_ARGS)
 				}
 				else
 				{
-					args[0] = NumericGetDatum(leftarg);
-					args[1] = NumericGetDatum(rightarg);
-					result = numericFun(&finfo);
+                                        finfo->args[0].value = NumericGetDatum(leftarg);
+                                        finfo->args[1].value = NumericGetDatum(rightarg);
+                                        result = numericFun(finfo);
 					if(result != cell->m_val[idx].val)
 						cell->m_val[idx].val = replaceVariable(context, cell->m_val[idx].val, result);
 				}
@@ -619,10 +623,11 @@ vsnumeric_min_max(PG_FUNCTION_ARGS)
 	ScalarValue*	pVal = pVector->m_vals;
 	uint8*			flag = pVector->m_flag;
 	int				nrows = pVector->m_rows;
-	Datum			args[2];
+        NullableDatum           args[2];
 	Datum			result;
 	Datum			*leftdata = NULL;
-	FunctionCallInfoData finfo;
+        LOCAL_FCINFO(finfo, 2);
+        finfo->extra = NULL;
 	/* left-hand and right-hand operand of addition */
 	Numeric			leftarg, rightarg;	
 	/* numeric flags of num1 and num2 */
@@ -632,7 +637,6 @@ vsnumeric_min_max(PG_FUNCTION_ARGS)
 	uint8			leftflag;
 	int				arrIndx, atomIndx;
 
-	finfo.arg = &args[0];
 	ctl.context = data->m_cxt;
 
 	for (i = 0; i < nrows; i++)
@@ -676,9 +680,9 @@ vsnumeric_min_max(PG_FUNCTION_ARGS)
 				}
 				else
 				{
-					args[0] = NumericGetDatum(leftarg);
-					args[1] = NumericGetDatum(rightarg);
-					result = numericFun(&finfo);
+                                        finfo->args[0].value = NumericGetDatum(leftarg);
+                                        finfo->args[1].value = NumericGetDatum(rightarg);
+                                        result = numericFun(finfo);
 					if(result != leftdata[0])
 						leftdata[0]  = data->replaceVariable(leftdata[0], result);
 				}

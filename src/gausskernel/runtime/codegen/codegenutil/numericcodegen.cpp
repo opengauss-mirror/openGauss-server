@@ -2342,14 +2342,13 @@ void WrapDeconstructArray(ScalarValue pval, Datum** datumarray, int* ndatum)
  */
 void Wrapcallnumericadd(hashCell* cell, MemoryContext mcontext, Numeric leftarg, Numeric rightarg, int idx)
 {
-    Datum args[2];
     Datum result;
-    FunctionCallInfoData finfo;
-    finfo.arg = &args[0];
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
-    args[0] = NumericGetDatum(leftarg);
-    args[1] = NumericGetDatum(rightarg);
-    result = numeric_add(&finfo);
+    finfo->args[0].value = NumericGetDatum(leftarg);
+    finfo->args[1].value = NumericGetDatum(rightarg);
+    result = numeric_add(finfo);
     cell->m_val[idx].val = replaceVariable(mcontext, cell->m_val[idx].val, result);
 }
 
@@ -2363,18 +2362,17 @@ void Wrapcallnumericadd(hashCell* cell, MemoryContext mcontext, Numeric leftarg,
  */
 void Wrapcallsonicnumericadd(SonicEncodingDatumArray* data, Numeric leftarg, Numeric rightarg, uint32 loc)
 {
-    Datum args[2];
     Datum result;
-    FunctionCallInfoData finfo;
-    finfo.arg = &args[0];
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
     int arrIdx = getArrayIndx(loc, data->m_nbit);
     int atomIdx = getArrayLoc(loc, data->m_atomSize - 1);
 
     Datum* leftdata = &((Datum*)data->m_arr[arrIdx]->data)[atomIdx];
 
-    args[0] = NumericGetDatum(leftarg);
-    args[1] = NumericGetDatum(rightarg);
-    result = numeric_add(&finfo);
+    finfo->args[0].value = NumericGetDatum(leftarg);
+    finfo->args[1].value = NumericGetDatum(rightarg);
+    result = numeric_add(finfo);
     leftdata[0] = data->replaceVariable(leftdata[0], result);
 }

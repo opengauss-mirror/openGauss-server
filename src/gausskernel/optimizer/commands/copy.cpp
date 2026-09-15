@@ -6577,7 +6577,7 @@ extern void SPI_pop_conditional(bool pushed);
 Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod,
     int encoding, FmgrInfo* convert_finfo)
 {
-    FunctionCallInfoData fcinfo;
+    FunctionCallInfo fcinfo = NULL;
     Datum result;
     bool pushed = false;
     short nargs = 3;
@@ -6623,35 +6623,36 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
         } break;
     }
 
-    InitFunctionCallInfoData(fcinfo, flinfo, nargs, InvalidOid, NULL, NULL);
+    fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(nargs));
+    InitFunctionCallInfoData(*fcinfo, flinfo, nargs, InvalidOid, NULL, NULL);
     if (str != NULL && db_encoding != encoding) {
         converted_str = try_fast_encoding_conversion(str, strlen(str), db_encoding, encoding, (void*)convert_finfo);
     } else {
         converted_str = str;
     }
 
-    fcinfo.arg[0] = CStringGetDatum(converted_str);
-    fcinfo.arg[1] = ObjectIdGetDatum(typioparam);
-    fcinfo.arg[2] = Int32GetDatum(typmod);
+    fcinfo->args[0].value = CStringGetDatum(converted_str);
+    fcinfo->args[1].value = ObjectIdGetDatum(typioparam);
+    fcinfo->args[2].value = Int32GetDatum(typmod);
 
-    fcinfo.argnull[0] = (converted_str == NULL);
-    fcinfo.argnull[1] = false;
-    fcinfo.argnull[2] = false;
+    fcinfo->args[0].isnull = (converted_str == NULL);
+    fcinfo->args[1].isnull = false;
+    fcinfo->args[2].isnull = false;
 
     /*
      * input specified datetime format.
      */
     if (nargs == 4) {
-        fcinfo.arg[3] = CStringGetDatum(date_time_fmt);
-        fcinfo.argnull[3] = false;
+        fcinfo->args[3].value = CStringGetDatum(date_time_fmt);
+        fcinfo->args[3].isnull = false;
     }
 
     if (encoding != db_encoding) {
         DB_ENCODING_SWITCH_TO(encoding);
-        result = FunctionCallInvoke(&fcinfo);
+        result = FunctionCallInvoke(fcinfo);
         DB_ENCODING_SWITCH_BACK(db_encoding);
     } else {
-        result = FunctionCallInvoke(&fcinfo);
+        result = FunctionCallInvoke(fcinfo);
     }
 
     if (converted_str != str) {
@@ -6659,15 +6660,17 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
     }
     /* Should get null result if and only if str is NULL */
     if (str == NULL) {
-        if (!fcinfo.isnull)
+        if (!fcinfo->isnull) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                    errmsg("input function %u returned non-NULL", fcinfo.flinfo->fn_oid)));
+                    errmsg("input function %u returned non-NULL", fcinfo->flinfo->fn_oid)));
+        }
     } else {
-        if (fcinfo.isnull)
+        if (fcinfo->isnull) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                    errmsg("input function %u returned NULL", fcinfo.flinfo->fn_oid)));
+                    errmsg("input function %u returned NULL", fcinfo->flinfo->fn_oid)));
+        }
     }
 
     SPI_STACK_LOG("pop cond", NULL, NULL);

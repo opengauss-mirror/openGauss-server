@@ -423,25 +423,26 @@ void PrepareFuncArg(CreateEventStmt *stmt, Datum ev_name, Datum schemaName, Func
     /* Parsing the time expression */
     GetTimeExecResult(stmt, start_time, interval_time, end_time);
 
-    ev_arg->arg[ARG_0] = ev_name;
-    ev_arg->arg[ARG_1] = program_name;
-    ev_arg->arg[ARG_2] = schedule_name;
-    ev_arg->arg[ARG_3] = CStringGetTextDatum("DEFAULT_JOB_CLASS");
-    ev_arg->arg[ARG_4] = (stmt->event_status == EVENT_ENABLE) ? BoolGetDatum(1) : BoolGetDatum(0);
-    ev_arg->arg[ARG_5] = BoolGetDatum(stmt->complete_preserve);
-    ev_arg->arg[ARG_6] = (stmt->event_comment_str == NULL) ? (Datum)0 : CStringGetTextDatum(stmt->event_comment_str);
-    ev_arg->arg[ARG_7] = CStringGetTextDatum("REGULAR");
-    ev_arg->arg[ARG_8] = (Datum)0;
-    ev_arg->arg[ARG_9] = (Datum)0;
-    ev_arg->arg[ARG_10] = CharGetDatum(JOB_INTYPE_PLAIN);
-    ev_arg->arg[ARG_11] = TimeStampToText(start_time);
-    ev_arg->arg[ARG_12] = interval_time;
-    ev_arg->arg[ARG_13] = TimeStampToText(end_time);
-    ev_arg->arg[ARG_14] = job_action;
-    ev_arg->arg[ARG_15] = job_type;
-    ev_arg->arg[ARG_16] = definer;
-    ev_arg->arg[ARG_17] = schemaName;
-    ev_arg->arg[ARG_18] = CStringGetTextDatum(job_definer_oid);
+    ev_arg->args[ARG_0].value = ev_name;
+    ev_arg->args[ARG_1].value = program_name;
+    ev_arg->args[ARG_2].value = schedule_name;
+    ev_arg->args[ARG_3].value = CStringGetTextDatum("DEFAULT_JOB_CLASS");
+    ev_arg->args[ARG_4].value = (stmt->event_status == EVENT_ENABLE) ? BoolGetDatum(1) : BoolGetDatum(0);
+    ev_arg->args[ARG_5].value = BoolGetDatum(stmt->complete_preserve);
+    ev_arg->args[ARG_6].value = (stmt->event_comment_str == NULL) ? (Datum)0
+                                                                  : CStringGetTextDatum(stmt->event_comment_str);
+    ev_arg->args[ARG_7].value = CStringGetTextDatum("REGULAR");
+    ev_arg->args[ARG_8].value = (Datum)0;
+    ev_arg->args[ARG_9].value = (Datum)0;
+    ev_arg->args[ARG_10].value = CharGetDatum(JOB_INTYPE_PLAIN);
+    ev_arg->args[ARG_11].value = TimeStampToText(start_time);
+    ev_arg->args[ARG_12].value = interval_time;
+    ev_arg->args[ARG_13].value = TimeStampToText(end_time);
+    ev_arg->args[ARG_14].value = job_action;
+    ev_arg->args[ARG_15].value = job_type;
+    ev_arg->args[ARG_16].value = definer;
+    ev_arg->args[ARG_17].value = schemaName;
+    ev_arg->args[ARG_18].value = CStringGetTextDatum(job_definer_oid);
 }
 
 void CheckEventPrivilege(char* schema_name, char* event_name, AclMode mode, bool is_create_or_alter)
@@ -500,23 +501,21 @@ ObjectAddress CreateEventCommand(CreateEventStmt *stmt)
 
     Datum schema_name = DirectFunctionCall1(namein, CStringGetDatum(schema_name_str));
     Datum ev_name = CStringGetTextDatum(event_name_str);
-    FunctionCallInfoData ev_arg;
+    LOCAL_FCINFO(ev_arg, ARG_19);
     const short nrgs_job = ARG_19;
 
     if (CheckEventExists(ev_name, stmt->if_not_exists)) {
         return myself;
     }
 
-    InitFunctionCallInfoData(ev_arg, NULL, nrgs_job, InvalidOid, NULL, NULL);
-    errno_t rc = memset_s(ev_arg.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(ev_arg.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    InitFunctionCallInfoData(*ev_arg, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(ev_arg->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
 
     /* Obtains the event parameter. */
-    PrepareFuncArg(stmt, ev_name, schema_name, &ev_arg);
+    PrepareFuncArg(stmt, ev_name, schema_name, ev_arg);
 
-    create_job_raw(&ev_arg);
+    create_job_raw(ev_arg);
 
     return myself;
 }
@@ -924,17 +923,15 @@ void DropEventCommand(DropEventStmt *stmt)
     }
     CheckEventPrivilege(schema_name_str, event_name_str, ACL_USAGE, false);
 
-    FunctionCallInfoData ev_arg;
+    LOCAL_FCINFO(ev_arg, ARG_3);
     const short nrgs_job = ARG_3;
-    InitFunctionCallInfoData(ev_arg, NULL, nrgs_job, InvalidOid, NULL, NULL);
-    errno_t rc = memset_s(ev_arg.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    InitFunctionCallInfoData(*ev_arg, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(ev_arg->args, nrgs_job * sizeof(NullableDatum), 0, nrgs_job * sizeof(NullableDatum));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(ev_arg.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
-    securec_check(rc, "\0", "\0");
-    ev_arg.arg[ARG_0] = ev_name;
-    ev_arg.arg[ARG_1] = BoolGetDatum(0);
-    ev_arg.arg[ARG_2] = BoolGetDatum(0);
-    drop_single_job_internal(&ev_arg);
+    ev_arg->args[ARG_0].value = ev_name;
+    ev_arg->args[ARG_1].value = BoolGetDatum(0);
+    ev_arg->args[ARG_2].value = BoolGetDatum(0);
+    drop_single_job_internal(ev_arg);
 }
 
 StmtResult *SearchEventInfo(ShowEventStmt *stmt)

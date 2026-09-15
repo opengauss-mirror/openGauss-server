@@ -74,6 +74,7 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* 
     desc->tdhasuids = false;
     desc->tdisredistable = false;
     desc->td_tam_ops = tam_ops;
+    desc->td_last_attnum = -1;
 
     return desc;
 }
@@ -270,7 +271,7 @@ TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
     TupleDesc desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->td_tam_ops);
 
     for (int i = 0; i < desc->natts; i++) {
-        rc = memcpy_s(&desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
+        rc = memcpy_sp(&desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, &tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
     }
 

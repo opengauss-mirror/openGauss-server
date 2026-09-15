@@ -1216,19 +1216,13 @@ inline PLpgSQL_function* CompileFunction(Oid functionOid)
     flinfo.fn_oid = functionOid;
     flinfo.fn_mcxt = CurrentMemoryContext;
 
-    Datum args[1];
-    FunctionCallInfoData fakeInfo = {};
-    errorno = memset_s(&fakeInfo, sizeof(fakeInfo), 0, sizeof(fakeInfo));
-    securec_check(errorno, "", "");
-
-    fakeInfo.fncollation = DEFAULT_COLLATION_OID;
-    fakeInfo.flinfo = &flinfo;
-    fakeInfo.arg = args;
-    fakeInfo.arg[0] = Int32GetDatum(functionOid);
+    LOCAL_FCINFO(fakeInfo, 1);
+    InitFunctionCallInfoData(*fakeInfo, &flinfo, 1, DEFAULT_COLLATION_OID, NULL, NULL);
+    fakeInfo->args[0].value = Int32GetDatum(functionOid);
 
     // must call PG initialization for current session first
     _PG_init();
-    return plpgsql_compile(&fakeInfo, false);
+    return plpgsql_compile(fakeInfo, false);
 }
 
 static PLpgSQL_function* TriggerFunctionCompilation(const char* functionName, Oid functionOid)
@@ -1455,8 +1449,8 @@ PGFunction GetPGFunctionInfo(Oid functionId, uint32_t* argCount, bool* isStrict 
         (int)flinfo.fn_strict,
         (int)flinfo.fn_retset,
         flinfo.fn_rettype,
-        flinfo.fn_rettypemod,
-        flinfo.fnName);
+        flinfo.fn_ext != NULL ? flinfo.fn_ext->fn_rettypemod : 0,
+        flinfo.fn_ext != NULL ? flinfo.fn_ext->fn_name : "(builtin)");
     *argCount = flinfo.fn_nargs;
     if (isStrict != nullptr) {
         *isStrict = flinfo.fn_strict;
@@ -1659,12 +1653,12 @@ bool GetFuncTypeClass(JitFunctionPlan* functionPlan, TupleDesc* resultTupDesc, T
     {
         fmgr_info(functionPlan->_function_id, &finfo);
 
-        FunctionCallInfoData fcinfo;
-        InitFunctionCallInfoData(fcinfo, &finfo, functionPlan->m_paramCount, InvalidOid, nullptr, nullptr);
+        LOCAL_FCINFO(fcinfo, 2);
+        InitFunctionCallInfoData(*fcinfo, &finfo, functionPlan->m_paramCount, InvalidOid, nullptr, nullptr);
 
-        *typeClass = get_call_result_type(&fcinfo, nullptr, resultTupDesc);
+        *typeClass = get_call_result_type(fcinfo, nullptr, resultTupDesc);
 
-        FreeFunctionCallInfoData(fcinfo);
+        FreeFunctionCallInfoData(*fcinfo);
         result = true;
     }
     PG_CATCH();

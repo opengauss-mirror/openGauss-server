@@ -2191,7 +2191,7 @@ bool equalTriggerDescs(TriggerDesc* trigdesc1, TriggerDesc* trigdesc2)
 static HeapTuple ExecCallTriggerFunc(
     TriggerData* trigdata, int tgindx, FmgrInfo* finfo, Instrumentation* instr, MemoryContext per_tuple_context)
 {
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 0);
     PgStat_FunctionCallUsage fcusage;
     Datum result;
     Oid old_uesr = 0;
@@ -2247,14 +2247,14 @@ static HeapTuple ExecCallTriggerFunc(
     /*
      * Call the function, passing no arguments but setting a context.
      */
-    InitFunctionCallInfoData(fcinfo, finfo, 0, InvalidOid, (Node*)trigdata, NULL);
+    InitFunctionCallInfoData(*fcinfo, finfo, 0, InvalidOid, (Node*)trigdata, NULL);
 
-    pgstat_init_function_usage(&fcinfo, &fcusage);
+    pgstat_init_function_usage(fcinfo, &fcusage);
 
     u_sess->tri_cxt.MyTriggerDepth++;
     PG_TRY();
     {
-        result = FunctionCallInvoke(&fcinfo);
+        result = FunctionCallInvoke(fcinfo);
     }
     PG_CATCH();
     {
@@ -2283,9 +2283,10 @@ static HeapTuple ExecCallTriggerFunc(
      * Trigger protocol allows function to return a null pointer, but NOT to
      * set the isnull result flag.
      */
-    if (fcinfo.isnull)
+    if (fcinfo->isnull) {
         ereport(ERROR, (errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
-            errmsg("trigger function %u returned null value", fcinfo.flinfo->fn_oid)));
+            errmsg("trigger function %u returned null value", fcinfo->flinfo->fn_oid)));
+    }
 
     /*
      * If doing EXPLAIN ANALYZE, stop charging time to this trigger, and count

@@ -691,59 +691,54 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
             DispatchAggFunction(&aggstate->pervecagg[aggno], &aggstate->aggInfo[idx], use_sonichash);
 
             /* Initialize the function call parameter struct as well */
-            InitFunctionCallInfoData(aggstate->aggInfo[idx].vec_agg_function,
+            aggstate->aggInfo[idx].vec_agg_function = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(4));
+            InitFunctionCallInfoData(*aggstate->aggInfo[idx].vec_agg_function,
                 &peraggstate->transfn,
                 4,
                 peraggstate->aggCollation,
                 NULL,
                 NULL);
+            aggstate->aggInfo[idx].vec_final_function = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(4));
             /* Choose vector agg funtion, when agg node is only on datanode or coordinator, same function to be choosed.
              */
+            FmgrInfoExt *agg_fn_ext = FmgrInfoEnsureExt(aggstate->aggInfo[idx].vec_agg_function->flinfo);
             if (OidIsValid(peraggstate->collectfn_oid) == false)
-                aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[0];
+                agg_fn_ext->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[0];
             else
-                aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[1];
+                agg_fn_ext->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[1];
 #ifdef ENABLE_MULTIPLE_NODES
             if (OidIsValid(peraggstate->finalfn_oid)) {
 #else
             if (OidIsValid(peraggstate->finalfn_oid) && aggstate->aggInfo[idx].vec_agg_cache[0] && 
                 aggstate->aggInfo[idx].vec_agg_final[0]) {
 #endif
-                InitFunctionCallInfoData(aggstate->aggInfo[idx].vec_final_function,
+                InitFunctionCallInfoData(*aggstate->aggInfo[idx].vec_final_function,
                     &peraggstate->finalfn,
-                    2,
+                    4,
                     peraggstate->aggCollation,
                     NULL,
                     NULL);
 
                 if (OidIsValid(peraggstate->collectfn_oid) == false) {
                     if (is_singlenode)
-                        aggstate->aggInfo[idx].vec_final_function.flinfo->fn_addr =
+                        aggstate->aggInfo[idx].vec_final_function->flinfo->fn_addr =
                             aggstate->aggInfo[idx].vec_agg_final[0];
                     else
-                        aggstate->aggInfo[idx].vec_final_function.flinfo->fn_addr =
+                        aggstate->aggInfo[idx].vec_final_function->flinfo->fn_addr =
                             aggstate->aggInfo[idx].vec_agg_final[1];
 
-                    aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr =
-                        aggstate->aggInfo[idx].vec_agg_cache[0];
+                    agg_fn_ext->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[0];
                 } else {
                     if (is_singlenode)
-                        aggstate->aggInfo[idx].vec_final_function.flinfo->fn_addr =
+                        aggstate->aggInfo[idx].vec_final_function->flinfo->fn_addr =
                             aggstate->aggInfo[idx].vec_agg_final[2];
                     else
-                        aggstate->aggInfo[idx].vec_final_function.flinfo->fn_addr =
+                        aggstate->aggInfo[idx].vec_final_function->flinfo->fn_addr =
                             aggstate->aggInfo[idx].vec_agg_final[3];
 
-                    aggstate->aggInfo[idx].vec_agg_function.flinfo->vec_fn_addr =
-                        aggstate->aggInfo[idx].vec_agg_cache[1];
+                    agg_fn_ext->vec_fn_addr = aggstate->aggInfo[idx].vec_agg_cache[1];
                 }
             }
-
-            ScalarVector* p_vec = New(CurrentMemoryContext) ScalarVector[4];
-            for (int k = 0; k < 4; k++)
-                p_vec[k].init(CurrentMemoryContext, unknown_desc);
-
-            aggstate->aggInfo[idx].vec_agg_function.argVector = p_vec;
 
             /* Allocate vector for boolean check purpose. */
             if (peraggstate->evalproj != NULL)
@@ -927,12 +922,12 @@ void BaseAggRunner::init_aggInfo(int agg_num, VecAggInfo* agg_info)
     for (int i = 0; i < m_aggNum; i++) {
         m_cols++;
         m_aggIdx[i] = agg_idx;
-        Oid aggFuncOid = agg_info[i].vec_agg_function.flinfo->fn_oid;
+        Oid aggFuncOid = agg_info[i].vec_agg_function->flinfo->fn_oid;
         if (aggFuncOid == F_INT8INC || aggFuncOid == F_INT8INC_ANY) { /* count(*) or count(col) */
             m_aggCount[i] = true;
         }
 
-        if (agg_info[i].vec_final_function.flinfo != NULL) {
+        if (agg_info[i].vec_final_function->flinfo != NULL) {
             m_finalAggInfo[m_finalAggNum].idx = agg_idx;
             m_finalAggInfo[m_finalAggNum].info = &agg_info[i];
             m_finalAggNum++;
@@ -1243,12 +1238,12 @@ void BaseAggRunner::BatchAggregation(VectorBatch* batch)
 void BaseAggRunner::AggregationOnScalar(VecAggInfo* agg_info, ScalarVector* p_vector, int idx, hashCell** location)
 {
     AutoContextSwitch memGuard(m_econtext->ecxt_per_tuple_memory);
-    FunctionCallInfo fcinfo = &agg_info->vec_agg_function;
+    FunctionCallInfo fcinfo = agg_info->vec_agg_function;
 
-    fcinfo->arg[0] = (Datum)p_vector;
-    fcinfo->arg[1] = (Datum)idx;
-    fcinfo->arg[2] = (Datum)location;
-    fcinfo->arg[3] = (Datum)m_hashContext;
+    fcinfo->args[0].value = (Datum)p_vector;
+    fcinfo->args[1].value = (Datum)idx;
+    fcinfo->args[2].value = (Datum)location;
+    fcinfo->args[3].value = (Datum)m_hashContext;
 
     VecFunctionCallInvoke(fcinfo);
     ResetExprContext(m_econtext);
@@ -1294,11 +1289,11 @@ void BaseAggRunner::BuildScanBatchFinal(hashCell* cell)
 
         if (i == m_finalAggInfo[j].idx) {
             /* to invoke function */
-            FunctionCallInfo fcinfo = &m_finalAggInfo[j].info->vec_final_function;
-            fcinfo->arg[0] = (Datum)cell;
-            fcinfo->arg[1] = (Datum)i;
-            fcinfo->arg[2] = (Datum)(&p_vector->m_vals[nrows]);
-            fcinfo->arg[3] = (Datum)(&p_vector->m_flag[nrows]);
+            FunctionCallInfo fcinfo = m_finalAggInfo[j].info->vec_final_function;
+            fcinfo->args[0].value = (Datum)cell;
+            fcinfo->args[1].value = (Datum)i;
+            fcinfo->args[2].value = (Datum)(&p_vector->m_vals[nrows]);
+            fcinfo->args[3].value = (Datum)(&p_vector->m_flag[nrows]);
 
             /*
              * for var final function , we must make sure the return val

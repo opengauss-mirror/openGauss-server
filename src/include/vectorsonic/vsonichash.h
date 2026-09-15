@@ -224,15 +224,14 @@ public:
                 *boolloc =
                     *boolloc && (nullcheck || (notnullcheck && ((outerType)val->m_vals[*loc1] == (innerType)(*data))));
             else {
-                FunctionCallInfoData fcinfo;
+                LOCAL_FCINFO(fcinfo, 2);
+                fcinfo->extra = NULL;
                 PGFunction cmpfun = m_eqfunctions[keyNum].fn_addr;
-                Datum args[2];
-                fcinfo.arg = &args[0];
 
-                fcinfo.arg[0] = val->m_vals[*loc1];
-                fcinfo.arg[1] = *data;
-                fcinfo.flinfo = (m_eqfunctions + keyNum);
-                *boolloc = *boolloc && (nullcheck || (notnullcheck && (bool)cmpfun(&fcinfo)));
+                fcinfo->args[0].value = val->m_vals[*loc1];
+                fcinfo->args[1].value = *data;
+                fcinfo->flinfo = (m_eqfunctions + keyNum);
+                *boolloc = *boolloc && (nullcheck || (notnullcheck && (bool)cmpfun(fcinfo)));
             }
 
             boolloc++;

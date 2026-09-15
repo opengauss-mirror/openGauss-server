@@ -44,6 +44,7 @@
 #include "openssl/evp.h"
 #include "catalog/gs_collation.h"
 #include "catalog/pg_collation_fn.h"
+#include "utils/fmgroids.h"
 #include "commands/extension.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
@@ -1800,187 +1801,203 @@ static void text_position_cleanup(TextPositionState* state)
     }
 }
 
+void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
+{
+    switch (finfo->fn_oid) {
+        case F_BTTEXTCMP:
+            if (lc_collate_is_c(collation)) {
+                finfo->fn_addr = bttextcmp_c_locale;
+            } else if (is_b_format_collation(collation)) {
+                finfo->fn_addr = bttextcmp_b_format;
+            } else {
+                finfo->fn_addr = bttextcmp_locale;
+            }
+            break;
+        case F_BPCHARCMP:
+            if (lc_collate_is_c(collation)) {
+                finfo->fn_addr = bpcharcmp_c_locale;
+            } else if (is_b_format_collation(collation)) {
+                finfo->fn_addr = bpcharcmp_b_format;
+            } else {
+                finfo->fn_addr = bpcharcmp_locale;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+/* varstr_cmp_locale()
+ * General locale-aware path: strcoll / wcscoll.
+ */
+int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid)
+{
+    int result;
+    char a1buf[TEXTBUFLEN];
+    char a2buf[TEXTBUFLEN];
+    char *a1p = NULL;
+    char *a2p = NULL;
+
+#ifdef HAVE_LOCALE_T
+    pg_locale_t mylocale = 0;
+#endif
+
+    if (collid != DEFAULT_COLLATION_OID) {
+        if (!OidIsValid(collid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INDETERMINATE_COLLATION),
+                    errmsg("could not determine which collation to use for string comparison"),
+                    errhint("Use the COLLATE clause to set the collation explicitly.")));
+        }
+#ifdef HAVE_LOCALE_T
+        mylocale = pg_newlocale_from_collation(collid);
+#endif
+    }
+
+    if (len1 == len2 && memcmp(arg1, arg2, len1) == 0) {
+        return 0;
+    }
+
+#ifdef WIN32
+    if (GetDatabaseEncoding() == PG_UTF8) {
+        int a1len;
+        int a2len;
+        int r;
+
+        if (len1 >= TEXTBUFLEN / 2) {
+            a1len = len1 * 2 + 2;
+            a1p = palloc(a1len);
+        } else {
+            a1len = TEXTBUFLEN;
+            a1p = a1buf;
+        }
+        if (len2 >= TEXTBUFLEN / 2) {
+            a2len = len2 * 2 + 2;
+            a2p = palloc(a2len);
+        } else {
+            a2len = TEXTBUFLEN;
+            a2p = a2buf;
+        }
+
+        if (len1 == 0) {
+            r = 0;
+        } else {
+            r = MultiByteToWideChar(CP_UTF8, 0, arg1, len1, (LPWSTR)a1p, a1len / 2);
+            if (!r) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
+                        errmsg("could not convert string to UTF-16: error code %lu", GetLastError())));
+            }
+        }
+        ((LPWSTR)a1p)[r] = 0;
+
+        if (len2 == 0) {
+            r = 0;
+        } else {
+            r = MultiByteToWideChar(CP_UTF8, 0, arg2, len2, (LPWSTR)a2p, a2len / 2);
+            if (!r) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
+                        errmsg("could not convert string to UTF-16: error code %lu", GetLastError())));
+            }
+        }
+        ((LPWSTR)a2p)[r] = 0;
+
+        errno = 0;
+#ifdef HAVE_LOCALE_T
+        if (mylocale) {
+            result = wcscoll_l((LPWSTR)a1p, (LPWSTR)a2p, mylocale);
+        } else {
+#endif
+            result = wcscoll((LPWSTR)a1p, (LPWSTR)a2p);
+#ifdef HAVE_LOCALE_T
+        }
+#endif
+        if (result == 2147483647) {
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("could not compare Unicode strings: %m")));
+        }
+
+        if (result == 0) {
+            result = memcmp(arg1, arg2, Min(len1, len2));
+            if ((result == 0) && (len1 != len2)) {
+                result = (len1 < len2) ? -1 : 1;
+            }
+        }
+
+        if (a1p != a1buf) {
+            pfree_ext(a1p);
+        }
+        if (a2p != a2buf) {
+            pfree_ext(a2p);
+        }
+
+        return result;
+    }
+#endif /* WIN32 */
+
+    if (len1 >= TEXTBUFLEN) {
+        a1p = (char*)palloc(len1 + 1);
+    } else {
+        a1p = a1buf;
+    }
+    if (len2 >= TEXTBUFLEN) {
+        a2p = (char*)palloc(len2 + 1);
+    } else {
+        a2p = a2buf;
+    }
+
+    errno_t err = EOK;
+    if (len1 > 0) {
+        err = memcpy_s(a1p, len1, arg1, len1);
+        securec_check(err, "\0", "\0");
+    }
+    a1p[len1] = '\0';
+    if (len2 > 0) {
+        err = memcpy_s(a2p, len2, arg2, len2);
+        securec_check(err, "\0", "\0");
+    }
+    a2p[len2] = '\0';
+
+#ifdef HAVE_LOCALE_T
+    if (mylocale) {
+        result = strcoll_l(a1p, a2p, mylocale);
+    } else {
+#endif
+        result = strcoll(a1p, a2p);
+#ifdef HAVE_LOCALE_T
+    }
+#endif
+
+    if (result == 0) {
+        result = strcmp(a1p, a2p);
+    }
+
+    if (a1p != a1buf) {
+        pfree_ext(a1p);
+    }
+    if (a2p != a2buf) {
+        pfree_ext(a2p);
+    }
+
+    return result;
+}
+
 /* varstr_cmp()
  * Comparison function for text strings with given lengths.
  * Includes locale support, but must copy strings to temporary memory
- *	to allow null-termination for inputs to strcoll().
+ *      to allow null-termination for inputs to strcoll().
  * Returns an integer less than, equal to, or greater than zero, indicating
  * whether arg1 is less than, equal to, or greater than arg2.
  */
 int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
 {
-    int result;
-
-    /*
-     * Unfortunately, there is no strncoll(), so in the non-C locale case we
-     * have to do some memory copying.	This turns out to be significantly
-     * slower, so we optimize the case where LC_COLLATE is C.  We also try to
-     * optimize relatively-short strings by avoiding palloc/pfree overhead.
-     */
     if (lc_collate_is_c(collid)) {
-        result = memcmp(arg1, arg2, Min(len1, len2));
-        if ((result == 0) && (len1 != len2))
-            result = (len1 < len2) ? -1 : 1;
+        return varstr_cmp_c(arg1, len1, arg2, len2);
     } else if (is_b_format_collation(collid)) {
-        result = varstr_cmp_by_builtin_collations(arg1, len1, arg2, len2, collid);
+        return varstr_cmp_by_builtin_collations(arg1, len1, arg2, len2, collid);
     } else {
-        char a1buf[TEXTBUFLEN];
-        char a2buf[TEXTBUFLEN];
-        char *a1p = NULL, *a2p = NULL;
-
-#ifdef HAVE_LOCALE_T
-        pg_locale_t mylocale = 0;
-#endif
-
-        if (collid != DEFAULT_COLLATION_OID) {
-            if (!OidIsValid(collid)) {
-                /*
-                 * This typically means that the parser could not resolve a
-                 * conflict of implicit collations, so report it that way.
-                 */
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDETERMINATE_COLLATION),
-                        errmsg("could not determine which collation to use for string comparison"),
-                        errhint("Use the COLLATE clause to set the collation explicitly.")));
-            }
-#ifdef HAVE_LOCALE_T
-            mylocale = pg_newlocale_from_collation(collid);
-#endif
-        }
-
-        /*
-         * memcmp() can't tell us which of two unequal strings sorts first, but
-         * it's a cheap way to tell if they're equal.  Testing shows that
-         * memcmp() followed by strcoll() is only trivially slower than
-         * strcoll() by itself, so we don't lose much if this doesn't work out
-         * very often, and if it does - for example, because there are many
-         * equal strings in the input - then we win big by avoiding expensive
-         * collation-aware comparisons.
-         */
-        if (len1 == len2 && memcmp(arg1, arg2, len1) == 0)
-            return 0;
-
-#ifdef WIN32
-        /* Win32 does not have UTF-8, so we need to map to UTF-16 */
-        if (GetDatabaseEncoding() == PG_UTF8) {
-            int a1len;
-            int a2len;
-            int r;
-
-            if (len1 >= TEXTBUFLEN / 2) {
-                a1len = len1 * 2 + 2;
-                a1p = palloc(a1len);
-            } else {
-                a1len = TEXTBUFLEN;
-                a1p = a1buf;
-            }
-            if (len2 >= TEXTBUFLEN / 2) {
-                a2len = len2 * 2 + 2;
-                a2p = palloc(a2len);
-            } else {
-                a2len = TEXTBUFLEN;
-                a2p = a2buf;
-            }
-
-            /* stupid Microsloth API does not work for zero-length input */
-            if (len1 == 0)
-                r = 0;
-            else {
-                r = MultiByteToWideChar(CP_UTF8, 0, arg1, len1, (LPWSTR)a1p, a1len / 2);
-                if (!r)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
-                            errmsg("could not convert string to UTF-16: error code %lu", GetLastError())));
-            }
-            ((LPWSTR)a1p)[r] = 0;
-
-            if (len2 == 0)
-                r = 0;
-            else {
-                r = MultiByteToWideChar(CP_UTF8, 0, arg2, len2, (LPWSTR)a2p, a2len / 2);
-                if (!r)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_CHARACTER_VALUE_FOR_CAST),
-                            errmsg("could not convert string to UTF-16: error code %lu", GetLastError())));
-            }
-            ((LPWSTR)a2p)[r] = 0;
-
-            errno = 0;
-#ifdef HAVE_LOCALE_T
-            if (mylocale)
-                result = wcscoll_l((LPWSTR)a1p, (LPWSTR)a2p, mylocale);
-            else
-#endif
-                result = wcscoll((LPWSTR)a1p, (LPWSTR)a2p);
-            if (result == 2147483647) /* _NLSCMPERROR; missing from mingw
-                                       * headers */
-                ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("could not compare Unicode strings: %m")));
-
-            /*
-             * In some locales wcscoll() can claim that nonidentical strings
-             * are equal.  Believing that would be bad news for a number of
-             * reasons, so we follow Perl's lead and sort "equal" strings
-             * according to strcmp (on the UTF-8 representation).
-             */
-            if (result == 0) {
-                result = memcmp(arg1, arg2, Min(len1, len2));
-                if ((result == 0) && (len1 != len2))
-                    result = (len1 < len2) ? -1 : 1;
-            }
-
-            if (a1p != a1buf)
-                pfree_ext(a1p);
-            if (a2p != a2buf)
-                pfree_ext(a2p);
-
-            return result;
-        }
-#endif /* WIN32 */
-
-        if (len1 >= TEXTBUFLEN)
-            a1p = (char*)palloc(len1 + 1);
-        else
-            a1p = a1buf;
-        if (len2 >= TEXTBUFLEN)
-            a2p = (char*)palloc(len2 + 1);
-        else
-            a2p = a2buf;
-
-        errno_t err = EOK;
-        if (len1 > 0) {
-            err = memcpy_s(a1p, len1, arg1, len1);
-            securec_check(err, "\0", "\0");
-        }
-        a1p[len1] = '\0';
-        if (len2 > 0) {
-            err = memcpy_s(a2p, len2, arg2, len2);
-            securec_check(err, "\0", "\0");
-        }
-        a2p[len2] = '\0';
-
-#ifdef HAVE_LOCALE_T
-        if (mylocale)
-            result = strcoll_l(a1p, a2p, mylocale);
-        else
-#endif
-            result = strcoll(a1p, a2p);
-
-        /*
-         * In some locales strcoll() can claim that nonidentical strings are
-         * equal.  Believing that would be bad news for a number of reasons,
-         * so we follow Perl's lead and sort "equal" strings according to
-         * strcmp().
-         */
-        if (result == 0)
-            result = strcmp(a1p, a2p);
-
-        if (a1p != a1buf)
-            pfree_ext(a1p);
-        if (a2p != a2buf)
-            pfree_ext(a2p);
+        return varstr_cmp_locale(arg1, len1, arg2, len2, collid);
     }
-
-    return result;
 }
 
 /* text_cmp()
@@ -2253,6 +2270,56 @@ Datum bttextcmp(PG_FUNCTION_ARGS)
     int32 result;
 
     result = text_cmp(arg1, arg2, PG_GET_COLLATION());
+
+    PG_FREE_IF_COPY(arg1, 0);
+    PG_FREE_IF_COPY(arg2, 1);
+
+    PG_RETURN_INT32(result);
+}
+
+Datum bttextcmp_c_locale(PG_FUNCTION_ARGS)
+{
+    text* arg1 = PG_GETARG_TEXT_PP(0);
+    text* arg2 = PG_GETARG_TEXT_PP(1);
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "bttextcmp_c_locale()");
+
+    int32 result;
+    result = varstr_cmp_c(VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1),
+                          VARDATA_ANY(arg2), VARSIZE_ANY_EXHDR(arg2));
+
+    PG_FREE_IF_COPY(arg1, 0);
+    PG_FREE_IF_COPY(arg2, 1);
+
+    PG_RETURN_INT32(result);
+}
+
+Datum bttextcmp_b_format(PG_FUNCTION_ARGS)
+{
+    text* arg1 = PG_GETARG_TEXT_PP(0);
+    text* arg2 = PG_GETARG_TEXT_PP(1);
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "bttextcmp_b_format()");
+
+    int32 result;
+    result = varstr_cmp_by_builtin_collations(VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1),
+                                              VARDATA_ANY(arg2), VARSIZE_ANY_EXHDR(arg2),
+                                              PG_GET_COLLATION());
+
+    PG_FREE_IF_COPY(arg1, 0);
+    PG_FREE_IF_COPY(arg2, 1);
+
+    PG_RETURN_INT32(result);
+}
+
+Datum bttextcmp_locale(PG_FUNCTION_ARGS)
+{
+    text* arg1 = PG_GETARG_TEXT_PP(0);
+    text* arg2 = PG_GETARG_TEXT_PP(1);
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "bttextcmp_locale()");
+
+    int32 result;
+    result = varstr_cmp_locale(VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1),
+                               VARDATA_ANY(arg2), VARSIZE_ANY_EXHDR(arg2),
+                               PG_GET_COLLATION());
 
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
@@ -4326,17 +4393,17 @@ Datum replace_text_with_two_args(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     if (PG_ARGISNULL(1))
         PG_RETURN_TEXT_P(PG_GETARG_TEXT_PP(0));
-    FunctionCallInfoData locfcinfo;
+    LOCAL_FCINFO(locfcinfo, 3);
     Datum result;
-    InitFunctionCallInfoData(locfcinfo, NULL, 3, InvalidOid, NULL, NULL);
-    locfcinfo.arg[0] = PG_GETARG_DATUM(0);
-    locfcinfo.arg[1] = PG_GETARG_DATUM(1);
-    locfcinfo.arg[2] = CStringGetTextDatum("\0");
-    locfcinfo.argnull[0] = false;
-    locfcinfo.argnull[1] = false;
-    locfcinfo.argnull[2] = false;
-    result = (*replace_text)(&locfcinfo);
-    fcinfo->isnull = locfcinfo.isnull;
+    InitFunctionCallInfoData(*locfcinfo, NULL, 3, InvalidOid, NULL, NULL);
+    locfcinfo->args[0].value = PG_GETARG_DATUM(0);
+    locfcinfo->args[1].value = PG_GETARG_DATUM(1);
+    locfcinfo->args[2].value = CStringGetTextDatum("\0");
+    locfcinfo->args[0].isnull = false;
+    locfcinfo->args[1].isnull = false;
+    locfcinfo->args[2].isnull = false;
+    result = (*replace_text)(locfcinfo);
+    fcinfo->isnull = locfcinfo->isnull;
     return result;
 }
 
@@ -5712,11 +5779,8 @@ Datum list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfoText(state, PG_GETARG_TEXT_PP(1)); /* value */
     }
@@ -5760,11 +5824,8 @@ Datum int2_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%hd", PG_GETARG_INT16(1)); /* value */
     }
@@ -5808,11 +5869,8 @@ Datum int4_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%d", PG_GETARG_INT32(1)); /* value */
     }
@@ -5856,11 +5914,8 @@ Datum int8_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%ld", PG_GETARG_INT64(1)); /* value */
     }
@@ -5904,11 +5959,8 @@ Datum float4_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%lf", PG_GETARG_FLOAT4(1)); /* value */
     }
@@ -5952,11 +6004,8 @@ Datum float8_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
 
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%lf", PG_GETARG_FLOAT8(1)); /* value */
     }
@@ -6017,11 +6066,8 @@ Datum numeric_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         }
         val = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
 
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
@@ -6075,11 +6121,8 @@ Datum date_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         DateADT dateVal = PG_GETARG_DATEADT(1);
         val = DatumGetCString(DirectFunctionCall1(date_out, dateVal));
 
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
@@ -6133,11 +6176,8 @@ Datum timestamp_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         Timestamp timestamp = PG_GETARG_TIMESTAMP(1);
         val = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
 
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
@@ -6191,11 +6231,8 @@ Datum timestamptz_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         TimestampTz dt = PG_GETARG_TIMESTAMPTZ(1);
         val = DatumGetCString(DirectFunctionCall1(timestamptz_out, dt));
 
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
@@ -6249,11 +6286,8 @@ Datum interval_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         Interval* span = PG_GETARG_INTERVAL_P(1);
         val = DatumGetCString(DirectFunctionCall1(interval_out, PointerGetDatum(span)));
 
-        /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
             state = makeStringAggState(fcinfo);
-        else if (!PG_ARGISNULL(2))
-            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
 
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);

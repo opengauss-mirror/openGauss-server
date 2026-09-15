@@ -684,12 +684,12 @@ Datum JitInvokePGFunction0(PGFunction fptr, int collationId)
     volatile MemoryContext origCxt = CurrentMemoryContext;
     volatile int spiConnectId = SPI_connectid();
 
-    FunctionCallInfoData fcinfo;
-    InitFunctionCallInfoData(fcinfo, NULL, 0, (Oid)collationId, NULL, NULL);
+    LOCAL_FCINFO(fcinfo, 0);
+    InitFunctionCallInfoData(*fcinfo, NULL, 0, (Oid)collationId, NULL, NULL);
     PG_TRY();
     {
-        result = fptr(&fcinfo);
-        SET_EXPR_IS_NULL(fcinfo.isnull);
+        result = fptr(fcinfo);
+        SET_EXPR_IS_NULL(fcinfo->isnull);
     }
     PG_CATCH();
     {
@@ -714,7 +714,6 @@ inline void PrepareFmgrInfo(FunctionCallInfoData* fcinfo, FmgrInfo* flinfo, Func
 
     // prepare for function arguments a list of constants nodes with corresponding argument types
     for (int i = 0; i < argCount; ++i) {
-        fcinfo->argTypes[i] = argTypes[i];
         args[i].xpr.type = T_Const;
         args[i].consttype = argTypes[i];
         cells[i].data.ptr_value = &args[i];
@@ -744,13 +743,13 @@ Datum JitInvokePGFunction1(PGFunction fptr, int collationId, int isStrict, Datum
     volatile MemoryContext origCxt = CurrentMemoryContext;
     volatile int spiConnectId = SPI_connectid();
 
-    FunctionCallInfoData fcinfo1;
-    InitFunctionCallInfoData(fcinfo1, NULL, 1, (Oid)collationId, NULL, NULL);
+    LOCAL_FCINFO(fcinfo1, 1);
+    InitFunctionCallInfoData(*fcinfo1, NULL, 1, (Oid)collationId, NULL, NULL);
     PG_TRY();
     {
         bool shouldCallFunc = true;
-        fcinfo1.arg[0] = arg;
-        fcinfo1.argnull[0] = isnull;
+        fcinfo1->args[0].value = arg;
+        fcinfo1->args[0].isnull = isnull;
 
         // some functions require types in flinfo.fn_expr, so we fake it as required
         FmgrInfo flinfo = {};
@@ -759,11 +758,11 @@ Datum JitInvokePGFunction1(PGFunction fptr, int collationId, int isStrict, Datum
         ListCell cells[1] = {};
         Const args[1] = {};
         Oid argTypes[1] = {argType};
-        PrepareFmgrInfo(&fcinfo1, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 1);
+        PrepareFmgrInfo(fcinfo1, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 1);
 
         if (isStrict > 0) {
-            for (int i = 0; i < fcinfo1.nargs; i++) {
-                if (fcinfo1.argnull[i]) {
+            for (int i = 0; i < fcinfo1->nargs; i++) {
+                if (fcinfo1->args[i].isnull) {
                     shouldCallFunc = false;
                     break;
                 }
@@ -772,8 +771,8 @@ Datum JitInvokePGFunction1(PGFunction fptr, int collationId, int isStrict, Datum
 
         // call the function
         if (shouldCallFunc) {
-            result = fptr(&fcinfo1);
-            SET_EXPR_IS_NULL(fcinfo1.isnull);
+            result = fptr(fcinfo1);
+            SET_EXPR_IS_NULL(fcinfo1->isnull);
         } else {
             SET_EXPR_IS_NULL(true);
         }
@@ -803,15 +802,15 @@ Datum JitInvokePGFunction2(PGFunction fptr, int collationId, int isStrict, Datum
     volatile MemoryContext origCxt = CurrentMemoryContext;
     volatile int spiConnectId = SPI_connectid();
 
-    FunctionCallInfoData fcinfo2;
-    InitFunctionCallInfoData(fcinfo2, NULL, 2, (Oid)collationId, NULL, NULL);
+    LOCAL_FCINFO(fcinfo2, 2);
+    InitFunctionCallInfoData(*fcinfo2, NULL, 2, (Oid)collationId, NULL, NULL);
     PG_TRY();
     {
         bool shouldCallFunc = true;
-        fcinfo2.arg[0] = arg1;
-        fcinfo2.argnull[0] = isnull1;
-        fcinfo2.arg[1] = arg2;
-        fcinfo2.argnull[1] = isnull2;
+        fcinfo2->args[0].value = arg1;
+        fcinfo2->args[0].isnull = isnull1;
+        fcinfo2->args[1].value = arg2;
+        fcinfo2->args[1].isnull = isnull2;
 
         // some functions require types in flinfo.fn_expr, so we fake it as required
         FmgrInfo flinfo = {};
@@ -820,11 +819,11 @@ Datum JitInvokePGFunction2(PGFunction fptr, int collationId, int isStrict, Datum
         ListCell cells[2] = {};
         Const args[2] = {};
         Oid argTypes[2] = {argType1, argType2};
-        PrepareFmgrInfo(&fcinfo2, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 2);
+        PrepareFmgrInfo(fcinfo2, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 2);
 
         if (isStrict > 0) {
-            for (int i = 0; i < fcinfo2.nargs; i++) {
-                if (fcinfo2.argnull[i]) {
+            for (int i = 0; i < fcinfo2->nargs; i++) {
+                if (fcinfo2->args[i].isnull) {
                     shouldCallFunc = false;
                     break;
                 }
@@ -833,8 +832,8 @@ Datum JitInvokePGFunction2(PGFunction fptr, int collationId, int isStrict, Datum
 
         // call the function
         if (shouldCallFunc) {
-            result = fptr(&fcinfo2);
-            SET_EXPR_IS_NULL(fcinfo2.isnull);
+            result = fptr(fcinfo2);
+            SET_EXPR_IS_NULL(fcinfo2->isnull);
         } else {
             SET_EXPR_IS_NULL(true);
         }
@@ -864,17 +863,17 @@ Datum JitInvokePGFunction3(PGFunction fptr, int collationId, int isStrict, Datum
     volatile MemoryContext origCxt = CurrentMemoryContext;
     volatile int spiConnectId = SPI_connectid();
 
-    FunctionCallInfoData fcinfo3;
-    InitFunctionCallInfoData(fcinfo3, NULL, 3, (Oid)collationId, NULL, NULL);
+    LOCAL_FCINFO(fcinfo3, 3);
+    InitFunctionCallInfoData(*fcinfo3, NULL, 3, (Oid)collationId, NULL, NULL);
     PG_TRY();
     {
         bool shouldCallFunc = true;
-        fcinfo3.arg[0] = arg1;
-        fcinfo3.argnull[0] = isnull1;
-        fcinfo3.arg[1] = arg2;
-        fcinfo3.argnull[1] = isnull2;
-        fcinfo3.arg[2] = arg3;
-        fcinfo3.argnull[2] = isnull3;
+        fcinfo3->args[0].value = arg1;
+        fcinfo3->args[0].isnull = isnull1;
+        fcinfo3->args[1].value = arg2;
+        fcinfo3->args[1].isnull = isnull2;
+        fcinfo3->args[2].value = arg3;
+        fcinfo3->args[2].isnull = isnull3;
 
         // some functions require types in flinfo.fn_expr, so we fake it as required
         FmgrInfo flinfo = {};
@@ -883,20 +882,20 @@ Datum JitInvokePGFunction3(PGFunction fptr, int collationId, int isStrict, Datum
         ListCell cells[3] = {};
         Const args[3] = {};
         Oid argTypes[3] = {argType1, argType2, argType3};
-        PrepareFmgrInfo(&fcinfo3, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 3);
+        PrepareFmgrInfo(fcinfo3, &flinfo, &funcExpr, &funcArgs, cells, args, argTypes, 3);
 
         // call the function
         if (isStrict > 0) {
-            for (int i = 0; i < fcinfo3.nargs; i++) {
-                if (fcinfo3.argnull[i] == true) {
+            for (int i = 0; i < fcinfo3->nargs; i++) {
+                if (fcinfo3->args[i].isnull == true) {
                     shouldCallFunc = false;
                     break;
                 }
             }
         }
         if (shouldCallFunc) {
-            result = fptr(&fcinfo3);
-            SET_EXPR_IS_NULL(fcinfo3.isnull);
+            result = fptr(fcinfo3);
+            SET_EXPR_IS_NULL(fcinfo3->isnull);
         } else {
             SET_EXPR_IS_NULL(true);
         }
@@ -928,14 +927,23 @@ static Datum JitInvokePGFunctionNImpl(PGFunction fptr, int collationId, int isSt
     volatile Const* constArgs = nullptr;
     volatile int spiConnectId = SPI_connectid();
 
-    FunctionCallInfoData fcinfo;
-    InitFunctionCallInfoData(fcinfo, NULL, argCount, (Oid)collationId, NULL, NULL);
+    // allocate fcinfo sized for the full argument list (LOCAL_FCINFO was fixed at 2)
+    FunctionCallInfoData* fcinfo_data = (FunctionCallInfoData*)MOT::MemSessionAlloc(SizeForFunctionCallInfo(argCount));
+    if (fcinfo_data == nullptr) {
+        ereport(ERROR,
+            (errmodule(MOD_MOT),
+                errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
+                errmsg("MOT/JIT execution cannot call PG function"),
+                errdetail("Out of session memory")));
+    }
+    FunctionCallInfo fcinfo = fcinfo_data;
+    InitFunctionCallInfoData(*fcinfo, NULL, argCount, (Oid)collationId, NULL, NULL);
     PG_TRY();
     {
         bool shouldCallFunc = true;
         for (int i = 0; i < argCount; ++i) {
-            fcinfo.arg[i] = args[i];
-            fcinfo.argnull[i] = isnull[i];
+            fcinfo->args[i].value = args[i];
+            fcinfo->args[i].isnull = isnull[i];
             if (isStrict && isnull[i]) {
                 SET_EXPR_IS_NULL(true);
                 shouldCallFunc = false;
@@ -958,12 +966,12 @@ static Datum JitInvokePGFunctionNImpl(PGFunction fptr, int collationId, int isSt
                         errdetail("Out of session memory")));
             }
             PrepareFmgrInfo(
-                &fcinfo, &flinfo, &funcExpr, &funcArgs, (ListCell*)cells, (Const*)constArgs, argTypes, argCount);
+                fcinfo, &flinfo, &funcExpr, &funcArgs, (ListCell*)cells, (Const*)constArgs, argTypes, argCount);
             flinfo.fn_oid = functionId;  // for invoke unjittable using plpgsql_call_handler
 
             // call the function
-            result = fptr(&fcinfo);
-            SET_EXPR_IS_NULL(fcinfo.isnull);
+            result = fptr(fcinfo);
+            SET_EXPR_IS_NULL(fcinfo->isnull);
         }
     }
     PG_CATCH();
@@ -981,6 +989,9 @@ static Datum JitInvokePGFunctionNImpl(PGFunction fptr, int collationId, int isSt
     }
     if (args != nullptr) {
         MOT::MemSessionFree((void*)constArgs);
+    }
+    if (fcinfo_data != nullptr) {
+        MOT::MemSessionFree((void*)fcinfo_data);
     }
 
     if (signalException) {
@@ -1867,18 +1878,18 @@ void saveAvgArray(int aggIndex, Datum avg_array)
 
 Datum ComputeAvg(PGFunction func, Datum avgArray, bool* isNull)
 {
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 1);
     Datum result;
 
-    InitFunctionCallInfoData(fcinfo, NULL, 1, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, NULL, 1, InvalidOid, NULL, NULL);
 
-    fcinfo.arg[0] = avgArray;
-    fcinfo.argnull[0] = false;
+    fcinfo->args[0].value = avgArray;
+    fcinfo->args[0].isnull = false;
 
-    result = (*func)(&fcinfo);
+    result = (*func)(fcinfo);
 
     // communicate back is-null status
-    *isNull = fcinfo.isnull;
+    *isNull = fcinfo->isnull;
 
     return result;
 }

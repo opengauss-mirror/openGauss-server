@@ -1000,17 +1000,17 @@ static void EventTriggerInvoke(List *fn_oid_list, EventTriggerData *trigdata)
     foreach (lc, fn_oid_list) {
         Oid     fnoid = lfirst_oid(lc);
         FmgrInfo        flinfo;
-        FunctionCallInfoData fcinfo;
+        LOCAL_FCINFO(fcinfo, 0);
         PgStat_FunctionCallUsage fcusage;
  
         /* Look up the function */
         fmgr_info(fnoid, &flinfo);
  
         /* Call the function, passing no arguments but setting a context. */
-        InitFunctionCallInfoData(fcinfo, &flinfo, 0,
+        InitFunctionCallInfoData(*fcinfo, &flinfo, 0,
                                  InvalidOid, (Node *) trigdata, NULL);
-        pgstat_init_function_usage(&fcinfo, &fcusage);
-        FunctionCallInvoke(&fcinfo);
+        pgstat_init_function_usage(fcinfo, &fcusage);
+        FunctionCallInvoke(fcinfo);
         pgstat_end_function_usage(&fcusage, true);
  
         /* Reclaim memory. */

@@ -97,6 +97,10 @@
 #define NUMERIC_SHORT_WEIGHT_MAX NUMERIC_SHORT_WEIGHT_MASK
 #define NUMERIC_SHORT_WEIGHT_MIN (-(NUMERIC_SHORT_WEIGHT_MASK + 1))
 
+#define NUMERIC_CAN_BE_SHORT(scale, weight)                                         \
+    ((scale) <= NUMERIC_SHORT_DSCALE_MAX && (weight) <= NUMERIC_SHORT_WEIGHT_MAX && \
+        (weight) >= NUMERIC_SHORT_WEIGHT_MIN)
+
 /*
  * Extract sign, display scale, weight.
  */
