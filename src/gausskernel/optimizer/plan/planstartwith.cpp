@@ -1530,7 +1530,12 @@ static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan
 
     foreach (lc, plan->targetlist) {
         TargetEntry *te = (TargetEntry *)lfirst(lc);
-        Assert (IsA(te->expr, Var));
+        /* A projection (for example a window/aggregate expression) may add
+         * non-Var entries to the targetlist.  They cannot identify a base
+         * column used by a hierarchical pseudo column. */
+        if (te->expr == NULL || !IsA(te->expr, Var)) {
+            continue;
+        }
         if (list_member(tmp_path_list, te->expr)) {
             *pathEntryList = lappend(*pathEntryList, te);
         }
@@ -1846,20 +1851,29 @@ static void FixArrayInternalEntry(List *targetlsit)
     foreach(lc1, targetlsit) {
         TargetEntry *entry = (TargetEntry *)lfirst(lc1);
 
-        if (entry->resname != NULL &&
-           (strstr(entry->resname, "array_key_") ||
-            strstr(entry->resname, "array_path_") ||
-            strstr(entry->resname, "array_root_"))) {
-            int varno = ((Var *)entry->expr)->varno;
-            int attno = entry->resname[10] - '0';
+        /* array_key is consumed by the StartWith executor using its own
+         * bookkeeping.  Only path/root entries need to be renamed here. */
+        StartWithOpColumnType entry_type = GetPseudoColumnType(entry);
+        if (entry_type == SWCOL_ARRAY_PATH || entry_type == SWCOL_ARRAY_ROOT) {
+            if (entry->expr == NULL || !IsA(entry->expr, Var)) {
+                continue;
+            }
+
+            Var *entry_var = (Var *)entry->expr;
+            int varno = entry_var->varno;
+            const char *prefix = entry_type == SWCOL_ARRAY_PATH ?
+                                 "array_path_" : "array_root_";
+            int attno = atoi(entry->resname + strlen(prefix));
             int resno = 0;
 
             foreach(lc2, targetlsit) {
                 TargetEntry *entry2 = (TargetEntry *)lfirst(lc2);
 
-                if (GetPseudoColumnType(entry2) == SWCOL_REGULAR) {
-                    int varno2 = ((Var *)entry2->expr)->varno;
-                    int attno2 = ((Var *)entry2->expr)->varattno;
+                if (GetPseudoColumnType(entry2) == SWCOL_REGULAR &&
+                    entry2->expr != NULL && IsA(entry2->expr, Var)) {
+                    Var *entry2_var = (Var *)entry2->expr;
+                    int varno2 = entry2_var->varno;
+                    int attno2 = entry2_var->varattno;
 
                     if (varno == varno2 && attno2 == attno) {
                         resno = entry2->resno;
@@ -1872,18 +1886,20 @@ static void FixArrayInternalEntry(List *targetlsit)
             errno_t rc = memset_s(newArrayName, NAMEDATALEN, 0, NAMEDATALEN);
             securec_check(rc, "\0", "\0");
 
-            if (strstr(entry->resname, "array_key_")) {
-                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_key_%d", resno);
-                securec_check_ss(rc, "\0", "\0");
-            } else if (strstr(entry->resname, "array_path_")) {
+            if (entry_type == SWCOL_ARRAY_PATH) {
                 rc = sprintf_s(newArrayName, NAMEDATALEN, "array_path_%d", resno);
                 securec_check_ss(rc, "\0", "\0");
-            } else if (strstr(entry->resname, "array_root_")) {
+            } else {
                 rc = sprintf_s(newArrayName, NAMEDATALEN, "array_root_%d", resno);
                 securec_check_ss(rc, "\0", "\0");
             }
 
-            entry->resname = pstrdup(newArrayName);
+            /* Keep the original name if no corresponding regular Var was
+             * found.  Renaming it to *_0 would make the executor look up a
+             * non-existent array and hide the real planning problem. */
+            if (resno > 0) {
+                entry->resname = pstrdup(newArrayName);
+            }
         }
     }
 
@@ -1933,8 +1949,8 @@ static bool IsPseudoInternalEntryExists(List *targetlist, TargetEntry *tle)
             continue;
         }
 
-        Assert (IsA(tle->expr, Var));
-        if (pg_strcasecmp(curEntry->resname, tle->resname) == 0) {
+        if (curEntry->resname != NULL && tle->resname != NULL &&
+            pg_strcasecmp(curEntry->resname, tle->resname) == 0) {
             result = true;
             break;
         }
@@ -1979,7 +1995,9 @@ static void AddPseudoEntries(Plan *plan, Index relid, PlanAccessPathSearchContex
              * The target entry's resno,varno,varattno is created in CteScan planing stage,
              * before we add it to curernt plan, we need do proper resno adjustment
              */
-            Assert (IsA(entry->expr, Var));
+            if (entry->expr == NULL || !IsA(entry->expr, Var)) {
+                continue;
+            }
             index++;
             ((Var *)entry->expr)->varno = relid;
             if (adapt) {
@@ -1991,7 +2009,10 @@ static void AddPseudoEntries(Plan *plan, Index relid, PlanAccessPathSearchContex
         }
     }
 
-    if (context->botNode != NULL) {
+    /* Do not rewrite the top CteScan itself.  Its internal array names are
+     * part of the tuple descriptor consumed by the StartWith executor. */
+    if (context->botNode != NULL &&
+        (context->topNode != NULL && context->topNode != plan)) {
         FixArrayInternalEntry(plan->targetlist);
     }
 

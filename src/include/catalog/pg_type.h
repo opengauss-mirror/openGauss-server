@@ -967,4 +967,5 @@ DATA(insert OID = 4073 (_jsonpath		PGNSP PGUID -1 f b A f t \054 0 4072 0 array_
 	 (type_is_enum(typid)) || \
 	 (type_is_set(typid)))
 
+extern void lock_normal_type_relation_by_typeid(Oid type_oid, int lockmode);
 #endif   /* PG_TYPE_H */
