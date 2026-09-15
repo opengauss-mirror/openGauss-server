@@ -198,7 +198,13 @@ sections:
       - label: 架构
         href: ./data_branch_architecture.md
       - label: 分支合并
-        href: ./data_branch_merge.md
+        sections:
+          - label: 分支合并概述
+            href: ./data_branch_merge.md
+          - label: 全量分支合并
+            href: ./data_branch_full_merge.md
+          - label: 增量分支合并
+            href: ./data_branch_delta_merge.md
       - label: LFC+预取
         href: ./data_branch_lfc_prefetch.md
       - label: 并行回放
