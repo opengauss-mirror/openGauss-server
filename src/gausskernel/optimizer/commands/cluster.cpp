@@ -229,7 +229,12 @@ void cluster(ClusterStmt* stmt, bool isTopLevel)
         tableOid = RangeVarGetRelidExtended(
             stmt->relation, lockMode, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
         rel = heap_open(tableOid, NoLock);
-
+        /* Ustore tables do not support CLUSTER. */
+        if (rel->rd_tam_ops == TableAmUstore) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cluster not supported in ustore")));
+        }
         TrForbidAccessRbObject(RelationRelationId, tableOid, stmt->relation->relname);
 
         /* cluster a specific partition */
