@@ -6,7 +6,7 @@ AnythingLLM is a full-stack app that can convert any document, resource (such as
 
 ## openGauss Containerized Deployment
 
-For details, see [Installing the Container Image](https://docs.opengauss.org/en/docs/latest/installation_guide/installing_the_container_image.html).
+For details, see [Installing the Container Image](https://docs.opengauss.org/en/docs/latest/installation_guide/installation_overview.html).
 
 ## AnythingLLM Deployment
 

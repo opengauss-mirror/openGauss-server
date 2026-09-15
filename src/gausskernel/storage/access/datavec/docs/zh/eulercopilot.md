@@ -43,7 +43,7 @@ git clone https://gitee.com/openeuler/euler-copilot-framework.git -b dev
 2）离线模式
 
 - 获取openEuler Intelligence项目<br>
-在[openEuler Intelligence官方仓库](https://gitee.com/openeuler/euler-copilot-framework/tree/dev/)下载压缩包，上传至服务器并解压。
+在[openEuler Intelligence官方仓库](https://gitcode.com/openeuler/euler-copilot-framework/tree/dev/)下载压缩包，上传至服务器并解压。
 
   ```bash
   unzip euler-copilot-framework.tar -d <YourPath>

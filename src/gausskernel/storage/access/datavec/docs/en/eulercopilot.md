@@ -43,7 +43,7 @@ git clone https://gitee.com/openeuler/euler-copilot-framework.git -b dev
 2) Offline mode
 
 - Obtain the openEuler Intelligence project<br>
-Download the archive from the [openEuler Intelligence official repository](https://gitee.com/openeuler/euler-copilot-framework/tree/dev/), upload it to the server, and extract it.
+Download the archive from the [openEuler Intelligence official repository](https://gitcode.com/openeuler/euler-copilot-framework/tree/dev/), upload it to the server, and extract it.
 
   ```bash
   unzip euler-copilot-framework.tar -d <YourPath>
