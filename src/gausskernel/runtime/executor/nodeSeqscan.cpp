@@ -338,10 +338,15 @@ bool FetchEpqTupleBatchMode(ScanState* node)
             (void)ExecClearTuple(slot);
             return true;
         }
- 
+
         /* Store test tuple in the plan node's scan slot */
+        uint1 epqTupleType = ((HeapTuple)estate->es_epqTuple[scan_rel_id - 1])->tupTableType;
         (void)ExecStoreTuple(estate->es_epqTuple[scan_rel_id - 1], slot, InvalidBuffer, false);
- 
+        if ((TTS_TABLEAM_IS_USTORE(slot) && epqTupleType == HEAP_TUPLE) ||
+            (TTS_TABLEAM_IS_HEAP(slot) && epqTupleType == UHEAP_TUPLE)) {
+            slot->tts_flags |= TTS_FLAG_SHOULDFREE;
+        }
+
         return true;
     }
  
