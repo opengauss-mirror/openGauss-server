@@ -1,10 +1,49 @@
 SET LOCAL d_format_behavior_compat_options = '';
+SET LOCAL shark.sequence_fallback = 'off';
 
--- This function uses PostgreSQL array declarations and subscripts. Temporarily
--- remove enable_sbr_identifier while preserving the default collation option;
--- the caller's GUC value is restored automatically after each function call.
-ALTER FUNCTION sys.shark_conv_string_to_datetime2(TEXT, TEXT, NUMERIC)
-    SET d_format_behavior_compat_options TO 'default_collation';
+-- The rollback-post catalog path can invoke this update before the catalog
+-- upgrade has installed pg_sequence_all_parameters.  Install the built-in
+-- declaration here only when it is absent so the view definitions below can
+-- be parsed.  The catalog upgrade scripts replace this declaration with the
+-- system version when they run.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_proc p
+          JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'pg_catalog'
+           AND p.proname = 'pg_sequence_all_parameters'
+           AND p.proargtypes = '25'::oidvector
+    ) THEN
+        CREATE FUNCTION pg_catalog.pg_sequence_all_parameters(
+            sequence_name text,
+            OUT start_value int16,
+            OUT minimum_value int16,
+            OUT maximum_value int16,
+            OUT increment int16,
+            OUT cycle_option boolean,
+            OUT cache_size int16,
+            OUT last_value int16,
+            OUT is_called boolean,
+            OUT log_cnt int8,
+            OUT uuid int8,
+            OUT last_used_value int16,
+            OUT is_exhausted boolean,
+            OUT is_global_cache boolean
+        )
+        RETURNS record
+        LANGUAGE internal
+        STABLE STRICT NOT FENCED NOT SHIPPABLE
+        AS $function$pg_sequence_all_parameters$function$;
+
+        -- This declaration belongs to the system catalog, not to Shark.
+        ALTER EXTENSION shark DROP FUNCTION
+            pg_catalog.pg_sequence_all_parameters(text);
+        PERFORM set_config('shark.sequence_fallback', 'on', true);
+    END IF;
+END
+$$;
 
 -- rebuild some views in verion before shark 3.0
 drop view if exists sys.sysobjects;
@@ -2426,34 +2465,15 @@ CREATE OR REPLACE FUNCTION sys.quotename(IN input_string varbinary, IN delimiter
 
 -- sys.trim
 CREATE OR REPLACE FUNCTION pg_catalog.btrim(IN input_string varbinary) RETURNS varchar LANGUAGE SQL STABLE as 'select pg_catalog.btrim($1::varchar::text)';
--- dateadd: remove STRICT so that a null datepart raises an error,
--- while a null number/date still returns null (handled in datefuncs.cpp).
-CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,date)
-RETURNS timestamp without time zone
-language c
-immutable NOT FENCED NOT SHIPPABLE
-AS '$libdir/shark', $function$dateadddate$function$;
 
-CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,timestamp without time zone)
-RETURNS timestamp without time zone
-language c
-immutable NOT FENCED NOT SHIPPABLE
-AS '$libdir/shark', $function$dateaddtimestamp$function$;
-
-CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,timestamp with time zone)
-RETURNS timestamp with time zone
-language c
-immutable NOT FENCED NOT SHIPPABLE
-AS '$libdir/shark', $function$dateaddtimestamptz$function$;
-
-CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,time without time zone)
-RETURNS timestamp without time zone
-language c
-immutable NOT FENCED NOT SHIPPABLE
-AS '$libdir/shark', $function$dateaddtime$function$;
-
-CREATE OR REPLACE FUNCTION sys.dateadd(cstring,integer,time with time zone)
-RETURNS timestamp with time zone
-language c
-immutable NOT FENCED NOT SHIPPABLE
-AS '$libdir/shark', $function$dateaddtimetz$function$;
+-- These views depend on the temporary catalog declaration above.  Keep them
+-- outside the extension only for the rollback-post compatibility path so the
+-- catalog rollback can replace the declaration with its older system version.
+DO $$
+BEGIN
+    IF current_setting('shark.sequence_fallback') = 'on' THEN
+        ALTER EXTENSION shark DROP VIEW sys.identity_columns;
+        ALTER EXTENSION shark DROP VIEW sys.sequences;
+    END IF;
+END
+$$;
