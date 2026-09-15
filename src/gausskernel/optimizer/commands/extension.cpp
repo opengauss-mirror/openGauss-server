@@ -872,6 +872,8 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
      */
     creating_extension = true;
     u_sess->cmd_cxt.CurrentExtensionObject = extensionOid;
+    bool prevInExtensionCreate = u_sess->plsql_cxt.in_extension_create;
+    u_sess->plsql_cxt.in_extension_create = true;
     bool creatingSpq = pg_strcasecmp(control->name, "spq") == 0;
     bool prevAllowSystemTableMods = g_instance.attr.attr_common.allowSystemTableMods;
     PG_TRY();
@@ -933,6 +935,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
     PG_CATCH();
     {
         creating_extension = false;
+        u_sess->plsql_cxt.in_extension_create = prevInExtensionCreate;
         u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
         if (creatingSpq) {
             g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
@@ -942,6 +945,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
     PG_END_TRY();
 
     creating_extension = false;
+    u_sess->plsql_cxt.in_extension_create = prevInExtensionCreate;
     u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
     if (creatingSpq) {
         g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
