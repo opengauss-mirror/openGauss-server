@@ -5029,6 +5029,14 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                     sent_to_remote,
 #endif
                     completion_tag, context, isCTAS);
+
+                /* Preserve the historical client tag after DDL event processing. */
+                if (completion_tag != NULL) {
+                    errno_t rc = strcpy_s(completion_tag, COMPLETION_TAG_BUFSIZE, "REINDEX");
+                    if (rc != EOK) {
+                        elog(ERROR, "could not set REINDEX completion tag: error code %d", rc);
+                    }
+                }
             } else {
                 ExecReindexStmt(stmt, query_string,
 #ifdef PGXC
