@@ -3313,7 +3313,8 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
         len = buflen - (s - out);
         if (n->key == NULL) {
             pfree_ext(out);
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid data for match in format string")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid data for match in format string")));
         }
 
         switch (n->key->id) {

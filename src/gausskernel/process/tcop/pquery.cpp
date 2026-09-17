@@ -1322,7 +1322,7 @@ bool PortalRun(
             PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
         }
 
-        if (u_sess->attr.attr_common.log_executor_stats)
+        if (u_sess->attr.attr_common.log_executor_stats) {
             ShowUsage("EXECUTOR STATISTICS");
         }
     }

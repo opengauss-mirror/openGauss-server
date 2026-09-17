@@ -1536,7 +1536,7 @@ static void ProcKill(int code, Datum arg)
     if (IsUnderPostmaster && StreamThreadAmI())
         MarkPostmasterChildUnuseForStreamWorker();
 
-    if(t_thrd.proc->backendId != InvalidBackendId) {
+    if (t_thrd.proc->backendId != InvalidBackendId) {
         LockErrorCleanup();
         LockReleaseAll(DEFAULT_LOCKMETHOD, true);
         LockReleaseAll(USER_LOCKMETHOD, true);
