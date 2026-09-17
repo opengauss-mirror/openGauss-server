@@ -499,6 +499,7 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     int got_unicode = 0;
     uint8* psw = NULL;
     int pswLen = 0;
+    bool pswOwned = false;
 
     init_work(&ctx, need_text, args, &ex);
 
@@ -526,16 +527,15 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
      */
     if (is_pubenc) {
         MBuf* kbuf = NULL;
-        uint8* pswCopy = NULL;
 
         if (keypsw) {
             pswLen = VARSIZE(keypsw) - VARHDRSZ;
             if (pswLen > 0) {
                 /* operate on a private copy; never write into the argument datum */
-                pswCopy = (uint8*)palloc(pswLen);
-                errno_t rc = memcpy_s(pswCopy, pswLen, VARDATA(keypsw), pswLen);
-                securec_check(rc, "\0", "\0");
-                psw = pswCopy;
+                psw = (uint8*)palloc(pswLen);
+                errno_t rc = memcpy_s(psw, pswLen, VARDATA(keypsw), pswLen);
+                securec_check(rc, "", "");
+                pswOwned = true;
             } else {
                 psw = (uint8*)VARDATA(keypsw);
             }
@@ -543,11 +543,6 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
         kbuf = create_mbuf_from_vardata(key);
         err = pgp_set_pubkey(ctx, kbuf, psw, pswLen, 1);
         mbuf_free(kbuf);
-        if (pswCopy != NULL) {
-            (void)memset_s(pswCopy, pswLen, 0, pswLen);
-            pfree(pswCopy);
-            psw = NULL;
-        }
     } else
         err = pgp_set_symkey(ctx, (uint8*)VARDATA(key), VARSIZE(key) - VARHDRSZ);
 
@@ -570,6 +565,11 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     got_unicode = pgp_get_unicode_mode(ctx);
 
 out:
+    if (pswOwned) {
+        (void)memset_s(psw, pswLen, 0, pswLen);
+        pfree(psw);
+        psw = NULL;
+    }
     (void)memset_s(&pswLen, sizeof(pswLen), 0, sizeof(pswLen));
 
     if (src)
@@ -758,6 +758,11 @@ Datum pgp_pub_decrypt_bytea(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(data, dataArg);
     PG_FREE_IF_COPY(key, keyArg);
     if (PG_NARGS() > pswArg) {
+        if (psw != NULL && (Pointer)psw != PG_GETARG_POINTER(pswArg)) {
+            /* psw is a detoasted copy owned by us; scrub it before freeing */
+            int pswLen = VARSIZE(psw);
+            (void)memset_s(psw, pswLen, 0, pswLen);
+        }
         PG_FREE_IF_COPY(psw, pswArg);
     }
     if (PG_NARGS() > argArg)
@@ -787,6 +792,11 @@ Datum pgp_pub_decrypt_text(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(data, dataArg);
     PG_FREE_IF_COPY(key, keyArg);
     if (PG_NARGS() > pswArg) {
+        if (psw != NULL && (Pointer)psw != PG_GETARG_POINTER(pswArg)) {
+            /* psw is a detoasted copy owned by us; scrub it before freeing */
+            int pswLen = VARSIZE(psw);
+            (void)memset_s(psw, pswLen, 0, pswLen);
+        }
         PG_FREE_IF_COPY(psw, pswArg);
     }
     if (PG_NARGS() > argArg)
