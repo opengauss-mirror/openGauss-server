@@ -1,21 +1,19 @@
-FROM openeuler/openeuler:24.03-lts
+FROM ubuntu:24.04
 
 ARG VERSION=7.0.0
 
 COPY openGauss-Server-${VERSION}-openEuler24.03-x86_64.tar.bz2 .
 COPY gosu-amd64 /usr/local/bin/gosu
-COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_x86_64.repo
 # remove all lines containing scws if do no want to chparser#
 COPY scws.tar.gz .
 
-ENV LANG=en_US.UTF-8
+ENV LANG en_US.utf8
 
 RUN set -eux; \
-    yum install -y bzip2 util-linux curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel openblas-devel glibc-locale-source glibc-langpack-en && \
-    rm -f /usr/lib/locale/locale-archive && \
-    localedef -i en_US -f UTF-8 en_US.UTF-8 && \
+    apt-get update && \
+    apt-get install -y bzip2 curl libaio-dev passwd tar libjemalloc-dev libcgroup-dev libcurl4-openssl-dev liblapacke libedit-dev libxml2-dev liblz4-dev libnuma-dev unixodbc-dev libssl-dev zstd openjdk-11-jdk wget unzip libopenblas-dev locales && \
     groupadd -g 70 omm && \
-    useradd -u 70 -g omm -d /home/omm omm && \
+    useradd -u 70 -g omm -m -d /home/omm omm && \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
@@ -26,12 +24,18 @@ RUN set -eux; \
     rm -rf openGauss-Server-${VERSION}-openEuler24.03-x86_64.tar.bz2 && \
     tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
     chmod 1777 /tmp && \
-    yum clean all
+	ln -s  /usr/lib/x86_64-linux-gnu/libaio.so /usr/lib/x86_64-linux-gnu/libaio.so.1 && \
+	ln -s /usr/lib/x86_64-linux-gnu/libedit.so.2 /usr/lib/x86_64-linux-gnu/libedit.so.0 && \
+	cp /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/local/opengauss/lib/libstdc++.so.6 && \
+	localedef -i en_US -c -f UTF-8 en_US.UTF-8 && \
+	apt-get clean
 
 RUN set -eux; \
     echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
     echo "export PATH=\$GAUSSHOME/bin:\$PATH " >> /home/omm/.bashrc && \
-    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc
+    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc && \
+	echo "export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/liblapacke.so.3" >> /home/omm/.bashrc && \
+	echo "export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/liblapacke.so.3" >> /etc/profile
 
 RUN set -eux; echo "export TMOUT=0 >> /etc/bashrc"
 

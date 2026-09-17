@@ -11,6 +11,8 @@ export PATH=$GAUSSHOME/bin:/scws/bin:$PATH
 export LD_LIBRARY_PATH=$GAUSSHOME/lib:/scws/lib:$LD_LIBRARY_PATH
 export DATAVEC_PQ_LIB_PATH=/usr/local/sra_recall/lib
 
+grep -q '^ID=ubuntu$' /etc/os-release && export LD_PRELOAD=/usr/lib/$(uname -m)-linux-gnu/liblapacke.so.3:$LD_PRELOAD
+
 file_env() {
         local var="$1"
         local fileVar="${var}_FILE"
@@ -70,7 +72,7 @@ docker_create_db_directories() {
 docker_init_database_dir() {
         # "initdb" is particular about the current user existing in "/etc/passwd", so we use "nss_wrapper" to fake that if necessary
         if ! getent passwd "$(id -u)" &> /dev/null && [ -e /usr/lib/libnss_wrapper.so ]; then
-                export LD_PRELOAD='/usr/lib/libnss_wrapper.so'
+                export LD_PRELOAD=/usr/lib/libnss_wrapper.so:$LD_PRELOAD
                 export NSS_WRAPPER_PASSWD="$(mktemp)"
                 export NSS_WRAPPER_GROUP="$(mktemp)"
                 echo "postgres:x:$(id -u):$(id -g):PostgreSQL:$PGDATA:/bin/false" > "$NSS_WRAPPER_PASSWD"

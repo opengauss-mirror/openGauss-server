@@ -1,31 +1,29 @@
-FROM openeuler/openeuler:24.03-lts
+FROM openeuler/openeuler:22.03-lts
 
 ARG VERSION=7.0.0
 
-COPY openGauss-Lite-${VERSION}-openEuler24.03-aarch64.tar.gz .
+COPY openGauss-Server-${VERSION}-openEuler22.03-aarch64.tar.bz2 .
 COPY gosu-arm64 /usr/local/bin/gosu
 COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_aarch64.repo
 # remove all lines containing scws if do no want to chparser#
 COPY scws.tar.gz .
 
-ENV LANG=en_US.UTF-8
+ENV LANG en_US.utf8
+
+#RUN yum install -y epel-release
 
 RUN set -eux; \
-    yum install -y bzip2 util-linux curl libatomic libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel wget unzip openblas-devel glibc-locale-source glibc-langpack-en && \
-    rm -f /usr/lib/locale/locale-archive && \
-    localedef -i en_US -f UTF-8 en_US.UTF-8 && \
-    groupadd -g 70 omm && \
-    useradd -u 70 -g omm -d /home/omm omm && \
+    yum install -y bzip2 util-linux curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel wget unzip openblas-devel && \
+    groupadd -g 70 omm; \
+    useradd -u 70 -g omm -d /home/omm omm; \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    tar -xf openGauss-Lite-${VERSION}-openEuler24.03-aarch64.tar.gz -C /usr/local/opengauss && \
-    tar -xf /usr/local/opengauss/openGauss-Lite-${VERSION}-openEuler24.03-aarch64.bin -C /usr/local/opengauss && \
+    tar -jxf openGauss-Server-${VERSION}-openEuler22.03-aarch64.tar.bz2 -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-Lite-${VERSION}-openEuler24.03-aarch64.tar.gz && \
-    rm -rf openGauss-Lite-${VERSION}-openEuler24.03-aarch64.bin && \
+    rm -rf openGauss-Server-${VERSION}-openEuler22.03-aarch64.tar.bz2 && \
     wget --header="Referer:https://www.hikunpeng.com/" https://kunpeng-repo.obs.cn-north-4.myhuaweicloud.com/Kunpeng%20BoostKit/Kunpeng%20BoostKit%2025.0.RC1/BoostKit-SRA_Recall-1.1.0.zip && \
     unzip BoostKit-SRA_Recall-1.1.0.zip && \
     rpm -ivf boostkit-sra_recall-1.1.0-1.aarch64.rpm && \
