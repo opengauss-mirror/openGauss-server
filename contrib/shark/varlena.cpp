@@ -691,8 +691,7 @@ objectproperty_internal(PG_FUNCTION_ARGS)
 
 	if (!(nspname && pg_strcasecmp(nspname, "sys") == 0) && 
 		(!nspname || pg_strcasecmp(nspname, "pg_catalog") == 0 ||
-		pg_strcasecmp(nspname, "pg_toast") == 0 ||
-		pg_strcasecmp(nspname, "public") == 0))
+		pg_strcasecmp(nspname, "pg_toast") == 0))
 	{
 		pfree_ext(property);
 		if (nspname)
