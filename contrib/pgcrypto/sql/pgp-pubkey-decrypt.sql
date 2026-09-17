@@ -546,3 +546,20 @@ from keytbl, encdata where keytbl.id=5 and encdata.id=1;
 -- password-protected secret key, right password
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'parool')
 from keytbl, encdata where keytbl.id=5 and encdata.id=1;
+
+-- password-protected secret key, decrypt evaluated twice in one query (issue #8509)
+select g, pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'parool')
+from keytbl, encdata, generate_series(1, 2) as g
+where keytbl.id = 5 and encdata.id = 1
+order by g;
+
+-- password-protected secret key, same wrong password used twice
+select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'foo')
+from keytbl, encdata where keytbl.id = 5 and encdata.id = 1;
+
+select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'foo')
+from keytbl, encdata where keytbl.id = 5 and encdata.id = 1;
+
+-- password-protected secret key, right password still works after repeated use
+select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'parool')
+from keytbl, encdata where keytbl.id = 5 and encdata.id = 1;

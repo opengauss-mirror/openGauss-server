@@ -239,6 +239,11 @@ int pgp_s2k_process(PGP_S2K* s2k, int cipher, const uint8* key, int key_len)
     int res;
     PX_MD* md = NULL;
 
+    /* a negative length would be widened to a huge unsigned value downstream */
+    if (key_len < 0) {
+        return PXE_PGP_NEED_SECRET_PSW;
+    }
+
     s2k->key_len = pgp_get_cipher_key_size(cipher);
     if (s2k->key_len <= 0)
         return PXE_PGP_UNSUPPORTED_CIPHER;
