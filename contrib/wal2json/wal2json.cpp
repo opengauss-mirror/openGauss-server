@@ -636,12 +636,12 @@ static void pg_decode_startup(LogicalDecodingContext *ctx, OutputPluginOptions *
             if (elem->arg == NULL) {
                 elog(DEBUG1, "support-streaming argument is null");
                 data->support_streaming = false;
-            }
-            else if (!parse_bool(strVal(elem->arg), &data->support_streaming))
+            } else if (!parse_bool(strVal(elem->arg), &data->support_streaming)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                          errmsg("could not parse value \"%s\" for parameter \"%s\"",
                              strVal(elem->arg), elem->defname)));
+            }
         } else {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -2952,13 +2952,13 @@ static void pg_decode_stream_start(LogicalDecodingContext *ctx, ReorderBufferTXN
         if (data->include_origin)
             appendStringInfo(ctx->out, ",\"origin\":%u", txn->origin_id);
         if (data->include_lsn) {
-            char *lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->final_lsn)));
-            appendStringInfo(ctx->out, ",\"lsn\":\"%s\"", lsn_str);
-            pfree(lsn_str);
+            char *lsnStr = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->final_lsn)));
+            appendStringInfo(ctx->out, ",\"lsn\":\"%s\"", lsnStr);
+            pfree(lsnStr);
 
-            lsn_str = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->end_lsn)));
-            appendStringInfo(ctx->out, ",\"nextlsn\":\"%s\"", lsn_str);
-            pfree(lsn_str);
+            lsnStr = DatumGetCString(DirectFunctionCall1(pg_lsn_out, UInt64GetDatum(txn->end_lsn)));
+            appendStringInfo(ctx->out, ",\"nextlsn\":\"%s\"", lsnStr);
+            pfree(lsnStr);
         }
         appendStringInfoChar(ctx->out, '}');
     }
@@ -3050,7 +3050,8 @@ static void pg_decode_stream_commit(LogicalDecodingContext *ctx, ReorderBufferTX
     data->current_streaming = false;
 }
 
-static void pg_decode_stream_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change)
+static void pg_decode_stream_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+    Relation relation, ReorderBufferChange *change)
 {
     JsonDecodingData *data = (JsonDecodingData*) ctx->output_plugin_private;
     data->current_streaming = true;

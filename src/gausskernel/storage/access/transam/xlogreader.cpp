@@ -1049,8 +1049,9 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             ptr += sizeof(RepOriginId);
             remaining -= sizeof(RepOriginId);
         } else if (block_id == XLR_BLOCK_ID_TOPLEVEL_XID) {
-            if (remaining < sizeof(TransactionId))
+            if (remaining < sizeof(TransactionId)) {
                 goto shortdata_err;
+            }
             state->toplevel_xid = *(TransactionId*)ptr;
             ptr += sizeof(TransactionId);
             remaining -= sizeof(TransactionId);

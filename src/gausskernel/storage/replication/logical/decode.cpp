@@ -235,7 +235,6 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
     buf.record = record;
     buf.record_data = GetXlrec(record);
     TransactionId txid = XLogRecGetTopXid(record);
-
     /*
      * If the top-level xid is valid, we need to assign the subxact to the
      * top-level xact. We need to do this for all records, hence we do it

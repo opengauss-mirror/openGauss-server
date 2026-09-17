@@ -561,8 +561,9 @@ static inline void CheckConcurrentAbortOnLogicalDecoding(const char *where)
      * level API but this is called from many places so we need to ensure it
      * here.
      */
-    if (unlikely(TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive) && !u_sess->utils_cxt.bsysscan))
+    if (unlikely(TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive) && !u_sess->utils_cxt.bsysscan)) {
         HeapamReportConcurrentAbortOnLogicalDecoding(where);
+    }
 }
 
 /* ------------------------------------------------------------------------

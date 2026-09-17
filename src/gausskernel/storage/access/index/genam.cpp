@@ -392,8 +392,7 @@ SysScanDesc systable_beginscan(Relation heap_relation, Oid index_id, bool index_
         if (!u_sess->utils_cxt.bsysscan) {
             u_sess->utils_cxt.sysscanlevel = 1;
             u_sess->utils_cxt.bsysscan = true;
-        }
-        else {
+        } else {
             u_sess->utils_cxt.sysscanlevel++;
         }
     }

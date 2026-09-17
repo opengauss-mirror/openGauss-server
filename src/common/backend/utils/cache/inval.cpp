@@ -1275,8 +1275,9 @@ void CommandEndInvalidationMessages(void)
         &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, LocalExecuteThreadAndSessionInvalidationMessage);
     
     /* WAL Log per-command invalidation messages for wal_level=logical */
-    if (XLogLogicalInfoActive())
+    if (XLogLogicalInfoActive()) {
         LogLogicalInvalidations();
+    }
 
     AppendInvalidationMessages(&inval_cxt->transInvalInfo->PriorCmdInvalidMsgs,
         &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs);
@@ -1913,12 +1914,14 @@ void LogLogicalInvalidations()
     int nmsgs = 0;
     knl_u_inval_context *inval_cxt = GetInvalCxt();
 
-    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION)
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
         return;
+    }
 
     /* Quick exit if we haven't done anything with invalidation messages. */
-    if (inval_cxt->transInvalInfo == NULL)
+    if (inval_cxt->transInvalInfo == NULL) {
         return;
+    }
 
     ProcessInvalidationMessagesMulti(&inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs,
                                      MakeSharedInvalidMessagesArray);
@@ -1933,7 +1936,8 @@ void LogLogicalInvalidations()
 
     if (nmsgs > 0) {
         /* prepare record */
-        memset(&xlrec, 0, MinSizeOfXactInvals);
+        errno_t rc = memset_s(&xlrec, MinSizeOfXactInvals, 0, MinSizeOfXactInvals);
+        securec_check(rc, "\0", "\0");
         xlrec.nmsgs = nmsgs;
 
         /* perform insertion */

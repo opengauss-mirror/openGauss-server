@@ -1481,8 +1481,9 @@ static TransactionId RecordTransactionCommit(void)
      * without a transaction block, the invalidations are not logged till this
      * time.
      */
-    if (XLogLogicalInfoActive())
+    if (XLogLogicalInfoActive()) {
         LogLogicalInvalidations();
+    }
 
     /* Get data needed for commit record */
     nrels = smgrGetPendingDeletes(true, &rels, false, &temp_nrels);
@@ -9123,28 +9124,28 @@ bool IsSubTransactionAssignmentPending(void)
 {
     TransactionState s = CurrentTransactionState;
 
-    if (NULL == s)
+    if (NULL == s) {
         return false;
-
-    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION)
+    }
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
         return false;
-
+    }
     /* wal_level has to be logical */
-    if (!XLogLogicalInfoActive())
+    if (!XLogLogicalInfoActive()) {
         return false;
-
+    }
     /* we need to be in a transaction state */
-    if (!IsTransactionState())
+    if (!IsTransactionState()) {
         return false;
-
+    }
     /* it has to be a subtransaction */
-    if (!IsSubTransaction())
+    if (!IsSubTransaction()) {
         return false;
-
+    }
     /* the subtransaction has to have a XID assigned */
-    if (!TransactionIdIsValid(GetCurrentTransactionIdIfAny()))
+    if (!TransactionIdIsValid(GetCurrentTransactionIdIfAny())) {
         return false;
-
+    }
     /* and it should not be already 'assigned' */
     return !s->assigned;
 }

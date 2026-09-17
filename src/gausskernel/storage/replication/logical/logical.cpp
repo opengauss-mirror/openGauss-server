@@ -98,7 +98,8 @@ static void stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 static void stream_stop_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr last_lsn);
 static void stream_abort_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr abort_lsn);
 static void stream_commit_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
-static void stream_change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation, ReorderBufferChange *change);
+static void stream_change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
+    ReorderBufferChange *change);
 
 /* Checkout aurgments whether coming from ALTER SYSTEM SET*/
 bool QuoteCheckOut(char* newval)

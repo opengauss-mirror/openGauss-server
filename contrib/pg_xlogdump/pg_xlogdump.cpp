@@ -555,8 +555,8 @@ void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record)
     XLogRecPtr xl_prev = XLogRecGetPrev(record);
     RelFileCompressOption compOpt;
 
-    printf("REDO @ %X/%X; LSN %X/%X: prev %X/%X; xid " XID_FMT "; topxid " XID_FMT "; "
-           "term %u; len %u; total %u; crc %u; desc: %s - ",
+    printf("REDO @ %X/%X; LSN %X/%X: prev %X/%X; xid " XID_FMT "; "
+           "topxid " XID_FMT "; term %u; len %u; total %u; crc %u; desc: %s - ",
         (uint32)(record->ReadRecPtr >> 32),
         (uint32)record->ReadRecPtr,
         (uint32)(record->EndRecPtr >> 32),

@@ -681,10 +681,11 @@ void ReorderBufferFree(ReorderBuffer*);
 ReorderBufferTupleBuf* ReorderBufferGetTupleBuf(ReorderBuffer*, Size tuple_len);
 void ReorderBufferReturnTupleBuf(ReorderBuffer*, ReorderBufferTupleBuf* tuple);
 ReorderBufferChange* ReorderBufferGetChange(ReorderBuffer*);
-void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*, bool upd_mem = true);
+void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*, bool updMem = true);
 ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer*, Size tuple_len);
 
-void ReorderBufferQueueChange(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*, bool toast_insert = false);
+void ReorderBufferQueueChange(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn,
+    ReorderBufferChange*, bool toastInsert = false);
 void ReorderBufferRemoveChangeForUpsert(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn);
 void ReorderBufferCommit(ReorderBuffer*, TransactionId, int nsubxacts, TransactionId *sub_xids, XLogRecPtr commit_lsn,
     XLogRecPtr end_lsn, RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time);

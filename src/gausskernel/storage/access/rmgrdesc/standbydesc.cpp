@@ -102,16 +102,16 @@ void standby_desc_invalidations(StringInfo buf, int nmsgs, SharedInvalidationMes
     int i;
 
     /* Do nothing if there are no invalidation messages */
-    if (nmsgs <= 0)
+    if (nmsgs <= 0) {
         return;
+    }
 
     if (relcacheInitFileInval)
         appendStringInfo(buf, "; relcache init file inval dbid %u tsid %u",
                          dbId, tsId);
 
     appendStringInfoString(buf, "; inval msgs:");
-    for (i = 0; i < nmsgs; i++)
-    {
+    for (i = 0; i < nmsgs; i++) {
         SharedInvalidationMessage *msg = &msgs[i];
 
         if (msg->id >= 0)

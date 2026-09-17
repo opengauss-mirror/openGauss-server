@@ -1630,7 +1630,6 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
          * actual values externally.
          */
         resolved = ResolveCminCmaxDuringDecoding(HistoricSnapshotGetTupleCids(), snapshot, htup, buffer, &cmin, &cmax);
-
         /*
          * If we haven't resolved the combo CID to cmin/cmax, that means we
          * have not decoded the combo CID yet. That means the cmin is
@@ -1648,8 +1647,9 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
          * assigned, and error out based on this (when unable to resolve combo
          * CID below that observed maximum value).
          */
-        if (!resolved)
+        if (!resolved) {
             return false;
+        }
 
         Assert(cmin != InvalidCommandId);
 
@@ -1702,7 +1702,6 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
 
         /* Lookup actual cmin/cmax values */
         resolved = ResolveCminCmaxDuringDecoding(HistoricSnapshotGetTupleCids(), snapshot, htup, buffer, &cmin, &cmax);
-
         /*
          * If we haven't resolved the combo CID to cmin/cmax, that means we
          * have not decoded the combo CID yet. That means the cmax is
@@ -1720,8 +1719,9 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
          * assigned, and error out based on this (when unable to resolve combo
          * CID below that observed maximum value).
          */
-        if (!resolved || cmax == InvalidCommandId)
+        if (!resolved || cmax == InvalidCommandId) {
             return true;
+        }
 
         if (cmax >= snapshot->curcid)
             return true; /* deleted after scan started */
