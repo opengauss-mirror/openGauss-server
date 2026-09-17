@@ -176,6 +176,12 @@ int64 gen_uuid(List* uuids)
                 errmsg("uuids can not be NIL when generating uuid in restore mode.")));
     }
 
+    if (unlikely(uuids == NIL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Invalid UUID Messages fro CREATE SEQUENCE.")));
+    }
+
     Assert(uuids != NIL);
     return get_uuid_from_uuids(&uuids);
 }

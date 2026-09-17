@@ -5587,12 +5587,18 @@ USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid)
         InitAccountLockHashTable();
     }
 
+    LWLockAcquire(g_instance.policy_cxt.account_table_lock, LW_SHARED);
+    if (g_instance.policy_cxt.account_table == NULL) {
+        LWLockRelease(g_instance.policy_cxt.account_table_lock);
+        return UNLOCK_STATUS;
+    }
     account_entry = (AccountLockHashEntry *)hash_search(g_instance.policy_cxt.account_table, &roleid, HASH_FIND, &found);
     if (found == true) {
         SpinLockAcquire(&account_entry->mutex);
         rolestatus = (USER_STATUS)(account_entry->rolstatus);
         SpinLockRelease(&account_entry->mutex);
     }
+    LWLockRelease(g_instance.policy_cxt.account_table_lock);
     return rolestatus;
 }
 /* Get the status of account password. */

@@ -1317,12 +1317,16 @@ bool PortalRun(
     t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
     u_sess->exec_cxt.portal_data_list = savePortalDataList;
 
-    if (portal->strategy != PORTAL_MULTI_QUERY) {
-        PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
+    if (u_sess->unique_sql_cxt.portal_nesting_level == 1 && portal->strategy != PORTAL_MULTI_QUERY) {
+        if (!(IS_UNIQUE_SQL_TRACK_TOP && u_sess->SPI_cxt._connected >= 0)) {
+            PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
+        }
 
-        if (u_sess->attr.attr_common.log_executor_stats)
+        if (u_sess->attr.attr_common.log_executor_stats) {
             ShowUsage("EXECUTOR STATISTICS");
+        }
     }
+
     TRACE_POSTGRESQL_QUERY_EXECUTE_DONE();
 
     /* doing sql count accordiong to cmdType */
@@ -1938,7 +1942,9 @@ static void PortalRunMulti(
 #endif
             }
 
-            PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
+            if (!(IS_UNIQUE_SQL_TRACK_TOP && u_sess->SPI_cxt._connected >= 0)) {
+                PGSTAT_END_TIME_RECORD(EXECUTION_TIME);
+            }
 
             if (u_sess->attr.attr_common.log_executor_stats)
                 ShowUsage("EXECUTOR STATISTICS");
