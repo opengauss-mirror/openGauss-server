@@ -111,6 +111,9 @@
 ./share/postgresql/extension/dolphin--4.1--4.0.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/age--1.0.0.sql
+./share/postgresql/extension/age--1.0.1.sql
+./share/postgresql/extension/age--1.0.0--1.0.1.sql
+./share/postgresql/extension/age--1.0.1--1.0.0.sql
 ./share/postgresql/extension/age.control
 ./share/postgresql/extension/timescaledb.control
 ./share/postgresql/extension/timescaledb--1.7.4.sql
