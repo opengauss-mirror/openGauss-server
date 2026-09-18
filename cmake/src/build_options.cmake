@@ -158,7 +158,11 @@ if(${ENABLE_LITE_MODE} STREQUAL "ON")
     set(ENABLE_LLVM_COMPILE OFF)
     set(ENABLE_GSS OFF)
     set(KRB5 OFF)
-    set(USE_LIBXML OFF)
+    # libxml2 is off by default in lite mode; passing -DHAVE_LIBXML2=ON explicitly
+    # turns on both the macro and the link, keeping the build consistent
+    if(NOT HAVE_LIBXML2)
+        set(USE_LIBXML OFF)
+    endif()
 endif()
 
 if(${ENABLE_OPENEULER_MAJOR} STREQUAL "ON")

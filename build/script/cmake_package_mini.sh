@@ -512,7 +512,7 @@ function install_gaussdb()
         export LD_LIBRARY_PATH="/usr/lib64:${LD_LIBRARY_PATH}"
         echo "Prepended /usr/lib64 to LD_LIBRARY_PATH for system cmake" >> "$LOG_FILE" 2>&1
     fi
-    cmake .. ${CMAKE_OPT}
+    cmake .. ${CMAKE_OPT} ${extra_config_opt}
     echo "Begin make and install gaussdb server" >> "$LOG_FILE" 2>&1
     make VERBOSE=1 -sj ${cpus_num}
     if [ $? -ne 0 ]; then
