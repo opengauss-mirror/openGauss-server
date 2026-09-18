@@ -91,6 +91,7 @@ ANALYZE delete_t;
 SET enable_seqscan = off;
 SET enable_bitmapscan = off;
 SET enable_hashjoin = off;
+SET enable_mergejoin = on;
 SET enable_nestloop = off;
 SET enable_union_all_diskann_topk_pushdown = on;
 SET enable_union_all_required_columns_pushdown = on;
@@ -105,6 +106,16 @@ EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view
 WHERE row_id > 2;
+
+-- The same source pruning must work for a Hash Anti Join, not only Merge.
+SET enable_mergejoin = off;
+SET enable_hashjoin = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2;
+SET enable_hashjoin = off;
+SET enable_mergejoin = on;
 
 -- WHERE + ORDER BY: each branch emits row_id plus a scalar distance.  The
 -- vector is consumed inside the branch and is not a UNION boundary column.
@@ -334,6 +345,7 @@ DEALLOCATE required_cols_plan;
 RESET enable_union_all_required_columns_pushdown;
 RESET enable_union_all_diskann_topk_pushdown;
 RESET enable_nestloop;
+RESET enable_mergejoin;
 RESET enable_hashjoin;
 RESET enable_bitmapscan;
 RESET enable_seqscan;

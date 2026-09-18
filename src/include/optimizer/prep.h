@@ -117,7 +117,7 @@ extern bool ContainRownumQual(const Query *parse);
 /*
  * prototypes for preptopk.cpp
  */
-extern void preprocess_union_all_required_columns(PlannerInfo* root);
+extern bool preprocess_union_all_required_columns(PlannerInfo* root);
 extern void preprocess_union_all_diskann_topk(PlannerInfo* root);
 extern void preprocess_union_all_order_key_projection(PlannerInfo* root);
 

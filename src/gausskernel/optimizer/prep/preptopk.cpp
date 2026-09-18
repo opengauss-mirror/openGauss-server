@@ -137,8 +137,10 @@ static bool rewrite_union_order_projection(Query *outer, Index unionRti,
  * The rewrite is performed on a private copy of the outer Query.  The copied
  * rtable/targetlist/jointree pointers are installed only after all positional
  * targetlist and type metadata checks succeed.
+ * Return true only when this Query was rewritten; the inherited planner flag
+ * must not authorize expression projection in an unchecked descendant Query.
  */
-void
+bool
 preprocess_union_all_required_columns(PlannerInfo *root)
 {
     Query *outer = root->parse;
@@ -152,11 +154,11 @@ preprocess_union_all_required_columns(PlannerInfo *root)
     bool wherePushed = false;
 
     if (!u_sess->attr.attr_sql.enable_union_all_required_columns_pushdown)
-        return;
+        return false;
 
     if (!required_columns_outer_query_is_safe(outer)) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=outer_query_shape");
-        return;
+        return false;
     }
 
     /*
@@ -167,18 +169,18 @@ preprocess_union_all_required_columns(PlannerInfo *root)
     unionRte = get_single_union_subquery_rte(work, &unionRti);
     if (unionRte == NULL || unionRte->security_barrier || unionRte->lateral) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=unsafe_union_rte");
-        return;
+        return false;
     }
 
     if (!collect_pure_union_all_leaves(unionRte->subquery, &leaves)) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=non_union_all");
-        return;
+        return false;
     }
 
     oldNcols = count_visible_tlist_entries(unionRte->subquery->targetList);
     if (oldNcols <= 0 || !validate_required_column_shape(unionRte->subquery, leaves, oldNcols)) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=inconsistent_output_shape");
-        return;
+        return false;
     }
 
     /*
@@ -190,7 +192,7 @@ preprocess_union_all_required_columns(PlannerInfo *root)
 
     if (!collect_required_output_columns(work, unionRti, oldNcols, &required)) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=unsupported_outer_reference");
-        return;
+        return false;
     }
 
     preserve_semantically_required_outputs(leaves, oldNcols, &required);
@@ -205,7 +207,7 @@ preprocess_union_all_required_columns(PlannerInfo *root)
     newNcols = bms_num_members(required);
     if (!compact_union_all_query(work, unionRti, unionRte, leaves, required, oldNcols)) {
         elog(DEBUG1, "union_all_required_columns: skipped reason=compact_validation_failed");
-        return;
+        return false;
     }
 
     /*
@@ -224,6 +226,8 @@ preprocess_union_all_required_columns(PlannerInfo *root)
          newNcols,
          wherePushed ? "true" : "false",
          wherePushed ? "false" : "true");
+
+    return true;
 }
 
 /*
@@ -248,6 +252,11 @@ required_columns_outer_query_is_safe(Query *query)
         query->hasForUpdate || query->hasTargetSRFs || query->hasSubLinks ||
         query->hasRecursive || query->hasModifyingCTE || query->hasRowSecurity ||
         query->limitOffset != NULL || query->limitIsPercent || query->limitWithTies)
+        return false;
+
+    /* The early rewrite cannot rely on hasTargetSRFs being populated yet. */
+    if (expression_returns_set((Node *)query->targetList) ||
+        expression_contains_rownum((Node *)query->targetList) || ContainRownumQual(query))
         return false;
 
     if (list_length(query->rtable) != 1 || !IsA(query->jointree, FromExpr))
@@ -743,6 +752,15 @@ preprocess_union_all_order_key_projection(PlannerInfo *root)
         !root->union_all_required_columns_pruned || outer->sortClause == NIL)
         return;
 
+    /*
+     * A residual filter must run before evaluation of the outer sort key.
+     * Even an immutable expression can throw (e.g. 1 / x for a filtered-out
+     * zero).  Keep its original evaluation boundary unless WHERE was pushed
+     * successfully into every leaf.
+     */
+    if (outer->jointree != NULL && outer->jointree->quals != NULL)
+        return;
+
     work = (Query *)copyObject(outer);
     unionRte = get_single_union_subquery_rte(work, &unionRti);
     if (unionRte == NULL || unionRte->security_barrier || unionRte->lateral ||
@@ -1216,11 +1234,21 @@ preprocess_union_all_diskann_topk(PlannerInfo *root)
 
     /* Get the single UNION ALL subquery RTE */
     unionRte = get_single_union_subquery_rte(outer, &unionRti);
-    if (unionRte == NULL || unionRte->security_barrier)
+    if (unionRte == NULL || unionRte->security_barrier || unionRte->lateral)
         return;
 
     /* Collect all leaves from pure UNION ALL tree */
     if (!collect_pure_union_all_leaves(unionRte->subquery, &leaves))
+        return;
+
+    /*
+     * The UNION container is a semantic boundary too.  An existing LIMIT or
+     * OFFSET there selects rows before the outer predicate/order; pushing a
+     * new local Top-K beneath it would change which rows can be selected.
+     * Reuse the common container and leaf checks, including barrier RTEs.
+     */
+    int oldNcols = count_visible_tlist_entries(unionRte->subquery->targetList);
+    if (oldNcols <= 0 || !validate_required_column_shape(unionRte->subquery, leaves, oldNcols))
         return;
 
     /* Extract outer WHERE clause */
@@ -1272,8 +1300,15 @@ diskann_topk_outer_query_is_safe(Query *query)
 
     /* Must not have aggregation, grouping, DISTINCT, window, etc. */
     if (query->hasAggs || query->groupClause || query->havingQual ||
-        query->distinctClause || query->hasWindowFuncs || query->cteList ||
-        query->hasForUpdate || query->hasSubLinks || query->setOperations)
+        query->distinctClause || query->hasWindowFuncs || query->windowClause || query->cteList ||
+        query->hasForUpdate || query->hasSubLinks || query->setOperations ||
+        query->hasTargetSRFs || query->hasRecursive || query->hasModifyingCTE ||
+        query->hasRowSecurity || query->limitIsPercent || query->limitWithTies)
+        return false;
+
+    /* A zero-row SRF invalidates input-row Top-K even if the flag is unset. */
+    if (expression_returns_set((Node *)query->targetList) ||
+        expression_contains_rownum((Node *)query->targetList) || ContainRownumQual(query))
         return false;
 
     /* Must have exactly one FROM item (the UNION ALL subquery) */
@@ -1289,14 +1324,7 @@ diskann_topk_outer_query_is_safe(Query *query)
     if (query->sortClause == NIL)
         return false;
 
-    /* All sort keys must be ASC NULLS LAST */
-    foreach (lc, query->sortClause) {
-        SortGroupClause *sc = (SortGroupClause *)lfirst(lc);
-        if (!sc->nulls_first && SORTBY_ASC == 0) {
-            /* ASC NULLS LAST is the default; check explicitly */
-        }
-        /* More robust: verify sortop direction */
-    }
+    /* Each leaf receives the exact sort operators and NULL ordering below. */
 
     /* Must have valid LIMIT (not NULL, not OFFSET, not PERCENT, not WITH TIES) */
     if (query->limitCount == NULL || query->limitOffset != NULL)
@@ -1551,6 +1579,12 @@ collect_setop_leaves(Node *node, List *rtable, List **leaves)
 static bool
 leaf_query_is_safe(Query *leaf)
 {
+    /* WHERE/order movement changes the numbering of a ROWNUM-producing leaf. */
+    if (leaf == NULL || leaf->commandType != CMD_SELECT ||
+        expression_returns_set((Node *)leaf->targetList) ||
+        expression_contains_rownum((Node *)leaf->targetList) || ContainRownumQual(leaf))
+        return false;
+
     /* Must not already have ORDER BY, LIMIT, or setOperations */
     if (leaf->sortClause != NIL || leaf->limitCount != NULL ||
         leaf->limitOffset != NULL || leaf->setOperations != NULL)

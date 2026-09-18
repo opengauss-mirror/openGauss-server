@@ -1763,6 +1763,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     List* newHaving = NIL;
     bool hasOuterJoins = false;
     bool hasResultRTEs = false;
+    bool unionAllColumnsRewritten = false;
     ListCell* l = NULL;
     StringInfoData buf;
     char RewriteContextName[NAMEDATALEN] = {0};
@@ -1943,7 +1944,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * This must run before Top-K rewriting while column numbers still describe
      * the original view output.
      */
-    preprocess_union_all_required_columns(root);
+    unionAllColumnsRewritten = preprocess_union_all_required_columns(root);
     DEBUG_QRW("After union all required-column pushdown");
 
     /* Push ORDER BY + LIMIT to UNION ALL leaves for DiskANN vector TopK */
@@ -1953,9 +1954,12 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     /*
      * Top-K recognition above needs the original ORDER BY expression.  Once
      * that decision is made, replace wide ordering inputs crossing UNION ALL
-     * with branch-local scalar keys.
+     * with branch-local scalar keys.  The inherited pruned flag controls
+     * physical tlists only: it does not mean this Query passed the rewrite
+     * safety checks (a descendant may contain aggregates, SRFs, or LIMIT).
      */
-    preprocess_union_all_order_key_projection(root);
+    if (unionAllColumnsRewritten)
+        preprocess_union_all_order_key_projection(root);
     DEBUG_QRW("After union all order-key projection");
 
     /*
