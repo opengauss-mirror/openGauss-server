@@ -229,6 +229,63 @@ END
 $$;
 SELECT * FROM differential_summary;
 
+-- Sort nodes share their child's targetlist.  With no row_id indexes, a
+-- forced Merge Anti Join builds Sort -> Seq Scan on its preserved side.  The
+-- source-projection rewrite must update that shared TargetEntry only once.
+CREATE TABLE shared_tlist_delta (row_id int, title text, embedding vector(4));
+CREATE TABLE shared_tlist_snapshot (row_id int, title text, embedding vector(4));
+CREATE TABLE shared_tlist_delete (row_id int);
+INSERT INTO shared_tlist_delta VALUES
+    (3, 'delta-3', '[3.25,0,0,0]'),
+    (10, 'delta-10', '[1.5,0,0,0]');
+INSERT INTO shared_tlist_snapshot VALUES
+    (1, 'snapshot-1', '[1,0,0,0]'),
+    (3, 'snapshot-3', '[3,0,0,0]'),
+    (4, 'snapshot-4', '[4,0,0,0]');
+INSERT INTO shared_tlist_delete VALUES (1);
+ANALYZE shared_tlist_delta;
+ANALYZE shared_tlist_snapshot;
+ANALYZE shared_tlist_delete;
+CREATE VIEW shared_tlist_rows AS
+SELECT row_id, title, embedding FROM shared_tlist_delta
+UNION ALL
+SELECT s.row_id, s.title, s.embedding FROM shared_tlist_snapshot s
+WHERE NOT EXISTS
+    (SELECT 1 FROM shared_tlist_delete d WHERE d.row_id = s.row_id);
+SET enable_hashjoin = off;
+SET enable_nestloop = off;
+SET enable_mergejoin = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id FROM shared_tlist_rows WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]', row_id LIMIT 4;
+SELECT row_id FROM shared_tlist_rows WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]', row_id LIMIT 4;
+RESET enable_mergejoin;
+RESET enable_nestloop;
+RESET enable_hashjoin;
+
+-- Source projection must fail closed when early distance evaluation can
+-- change errors.  Row 1 has the wrong dimension but is deleted before the
+-- distance expression.  An unconstrained vector column therefore remains a
+-- raw scan output until after the Anti Join.
+CREATE TABLE loose_delta (row_id int, title text, embedding vector);
+CREATE TABLE loose_snapshot (row_id int, title text, embedding vector);
+CREATE TABLE loose_delete (row_id int);
+INSERT INTO loose_delta VALUES (10, 'keep', '[10,20,30,40]');
+INSERT INTO loose_snapshot VALUES
+    (1, 'deleted-bad-dimension', '[1,2,3]'),
+    (2, 'keep', '[2,3,4,5]');
+INSERT INTO loose_delete VALUES (1);
+CREATE VIEW loose_rows AS
+SELECT row_id, title, embedding FROM loose_delta
+UNION ALL
+SELECT s.row_id, s.title, s.embedding FROM loose_snapshot s
+WHERE NOT EXISTS (SELECT 1 FROM loose_delete d WHERE d.row_id = s.row_id);
+SET enable_union_all_required_columns_pushdown = on;
+SET enable_union_all_diskann_topk_pushdown = on;
+SELECT row_id FROM loose_rows WHERE title IS NOT NULL
+ORDER BY embedding <-> '[1,2,3,4]'::vector, row_id LIMIT 10;
+
 -- Exercise a genuinely generic Param plan, not only first-execution custom
 -- planning where bind values have already become constants.
 SET plan_cache_mode = force_generic_plan;

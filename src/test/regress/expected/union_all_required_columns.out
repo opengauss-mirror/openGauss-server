@@ -5,19 +5,19 @@ CREATE SCHEMA union_all_required_columns_test;
 SET search_path = union_all_required_columns_test, public;
 CREATE TABLE delta_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     title text,
     embedding vector(4)
 );
 CREATE TABLE snapshot_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     title text,
     embedding vector(4)
 );
 CREATE TABLE delete_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     reason text,
     unused_delete text
 );
@@ -83,6 +83,7 @@ SET enable_mergejoin = on;
 SET enable_nestloop = off;
 SET enable_union_all_diskann_topk_pushdown = on;
 SET enable_union_all_required_columns_pushdown = on;
+SET ann_orderby_distance_reuse = l2;
 -- -------------------------------------------------------------------------
 -- Plan guards: the four target SQL combinations.
 -- -------------------------------------------------------------------------
@@ -92,23 +93,29 @@ EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view
 WHERE row_id > 2;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Result
    Output: delta_t.row_id
    ->  Append
-         ->  Index Only Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+         ->  Seq Scan on union_all_required_columns_test.delta_t
                Output: delta_t.row_id
-               Index Cond: (delta_t.row_id > 2)
+               Filter: (delta_t.row_id > 2)
          ->  Merge Anti Join
                Output: s.row_id
                Merge Cond: (s.row_id = d.row_id)
-               ->  Index Only Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+               ->  Sort
                      Output: s.row_id
-                     Index Cond: (s.row_id > 2)
-               ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                     Sort Key: s.row_id
+                     ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                           Output: s.row_id
+                           Filter: (s.row_id > 2)
+               ->  Sort
                      Output: d.row_id
-(14 rows)
+                     Sort Key: d.row_id
+                     ->  Seq Scan on union_all_required_columns_test.delete_t d
+                           Output: d.row_id
+(20 rows)
 
 -- The same source pruning must work for a Hash Anti Join, not only Merge.
 SET enable_mergejoin = off;
@@ -117,55 +124,62 @@ EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view
 WHERE row_id > 2;
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Result
    Output: delta_t.row_id
    ->  Append
-         ->  Index Only Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+         ->  Seq Scan on union_all_required_columns_test.delta_t
                Output: delta_t.row_id
-               Index Cond: (delta_t.row_id > 2)
+               Filter: (delta_t.row_id > 2)
          ->  Hash Anti Join
                Output: s.row_id
                Hash Cond: (s.row_id = d.row_id)
-               ->  Index Only Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+               ->  Seq Scan on union_all_required_columns_test.snapshot_t s
                      Output: s.row_id
-                     Index Cond: (s.row_id > 2)
+                     Filter: (s.row_id > 2)
                ->  Hash
                      Output: d.row_id
-                     ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                     ->  Seq Scan on union_all_required_columns_test.delete_t d
                            Output: d.row_id
 (16 rows)
 
 SET enable_hashjoin = off;
 SET enable_mergejoin = on;
 -- WHERE + ORDER BY: each branch emits row_id plus a scalar distance.  The
--- vector is consumed inside the branch and is not a UNION boundary column.
+-- snapshot scan computes the distance at the source boundary; raw embedding
+-- must not cross either the scan-to-Anti-Join or the UNION boundary.
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view
 WHERE row_id > 2
 ORDER BY embedding <-> '[0,0,0,0]';
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Sort
    Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
    Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
    ->  Result
          Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
          ->  Append
-               ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+               ->  Seq Scan on union_all_required_columns_test.delta_t
                      Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                     Index Cond: (delta_t.row_id > 2)
+                     Filter: (delta_t.row_id > 2)
                ->  Merge Anti Join
-                     Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                     Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                      Merge Cond: (s.row_id = d.row_id)
-                     ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
-                           Output: s.row_id, s.embedding
-                           Index Cond: (s.row_id > 2)
-                     ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                           Sort Key: s.row_id
+                           ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                                 Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                                 Filter: (s.row_id > 2)
+                     ->  Sort
                            Output: d.row_id
-(17 rows)
+                           Sort Key: d.row_id
+                           ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                 Output: d.row_id
+(23 rows)
 
 -- WHERE + LIMIT: retain one global Limit; never synthesize branch Limits.
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -173,25 +187,31 @@ SELECT row_id
 FROM union_view
 WHERE row_id > 2
 LIMIT 4;
-                                                  QUERY PLAN                                                   
----------------------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Limit
    Output: delta_t.row_id
    ->  Result
          Output: delta_t.row_id
          ->  Append
-               ->  Index Only Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+               ->  Seq Scan on union_all_required_columns_test.delta_t
                      Output: delta_t.row_id
-                     Index Cond: (delta_t.row_id > 2)
+                     Filter: (delta_t.row_id > 2)
                ->  Merge Anti Join
                      Output: s.row_id
                      Merge Cond: (s.row_id = d.row_id)
-                     ->  Index Only Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+                     ->  Sort
                            Output: s.row_id
-                           Index Cond: (s.row_id > 2)
-                     ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                           Sort Key: s.row_id
+                           ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                                 Output: s.row_id
+                                 Filter: (s.row_id > 2)
+                     ->  Sort
                            Output: d.row_id
-(16 rows)
+                           Sort Key: d.row_id
+                           ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                 Output: d.row_id
+(22 rows)
 
 -- WHERE + ORDER BY + LIMIT: retain the global Limit and add one Limit per
 -- branch.  Snapshot deletion filtering remains below its branch Limit.
@@ -201,47 +221,8 @@ FROM union_view
 WHERE row_id > 2
 ORDER BY embedding <-> '[0,0,0,0]'
 LIMIT 4;
-                                                      QUERY PLAN                                                       
------------------------------------------------------------------------------------------------------------------------
- Limit
-   Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-   ->  Result
-         Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-         ->  Merge Append
-               Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-               ->  Limit
-                     Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                     ->  Sort
-                           Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                           Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                           ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
-                                 Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                                 Index Cond: (delta_t.row_id > 2)
-               ->  Limit
-                     Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
-                     ->  Sort
-                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
-                           Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
-                           ->  Merge Anti Join
-                                 Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
-                                 Merge Cond: (s.row_id = d.row_id)
-                                 ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
-                                       Output: s.row_id, s.embedding
-                                       Index Cond: (s.row_id > 2)
-                                 ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
-                                       Output: d.row_id
-(27 rows)
-
--- A non-indexed predicate gives the delta branch a representative DiskANN
--- plan.  title is legal in Filter but must not occur in any Output list.
-EXPLAIN (VERBOSE ON, COSTS OFF)
-SELECT row_id
-FROM union_view
-WHERE title IS NOT NULL
-ORDER BY embedding <-> '[0,0,0,0]'
-LIMIT 4;
-                                                      QUERY PLAN                                                       
------------------------------------------------------------------------------------------------------------------------
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
  Limit
    Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
    ->  Result
@@ -251,7 +232,53 @@ LIMIT 4;
                ->  Limit
                      Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                      ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
-                           Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                           Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                           Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                           Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
+                           ->  Merge Anti Join
+                                 Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
+                                             Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                             Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
+
+-- A non-indexed predicate gives the delta branch a representative DiskANN
+-- plan.  title is legal in Filter but must not occur in any Output list.
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE title IS NOT NULL
+ORDER BY embedding <-> '[0,0,0,0]'
+LIMIT 4;
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
+                           Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                            Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
                            Filter Mode: Post-Filter
                            Filter: (delta_t.title IS NOT NULL)
@@ -261,14 +288,22 @@ LIMIT 4;
                            Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                            Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
                            ->  Merge Anti Join
-                                 Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                                 Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                                  Merge Cond: (s.row_id = d.row_id)
-                                 ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
-                                       Output: s.row_id, s.embedding
-                                       Filter: (s.title IS NOT NULL)
-                                 ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
+                                             Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                             Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.title IS NOT NULL)
+                                 ->  Sort
                                        Output: d.row_id
-(26 rows)
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
 
 -- A delete-side filter column ends at its scan Filter.  Only d.row_id reaches
 -- the Anti Join; unused_delete never enters a plan Output list.
@@ -276,8 +311,8 @@ EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view_delete_filter
 WHERE title <> 'never';
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Result
    Output: delta_t.row_id
    ->  Append
@@ -287,15 +322,19 @@ WHERE title <> 'never';
          ->  Merge Anti Join
                Output: s.row_id
                Merge Cond: (s.row_id = d.row_id)
-               ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+               ->  Sort
                      Output: s.row_id
-                     Filter: (s.title <> 'never'::text)
-               ->  Materialize
+                     Sort Key: s.row_id
+                     ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                           Output: s.row_id
+                           Filter: (s.title <> 'never'::text)
+               ->  Sort
                      Output: d.row_id
-                     ->  Index Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                     Sort Key: d.row_id
+                     ->  Seq Scan on union_all_required_columns_test.delete_t d
                            Output: d.row_id
                            Filter: (d.reason = 'deleted'::text)
-(17 rows)
+(21 rows)
 
 -- Required-column pruning remains active without branch Top-K.  There is one
 -- global Limit and the UNION still transports a scalar distance.
@@ -306,8 +345,8 @@ FROM union_view
 WHERE row_id > 2
 ORDER BY embedding <-> '[0,0,0,0]'
 LIMIT 4;
-                                                   QUERY PLAN                                                    
------------------------------------------------------------------------------------------------------------------
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
  Limit
    Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
    ->  Sort
@@ -316,18 +355,24 @@ LIMIT 4;
          ->  Result
                Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                ->  Append
-                     ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+                     ->  Seq Scan on union_all_required_columns_test.delta_t
                            Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                           Index Cond: (delta_t.row_id > 2)
+                           Filter: (delta_t.row_id > 2)
                      ->  Merge Anti Join
-                           Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                            Merge Cond: (s.row_id = d.row_id)
-                           ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
-                                 Output: s.row_id, s.embedding
-                                 Index Cond: (s.row_id > 2)
-                           ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                           ->  Sort
+                                 Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                 Sort Key: s.row_id
+                                 ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                                       Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                                       Filter: (s.row_id > 2)
+                           ->  Sort
                                  Output: d.row_id
-(19 rows)
+                                 Sort Key: d.row_id
+                                 ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                       Output: d.row_id
+(25 rows)
 
 SET enable_union_all_diskann_topk_pushdown = on;
 -- Disabling the new GUC is a guarded compatibility path: original wide leaf
@@ -339,8 +384,8 @@ FROM union_view
 WHERE row_id > 2
 ORDER BY embedding <-> '[0,0,0,0]'
 LIMIT 4;
-                                                                    QUERY PLAN                                                                     
----------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
  Limit
    Output: "*SELECT* 1".row_id, (("*SELECT* 1".embedding <-> '[0,0,0,0]'::vector))
    ->  Sort
@@ -354,12 +399,11 @@ LIMIT 4;
                            Filter: ("*SELECT* 1".row_id > 2)
                            ->  Limit
                                  Output: delta_t.row_id, delta_t.title, delta_t.embedding, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                                 ->  Sort
+                                 ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
                                        Output: delta_t.row_id, delta_t.title, delta_t.embedding, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                                       Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
-                                       ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
-                                             Output: delta_t.row_id, delta_t.title, delta_t.embedding, (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                                             Index Cond: (delta_t.row_id > 2)
+                                       Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                                       Filter Mode: Post-Filter
+                                       Filter: (delta_t.row_id > 2)
                      ->  Subquery Scan on "*SELECT* 2"
                            Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
                            Filter: ("*SELECT* 2".row_id > 2)
@@ -371,12 +415,20 @@ LIMIT 4;
                                        ->  Merge Anti Join
                                              Output: s.row_id, s.title, s.embedding, (s.embedding <-> '[0,0,0,0]'::vector)
                                              Merge Cond: (s.row_id = d.row_id)
-                                             ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+                                             ->  Sort
                                                    Output: s.row_id, s.title, s.embedding
-                                                   Index Cond: (s.row_id > 2)
-                                             ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                                                   Sort Key: s.row_id
+                                                   ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
+                                                         Output: s.row_id, s.title, s.embedding
+                                                         Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                                         Filter Mode: Post-Filter
+                                                         Filter: (s.row_id > 2)
+                                             ->  Sort
                                                    Output: d.row_id
-(35 rows)
+                                                   Sort Key: d.row_id
+                                                   ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                                         Output: d.row_id
+(42 rows)
 
 SET enable_union_all_required_columns_pushdown = on;
 -- A nested four-leaf UNION ALL guards recursive SetOperationStmt metadata
@@ -394,23 +446,23 @@ FROM
     SELECT row_id, title, embedding FROM snapshot_t WHERE row_id >= 3
 ) u
 WHERE row_id > 0;
-                                                                    QUERY PLAN                                                                    
---------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                  QUERY PLAN                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------
  Result
    Output: union_all_required_columns_test.delta_t.row_id
    ->  Append
-         ->  Index Only Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+         ->  Seq Scan on union_all_required_columns_test.delta_t
                Output: union_all_required_columns_test.delta_t.row_id
-               Index Cond: ((union_all_required_columns_test.delta_t.row_id < 101) AND (union_all_required_columns_test.delta_t.row_id > 0))
-         ->  Index Only Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+               Filter: ((union_all_required_columns_test.delta_t.row_id < 101) AND (union_all_required_columns_test.delta_t.row_id > 0))
+         ->  Seq Scan on union_all_required_columns_test.delta_t
                Output: union_all_required_columns_test.delta_t.row_id
-               Index Cond: ((union_all_required_columns_test.delta_t.row_id >= 101) AND (union_all_required_columns_test.delta_t.row_id > 0))
-         ->  Index Only Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t
+               Filter: ((union_all_required_columns_test.delta_t.row_id >= 101) AND (union_all_required_columns_test.delta_t.row_id > 0))
+         ->  Seq Scan on union_all_required_columns_test.snapshot_t
                Output: union_all_required_columns_test.snapshot_t.row_id
-               Index Cond: ((union_all_required_columns_test.snapshot_t.row_id < 3) AND (union_all_required_columns_test.snapshot_t.row_id > 0))
-         ->  Index Only Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t
+               Filter: ((union_all_required_columns_test.snapshot_t.row_id < 3) AND (union_all_required_columns_test.snapshot_t.row_id > 0))
+         ->  Seq Scan on union_all_required_columns_test.snapshot_t
                Output: union_all_required_columns_test.snapshot_t.row_id
-               Index Cond: ((union_all_required_columns_test.snapshot_t.row_id >= 3) AND (union_all_required_columns_test.snapshot_t.row_id > 0))
+               Filter: ((union_all_required_columns_test.snapshot_t.row_id >= 3) AND (union_all_required_columns_test.snapshot_t.row_id > 0))
 (15 rows)
 
 -- -------------------------------------------------------------------------
@@ -600,8 +652,8 @@ CREATE VIEW security_barrier_view WITH (security_barrier=true) AS
 SELECT * FROM union_view;
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id FROM distinct_view WHERE row_id > 0;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Subquery Scan on distinct_view
    Output: distinct_view.row_id
    ->  Unique
@@ -610,18 +662,18 @@ SELECT row_id FROM distinct_view WHERE row_id > 0;
                Output: delta_t.row_id, delta_t.title, delta_t.embedding
                Sort Key: delta_t.row_id, delta_t.title, delta_t.embedding
                ->  Append
-                     ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+                     ->  Seq Scan on union_all_required_columns_test.delta_t
                            Output: delta_t.row_id, delta_t.title, delta_t.embedding
-                           Index Cond: (delta_t.row_id > 0)
-                     ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t
+                           Filter: (delta_t.row_id > 0)
+                     ->  Seq Scan on union_all_required_columns_test.snapshot_t
                            Output: snapshot_t.row_id, snapshot_t.title, snapshot_t.embedding
-                           Index Cond: (snapshot_t.row_id > 0)
+                           Filter: (snapshot_t.row_id > 0)
 (14 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id FROM leaf_limit_view WHERE row_id > 0;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  Result
    Output: "*SELECT* 1".row_id
    ->  Append
@@ -630,38 +682,50 @@ SELECT row_id FROM leaf_limit_view WHERE row_id > 0;
                Filter: ("*SELECT* 1".row_id > 0)
                ->  Limit
                      Output: delta_t.row_id, delta_t.title, delta_t.embedding
-                     ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+                     ->  Sort
                            Output: delta_t.row_id, delta_t.title, delta_t.embedding
+                           Sort Key: delta_t.row_id
+                           ->  Seq Scan on union_all_required_columns_test.delta_t
+                                 Output: delta_t.row_id, delta_t.title, delta_t.embedding
          ->  Subquery Scan on "*SELECT* 2"
                Output: "*SELECT* 2".row_id
                Filter: ("*SELECT* 2".row_id > 0)
                ->  Limit
                      Output: snapshot_t.row_id, snapshot_t.title, snapshot_t.embedding
-                     ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t
+                     ->  Sort
                            Output: snapshot_t.row_id, snapshot_t.title, snapshot_t.embedding
-(17 rows)
+                           Sort Key: snapshot_t.row_id
+                           ->  Seq Scan on union_all_required_columns_test.snapshot_t
+                                 Output: snapshot_t.row_id, snapshot_t.title, snapshot_t.embedding
+(23 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id FROM security_barrier_view WHERE row_id > 0;
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Subquery Scan on security_barrier_view
    Output: security_barrier_view.row_id
    ->  Result
          Output: delta_t.row_id, delta_t.title, delta_t.embedding
          ->  Append
-               ->  Index Scan using delta_t_pkey on union_all_required_columns_test.delta_t
+               ->  Seq Scan on union_all_required_columns_test.delta_t
                      Output: delta_t.row_id, delta_t.title, delta_t.embedding
-                     Index Cond: (delta_t.row_id > 0)
+                     Filter: (delta_t.row_id > 0)
                ->  Merge Anti Join
                      Output: s.row_id, s.title, s.embedding
                      Merge Cond: (s.row_id = d.row_id)
-                     ->  Index Scan using snapshot_t_pkey on union_all_required_columns_test.snapshot_t s
+                     ->  Sort
                            Output: s.row_id, s.title, s.embedding
-                           Index Cond: (s.row_id > 0)
-                     ->  Index Only Scan using delete_t_pkey on union_all_required_columns_test.delete_t d
+                           Sort Key: s.row_id
+                           ->  Seq Scan on union_all_required_columns_test.snapshot_t s
+                                 Output: s.row_id, s.title, s.embedding
+                                 Filter: (s.row_id > 0)
+                     ->  Sort
                            Output: d.row_id
-(16 rows)
+                           Sort Key: d.row_id
+                           ->  Seq Scan on union_all_required_columns_test.delete_t d
+                                 Output: d.row_id
+(22 rows)
 
 SELECT count(*) AS distinct_rows FROM distinct_view WHERE row_id > 0;
  distinct_rows 
@@ -696,6 +760,7 @@ EXECUTE required_cols_plan(2, '[0,0,0,0]', 4);
 (4 rows)
 
 DEALLOCATE required_cols_plan;
+RESET ann_orderby_distance_reuse;
 RESET enable_union_all_required_columns_pushdown;
 RESET enable_union_all_diskann_topk_pushdown;
 RESET enable_nestloop;

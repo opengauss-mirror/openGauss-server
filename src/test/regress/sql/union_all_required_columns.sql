@@ -7,21 +7,21 @@ SET search_path = union_all_required_columns_test, public;
 
 CREATE TABLE delta_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     title text,
     embedding vector(4)
 );
 
 CREATE TABLE snapshot_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     title text,
     embedding vector(4)
 );
 
 CREATE TABLE delete_t
 (
-    row_id bigint PRIMARY KEY,
+    row_id bigint,
     reason text,
     unused_delete text
 );
@@ -95,6 +95,7 @@ SET enable_mergejoin = on;
 SET enable_nestloop = off;
 SET enable_union_all_diskann_topk_pushdown = on;
 SET enable_union_all_required_columns_pushdown = on;
+SET ann_orderby_distance_reuse = l2;
 
 -- -------------------------------------------------------------------------
 -- Plan guards: the four target SQL combinations.
@@ -118,7 +119,8 @@ SET enable_hashjoin = off;
 SET enable_mergejoin = on;
 
 -- WHERE + ORDER BY: each branch emits row_id plus a scalar distance.  The
--- vector is consumed inside the branch and is not a UNION boundary column.
+-- snapshot scan computes the distance at the source boundary; raw embedding
+-- must not cross either the scan-to-Anti-Join or the UNION boundary.
 EXPLAIN (VERBOSE ON, COSTS OFF)
 SELECT row_id
 FROM union_view
@@ -342,6 +344,7 @@ ORDER BY embedding <-> $2, row_id LIMIT $3;
 EXECUTE required_cols_plan(2, '[0,0,0,0]', 4);
 DEALLOCATE required_cols_plan;
 
+RESET ann_orderby_distance_reuse;
 RESET enable_union_all_required_columns_pushdown;
 RESET enable_union_all_diskann_topk_pushdown;
 RESET enable_nestloop;
