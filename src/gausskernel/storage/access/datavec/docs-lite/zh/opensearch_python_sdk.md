@@ -329,21 +329,30 @@ results = client.multi.hybrid_search(
 
 ## 8. 已知限制
 
-以下限制来自兼容层 `KNOWN_ISSUES.md`，合入业务前应评估。
+合入业务前应评估以下限制。
+
+### 8.1 连接器仓已记录的限制
+
+以下三条来自连接器仓 [KNOWN_ISSUES.md](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2/blob/master/opensearch_sdk/opensearch_sdk/KNOWN_ISSUES.md)，该文档含根因分析、备选方案和验证方法。
 
 | 限制 | 现象 | 建议 |
 | --- | --- | --- |
 | `match_phrase` | 无法走 BM25 短语算子，降级为 `LIKE '%phrase%'`，大数据量变慢且无 BM25 相关性分 | 分类/枚举改 `keyword` + `terms`；可接受分词则用 `match` |
 | `nested` | 数组只保留**第一个**对象，后续元素静默丢弃 | 一对一 nested 可用；一对多请拆关联表或 JSONB，不要依赖静默截断 |
 | `terms`（字符串 keyword） | 多个值拼成一句再走 BM25，可能因分词/词干产生额外命中 | 需要严格精确匹配时改用规范化 keyword + 确认分词行为 |
+
+### 8.2 本文补充的限制
+
+以下限制来自兼容层源码分析和本文示例的实际验证，连接器仓 `KNOWN_ISSUES.md` 尚未收录。
+
+| 限制 | 现象 | 建议 |
+| --- | --- | --- |
 | 非 drop-in | 不能 `from opensearchpy import OpenSearch` 后只改地址 | 必须改用 `OpenGauss`，并改连接参数 |
 | `hosts` | 多主机列表只连第一项 | 高可用请用 openGauss 自身主备连接方式，而不是 OpenSearch 节点列表 |
 | DiskANN | OpenSearch mapping 的 `method` 主要识别 hnsw / ivf | DiskANN 查询走 `client.multi.vector_search` |
 | `indices.exists` | 查询 `information_schema.tables`，部分实例无此 schema | 改用 `client.cat.indices()` 或 `pg_tables` |
 | 中文数据 | 库编码为 `SQL_ASCII` 时插入/检索中文会 `ascii codec` 失败 | 使用 UTF8 数据库 |
 | Python 3.7 | `typing.Literal` 不可用，缺 `typing_extensions` 则无法 import | 建议 3.8+，或 `pip install typing_extensions` |
-
-完整说明见连接器仓 [KNOWN_ISSUES.md](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2/blob/master/opensearch_sdk/opensearch_sdk/KNOWN_ISSUES.md)。
 
 其中 `indices.exists`、中文编码两条与具体实例的初始化方式有关，请在自己的环境中先行确认。
 
