@@ -5851,12 +5851,13 @@ static AclMode check_usage_privilege(Oid nsp_oid, AclMode mask, Oid roleid, AclM
 }
 
 /*
- * The initial user and operator admin in operation mode
+ * The initial user, sysadmin and operator admin in operation mode
  * can bypass permission check for schema pg_catalog.
 */
 static bool is_pg_catalog_bypass_user(Oid roleid)
 {
-    return roleid == INITIAL_USER_ID || (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
+    return roleid == INITIAL_USER_ID || systemDBA_arg(roleid) ||
+        (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
 }
 
 /*
@@ -5865,7 +5866,8 @@ static bool is_pg_catalog_bypass_user(Oid roleid)
 */
 static bool is_namespace_bypass_user(Oid roleid)
 {
-    return superuser_arg(roleid) || (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
+    return superuser_arg(roleid) || systemDBA_arg(roleid) ||
+        (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
 }
 
 /*

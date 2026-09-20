@@ -899,7 +899,7 @@ static void DefineViewRules(Oid viewOid, Query* viewParse, bool replace)
 {
     Relation view_relation = heap_open(viewOid, AccessShareLock);
     if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
-        (GetUserId() != INITIAL_USER_ID && is_system_view_schema_oid(RelationGetNamespace(view_relation)))) {
+        (!superuser() && is_system_view_schema_oid(RelationGetNamespace(view_relation)))) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
             errmsg("Not support: \"%s\" is a system catalog.", RelationGetRelationName(view_relation)),
             errcause("Not support modify the system catalog."),
