@@ -24,6 +24,7 @@
 #include "access/xact.h"
 #include "access/tableam.h"
 #include "auditfuncs.h"
+#include "catalog/catalog.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
 #include "executor/spi_priv.h"
@@ -36,6 +37,7 @@
 #include "tcop/pquery.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
 #include "utils/typcache.h"
 #include "instruments/instr_unique_sql.h"
@@ -301,6 +303,8 @@ extern void check_variable_value_info(const char* var_name, const Expr* var_expr
 
 extern SPIPlanPtr prepare_stmt_exec(PLpgSQL_execstate *estate, PLpgSQL_function *func,
 							  PLpgSQL_stmt_exec *stmt, bool keepplan = false);
+
+static bool isFuncInDSysSchema(Oid funcOid);
 
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
@@ -5135,10 +5139,9 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             PG_CATCH();
             {
                 if (DB_IS_CMPT(D_FORMAT) && !estate->func->xact_abort && IsTransactionOrTransactionBlock() &&
-                    !u_sess->attr.attr_common.IsInplaceUpgrade &&
-                    !u_sess->plsql_cxt.in_extension_create &&
-                    strcmp(estate->func->fn_signature, "inline_code_block") != 0
-		    && u_sess->plsql_cxt.trycatch_depth == 0) {
+                    !u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->plsql_cxt.in_extension_create &&
+                    strcmp(estate->func->fn_signature, "inline_code_block") != 0 &&
+                    u_sess->plsql_cxt.trycatch_depth == 0 && !isFuncInDSysSchema(estate->func->fn_oid)) {
                     RollbackAndReleaseCurrentSubTransaction();
                     MemoryContextSwitchTo(oldcontext);
                     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
@@ -17531,4 +17534,20 @@ static Node *get_underlying_node_from_implicit_casting(Node *n, NodeTag underlyi
         return (Node *)linitial(funcexpr->args);
 
     return NULL;
+}
+
+/* Check the function's namespace, including Shark's dynamically created schemas. */
+static bool isFuncInDSysSchema(Oid funcOid)
+{
+    if (!DB_IS_CMPT(D_FORMAT) || !OidIsValid(funcOid)) {
+        return false;
+    }
+
+    Oid namespaceId = get_func_namespace(funcOid);
+    if (!OidIsValid(namespaceId)) {
+        return false;
+    }
+
+    return IsSysSchema(namespaceId) || namespaceId == get_namespace_oid("sys", true) ||
+           namespaceId == get_namespace_oid("information_schema_tsql", true);
 }
