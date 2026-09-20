@@ -165,7 +165,7 @@
     20154
     (1 row)
 
-    select object_id('sys.students', 'U');
+    select object_id('public.students', 'U');
     object_id 
     -----------
     20154
@@ -303,24 +303,24 @@
     其中database为当前数据库
 
     ```
-    CREATE TABLE sys.students (
+    CREATE TABLE public.students (
         id SERIAL PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         age INT DEFAULT 0,
         grade DECIMAL(5, 2)
     );
-    set search_path = 'sys';
+    set search_path = 'public';
     select objectproperty(object_id('students'), 'ownerid') as ownerid;
      ownerid 
     ---------
     10
     (1 row)
-    select objectproperty(object_id('sys.students'), 'istable') as ownerid;
+    select objectproperty(object_id('public.students'), 'istable') as ownerid;
      ownerid 
     ---------
     1
     (1 row)
-    select objectproperty(object_id('database.sys.students'), 'isview') as ownerid;
+    select objectproperty(object_id('database.public.students'), 'isview') as ownerid;
      ownerid 
     ---------
     0
