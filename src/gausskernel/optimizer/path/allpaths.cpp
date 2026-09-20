@@ -47,11 +47,13 @@
 #include "optimizer/optimizerdebug.h"
 #include "optimizer/tlist.h"
 #include "optimizer/bucketpruning.h"
+#include "optimizer/unionall_faststart.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_clause.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "storage/buf/bufmgr.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "pgxc/pgxc.h"
@@ -2111,6 +2113,48 @@ static void set_append_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rt
     }
 
     /*
+     * UNION ALL Fast-Start Reorder (appendrel path):
+     *   Handles simple UNION ALL flattened to appendrel by
+     *   flatten_simple_union_all() in subquery_planner.
+     *   When the GUC is on and the current query block passes the common
+     *   applicability check, reorder member subpaths by LIMIT/OFFSET demand
+     *   and branch cost so Append produces first rows faster.
+     *
+     *   Notes:
+     *     - Nested or mixed set-operations are handled by the generic setops
+     *       path in prepunion.cpp; this covers simple UNION ALL with
+     *       setOperations already cleared.
+     *     - Only applies to the appendrel parent node. Member child rels
+     *       (RELOPT_OTHER_MEMBER_REL) already have their cheapest paths
+     *       generated and do not enter set_append_rel_pathlist.
+     *     - The common applicability check rejects ORDER BY, special Limit,
+     *       and upper operations that change input demand; the reorder entry
+     *       only checks branch root nodes, not expanding CTE or wrappers.
+     *     - Only use query-level LIMIT when the appendrel covers all base
+     *       relations, to avoid reordering branches when UNION ALL has an
+     *       outer JOIN above it.
+     *     - Reorder happens before the unparameterized Append is generated
+     *       and writes back subpaths in place, so the unparameterized Append
+     *       follows this order; parameterized Append is built independently
+     *       by build_append_rel_path from each member rel's path and does not
+     *       depend on this order (this entry only fires when appendrel covers
+     *       all base relations, so no JOIN above it, parameterized paths are
+     *       not selected, no impact).
+     */
+    if (ENABLE_UNION_ALL_FASTSTART() && subpaths_valid && subpaths != NIL &&
+        rte->rtekind == RTE_SUBQUERY && rte->inh &&
+        rel->reloptkind == RELOPT_BASEREL &&
+        bms_equal(rel->relids, root->all_baserels) &&
+        root->parse->setOperations == NULL) {
+        int64 needrows = 0;
+
+        /* HAVING expression may have been preprocessed away; still check the original flag. */
+        if (!root->hasHavingQual && union_all_faststart_applicable_for_parse(root->parse, &needrows)) {
+            reorder_union_all_paths_by_limit_cost(subpaths, needrows);
+        }
+    }
+
+    /*
      * Next, build an unordered, unparameterized Append path for the rel.
      * (Note: this is correct even if we have zero or one live subpath due to
      * constraint exclusion.)
@@ -2309,7 +2353,7 @@ get_cheapest_parameterized_child_path(PlannerInfo *root, RelOptInfo *rel,
     cheapest = NULL;
     foreach(lc, rel->pathlist)
     {
-        Path       *path = (Path *) lfirst(lc);
+        Path *path = (Path *) lfirst(lc);
 
         /* Can't use it if it needs more than requested parameterization */
         if (!bms_is_subset(PATH_REQ_OUTER(path), required_outer))
@@ -3030,6 +3074,58 @@ static void set_subquery_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti,
 }
 
 /*
+ * TryUnionAllFaststartReorderSubquery
+ *   UNION ALL Fast-Start Reorder (unflattened subquery):
+ *   A UNION ALL subquery that cannot be flattened by
+ *   flatten_simple_union_all (e.g. leaf branches need type coercion) is
+ *   planned as one SubqueryScan, so the outer LIMIT demand reaches
+ *   neither the appendrel path entry nor the generate_union_plan entry.
+ *   When the outer query block is a plain wrapper whose only base
+ *   relation is this subquery, its LIMIT/OFFSET demand applies directly
+ *   to the union output; reorder the finished Append branches in place.
+ *
+ *   Branch plans under this Append are SubqueryScan nodes built by
+ *   recurse_set_operations; the shared reorder entry checks branch roots
+ *   through that wrapper, same as the generic setops plan entry.
+ *
+ *   An outer WHERE (rel->baserestrictinfo) filters union output rows before
+ *   the LIMIT, so the real branch demand is needrows / selectivity: the
+ *   plain needrows is only a lower bound and may pick a worse prefix, skip
+ *   reordering in that case (conservative, correctness is never affected).
+ */
+static void TryUnionAllFaststartReorderSubquery(PlannerInfo* root, RelOptInfo* rel, Query* parse, Query* subquery)
+{
+    if (parse->setOperations != NULL || subquery->setOperations == NULL ||
+        rel->reloptkind != RELOPT_BASEREL || !bms_equal(rel->relids, root->all_baserels) ||
+        root->hasHavingQual || rel->baserestrictinfo != NIL) {
+        return;
+    }
+
+    SetOperationStmt* topop = (SetOperationStmt*)subquery->setOperations;
+
+    if (!IsA(topop, SetOperationStmt) || topop->op != SETOP_UNION || !topop->all) {
+        return;
+    }
+
+    int64 needrows = 0;
+
+    if (!union_all_faststart_applicable_for_parse(parse, &needrows)) {
+        return;
+    }
+
+    Plan* unionplan = rel->subplan;
+
+    /* Peel pure-projection BaseResult nodes above the setops plan. */
+    while (unionplan != NULL && IsA(unionplan, BaseResult) &&
+        ((BaseResult*)unionplan)->resconstantqual == NULL) {
+        unionplan = unionplan->lefttree;
+    }
+    if (unionplan != NULL && IsA(unionplan, Append)) {
+        reorder_union_all_plans_by_limit_cost(((Append*)unionplan)->appendplans, needrows);
+    }
+}
+
+/*
  * set_subquery_path
  *
  * NOTE that the subquery may not equal to the rte->subquery
@@ -3074,6 +3170,11 @@ set_subquery_path(PlannerInfo *root, RelOptInfo *rel,
     if (is_dummy_plan(rel->subplan)) {
         set_dummy_rel_pathlist(rel);
         return;
+    }
+
+    /* UNION ALL Fast-Start Reorder for unflattened subquery, see helper. */
+    if (ENABLE_UNION_ALL_FASTSTART()) {
+        TryUnionAllFaststartReorderSubquery(root, rel, parse, subquery);
     }
 
     /* Mark rel with estimated output rows, width, etc */

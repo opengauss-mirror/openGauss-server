@@ -44,10 +44,12 @@
 #include "optimizer/planner.h"
 #include "optimizer/prep.h"
 #include "optimizer/tlist.h"
+#include "optimizer/unionall_faststart.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_hint.h"
 #include "parser/parsetree.h"
 #include "pgxc/pgxc.h"
+#include "utils/guc.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -655,6 +657,29 @@ static Plan* generate_union_plan(SetOperationStmt* op, PlannerInfo* root, double
      */
     planlist = list_concat(recurse_union_children(op->larg, root, tuple_fraction, op, refnames_tlist),
         recurse_union_children(op->rarg, root, tuple_fraction, op, refnames_tlist));
+
+    /*
+     * UNION ALL Fast-Start Reorder:
+     *   When the GUC is on and the current query block passes the common
+     *   applicability check, reorder UNION ALL leaf Plans by LIMIT/OFFSET
+     *   demand and branch cost so the Append node produces first rows faster.
+     *
+     *   - Exclude UNION (op->all == false) because the dedup node above
+     *     makes input order irrelevant for first-row benefit.
+     *   - INTERSECT/EXCEPT and other upper set operations plan their children
+     *     with tuple_fraction = 0.0, so UNION ALL below them is not reordered.
+     *   - ORDER BY, special Limit, cardinality-changing upper operations,
+     *     and LIMIT/OFFSET constant/overflow conditions are checked by the
+     *     common function; the reorder entry only checks branch root nodes,
+     *     not expanding CTE or other wrappers.
+     */
+    if (op->all && tuple_fraction > 0.0 && ENABLE_UNION_ALL_FASTSTART()) {
+        int64 needrows = 0;
+
+        if (union_all_faststart_applicable_for_parse(root->parse, &needrows)) {
+            reorder_union_all_plans_by_limit_cost(planlist, needrows);
+        }
+    }
 
     /*
      * Generate tlist for Append plan node.

@@ -96,6 +96,7 @@ typedef struct GPCPlainEnv
     int default_statistics_target;    // QUERY_TUNING_OTHER
     int from_collapse_limit;    // QUERY_TUNING_OTHER
     int join_collapse_limit;    // QUERY_TUNING_OTHER
+    int union_all_faststart_limit_threshold;    // QUERY_TUNING_OTHER
     int cost_param;            // QUERY_TUNING_OTHER
     int schedule_splits_threshold;    // QUERY_TUNING_OTHER
     int hashagg_table_size;        // QUERY_TUNING_OTHER

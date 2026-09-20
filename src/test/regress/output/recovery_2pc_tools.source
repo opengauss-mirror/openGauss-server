@@ -775,6 +775,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  undo_retention_time                              | integer | s    | 0         | 259200
  undo_space_limit_size                            | integer | 8kB  | 102400    | 2147483647
  undo_zone_count                                  | integer |      | 0         | 1048576
+ union_all_faststart_limit_threshold              | integer |      | 0         | 2147483647
  unique_sql_retention_time                        | integer | min  | 1         | 3650
  unix_socket_directory                            | string  |      |           | 
  unix_socket_group                                | string  |      |           | 

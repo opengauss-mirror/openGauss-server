@@ -164,6 +164,7 @@ GlobalPlanCache::EnvFill(GPCEnv *env, bool depends_on_role)
     env->plainenv.default_statistics_target = u_sess->attr.attr_sql.default_statistics_target;
     env->plainenv.from_collapse_limit = u_sess->attr.attr_sql.from_collapse_limit;
     env->plainenv.join_collapse_limit = u_sess->attr.attr_sql.join_collapse_limit;
+    env->plainenv.union_all_faststart_limit_threshold = u_sess->attr.attr_sql.union_all_faststart_limit_threshold;
     env->plainenv.cost_param = u_sess->attr.attr_sql.cost_param;
     env->plainenv.schedule_splits_threshold = u_sess->attr.attr_sql.schedule_splits_threshold;
     env->plainenv.hashagg_table_size = u_sess->attr.attr_sql.hashagg_table_size;
