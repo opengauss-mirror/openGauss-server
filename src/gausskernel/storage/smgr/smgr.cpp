@@ -18,6 +18,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/datavec/vector_buffer.h"
 #include "catalog/storage.h"
 #include "commands/tablespace.h"
 #include "lib/ilist.h"
@@ -722,6 +723,8 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
         max_forknum = reln->md_fdarray_size;
     }
 
+    VectorBufferInvalidateRelation(&rnode.node);
+
     /* Close the forks at smgr level */
     for (forknum = 0; forknum < max_forknum; forknum++) {
         (*(smgrsw[which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
@@ -783,6 +786,10 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
 {
     RelFileNodeBackend rnode = reln->smgr_rnode;
     int which = reln->smgr_which;
+
+    if (forknum == MAIN_FORKNUM) {
+        VectorBufferInvalidateRelation(&rnode.node);
+    }
 
     /* Close the fork at smgr level */
     (*(smgrsw[which].smgr_close))(reln, forknum, InvalidBlockNumber);
@@ -1059,6 +1066,10 @@ void smgrtruncatefunc(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks
  */
 void smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
+    if (forknum == MAIN_FORKNUM) {
+        VectorBufferInvalidateRelation(&reln->smgr_rnode.node);
+    }
+
     /*
      * Get rid of any buffers for the about-to-be-deleted blocks. bufmgr will
      * just drop them without bothering to write the contents.

@@ -207,6 +207,7 @@
 #include "access/twophase.h"
 #include "access/ustore/knl_undoworker.h"
 #include "access/datavec/ogai_worker.h"
+#include "access/datavec/vector_buffer.h"
 #include "alarm/alarm.h"
 #include "auditfuncs.h"
 #include "catalog/pg_type.h"
@@ -4812,6 +4813,13 @@ static int ServerLoop(void)
             g_instance.pid_cxt.UndoRecyclerPID = initialize_util_thread(UNDO_RECYCLER);
         }
 
+        if (g_instance.attr.attr_storage.vectorBuffers > 0 &&
+            g_instance.attr.attr_storage.vbp_cold_evict &&
+            g_instance.pid_cxt.VbpReclaimPID == 0 &&
+            pmState == PM_RUN) {
+            g_instance.pid_cxt.VbpReclaimPID = initialize_util_thread(VBP_RECLAIM);
+        }
+
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.GlobalStatsPID == 0 &&
             (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
@@ -6407,6 +6415,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGHUP);
         }
+        if (g_instance.pid_cxt.VbpReclaimPID != 0) {
+            signal_child(g_instance.pid_cxt.VbpReclaimPID, SIGHUP);
+        }
 
         if (g_instance.pid_cxt.exrto_recycler_pid != 0) {
             signal_child(g_instance.pid_cxt.exrto_recycler_pid, SIGHUP);
@@ -6749,6 +6760,10 @@ static void pmdie(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
                 signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+            }
+
+            if (g_instance.pid_cxt.VbpReclaimPID != 0) {
+                signal_child(g_instance.pid_cxt.VbpReclaimPID, SIGTERM);
             }
 
             if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0) {
@@ -7728,6 +7743,12 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.attr.attr_storage.enable_async_ogai && g_instance.pid_cxt.UndoLauncherPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.OgaiLauncherPID = initialize_util_thread(OGAI_LAUNCHER);
 
+            if (g_instance.attr.attr_storage.vectorBuffers > 0 &&
+                g_instance.attr.attr_storage.vbp_cold_evict &&
+                g_instance.pid_cxt.VbpReclaimPID == 0 && !dummyStandbyMode) {
+                g_instance.pid_cxt.VbpReclaimPID = initialize_util_thread(VBP_RECLAIM);
+            }
+
 #ifndef ENABLE_MULTIPLE_NODES
             if (((u_sess->attr.attr_common.upgrade_mode == 0 ||
                 pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
@@ -8594,6 +8615,15 @@ static void reaper(SIGNAL_ARGS)
 
             if (!EXIT_STATUS_0(exitstatus)) {
                 LogChildExit(LOG, _("Undo recycle process"), pid, exitstatus);
+            }
+            continue;
+        }
+
+        if (pid == g_instance.pid_cxt.VbpReclaimPID) {
+            g_instance.pid_cxt.VbpReclaimPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus)) {
+                LogChildExit(LOG, _("VBP reclaim process"), pid, exitstatus);
             }
             continue;
         }
@@ -15770,6 +15800,16 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         } break;
 
+        case VBP_RECLAIM: {
+            t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+            InitProcessAndShareMemory();
+            VectorBufferReclaimMain();
+            proc_exit(0);
+        } break;
+
         case GLOBALSTATS_THREAD: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
             if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
@@ -15934,6 +15974,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<UNDO_WORKER>, UNDO_WORKER, "asyncundoworker", "async undo worker" },
     { GaussDbThreadMain<OGAI_LAUNCHER>, OGAI_LAUNCHER, "asyncogailaunch", "async ogai launcher" },
     { GaussDbThreadMain<OGAI_WORKER>, OGAI_WORKER, "asyncogaiworker", "async ogai worker" },
+    { GaussDbThreadMain<VBP_RECLAIM>, VBP_RECLAIM, "vbpreclaim", "vector buffer reclaim" },
     { GaussDbThreadMain<CSNMIN_SYNC>, CSNMIN_SYNC, "csnminsync", "csnmin sync" },
     { GaussDbThreadMain<GLOBALSTATS_THREAD>, GLOBALSTATS_THREAD, "globalstats", "global stats" },
     { GaussDbThreadMain<BARRIER_CREATOR>, BARRIER_CREATOR, "barriercreator", "barrier creator" },

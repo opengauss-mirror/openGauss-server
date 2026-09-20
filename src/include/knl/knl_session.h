@@ -3232,6 +3232,7 @@ typedef struct knl_u_datavec_context {
     double rbq_refinek;
     bool enable_npu;
     bool hnsw_use_mmap;
+    bool enable_vector_buffer_cache;
 } knl_u_datavec_context;
 
 #ifdef ENABLE_HTAP

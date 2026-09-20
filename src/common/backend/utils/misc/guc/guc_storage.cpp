@@ -32,6 +32,7 @@
 #endif
 
 #include "access/cbmparsexlog.h"
+#include "access/datavec/vector_buffer.h"
 #include "access/gin.h"
 #include "access/gtm.h"
 #include "pgxc/pgxc.h"
@@ -288,6 +289,8 @@ static void assign_recovery_parallelism(int newval, void* extra);
 static bool check_xlog_archive_command(char** newval, void** extra, GucSource source);
 static bool check_xlog_archive_dest(char** newval, void** extra, GucSource source);
 static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source);
+static bool check_vbp_chunk_size_guc(int* newval, void** extra, GucSource source);
+static bool check_vbp_hash_partitions_guc(int* newval, void** extra, GucSource source);
 static void AssignSmbBuffers(int newval, void* extra);
 
 static const struct config_enum_entry resource_track_log_options[] = {
@@ -1619,6 +1622,17 @@ static void InitStorageConfigureNamesBool()
             check_enable_mmap_guc,
             NULL,
             NULL},
+        {{"vbp_cold_evict",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Enable cold-path vector buffer reclaim (SetLatch + reclaim util thread)."),
+            gettext_noop("When off, pool-full miss still falls back privately and does not wake reclaim.")},
+            &g_instance.attr.attr_storage.vbp_cold_evict,
+            true,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{"handle_toast_in_autovac",
             PGC_SIGHUP,
@@ -1834,6 +1848,101 @@ static void InitStorageConfigureNamesInt()
             10000,
             0,
             1000000,
+            NULL,
+            NULL,
+            NULL},
+        {{"vector_buffers",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the amount of shared memory used by datavec vector buffer."),
+            NULL,
+            GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.vectorBuffers,
+            0,
+            0,
+            INT_MAX / 2,
+            NULL,
+            NULL,
+            NULL},
+        {{"vbp_chunk_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the vector buffer payload chunk size."),
+            NULL,
+            GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.vbpChunkSize,
+            VECTOR_BUFFER_DEFAULT_CHUNK_SIZE_KB,
+            1024,
+            INT_MAX / 2,
+            check_vbp_chunk_size_guc,
+            NULL,
+            NULL},
+        {{"vbp_hash_partitions",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the number of vector buffer hash lock partitions."),
+            gettext_noop("Valid values are powers of two. Each partition has a spinlock "
+                         "covering a stripe of buckets.")},
+            &g_instance.attr.attr_storage.vbpHashPartitions,
+            VECTOR_BUFFER_DEFAULT_HASH_PARTITIONS,
+            1,
+            4096,
+            check_vbp_hash_partitions_guc,
+            NULL,
+            NULL},
+        {{"vbp_min_payload",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the minimum payload size cached by vector buffer."),
+            NULL},
+            &g_instance.attr.attr_storage.vbpMinPayload,
+            VECTOR_BUFFER_DEFAULT_MIN_PAYLOAD,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"vbp_reclaim_scan_limit",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum number of vector buffer entries scanned for reclaim."),
+            NULL},
+            &g_instance.attr.attr_storage.vbpReclaimScanLimit,
+            VECTOR_BUFFER_DEFAULT_RECLAIM_SCAN_LIMIT,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"vector_buffer_reclaim_batch_size",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the default budget (entry count) for one cold-path vector buffer evict batch."),
+            NULL},
+            &g_instance.attr.attr_storage.vectorBufferReclaimBatchSize,
+            VECTOR_BUFFER_DEFAULT_RECLAIM_BATCH_SIZE,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"vector_buffer_reclaim_interval",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("WaitLatch timeout for the vector buffer reclaim util thread."),
+            NULL,
+            GUC_UNIT_MS},
+            &g_instance.attr.attr_storage.vectorBufferReclaimInterval,
+            VECTOR_BUFFER_DEFAULT_RECLAIM_INTERVAL_MS,
+            10,
+            INT_MAX,
             NULL,
             NULL,
             NULL},
@@ -8095,6 +8204,30 @@ static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source)
     }
     return true;
 #endif
+    return true;
+}
+
+static bool check_vbp_chunk_size_guc(int* newval, void** extra, GucSource source)
+{
+    (void)extra;
+    (void)source;
+
+    if (*newval < VECTOR_BUFFER_MIN_CHUNK_SIZE_KB || ((*newval & (*newval - 1)) != 0)) {
+        GUC_check_errdetail("vbp_chunk_size must be a power of two and at least 1024kB.");
+        return false;
+    }
+    return true;
+}
+
+static bool check_vbp_hash_partitions_guc(int* newval, void** extra, GucSource source)
+{
+    (void)extra;
+    (void)source;
+
+    if (*newval <= 0 || ((*newval & (*newval - 1)) != 0)) {
+        GUC_check_errdetail("vbp_hash_partitions must be a positive power of two.");
+        return false;
+    }
     return true;
 }
 

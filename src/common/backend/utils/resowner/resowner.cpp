@@ -23,6 +23,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
+#include "access/datavec/vector_buffer.h"
 #include "access/ustore/knl_uundovec.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "storage/predicate.h"
@@ -178,6 +179,10 @@ typedef struct ResourceOwnerData {
     MemoryContext* globalMemContexts;
     int maxGlobalMemContexts;
 
+    int nVectorBufferAccesses;
+    VectorBufferAccess** vectorBufferAccesses;
+    int maxVectorBufferAccesses;
+
     MemoryContext memCxt;
 
     /* whether this is a complete one. FALSE is setted while its transaction finishes. */
@@ -326,6 +331,15 @@ static void ResourceOwnerReleaseInternal(
             undo::ReleaseSlotBuffer();
         }
 
+        /* Borrowed VBP handles may still own ordinary buffer pins. */
+        while (owner->nVectorBufferAccesses > 0) {
+            int accessIndex = --owner->nVectorBufferAccesses;
+            VectorBufferAccess* access = owner->vectorBufferAccesses[accessIndex];
+
+            owner->vectorBufferAccesses[accessIndex] = NULL;
+            VectorBufferReleaseOwnerAccessNoForget(access, isCommit);
+        }
+
         if (isCommit && owner->nbufferio > 0) {
             ereport(WARNING,
                 (errmsg("buffer I/O remained active while releasing resource owner %s; aborting it",
@@ -356,7 +370,6 @@ static void ResourceOwnerReleaseInternal(
                 CUCache->PrintDataCacheSlotLeakWarning(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
             CUCache->UnPinDataBlock(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
         }
-
         while (owner->nfakerelrefs > 0) {
             dlist_node *tail_node = dlist_tail_node(&(owner->fakerelrefs_list));
             Relation nfakerelref = (Relation)dlist_container(struct RelationData, node, tail_node);
@@ -493,6 +506,8 @@ static void ResourceOwnerFreeOwner(ResourceOwner owner, bool whole)
     if (owner->valid) {
         if (owner->buffers)
             pfree(owner->buffers);
+        if (owner->vectorBufferAccesses)
+            pfree(owner->vectorBufferAccesses);
 
         if (owner->bufferio)
             pfree(owner->bufferio);
@@ -730,6 +745,15 @@ static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
         ResourceOwnerEnlargeGMemContext(target);
         ResourceOwnerRememberGMemContext(target, source->globalMemContexts[--source->nglobalMemContext]);
     }
+
+    while (source->nVectorBufferAccesses > 0) {
+        VectorBufferAccess* access;
+
+        ResourceOwnerEnlargeVectorBufferAccesses(target);
+        access = source->vectorBufferAccesses[--source->nVectorBufferAccesses];
+        ResourceOwnerRememberVectorBufferAccess(target, access);
+        VectorBufferReassignOwnerAccess(access, target);
+    }
 }
 
 /* ResourceOwnerConcat
@@ -753,9 +777,9 @@ void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
      * function needs to be adapted when tracing new types of resources.
      */
 #ifdef ENABLE_HTAP
-    Assert(sizeof(ResourceOwnerData) == 496); /* The current size of ResourceOwnerData is 496 */
+    Assert(sizeof(ResourceOwnerData) == 512); /* The current size of ResourceOwnerData is 512 */
 #else
-    Assert(sizeof(ResourceOwnerData) == 464); /* The current size of ResourceOwnerData is 464 */
+    Assert(sizeof(ResourceOwnerData) == 480); /* The current size of ResourceOwnerData is 480 */
 #endif
 
     /* Recurse to handle descendants */
@@ -866,6 +890,32 @@ void ResourceOwnerEnlargeBuffers(ResourceOwner owner)
 }
 
 /*
+ * Make room before acquiring a vector buffer access. Remembering the access
+ * must not allocate after its shared scan reference has been acquired.
+ */
+void ResourceOwnerEnlargeVectorBufferAccesses(ResourceOwner owner)
+{
+    const int initialCapacity = 16;
+    const int growthFactor = 2;
+    int newmax;
+
+    if (owner == NULL || owner->nVectorBufferAccesses < owner->maxVectorBufferAccesses) {
+        return;
+    }
+
+    if (owner->vectorBufferAccesses == NULL) {
+        newmax = initialCapacity;
+        owner->vectorBufferAccesses = (VectorBufferAccess**)MemoryContextAlloc(
+            owner->memCxt, newmax * sizeof(VectorBufferAccess*));
+    } else {
+        newmax = owner->maxVectorBufferAccesses * growthFactor;
+        owner->vectorBufferAccesses = (VectorBufferAccess**)repalloc(
+            owner->vectorBufferAccesses, newmax * sizeof(VectorBufferAccess*));
+    }
+    owner->maxVectorBufferAccesses = newmax;
+}
+
+/*
  * Make sure there is room for at least one more entry in a ResourceOwner's
  * buffer array.
  *
@@ -971,6 +1021,14 @@ void ResourceOwnerRememberBuffer(ResourceOwner owner, Buffer buffer)
         Assert(owner->nbuffers < owner->maxbuffers);
         owner->buffers[owner->nbuffers] = buffer;
         owner->nbuffers++;
+    }
+}
+
+void ResourceOwnerRememberVectorBufferAccess(ResourceOwner owner, VectorBufferAccess* access)
+{
+    if (owner != NULL) {
+        Assert(owner->nVectorBufferAccesses < owner->maxVectorBufferAccesses);
+        owner->vectorBufferAccesses[owner->nVectorBufferAccesses++] = access;
     }
 }
 
@@ -1183,6 +1241,26 @@ void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer)
             (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                 errmsg("buffer %d is not owned by resource owner %s", buffer, owner->name)));
     }
+}
+
+void ResourceOwnerForgetVectorBufferAccess(ResourceOwner owner, VectorBufferAccess* access)
+{
+    if (owner == NULL || !owner->valid) {
+        return;
+    }
+    VectorBufferAccess** accesses = owner->vectorBufferAccesses;
+    int last = owner->nVectorBufferAccesses - 1;
+
+    for (int i = last; i >= 0; i--) {
+        if (accesses[i] == access) {
+            accesses[i] = accesses[last];
+            owner->nVectorBufferAccesses = last;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("vector buffer access is not owned by resource owner %s", owner->name)));
 }
 
 /*
@@ -2262,6 +2340,7 @@ void ResourceOwnerMarkInvalid(ResourceOwner owner)
             ResourceOwnerMarkInvalid(child);
         }
 
+        Assert(owner->nVectorBufferAccesses == 0);
         ResourceOwnerFreeOwner(owner, false);
         owner->valid = false;
     }
@@ -2843,6 +2922,7 @@ bool CurrentResourceOwnerIsEmpty(ResourceOwner owner)
         return true;
     }
     Assert(owner->nbuffers == 0);
+    Assert(owner->nVectorBufferAccesses == 0);
     Assert(owner->nbufferio == 0);
     Assert(owner->nlocalcatclist == 0);
     Assert(owner->nlocalcatctup == 0);
@@ -2869,6 +2949,7 @@ bool CurrentResourceOwnerIsEmpty(ResourceOwner owner)
     Assert(owner->nglobalMemContext == 0);
     return true;
 }
+
 /*
  * ResourceOwnerReleaseAllPlanCacheRefs
  *              Release the plancache references (only) held by this owner.
