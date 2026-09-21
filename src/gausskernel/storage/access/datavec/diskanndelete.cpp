@@ -28,7 +28,13 @@
 #include "access/tableam.h"
 #include "executor/executor.h"
 #include "access/generic_xlog.h"
+#include "commands/vacuum.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/item/itemid.h"
+#include "storage/lmgr.h"
 #include "access/datavec/diskann.h"
+#include "access/datavec/diskannv2.h"
+#include "access/datavec/vector_storage.h"
 static constexpr bool IsPartitionedRelation(char parttype)
 {
     return ((parttype) == PARTTYPE_PARTITIONED_RELATION ||
@@ -90,8 +96,10 @@ Buffer DiskannGetSameIndexTuple(Relation rel, DiskAnnScanOpaque so, IndexTuple i
         Page page = GenericXLogRegisterBuffer(state, buf, 0);
         IndexTuple currIndexTuple = DiskAnnPageGetIndexTuple(page);
         DiskAnnNodePage ntup = DiskAnnPageGetNode(currIndexTuple);
-        if (ItemPointerEquals(&(indexTuple->t_tid), &(currIndexTuple->t_tid)) &&
-            isTupleEqual(indexTuple, currIndexTuple)) {
+        bool sameHeap = ItemPointerEquals(&(indexTuple->t_tid), &(currIndexTuple->t_tid));
+        bool sameTuple = metapage->enableVectorStorage ? sameHeap :
+            (sameHeap && isTupleEqual(indexTuple, currIndexTuple));
+        if (sameTuple) {
             target = blkno;
 
             GenericXLogUnregister(state, buf);
@@ -147,12 +155,80 @@ void EraseEdgeFromGraph(Relation rel, BlockNumber node, BlockNumber target, Disk
             continue;
         }
         etup->nexts[count] = etup->nexts[curr];
+        etup->distance[count] = etup->distance[curr];
         ++count;
     }
     etup->count = count;
 
     GenericXLogFinish(state);
     UnlockReleaseBuffer(buf);
+}
+
+/* Reconnect neighbors without searching through the node being removed. */
+class DiskAnnDeleteGraphStore : public DiskAnnPageGraphStore {
+public:
+    DiskAnnDeleteGraphStore(Relation index, BlockNumber excluded)
+        : DiskAnnPageGraphStore(index), m_excluded(excluded)
+    {}
+
+    bool IsLiveNeighbor(BlockNumber blkno) const override
+    {
+        /* The caller holds the excluded node's content lock exclusively. */
+        return blkno != m_excluded && DiskAnnPageGraphStore::IsLiveNeighbor(blkno);
+    }
+
+private:
+    BlockNumber m_excluded;
+};
+
+/*
+ * buf is already exclusive/cleanup-locked. Relink its neighbors before
+ * unlinking it: a rolled-back insertion can be the only bridge to a later
+ * live insertion. Merely removing its edges would make that live node
+ * unreachable from the frozen entry point after VACUUM.
+ */
+static void DiskAnnKillLockedNode(Relation rel, Buffer buf, DiskAnnMetaPage metaPage)
+{
+    DiskAnnNodePage ntup;
+    DiskAnnEdgePage etup;
+    GenericXLogState *state;
+    Page page;
+    BlockNumber deletedBlk = BufferGetBlockNumber(buf);
+
+    state = GenericXLogStart(rel);
+    page = GenericXLogRegisterBuffer(state, buf, 0);
+    ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    etup = (DiskAnnEdgePage)((uint8_t *)ntup + metaPage->nodeSize);
+
+    DiskAnnDeleteGraphStore graphStore(rel, deletedBlk);
+    for (uint16 curr = 0; curr < etup->count; curr++) {
+        BlockNumber neighbor = etup->nexts[curr];
+        if (neighbor == deletedBlk || neighbor == metaPage->frozenBlkno[0] || IsMarkDeleted(rel, neighbor)) {
+            continue;
+        }
+        DiskAnnGraph graph(rel, metaPage->dimensions, metaPage->frozenBlkno[0], &graphStore);
+        graph.Link(neighbor, metaPage->indexSize, false);
+    }
+
+    for (uint16 curr = 0; curr < etup->count; ++curr) {
+        if (etup->nexts[curr] != deletedBlk) {
+            EraseEdgeFromGraph(rel, etup->nexts[curr], deletedBlk, metaPage);
+        }
+    }
+    etup->count = 0;
+    ntup->deleted = 1;
+
+    ItemId itemid = PageGetItemId(page, FirstOffsetNumber);
+    ItemIdMarkDead(itemid);
+
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
+
+    if (metaPage->enableVectorStorage) {
+        ItemPointerData ownerTid;
+        ItemPointerSet(&ownerTid, deletedBlk, FirstOffsetNumber);
+        VecPayloadRecycle(rel, MAIN_FORKNUM, &ownerTid);
+    }
 }
 
 void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
@@ -165,6 +241,7 @@ void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
         return;
     }
 
+    LockPage(rel, DISKANN_GRAPH_LOCK, ExclusiveLock);
     IndexScanDesc scanDesc = diskannbeginscan_internal(rel, 0, 1);
     Datum dest = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     ScanKeyInit(scanDesc->orderByData, 0, BTEqualStrategyNumber, F_OIDEQ, dest);
@@ -191,29 +268,13 @@ void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
     Buffer buf = DiskannGetSameIndexTuple(rel, so, indexTuple, &metapage);
     if (buf == InvalidBuffer) {
         diskannendscan_internal(scanDesc);
+        UnlockPage(rel, DISKANN_GRAPH_LOCK, ExclusiveLock);
         return;
     }
 
-    DiskAnnNodePage ntup;
-    DiskAnnEdgePage etup;
-
-    GenericXLogState *state = GenericXLogStart(rel);
-    Page page = GenericXLogRegisterBuffer(state, buf, 0);
-    ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
-    etup = (DiskAnnEdgePage)((uint8_t*)ntup + metapage.nodeSize);
-
-    BlockNumber deletedBlk = BufferGetBlockNumber(buf);
-    for (uint16 curr = 0; curr < etup->count; ++curr) {
-        EraseEdgeFromGraph(rel, etup->nexts[curr], deletedBlk, &metapage);
-    }
-    etup->count = 0;
-
-    ItemId itemid = PageGetItemId(page, FirstOffsetNumber);
-    ItemIdMarkDead(itemid);
-    GenericXLogFinish(state);
-    UnlockReleaseBuffer(buf);
-
+    DiskAnnKillLockedNode(rel, buf, &metapage);
     diskannendscan_internal(scanDesc);
+    UnlockPage(rel, DISKANN_GRAPH_LOCK, ExclusiveLock);
 }
 
 static void CheckAndDeleteFromIndex(Relation actualIndex, IndexInfo* indexInfo, ItemPointer tid, EState* estate)
@@ -328,4 +389,152 @@ void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* est
     }
 
     list_free_ext(indexOidList);
+}
+
+static bool DiskAnnPageIsGraphNode(Page page)
+{
+    ItemId itemid;
+
+    if (page == NULL || PageIsNew(page) || PageIsEmpty(page)) {
+        return false;
+    }
+    if (PageGetSpecialSize(page) != MAXALIGN(sizeof(DiskAnnPageOpaqueData))) {
+        return false;
+    }
+    if (DiskAnnPageGetOpaque(page)->pageId != DISKANN_PAGE_ID) {
+        return false;
+    }
+    itemid = PageGetItemId(page, FirstOffsetNumber);
+    return ItemIdIsUsed(itemid);
+}
+
+static bool DiskAnnPageIsLiveGraphNode(Page page)
+{
+    ItemId itemid;
+
+    if (!DiskAnnPageIsGraphNode(page)) {
+        return false;
+    }
+    itemid = PageGetItemId(page, FirstOffsetNumber);
+    return !ItemIdIsDead(itemid);
+}
+
+static bool DiskAnnBlknoIsFrozen(const DiskAnnMetaPageData *meta, BlockNumber blkno)
+{
+    uint16 i;
+
+    if (meta == NULL) {
+        return false;
+    }
+    for (i = 0; i < meta->nfrozen && i < FROZEN_POINT_SIZE; i++) {
+        if (meta->frozenBlkno[i] == blkno) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * VACUUM's ambulkdelete: walk graph pages, drop nodes whose heap tid is dead,
+ * recycle vector-storage payload slots onto payloadFreeHead.
+ */
+IndexBulkDeleteResult *diskannbulkdelete_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
+                                                  IndexBulkDeleteCallback callback, void *callbackState)
+{
+    if (DiskAnnGetFormatVersion(info->index) == DISKANN_VERSION_V2) {
+        return DiskAnnV2BulkDelete(info, stats, callback, callbackState);
+    }
+
+    Relation index = info->index;
+    DiskAnnMetaPageData meta;
+    BufferAccessStrategy bstrategy;
+    BlockNumber nblocks;
+    BlockNumber blkno;
+
+    if (stats == NULL) {
+        stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
+    }
+    if (callback == NULL) {
+        return stats;
+    }
+
+    LockPage(index, DISKANN_GRAPH_LOCK, ExclusiveLock);
+    DiskANNGetMetaPageInfo(index, &meta);
+    bstrategy = GetAccessStrategy(BAS_BULKREAD);
+    nblocks = RelationGetNumberOfBlocks(index);
+
+    for (blkno = 1; blkno < nblocks; blkno++) {
+        Buffer buf;
+        Page page;
+        IndexTuple itup;
+
+        vacuum_delay_point();
+        if (DiskAnnBlknoIsFrozen(&meta, blkno)) {
+            continue;
+        }
+
+        buf = ReadBufferExtended(index, MAIN_FORKNUM, blkno, RBM_NORMAL, bstrategy);
+        LockBufferForCleanup(buf);
+        page = BufferGetPage(buf);
+        if (!DiskAnnPageIsGraphNode(page)) {
+            UnlockReleaseBuffer(buf);
+            continue;
+        }
+
+        /*
+         * Already-dead node: neighbors were unlinked, but payload recycle may
+         * have been interrupted. Recycle from the retained owner reference.
+         */
+        if (!DiskAnnPageIsLiveGraphNode(page)) {
+            UnlockReleaseBuffer(buf);
+            if (meta.enableVectorStorage) {
+                ItemPointerData ownerTid;
+                ItemPointerSet(&ownerTid, blkno, FirstOffsetNumber);
+                VecPayloadRecycle(index, MAIN_FORKNUM, &ownerTid);
+            }
+            continue;
+        }
+
+        itup = DiskAnnPageGetIndexTuple(page);
+        DiskAnnNodePage node = DiskAnnPageGetNode(itup);
+        ItemPointerData liveTids[DISKANN_HEAPTIDS];
+        int nlive = 0;
+        if (node->heaptidsLength > DISKANN_HEAPTIDS) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("invalid diskann heap TID count")));
+        }
+        for (int i = 0; i < node->heaptidsLength; i++) {
+            if (!callback(&node->heaptids[i], callbackState, InvalidOid, InvalidBktId)) {
+                liveTids[nlive++] = node->heaptids[i];
+            } else {
+                stats->tuples_removed++;
+            }
+        }
+        if (nlive > 0) {
+            stats->num_index_tuples += nlive;
+            if (nlive != node->heaptidsLength) {
+                GenericXLogState *state = GenericXLogStart(index);
+                page = GenericXLogRegisterBuffer(state, buf, 0);
+                itup = DiskAnnPageGetIndexTuple(page);
+                node = DiskAnnPageGetNode(itup);
+                itup->t_tid = liveTids[0];
+                node->heaptidsLength = (uint8)nlive;
+                for (int i = 0; i < DISKANN_HEAPTIDS; i++) {
+                    if (i < nlive) {
+                        node->heaptids[i] = liveTids[i];
+                    } else {
+                        ItemPointerSetInvalid(&node->heaptids[i]);
+                    }
+                }
+                GenericXLogFinish(state);
+            }
+            UnlockReleaseBuffer(buf);
+            continue;
+        }
+
+        DiskAnnKillLockedNode(index, buf, &meta);
+    }
+
+    FreeAccessStrategy(bstrategy);
+    UnlockPage(index, DISKANN_GRAPH_LOCK, ExclusiveLock);
+    return stats;
 }

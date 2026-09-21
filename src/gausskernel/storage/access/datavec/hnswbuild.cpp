@@ -30,6 +30,8 @@
 #include "postmaster/bgworker.h"
 #include "catalog/index.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
+#include "access/datavec/vector_storage.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/procarray.h"
@@ -50,6 +52,21 @@
 #define PROGRESS_CREATEIDX_TUPLES_DONE 0
 
 #define GENERATIONCHUNK_RAWSIZE (SIZEOF_SIZE_T + SIZEOF_VOID_P * 2)
+#define HNSW_PARALLEL_GRAPH_MIN_SAFETY_MARGIN ((Size)1024 * 1024)
+#define HNSW_PARALLEL_GRAPH_MAX_SAFETY_MARGIN ((Size)64 * 1024 * 1024)
+#define HNSW_PARALLEL_GRAPH_SAFETY_FRACTION 128
+
+typedef struct HnswBuildPayloadRefArray {
+    VecPayloadDiskRef *items;
+    uint32 count;
+    uint32 capacity;
+} HnswBuildPayloadRefArray;
+
+static Size HnswEstimateElementGraphMemory(HnswBuildState *buildstate, Size valueSize, Size rbqcodesSize,
+    Size pqcodesSize, int level);
+static inline bool HnswGraphHasAllocSpace(HnswGraph *graph, Size needed);
+static Size HnswParallelGraphSafetyMargin(Size allocationSize);
+static Size HnswParallelGraphUsableMemory(Size allocationSize);
 
 /*
  * Add sample
@@ -264,6 +281,7 @@ static void CreateMetaPage(HnswBuildState *buildstate)
     Buffer buf;
     Page page;
     HnswMetaPage metap;
+    bool enableVectorStorage = HnswGetEnableVectorPayloadStorage(index);
 
     buf = HnswNewBuffer(index, forkNum);
     page = BufferGetPage(buf);
@@ -276,7 +294,7 @@ static void CreateMetaPage(HnswBuildState *buildstate)
     /* Set metapage data */
     metap = HnswPageGetMeta(page);
     metap->magicNumber = HNSW_MAGIC_NUMBER;
-    metap->version = HNSW_VERSION;
+    metap->version = enableVectorStorage ? HNSW_VECTOR_STORAGE_VERSION : HNSW_VERSION;
     metap->dimensions = buildstate->dimensions;
     metap->m = buildstate->m;
     metap->efConstruction = buildstate->efConstruction;
@@ -350,7 +368,24 @@ static void CreateMetaPage(HnswBuildState *buildstate)
         metap->lsgCodeBookSize = metap->lsgSampleSize * buildstate->lsgDim * sizeof(float);
         metap->lsgSampleNblk = (metap->lsgCodeBookSize + LSGSAMPLE_STORAGE_SIZE - 1) / LSGSAMPLE_STORAGE_SIZE;
     } else {
+        metap->enableLsg = false;
         metap->lsgSampleSize = 0;
+        metap->lsgCodeBookSize = 0;
+        metap->lsgSampleNblk = 0;
+    }
+
+    metap->flags = 0;
+    metap->payloadFormatVersion = 0;
+    metap->reservedFlags = 0;
+    metap->payloadLen = enableVectorStorage ? buildstate->vectorPayloadLen : 0;
+    metap->graphHeadBlkno = HNSW_HEAD_BLKNO;
+    metap->payloadInsertBlkno = InvalidBlockNumber;
+    ItemPointerSetInvalid(&metap->payloadFreeHead);
+    metap->livePayloads = 0;
+    metap->deadPayloads = 0;
+    if (enableVectorStorage) {
+        metap->flags |= HNSW_META_HAS_VECTOR_STORAGE;
+        metap->payloadFormatVersion = HNSW_PAYLOAD_FORMAT_VERSION;
     }
 
     ((PageHeader)page)->pd_lower = ((char *)metap + sizeof(HnswMetaPageData)) - (char *)page;
@@ -508,12 +543,23 @@ static void HnswBuildAppendPage(Relation index, Buffer *buf, Page *page, ForkNum
     /* Commit */
     MarkBufferDirty(*buf);
     UnlockReleaseBuffer(*buf);
+    *buf = InvalidBuffer;
+    *page = NULL;
 
     /* Can take a while, so ensure we can interrupt */
     /* Needs to be called when no buffer locks are held */
     LockBuffer(newbuf, BUFFER_LOCK_UNLOCK);
-    CHECK_FOR_INTERRUPTS();
-    LockBuffer(newbuf, BUFFER_LOCK_EXCLUSIVE);
+    PG_TRY();
+    {
+        CHECK_FOR_INTERRUPTS();
+        LockBuffer(newbuf, BUFFER_LOCK_EXCLUSIVE);
+    }
+    PG_CATCH();
+    {
+        ReleaseBuffer(newbuf);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     /* Prepare new page */
     *buf = newbuf;
@@ -682,6 +728,230 @@ static void CreateGraphPages(HnswBuildState *buildstate)
 }
 
 /*
+ * Create raw vector payload pages followed by compact V2 graph pages.
+ */
+static void BuildV2Payload(HnswBuildState *buildstate, HnswBuildPayloadRefArray *refs,
+    VecPayloadBuildState *payloadState, BlockNumber *payloadInsertBlkno, bool *payloadBuildStarted)
+{
+    Relation index = buildstate->index;
+    char *base = buildstate->hnswarea;
+    HnswElementPtr iter = buildstate->graph->head;
+
+    while (!HnswPtrIsNull(base, iter)) {
+        refs->count++;
+        iter = ((HnswElement)HnswPtrAccess(base, iter))->next;
+    }
+    refs->capacity = refs->count;
+    if (refs->capacity > 0) {
+        refs->items = (VecPayloadDiskRef *)palloc0(sizeof(VecPayloadDiskRef) * refs->capacity);
+    }
+    refs->count = 0;
+
+    VecPayloadBeginBuild(payloadState, index, buildstate->forkNum);
+    *payloadBuildStarted = true;
+    iter = buildstate->graph->head;
+    while (!HnswPtrIsNull(base, iter)) {
+        HnswElement element = (HnswElement)HnswPtrAccess(base, iter);
+        Datum value = PointerGetDatum(HnswPtrAccess(base, element->value));
+        uint32 payloadLen = (uint32)VARSIZE_ANY(DatumGetPointer(value));
+        if (buildstate->vectorPayloadLen != payloadLen) {
+            ereport(ERROR, (errmsg("HNSW vector storage requires a fixed payload length"),
+                errdetail("Expected %u bytes, but found %u bytes.", buildstate->vectorPayloadLen, payloadLen)));
+        }
+        const VecPayloadInput payload = {VEC_PAYLOAD_RAW_VECTOR, DatumGetPointer(value), payloadLen};
+        VecPayloadPutBuild(payloadState, &payload, &refs->items[refs->count]);
+        ItemPointerCopy(&refs->items[refs->count].tid, &element->payloadTid);
+        refs->count++;
+        iter = element->next;
+    }
+    VecPayloadEndBuild(payloadState, payloadInsertBlkno);
+    *payloadBuildStarted = false;
+}
+
+static void EnsureV2GraphSpace(HnswBuildState *buildstate, Buffer *buf, Page *page, Size needed)
+{
+    if (PageGetFreeSpace(*page) >= needed) {
+        return;
+    }
+    HnswBuildAppendPage(buildstate->index, buf, page, buildstate->forkNum);
+    HnswPageSetRole(*page, HNSW_PAGE_ROLE_GRAPH);
+    if (buildstate->isUStore) {
+        HnswPageGetOpaque(*page)->pageType = HNSW_USTORE_PAGE_TYPE;
+    }
+}
+
+typedef struct HnswV2GraphWriteContext {
+    HnswBuildState *buildstate;
+    HnswBuildPayloadRefArray *refs;
+    HnswElementTuple etup;
+    HnswNeighborTuple ntup;
+    Buffer *buf;
+    Page *page;
+} HnswV2GraphWriteContext;
+
+static void WriteV2GraphElement(const HnswV2GraphWriteContext *context, HnswElement element)
+{
+    HnswBuildState *buildstate = context->buildstate;
+    HnswBuildPayloadRefArray *refs = context->refs;
+    HnswElementTuple etup = context->etup;
+    HnswNeighborTuple ntup = context->ntup;
+    Buffer *buf = context->buf;
+    Page *page = context->page;
+    Size etupSize = HNSW_ELEMENT_TUPLE_V2_SIZE;
+    Size ntupSize = HnswNeighborTupleSizeV2(element->level, buildstate->m);
+    Size combinedSize = etupSize + ntupSize + sizeof(ItemIdData);
+    if (buildstate->isUStore) {
+        combinedSize += sizeof(IndexTransInfo);
+    }
+    if (etupSize > HNSW_TUPLE_ALLOC_SIZE) {
+        elog(ERROR, "index tuple too large");
+    }
+    HnswSetElementTupleV2(etup, element, &refs->items[refs->count]);
+    if (combinedSize <= HNSW_MAX_SIZE) {
+        EnsureV2GraphSpace(buildstate, buf, page, combinedSize);
+    } else {
+        EnsureV2GraphSpace(buildstate, buf, page, etupSize);
+    }
+    element->blkno = BufferGetBlockNumber(*buf);
+    element->offno = OffsetNumberNext(PageGetMaxOffsetNumber(*page));
+    element->neighborPage = combinedSize <= HNSW_MAX_SIZE ? element->blkno : element->blkno + 1;
+    element->neighborOffno = combinedSize <= HNSW_MAX_SIZE ? OffsetNumberNext(element->offno) : FirstOffsetNumber;
+    ItemPointerSet(&etup->neighbortid, element->neighborPage, element->neighborOffno);
+    if (buildstate->isUStore) {
+        ((PageHeader)*page)->pd_upper -= sizeof(IndexTransInfo);
+        IndexTransInfo *idxXid = (IndexTransInfo *)(((char *)*page) + ((PageHeader)*page)->pd_upper);
+        idxXid->xmin = FrozenTransactionId;
+        idxXid->xmax = InvalidTransactionId;
+    }
+    if (PageAddItem(*page, (Item)etup, etupSize, InvalidOffsetNumber, false, false) != element->offno) {
+        elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(buildstate->index));
+    }
+    EnsureV2GraphSpace(buildstate, buf, page, ntupSize);
+    if (PageAddItem(*page, (Item)ntup, ntupSize, InvalidOffsetNumber, false, false) != element->neighborOffno) {
+        elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(buildstate->index));
+    }
+    refs->count++;
+}
+
+static void WriteV2GraphElements(const HnswV2GraphWriteContext *context)
+{
+    HnswBuildState *buildstate = context->buildstate;
+    char *base = buildstate->hnswarea;
+    HnswElementPtr iter = buildstate->graph->head;
+    context->refs->count = 0;
+    while (!HnswPtrIsNull(base, iter)) {
+        HnswElement element = (HnswElement)HnswPtrAccess(base, iter);
+        iter = element->next;
+        MemSet(context->etup, 0, HNSW_TUPLE_ALLOC_SIZE);
+        WriteV2GraphElement(context, element);
+    }
+}
+
+static void InitV2GraphPage(HnswBuildState *buildstate, Buffer *buf, Page *page)
+{
+    *buf = HnswNewBuffer(buildstate->index, buildstate->forkNum);
+    *page = BufferGetPage(*buf);
+    HnswInitPage(*buf, *page);
+    HnswPageSetRole(*page, HNSW_PAGE_ROLE_GRAPH);
+    if (buildstate->isUStore) {
+        HnswPageGetOpaque(*page)->pageType = HNSW_USTORE_PAGE_TYPE;
+    }
+    if (!HnswPtrIsNull(buildstate->hnswarea, buildstate->graph->head) &&
+        PageGetFreeSpace(*page) < HNSW_ELEMENT_TUPLE_V2_SIZE) {
+        ereport(ERROR, (errmsg("HNSW vector storage element tuple must be stored within a single page")));
+    }
+}
+
+static void WriteV2GraphAndMeta(HnswBuildState *buildstate, HnswBuildPayloadRefArray *refs,
+    BlockNumber payloadInsertBlkno)
+{
+    Relation index = buildstate->index;
+    ForkNumber forkNum = buildstate->forkNum;
+    BlockNumber firstGraphBlkno = RelationGetNumberOfBlocksInFork(index, forkNum);
+    HnswElementTuple etup = NULL;
+    HnswNeighborTuple ntup = NULL;
+    Buffer buf = InvalidBuffer;
+    Page page = NULL;
+    PG_TRY();
+    {
+        etup = (HnswElementTuple)palloc0(HNSW_TUPLE_ALLOC_SIZE);
+        ntup = (HnswNeighborTuple)palloc0(HNSW_TUPLE_ALLOC_SIZE);
+        InitV2GraphPage(buildstate, &buf, &page);
+        const HnswV2GraphWriteContext context = {buildstate, refs, etup, ntup, &buf, &page};
+        WriteV2GraphElements(&context);
+        BlockNumber insertPage = BufferGetBlockNumber(buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+        buf = InvalidBuffer;
+        HnswElement entryPoint = (HnswElement)HnswPtrAccess(buildstate->hnswarea, buildstate->graph->entryPoint);
+        const HnswVectorStorageMetaUpdate metaUpdate = {
+            firstGraphBlkno, payloadInsertBlkno, buildstate->vectorPayloadLen, refs->count
+        };
+        HnswUpdateMetaPageVectorStorage(index, &metaUpdate, forkNum, true);
+        HnswUpdateMetaPage(index, HNSW_UPDATE_ENTRY_ALWAYS, entryPoint, insertPage, forkNum, true);
+    }
+    PG_CATCH();
+    {
+        if (BufferIsValid(buf)) {
+            UnlockReleaseBuffer(buf);
+        }
+        if (etup != NULL) {
+            pfree(etup);
+        }
+        if (ntup != NULL) {
+            pfree(ntup);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    pfree(etup);
+    pfree(ntup);
+}
+
+static void CreateGraphAndPayloadPagesV2(HnswBuildState *buildstate)
+{
+    BlockNumber payloadInsertBlkno = InvalidBlockNumber;
+    HnswBuildPayloadRefArray refs;
+    VecPayloadBuildState payloadState;
+    bool payloadBuildStarted = false;
+
+    errno_t rc = memset_s(&refs, sizeof(refs), 0, sizeof(refs));
+    if (rc != EOK) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to initialize HNSW payload references: memset_s returned %d", rc)));
+    }
+    rc = memset_s(&payloadState, sizeof(payloadState), 0, sizeof(payloadState));
+    if (rc != EOK) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to initialize HNSW payload build state: memset_s returned %d", rc)));
+    }
+    payloadState.buf = InvalidBuffer;
+
+    PG_TRY();
+    {
+        BuildV2Payload(buildstate, &refs, &payloadState, &payloadInsertBlkno, &payloadBuildStarted);
+        WriteV2GraphAndMeta(buildstate, &refs, payloadInsertBlkno);
+    }
+    PG_CATCH();
+    {
+        if (payloadBuildStarted && BufferIsValid(payloadState.buf)) {
+            UnlockReleaseBuffer(payloadState.buf);
+            payloadState.buf = InvalidBuffer;
+            payloadState.page = NULL;
+        }
+        if (refs.items != NULL) {
+            pfree(refs.items);
+            refs.items = NULL;
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    if (refs.items != NULL) {
+        pfree(refs.items);
+    }
+}
+
+/*
  * Write neighbor tuples
  */
 static void WriteNeighborTuples(HnswBuildState *buildstate)
@@ -700,7 +970,10 @@ static void WriteNeighborTuples(HnswBuildState *buildstate)
         HnswElement element = (HnswElement)HnswPtrAccess(base, iter);
         Buffer buf;
         Page page;
-        Size ntupSize = HNSW_NEIGHBOR_TUPLE_SIZE(element->level, m);
+        bool withPayloadTids = HnswGetEnableVectorPayloadStorage(index);
+        Size ntupSize = withPayloadTids ?
+            HnswNeighborTupleSizeV2(element->level, m) :
+            HNSW_NEIGHBOR_TUPLE_SIZE(element->level, m);
 
         /* Update iterator */
         iter = element->next;
@@ -716,7 +989,7 @@ static void WriteNeighborTuples(HnswBuildState *buildstate)
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         page = BufferGetPage(buf);
 
-        HnswSetNeighborTuple(base, ntup, element, m);
+        HnswSetNeighborTuple(base, ntup, element, m, withPayloadTids);
 
         if (!page_index_tuple_overwrite(page, element->neighborOffno, (Item)ntup, ntupSize))
             elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(index));
@@ -737,7 +1010,7 @@ static void FlushPages(HnswBuildState *buildstate)
 #ifdef HNSW_MEMORY
     elog(INFO, "memory: %zu MB", buildstate->graph->memoryUsed / (1024 * 1024));
 #endif
-    BlockNumber numPages = RelationGetNumberOfBlocks(buildstate->index);
+    BlockNumber numPages = RelationGetNumberOfBlocksInFork(buildstate->index, buildstate->forkNum);
     /* 
      * When numPages != 0, it means there was no data in the table when hnsw rabitq
      * called "create index", so a Metapage is created to record basic information.
@@ -762,7 +1035,11 @@ static void FlushPages(HnswBuildState *buildstate)
         CreateLsgSamplePages(buildstate);
         FlushLsgSamples(buildstate);
     }
-    CreateGraphPages(buildstate);
+    if (HnswGetEnableVectorPayloadStorage(buildstate->index)) {
+        CreateGraphAndPayloadPagesV2(buildstate);
+    } else {
+        CreateGraphPages(buildstate);
+    }
     WriteNeighborTuples(buildstate);
 
     buildstate->graph->flushed = true;
@@ -948,6 +1225,10 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     Vector *transValue = NULL;
     LWLock *flushLock = &graph->flushLock;
     char *base = buildstate->hnswarea;
+    int elementLevel;
+    Size pqcodesSize = 0;
+    Size rbqcodesSize = 0;
+    Size graphMemoryNeeded;
 
     /* Detoast once for all calls */
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
@@ -966,6 +1247,17 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
         value = HnswNormValue(typeInfo, buildstate->collation, value);
     }
 
+    valueSize = VARSIZE_ANY(DatumGetPointer(value));
+    if (buildstate->enablePQ) {
+        pqcodesSize = buildstate->pqM * sizeof(uint8);
+    }
+    if (buildstate->enableRabitQ) {
+        RabitQConfig *rbqConfig = buildstate->rbqConfig;
+        rbqcodesSize = rbqCodeSize(buildstate->dimensions, rbqConfig->reType == SQ8);
+    }
+    elementLevel = HnswChooseLevel(buildstate->ml, buildstate->maxLevel);
+    graphMemoryNeeded = HnswEstimateElementGraphMemory(buildstate, valueSize, rbqcodesSize, pqcodesSize, elementLevel);
+
     /* Ensure graph not flushed when inserting */
     LWLockAcquire(flushLock, LW_SHARED);
 
@@ -973,7 +1265,8 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     if (graph->flushed) {
         LWLockRelease(flushLock);
 
-        return HnswInsertTupleOnDisk(index, value, isnull, heaptid, true, buildstate->heap);
+        return HnswInsertTupleOnDisk(index, value, isnull, heaptid, true, buildstate->heap,
+            &graph->extensionLock);
     }
 
     /*
@@ -986,7 +1279,7 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
      * Check that we have enough memory available for the new element now that
      * we have the allocator lock, and flush pages if needed.
      */
-    if (graph->memoryUsed >= graph->memoryTotal) {
+    if (!HnswGraphHasAllocSpace(graph, graphMemoryNeeded)) {
         LWLockRelease(&graph->allocatorLock);
 
         LWLockRelease(flushLock);
@@ -1003,7 +1296,8 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
 
         LWLockRelease(flushLock);
 
-        return HnswInsertTupleOnDisk(index, value, isnull, heaptid, true, buildstate->heap);
+        return HnswInsertTupleOnDisk(index, value, isnull, heaptid, true, buildstate->heap,
+            &graph->extensionLock);
     }
 
     if (buildstate->enableRabitQ) {
@@ -1014,13 +1308,13 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
         RabitQConfig *rbqConfig = buildstate->rbqConfig;
         if (rbqConfig->reType == SQ8) {
             /* Calculate origin vector's SQ8 */
-            rbqPtr = (Pointer)HnswAlloc(allocator, rbqCodeSize(buildstate->dimensions, true));
+            rbqPtr = (Pointer)HnswAlloc(allocator, rbqcodesSize);
             ScalarQuantizer *sq = rbqConfig->sq;
             int dim = sq->dim;
             VectorEncodeSQ(dim, sq->trained, sq->trained + dim, ((Vector *)DatumGetPointer(vecVal))->x,
                                 getRefineCode(rbqPtr, rbqConfig->reOffset));
         } else {
-            rbqPtr = (Pointer)HnswAlloc(allocator, rbqCodeSize(buildstate->dimensions, false));
+            rbqPtr = (Pointer)HnswAlloc(allocator, rbqcodesSize);
         }
         /* Transform vector in rabitq */
         VectorTransform* vtrans = rbqConfig->vtrans;
@@ -1036,15 +1330,11 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
         }
     }
 
-    /* Get datum size */
-    valueSize = VARSIZE_ANY(DatumGetPointer(value));
-
     /* Ok, we can proceed to allocate the element */
-    element = HnswInitElement(base, heaptid, buildstate->m, buildstate->ml, buildstate->maxLevel, allocator);
+    element = HnswInitElementWithLevel(base, heaptid, buildstate->m, elementLevel, allocator);
     valuePtr = (Pointer)HnswAlloc(allocator, valueSize);
     if (buildstate->enablePQ) {
-        Size codesize = buildstate->pqM * sizeof(uint8);
-        codePtr = (Pointer)HnswAlloc(allocator, codesize);
+        codePtr = (Pointer)HnswAlloc(allocator, pqcodesSize);
     }
 
     /*
@@ -1131,7 +1421,7 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
 /*
  * Initialize the graph
  */
-static void InitGraph(HnswGraph *graph, char *base, long memoryTotal)
+static void InitGraph(HnswGraph *graph, char *base, Size memoryTotal)
 {
     HnswPtrStore(base, graph->head, (HnswElement)NULL);
     HnswPtrStore(base, graph->entryPoint, (HnswElement)NULL);
@@ -1144,6 +1434,7 @@ static void InitGraph(HnswGraph *graph, char *base, long memoryTotal)
     LWLockInitialize(&graph->entryWaitLock, hnsw_lock_tranche_id);
     LWLockInitialize(&graph->allocatorLock, hnsw_lock_tranche_id);
     LWLockInitialize(&graph->flushLock, hnsw_lock_tranche_id);
+    LWLockInitialize(&graph->extensionLock, hnsw_lock_tranche_id);
 }
 
 /*
@@ -1163,9 +1454,64 @@ static void *HnswMemoryContextAlloc(Size size, void *state)
     HnswBuildState *buildstate = (HnswBuildState *)state;
     void *chunk = MemoryContextAlloc(buildstate->graphCtx, size);
 
-    buildstate->graphData.memoryUsed += MAXALIGN(size);
+    buildstate->graphData.memoryUsed = add_size(buildstate->graphData.memoryUsed, MAXALIGN(size));
 
     return chunk;
+}
+
+static Size HnswEstimateElementGraphMemory(HnswBuildState *buildstate, Size valueSize, Size rbqcodesSize,
+    Size pqcodesSize, int level)
+{
+    Size needed = MAXALIGN(sizeof(HnswElementData));
+
+    needed = add_size(needed, MAXALIGN(sizeof(HnswNeighborArrayPtr) * (level + 1)));
+    for (int lc = 0; lc <= level; lc++) {
+        needed = add_size(needed, MAXALIGN(HNSW_NEIGHBOR_ARRAY_SIZE(HnswGetLayerM(buildstate->m, lc))));
+    }
+
+    needed = add_size(needed, MAXALIGN(valueSize));
+    if (buildstate->enablePQ) {
+        needed = add_size(needed, MAXALIGN(pqcodesSize));
+    }
+    if (rbqcodesSize > 0) {
+        needed = add_size(needed, MAXALIGN(rbqcodesSize));
+    }
+
+    return needed;
+}
+
+static inline bool HnswGraphHasAllocSpace(HnswGraph *graph, Size needed)
+{
+    if (graph->memoryUsed > graph->memoryTotal) {
+        return false;
+    }
+
+    return needed <= graph->memoryTotal - graph->memoryUsed;
+}
+
+static Size HnswParallelGraphSafetyMargin(Size allocationSize)
+{
+    Size margin = allocationSize / HNSW_PARALLEL_GRAPH_SAFETY_FRACTION;
+
+    if (margin < HNSW_PARALLEL_GRAPH_MIN_SAFETY_MARGIN) {
+        margin = HNSW_PARALLEL_GRAPH_MIN_SAFETY_MARGIN;
+    } else if (margin > HNSW_PARALLEL_GRAPH_MAX_SAFETY_MARGIN) {
+        margin = HNSW_PARALLEL_GRAPH_MAX_SAFETY_MARGIN;
+    }
+
+    return margin;
+}
+
+static Size HnswParallelGraphUsableMemory(Size allocationSize)
+{
+    Size margin = HnswParallelGraphSafetyMargin(allocationSize);
+    if (allocationSize <= margin) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+            errmsg("maintenance_work_mem is too small for HNSW parallel build"),
+            errhint("Increase maintenance_work_mem or disable parallel HNSW build.")));
+    }
+
+    return allocationSize - margin;
 }
 
 /*
@@ -1174,91 +1520,81 @@ static void *HnswMemoryContextAlloc(Size size, void *state)
 static void *HnswSharedMemoryAlloc(Size size, void *state)
 {
     HnswBuildState *buildstate = (HnswBuildState *)state;
+    Size alignedSize = MAXALIGN(size);
+    Size newMemoryUsed;
+
+    if (!HnswGraphHasAllocSpace(buildstate->graph, alignedSize)) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+            errmsg("HNSW graph exceeded maintenance_work_mem during parallel build"),
+            errhint("Increase maintenance_work_mem or reduce parallel HNSW build memory usage.")));
+    }
+
     void *chunk = buildstate->hnswarea + buildstate->graph->memoryUsed;
 
-    buildstate->graph->memoryUsed += MAXALIGN(size);
+    newMemoryUsed = add_size(buildstate->graph->memoryUsed, alignedSize);
+    if (newMemoryUsed > buildstate->graph->memoryTotal) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+            errmsg("HNSW graph exceeded maintenance_work_mem during parallel build"),
+            errhint("Increase maintenance_work_mem or reduce parallel HNSW build memory usage.")));
+    }
+    buildstate->graph->memoryUsed = newMemoryUsed;
     return chunk;
 }
 
 /*
- * Initialize the build state
+ * Validate HNSW build parameters and their compatibility.
  */
-static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation index, IndexInfo *indexInfo,
-                           ForkNumber forkNum, bool parallel)
+static void ValidateHnswBuildOptions(HnswBuildState *buildstate, bool enableVectorStorage)
 {
-    buildstate->heap = heap;
-    buildstate->index = index;
-    buildstate->indexInfo = indexInfo;
-    buildstate->forkNum = forkNum;
-    buildstate->typeInfo = HnswGetTypeInfo(index);
+    Oid columnType = TupleDescAttr(buildstate->index->rd_att, 0)->atttypid;
 
-    buildstate->m = HnswGetM(index);
-    buildstate->efConstruction = HnswGetEfConstruction(index);
-    buildstate->dimensions = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    if (enableVectorStorage) {
+        if (columnType != VECTOROID && columnType != HALFVECTOROID) {
+            ereport(ERROR, (errmsg("HNSW vector storage currently supports dense vector and halfvec only")));
+        }
+        if (buildstate->typeInfo == NULL) {
+            ereport(ERROR, (errmsg("HNSW vector storage type information is missing")));
+        }
+        if (buildstate->typeInfo->itemSize == NULL) {
+            ereport(ERROR, (errmsg("HNSW vector storage requires fixed-size type information")));
+        }
+    }
 
     /* Disallow varbit since require fixed dimensions */
-    if (TupleDescAttr(index->rd_att, 0)->atttypid == VARBITOID) {
+    if (columnType == VARBITOID) {
         elog(ERROR, "type not supported for hnsw index");
     }
 
-    /* Require column to have dimensions to be indexed */
     if (buildstate->dimensions < 0) {
         elog(ERROR, "column does not have dimensions");
     }
 
     if (buildstate->dimensions > buildstate->typeInfo->maxDimensions) {
-        elog(ERROR, "column cannot have more than %d dimensions for hnsw index", buildstate->typeInfo->maxDimensions);
+        elog(ERROR, "column cannot have more than %d dimensions for hnsw index",
+             buildstate->typeInfo->maxDimensions);
     }
 
     if (buildstate->efConstruction < 2 * buildstate->m) {
         elog(ERROR, "ef_construction must be greater than or equal to 2 * m");
     }
 
-    buildstate->reltuples = 0;
-    buildstate->indtuples = 0;
-
-    /* Get support functions */
-    buildstate->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
-    buildstate->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
-    buildstate->kmeansnormprocinfo = HnswOptionalProcInfo(index, HNSW_KMEANS_NORMAL_PROC);
-    buildstate->collation = index->rd_indcollation[0];
-
-    InitGraph(&buildstate->graphData, NULL, u_sess->attr.attr_memory.maintenance_work_mem * 1024L);
-    buildstate->graph = &buildstate->graphData;
-    buildstate->ml = HnswGetMl(buildstate->m);
-    buildstate->maxLevel = HnswGetMaxLevel(buildstate->m);
-
-    buildstate->graphCtx =
-        AllocSetContextCreate(CurrentMemoryContext, "Hnsw build graph context", ALLOCSET_DEFAULT_SIZES);
-    buildstate->tmpCtx =
-        AllocSetContextCreate(CurrentMemoryContext, "Hnsw build temporary context", ALLOCSET_DEFAULT_SIZES);
-
-    InitAllocator(&buildstate->allocator, &HnswMemoryContextAlloc, buildstate);
-
-    buildstate->hnswleader = NULL;
-    buildstate->hnswshared = NULL;
-    buildstate->hnswarea = NULL;
-
-    buildstate->enablePQ = HnswGetEnablePQ(index);
-    buildstate->enableLsg = HnswGetEnableLsg(index);
-    LsgCalculator* LocScalingParam;
-    if (buildstate->enableLsg && index->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+    if (buildstate->enableLsg && buildstate->index->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("unlogged HNSW LSG indexes are not supported")));
     }
+
+    if (enableVectorStorage && (buildstate->enablePQ || buildstate->enableRabitQ || buildstate->enableLsg)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("enable_vector_payload_storage cannot be combined with enable_pq, enable_rabitq or enable_lsg"),
+            errhint("Disable enable_pq, enable_rabitq and enable_lsg, or disable enable_vector_payload_storage.")));
+    }
+
     if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
         ereport(ERROR, (errmsg("this data type cannot support hnswpq.")));
     }
     if (buildstate->enablePQ && !g_instance.pq_inited) {
         ereport(ERROR, (errmsg("this instance has not currently loaded the pq dynamic library.")));
     }
-
-    buildstate->pqM = HnswGetPqM(index);
-    buildstate->pqKsub = HnswGetPqKsub(index);
-
-    buildstate->enableRabitQ = HnswGetEnableRabitQ(index);
-    buildstate->rbqDelayBuildRows = 0;
-    buildstate->rbqDelayState = RBQ_BUILD_NORMAL;
     if (buildstate->enablePQ && buildstate->enableRabitQ) {
         ereport(ERROR, (errmsg("hnsw does not support the mixed use of the two quantization methods: PQ and RabitQ.")));
     }
@@ -1273,6 +1609,78 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
         if (buildstate->dimensions % buildstate->pqM != 0) {
             ereport(ERROR, (errmsg("dimensions must be divisible by pq_M, please reset pq_M.")));
         }
+    }
+    if (buildstate->enableRabitQ && !buildstate->typeInfo->supportRabitQ) {
+        ereport(ERROR, (errmsg("this data type cannot support hnsw_rabitq.")));
+    }
+
+    buildstate->vectorPayloadLen = 0;
+    if (enableVectorStorage) {
+        Size rawPayloadLen = buildstate->typeInfo->itemSize(buildstate->dimensions);
+        if (rawPayloadLen == 0 || rawPayloadLen > PG_UINT32_MAX) {
+            ereport(ERROR, (
+                errmsg("HNSW vector storage payload length is invalid"),
+                errdetail("Computed raw payload length is %zu bytes.", rawPayloadLen)));
+        }
+        buildstate->vectorPayloadLen = (uint32)rawPayloadLen;
+    }
+}
+
+/*
+ * Initialize the build state
+ */
+static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation index, IndexInfo *indexInfo,
+                           ForkNumber forkNum, bool parallel)
+{
+    bool enableVectorStorage;
+
+    buildstate->heap = heap;
+    buildstate->index = index;
+    buildstate->indexInfo = indexInfo;
+    buildstate->forkNum = forkNum;
+    buildstate->typeInfo = HnswGetTypeInfo(index);
+    enableVectorStorage = HnswGetEnableVectorPayloadStorage(index);
+
+    buildstate->m = HnswGetM(index);
+    buildstate->efConstruction = HnswGetEfConstruction(index);
+    buildstate->dimensions = TupleDescAttr(index->rd_att, 0)->atttypmod;
+
+    buildstate->reltuples = 0;
+    buildstate->indtuples = 0;
+
+    /* Get support functions */
+    buildstate->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
+    buildstate->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
+    buildstate->kmeansnormprocinfo = HnswOptionalProcInfo(index, HNSW_KMEANS_NORMAL_PROC);
+    buildstate->collation = index->rd_indcollation[0];
+
+    buildstate->enablePQ = HnswGetEnablePQ(index);
+    buildstate->enableLsg = HnswGetEnableLsg(index);
+    buildstate->enableRabitQ = HnswGetEnableRabitQ(index);
+    buildstate->pqM = HnswGetPqM(index);
+    buildstate->pqKsub = HnswGetPqKsub(index);
+    ValidateHnswBuildOptions(buildstate, enableVectorStorage);
+
+    InitGraph(&buildstate->graphData, NULL, (Size)u_sess->attr.attr_memory.maintenance_work_mem * 1024L);
+    buildstate->graph = &buildstate->graphData;
+    buildstate->ml = HnswGetMl(buildstate->m);
+    buildstate->maxLevel = enableVectorStorage ?
+        HnswGetMaxLevelV2(buildstate->m) : HnswGetMaxLevel(buildstate->m);
+
+    buildstate->graphCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "Hnsw build graph context", ALLOCSET_DEFAULT_SIZES);
+    buildstate->tmpCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "Hnsw build temporary context", ALLOCSET_DEFAULT_SIZES);
+
+    InitAllocator(&buildstate->allocator, &HnswMemoryContextAlloc, buildstate);
+
+    buildstate->hnswleader = NULL;
+    buildstate->hnswshared = NULL;
+    buildstate->hnswarea = NULL;
+
+    buildstate->rbqDelayBuildRows = 0;
+    buildstate->rbqDelayState = RBQ_BUILD_NORMAL;
+    if (buildstate->enablePQ) {
         Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
         subItemsize = MAXALIGN(subItemsize);
         buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
@@ -1288,9 +1696,6 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     buildstate->pqMode = HNSW_PQMODE_DEFAULT;
     buildstate->pqDistanceTable = NULL;
 
-    if (buildstate->enableRabitQ && !buildstate->typeInfo->supportRabitQ) {
-        ereport(ERROR, (errmsg("this data type cannot support hnsw_rabitq.")));
-    }
     if (buildstate->enableRabitQ && !parallel) {
         RabitQConfig *rbqConfig = (RabitQConfig *)palloc(sizeof(RabitQConfig));
         rbqConfig->FHT = HnswGetUseFHT(index);
@@ -1625,9 +2030,9 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
 
     hnswarea = (char *)palloc0_huge(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), esthnswarea);
     /* Report less than allocated so never fails */
-    InitGraph(&hnswshared->graphData, hnswarea, esthnswarea - 1024 * 1024);
+    InitGraph(&hnswshared->graphData, hnswarea, HnswParallelGraphUsableMemory(esthnswarea));
 
-    hnswshared->graphData.memoryUsed += MAXALIGN(1);
+    hnswshared->graphData.memoryUsed = add_size(hnswshared->graphData.memoryUsed, MAXALIGN(1));
 
     hnswshared->hnswarea = hnswarea;
     return hnswshared;

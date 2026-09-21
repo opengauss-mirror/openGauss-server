@@ -25,6 +25,7 @@
 #include "access/generic_xlog.h"
 #include "commands/vacuum.h"
 #include "access/datavec/ivfflat.h"
+#include "access/datavec/vector_storage.h"
 #include "storage/buf/bufmgr.h"
 
 /*
@@ -44,6 +45,7 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
                             NULL, &otherNblk, NULL, NULL, NULL);
     BlockNumber blkno = IVFFLAT_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk + matrixNblk + otherNblk;
     BufferAccessStrategy bas = GetAccessStrategy(BAS_BULKREAD);
+    bool vectorStorage = IvfflatRelationHasVectorPayloadStorage(index, NULL, NULL);
 
     if (stats == NULL)
         stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
@@ -88,7 +90,11 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
                 OffsetNumber offno;
                 OffsetNumber maxoffno;
                 OffsetNumber deletable[MaxOffsetNumber];
+                ItemPointerData retiredOwners[MaxOffsetNumber];
                 int ndeletable;
+                int nnewlyDead;
+                int ndeadPayloads = 0;
+                BlockNumber pageBlk;
 
                 vacuum_delay_point();
 
@@ -107,36 +113,104 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
 
                 maxoffno = PageGetMaxOffsetNumber(page);
                 ndeletable = 0;
+                nnewlyDead = 0;
+                pageBlk = searchPage;
 
-                /* Find deleted tuples */
+                /*
+                 * Keep the list tuple until the payload tid is on the free
+                 * list (same as HNSW). Mark LP_DEAD first so scans skip it; a
+                 * crash before VecPayloadRecycle is repaired by the next VACUUM.
+                 */
                 for (offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
-                    IndexTuple itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offno));
-                    ItemPointer htup = &(itup->t_tid);
+                    ItemId itemid = PageGetItemId(page, offno);
+                    IndexTuple itup;
+                    ItemPointer htup;
+                    bool alreadyDead;
+                    bool heapDead;
 
-                    if (callback(htup, callbackState, InvalidOid, InvalidBktId)) {
-                        deletable[ndeletable++] = offno;
-                        stats->tuples_removed++;
-                    } else
+                    if (!ItemIdIsUsed(itemid)) {
+                        continue;
+                    }
+
+                    itup = (IndexTuple)PageGetItem(page, itemid);
+                    htup = &(itup->t_tid);
+                    alreadyDead = ItemIdIsDead(itemid);
+                    heapDead = alreadyDead || callback(htup, callbackState, InvalidOid, InvalidBktId);
+                    if (!heapDead) {
                         stats->num_index_tuples++;
+                        continue;
+                    }
+
+                    if (vectorStorage) {
+                        ItemPointerSet(&retiredOwners[ndeadPayloads], pageBlk, offno);
+                        ndeadPayloads++;
+                    }
+                    deletable[ndeletable++] = offno;
+                    if (!alreadyDead) {
+                        ItemIdMarkDead(itemid);
+                        stats->tuples_removed++;
+                        nnewlyDead++;
+                    }
                 }
 
                 /* Set to first free page */
                 /* Must be set before searchPage is updated */
-                if (!BlockNumberIsValid(insertPage) && ndeletable > 0)
+                if (!BlockNumberIsValid(insertPage) && nnewlyDead > 0)
                     insertPage = searchPage;
 
                 searchPage = IvfflatPageGetOpaque(page)->nextblkno;
 
-                if (ndeletable > 0) {
-                    /* Delete tuples */
-                    PageIndexMultiDelete(page, deletable, ndeletable);
+                if (nnewlyDead > 0) {
                     GenericXLogFinish(state);
                 } else
                     GenericXLogAbort(state);
 
                 UnlockReleaseBuffer(buf);
 
-                delTuplePerList += ndeletable;
+                for (int i = 0; i < ndeadPayloads; i++) {
+                    VecPayloadRecycle(index, MAIN_FORKNUM, &retiredOwners[i]);
+                }
+
+                /*
+                 * Payload is durable on the free list (or already was). Drop
+                 * the leftover LP_DEAD tuples so the page can take inserts.
+                 */
+                if (ndeletable > 0) {
+                    Buffer pbuf;
+                    Page ppage;
+                    GenericXLogState *pstate;
+                    OffsetNumber stillDead[MaxOffsetNumber];
+                    int nstill = 0;
+                    OffsetNumber pmax;
+                    int i;
+
+                    pbuf = ReadBufferExtended(index, MAIN_FORKNUM, pageBlk, RBM_NORMAL, bas);
+                    LockBufferForCleanup(pbuf);
+                    pstate = GenericXLogStart(index);
+                    ppage = GenericXLogRegisterBuffer(pstate, pbuf, 0);
+                    pmax = PageGetMaxOffsetNumber(ppage);
+                    for (i = 0; i < ndeletable; i++) {
+                        OffsetNumber poff = deletable[i];
+                        ItemId pitem;
+
+                        if (poff > pmax) {
+                            continue;
+                        }
+                        pitem = PageGetItemId(ppage, poff);
+                        if (ItemIdIsUsed(pitem) && ItemIdIsDead(pitem)) {
+                            stillDead[nstill++] = poff;
+                        }
+                    }
+                    if (nstill > 0) {
+                        PageIndexMultiDelete(ppage, stillDead, nstill);
+                        GenericXLogFinish(pstate);
+                    } else {
+                        GenericXLogAbort(pstate);
+                    }
+                    UnlockReleaseBuffer(pbuf);
+                }
+
+                delTuplePerList += nnewlyDead;
             }
 
             /*

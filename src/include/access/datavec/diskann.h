@@ -30,6 +30,7 @@
 #include "fmgr.h"
 #include "nodes/execnodes.h"
 #include "access/datavec/vector.h"
+#include "access/datavec/vector_storage.h"
 #include "access/datavec/utils.h"
 #include "access/amapi.h"
 #include "utils/hsearch.h"
@@ -39,8 +40,12 @@
 #define DISKANN_FUNC_NUM 4
 
 #define DISKANN_VERSION 1
+/* Page graph with external payloads; version 2 belongs to RaBitQ. */
+#define DISKANN_VERSION_PAYLOAD 3
 #define DISKANN_MAGIC_NUMBER 0x14FF1A7
 #define DISKANN_PAGE_ID 0xFF84
+/* Heavyweight page lock: readers/inserters share it; graph retirement excludes them. */
+#define DISKANN_GRAPH_LOCK 0
 
 /* Support functions */
 #define DISKANN_DISTANCE_PROC 1
@@ -327,6 +332,7 @@ typedef struct DiskAnnOptions {
     int pcaDim;         /* PCA output dimension, 0 = no reduction */
     int rabitqBits;     /* RaBitQ bits per dimension, 1 or 2 */
     bool rabitqBitsSet; /* whether rabitq_bits was given explicitly */
+    bool enableVectorStorage;
 } DiskAnnOptions;
 
 typedef struct DiskAnnEdgePageData {
@@ -411,6 +417,7 @@ struct DiskAnnPageGraphStore : public DiskAnnGraphStore {
     float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const override;
     void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs) override;
     void GetEdge(DiskAnnEdgePage edge, BlockNumber blkno) const override;
+    virtual bool IsLiveNeighbor(BlockNumber blkno) const;
     void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const override;
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const override;
     bool MergeDuplicate(BlockNumber dst, BlockNumber blk, bool building) override;
@@ -430,6 +437,7 @@ struct DiskAnnPageGraphStore : public DiskAnnGraphStore {
     uint32 m_nodeSize;
     uint32 m_itemSize;
     double m_dimension;
+    bool m_vectorPayloadStorage;
     int m_funcType;
 };
 
@@ -518,9 +526,27 @@ typedef struct DiskAnnMetaPageData {
     bool enablePQ;
     DiskPQParams* params;
 
+    /* Keep the entire version 1 prefix, including frozenBlkno, unchanged. */
     BlockNumber frozenBlkno[FROZEN_POINT_SIZE];
+
+    bool enableVectorStorage;
+    BlockNumber payloadInsertBlkno;
+    uint32 payloadLen;
+    ItemPointerData payloadFreeHead;
+    uint64 livePayloads;
+    uint64 deadPayloads;
+
 } DiskAnnMetaPageData;
 typedef DiskAnnMetaPageData* DiskAnnMetaPage;
+
+#define DISKANN_META_V1_FIELDS_SIZE offsetof(DiskAnnMetaPageData, enableVectorStorage)
+#define DISKANN_META_V1_SIZE MAXALIGN(DISKANN_META_V1_FIELDS_SIZE)
+
+typedef struct DiskAnnInsertContext {
+    DiskAnnMetaPage metaPage;
+    bool building;
+    VecPayloadBuildState *payloadState;
+} DiskAnnInsertContext;
 
 typedef struct DiskAnnBuildState {
     /* Info */
@@ -565,6 +591,12 @@ typedef struct DiskAnnBuildState {
     BlockSamplerData bs;
     double rstate;
     int rowstoskip;
+
+    /* Vector storage */
+    bool enableVectorStorage;
+    VecPayloadBuildState payloadState;
+    BlockNumber payloadInsertBlkno;
+    uint32 payloadLen;
 
     /* Memory */
     MemoryContext tmpCtx;
@@ -622,6 +654,10 @@ struct DiskAnnScanOpaqueData {
 
     bool enablePQ;
     DiskPQParams params;
+
+    bool enableVectorStorage;
+    uint32 vectorPayloadLen;
+    VectorBufferAccess *vectorBufferAccess;
 
     blockhash_hash *blocks;
     VectorList<BlockNumber> frozenBlks;
@@ -684,10 +720,15 @@ struct VamanaVertexNbIterator {
     uint32_t infoFlag;
 
     DiskAnnEdgePage edges;
+    bool edgesOwned;
     Buffer nodeBuf;
     Buffer curNeighborBuf;
     DiskAnnNodePage curNbtup;
     IndexTuple curItup;
+    uint8 curHeaptidsLength;
+    ItemPointerData curHeaptids[DISKANN_HEAPTIDS];
+    VectorBufferAccess *access;
+    bool vectorPayloadStorage;
     uint32_t nodeSize;
     blockhash_hash *blocks;
     VamanaVertexNbIterator(Relation index, BlockNumber blk, uint32_t flag);
@@ -735,6 +776,12 @@ float ComputeL2DistanceFast(const float* u, const double su, const float* v, con
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
+bool DiskAnnGetEnableVectorPayloadStorage(Relation index);
+bool DiskAnnRelationHasVectorPayloadStorage(
+    Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen);
+Vector *DiskAnnCopyVectorFromPayloadRef(Relation index, const VecPayloadDiskRef *diskRef,
+    VectorBufferAccess *access);
+Vector *DiskAnnCopyVectorFromIndexTuple(Relation index, IndexTuple itup);
 uint32 DiskAnnGetFormatVersion(Relation index);
 uint32 DiskAnnPeekFormatVersion(Relation index); /* no upgrade gate (DELETE mark-dead) */
 
@@ -761,7 +808,8 @@ float ComputeL2DistanceFast(const float *u, const double su, const float *v, con
 DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber vertex,
                                                float *query, uint16_t dim, double sqrsum);
 double VectorSquareNorm(const float *a, int dim);
-BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage, bool building);
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid,
+                        const DiskAnnInsertContext *context);
 void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* estate, Partition p);
 
 /* PQ related functions */

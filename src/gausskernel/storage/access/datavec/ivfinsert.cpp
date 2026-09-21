@@ -259,7 +259,26 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     originalInsertPage = insertPage;
 
     RabitqVector *rbqVec = NULL;
-    if (enableRabitQ) {
+    BlockNumber startBlkno = InvalidBlockNumber;
+    uint32 payloadLen = 0;
+
+    if (IvfflatRelationHasVectorPayloadStorage(index, &startBlkno, &payloadLen)) {
+        BlockNumber landedBlkno = InvalidBlockNumber;
+        Pointer valuePtr = DatumGetPointer(value);
+        uint32 valueLen;
+
+        valuePtr = IvfflatCanonicalVectorPayload(value, &valueLen);
+        if (valueLen != payloadLen) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("IVFFlat vector storage requires a fixed payload length"),
+                errdetail("Expected %u bytes, but found %u bytes.", payloadLen, valueLen)));
+        }
+        VecPayloadInput payloadInput = {VEC_PAYLOAD_RAW_VECTOR, valuePtr, valueLen};
+        VecPayloadInsertIndexTupleRequest request = {MAIN_FORKNUM, startBlkno, heap_tid, &landedBlkno, NULL};
+
+        itup = VecPayloadInsertIndexTuple(index, &payloadInput, &request);
+        (void)landedBlkno;
+    } else if (enableRabitQ) {
         bool refineSQ8 = rbqConfig->reType == SQ8;
         if (refineSQ8) {
             /* Calculate origin vector's SQ8 */

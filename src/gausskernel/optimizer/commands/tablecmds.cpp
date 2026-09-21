@@ -46,6 +46,7 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
@@ -20766,6 +20767,58 @@ bool static transformCompressedOptions(Relation rel, bytea* relOption, List* def
 /*
  * Set, reset, or replace reloptions.
  */
+static bool GetVectorPayloadStorageReloption(List *options, bool *enabled)
+{
+    ListCell *cell = NULL;
+
+    foreach (cell, options) {
+        DefElem *def = (DefElem *)lfirst(cell);
+
+        if (pg_strcasecmp(def->defname, "enable_vector_payload_storage") == 0) {
+            *enabled = defGetBoolean(def);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ForbidVectorPayloadStorageReloptionAlter(Relation rel, List *defList,
+    AlterTableType operation, Datum oldOptions, bool oldOptionsIsNull)
+{
+    Oid relam;
+    bool newEnabled = false;
+    bool oldEnabled = false;
+    bool specified;
+
+    if (!RelationIsIndex(rel) || rel->rd_rel == NULL) {
+        return;
+    }
+    relam = rel->rd_rel->relam;
+    if (relam != HNSW_AM_OID && relam != IVFFLAT_AM_OID && relam != DISKANN_AM_OID) {
+        return;
+    }
+    specified = GetVectorPayloadStorageReloption(defList, &newEnabled);
+    if (operation != AT_ReplaceRelOptions) {
+        if (specified) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot alter \"enable_vector_payload_storage\" for an existing vector index"),
+                errhint("Rebuild the index with the desired vector payload storage setting.")));
+        }
+        return;
+    }
+    if (!oldOptionsIsNull) {
+        List *options = untransformRelOptions(oldOptions);
+
+        (void)GetVectorPayloadStorageReloption(options, &oldEnabled);
+        list_free_deep(options);
+    }
+    if (oldEnabled != newEnabled) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot alter \"enable_vector_payload_storage\" for an existing vector index"),
+            errhint("Rebuild the index with the desired vector payload storage setting.")));
+    }
+}
+
 static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType operation, LOCKMODE lockmode, bool innerset, AlteredTableInfo* tab)
 {
     Oid relid;
@@ -20842,6 +20895,8 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         psortTid = DatumGetObjectId(SysCacheGetAttr(RELOID, tuple, Anum_pg_class_relcudescrelid, &isnull));
     }
 
+    datum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
+    ForbidVectorPayloadStorageReloptionAlter(rel, defList, operation, datum, isnull);
     if (operation == AT_ReplaceRelOptions) {
         /*
          * If we're supposed to replace the reloptions list, we just pretend
@@ -20849,9 +20904,6 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
          */
         datum = (Datum)0;
         isnull = true;
-    } else {
-        /* Get the old reloptions */
-        datum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
     }
     if (rel->rd_rel->relkind == RELKIND_RELATION) {
         oldOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);

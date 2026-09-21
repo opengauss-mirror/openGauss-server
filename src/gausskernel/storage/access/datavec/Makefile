@@ -21,6 +21,7 @@ OBJS = bitutils.o hnsw.o hnswbuild.o hnswdelete.o hnswinsert.o hnswscan.o hnswut
        vectortransformer.o rabitq.o scalarquantizer.o ogai_model_framework.o ogai_model_manager.o ogai_qwen.o \
        ogai_utils.o ogai.o ogai_ollama.o ogai_openai.o ogai_launcher.o ogai_text_splitter.o \
        ogai_vector_processor.o ogai_worker.o ogai_onnx_mgr.o ogai_onnx_embedding.o ogai_onnx_runtime.o hnswlsg.o \
-       vector_buffer.o vector_buffer_allocator.o vector_buffer_hash.o
+       vector_buffer.o vector_buffer_allocator.o vector_buffer_hash.o \
+       vector_storage.o hnsw_vector_storage.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

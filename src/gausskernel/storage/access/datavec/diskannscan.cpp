@@ -23,6 +23,9 @@
 
 #include <algorithm>
 #include "access/datavec/diskann.h"
+#include "access/datavec/vector_buffer.h"
+#include "securec.h"
+#include "storage/lmgr.h"
 #include "access/datavec/diskannv2.h"
 #include "utils/memutils.h"
 
@@ -85,7 +88,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
     so = (DiskAnnScanOpaque)palloc(sizeof(DiskAnnScanOpaqueData));
-    so->formatVersion = DISKANN_VERSION;
+    so->formatVersion = DiskAnnGetFormatVersion(index);
     so->rel = index;
     so->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "DiskANN scan temporary context", ALLOCSET_DEFAULT_SIZES);
     so->nodeSize = metapage.nodeSize;
@@ -97,6 +100,15 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
     so->enablePQ = metapage.enablePQ;
+    so->vectorPayloadLen = 0;
+    so->vectorBufferAccess = NULL;
+    so->enableVectorStorage =
+        DiskAnnRelationHasVectorPayloadStorage(index, NULL, &so->vectorPayloadLen);
+    if (so->enableVectorStorage) {
+        if (!VectorBufferBeginAccess(&index->rd_node, so->vectorPayloadLen, &so->vectorBufferAccess)) {
+            so->vectorBufferAccess = NULL;
+        }
+    }
     so->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     DiskPQParams *tmpDiskPQParams = InitDiskPQParamsOnDisk(index, so->procinfo, metapage.dimensions, so->enablePQ);
     if (tmpDiskPQParams != NULL) {
@@ -134,6 +146,10 @@ void diskannendscan_internal(IndexScanDesc scan)
     so->candidates.clear();
     so->frozenBlks.clear();
     MemoryContextDelete(so->tmpCtx);
+    if (so->vectorBufferAccess != NULL) {
+        VectorBufferEndAccess(&so->vectorBufferAccess);
+        so->vectorBufferAccess = NULL;
+    }
     pfree(so);
     scan->opaque = NULL;
 }
@@ -166,7 +182,11 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
             so->nexpextedCandidates *= SEARCH_DOUBLE;
         }
 
+        /* Graph refs are copied before payloads are pinned; exclude retirement
+         * over this interval, including concurrent insertion graph walks. */
+        LockPage(scan->indexRelation, DISKANN_GRAPH_LOCK, ShareLock);
         diskannsearch(so);
+        UnlockPage(scan->indexRelation, DISKANN_GRAPH_LOCK, ShareLock);
         so->ncandidates = (uint32_t)so->candidates.size();
 
         so->curIterNum++;
@@ -274,6 +294,7 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
         bool deleted = IsMarkDeleted(so->rel, n->id);
         if (deleted) {
             queue->remove(idx);
+            continue;
         }
 
         uint32_t infoFlag = DISKANN_NEIGHBOR_VECTOR | DISKANN_NEIGHBOR_BLKNO;
@@ -298,9 +319,9 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
                 pfree(DatumGetPointer(nbinfo.vector));
             }
             Neighbor nn = Neighbor(nbVertex, distance);
-            nn.heaptidsLength = nbIter->curNbtup->heaptidsLength;
+            nn.heaptidsLength = nbIter->curHeaptidsLength;
             for (int i = 0; i < nn.heaptidsLength; i++) {
-                nn.heaptids[i] = nbIter->curNbtup->heaptids[i];
+                nn.heaptids[i] = nbIter->curHeaptids[i];
             }
 
             queue->insert(nn);
@@ -315,15 +336,11 @@ float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, u
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     Page page = BufferGetPage(buf);
     IndexTuple itup = DiskAnnPageGetIndexTuple(page);
-    TupleDesc tupdesc = RelationGetDescr(so->rel);
-    bool isnull;
-    Datum src = index_getattr(itup, 1, tupdesc, &isnull);
-    Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
-    Vector* vec = (Vector*)DatumGetPointer(dst);
-    int16 dim = DatumGetVector(so->value)->dim;
-    Assert(dim == vec->dim);
-    DiskAnnNodePage tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
-    float *query = DatumGetVector(so->value)->x;
+    DiskAnnNodePage tup = DiskAnnPageGetNode(itup);
+    VecPayloadDiskRef diskRef;
+    Vector* vec;
+    int16 dim;
+
     if (heaptids != NULL) {
         *heaptidsLength = tup->heaptidsLength;
         for (int i = 0; i < DISKANN_HEAPTIDS; i++) {
@@ -334,11 +351,25 @@ float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, u
         }
     }
 
-    float distance = DatumGetFloat8(FunctionCall2Coll(so->procinfo, so->collation, so->value, PointerGetDatum(vec)));
-    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
-        pfree(DatumGetPointer(dst));
+    if (so->enableVectorStorage) {
+        if (!VecPayloadIndexTupleGetRef(itup, so->rel, &diskRef)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("diskann vector storage failed to read payload ref for relation \"%s\"",
+                    RelationGetRelationName(so->rel))));
+        }
+        UnlockReleaseBuffer(buf);
+        vec = DiskAnnCopyVectorFromPayloadRef(so->rel, &diskRef, so->vectorBufferAccess);
+    } else {
+        vec = DiskAnnCopyVectorFromIndexTuple(so->rel, itup);
+        UnlockReleaseBuffer(buf);
     }
-    UnlockReleaseBuffer(buf);
+
+    dim = DatumGetVector(so->value)->dim;
+    Assert(dim == vec->dim);
+
+    float distance = DatumGetFloat8(FunctionCall2Coll(so->procinfo, so->collation, so->value, PointerGetDatum(vec)));
+    pfree(vec);
     return distance;
 }
 
@@ -355,7 +386,14 @@ Neighbor *GetNextNeighbor(NeighborPriorityQueue* queue, size_t *idx)
 
 VamanaVertexNbIterator *CreateIterator(BlockNumber blk, DiskAnnScanOpaque so, uint32_t infoFlag)
 {
-    VamanaVertexNbIterator *nbIter = (VamanaVertexNbIterator *)palloc(sizeof(VamanaVertexNbIterator));
+    VamanaVertexNbIterator *nbIter = (VamanaVertexNbIterator *)palloc0(sizeof(VamanaVertexNbIterator));
+    Buffer nodeBuf;
+    Buffer masterBuf = InvalidBuffer;
+    Page cpage;
+    DiskAnnNodePage tup_src;
+    DiskAnnEdgePage srcEdges;
+    errno_t rc;
+
     nbIter->rel = so->rel;
     nbIter->nodeSize = so->nodeSize;
     nbIter->blocks = so->blocks;
@@ -365,28 +403,54 @@ VamanaVertexNbIterator *CreateIterator(BlockNumber blk, DiskAnnScanOpaque so, ui
     nbIter->curNeighborBuf = InvalidBuffer;
     nbIter->curItup = NULL;
     nbIter->curNbtup = NULL;
-    nbIter->nodeBuf = ReadBuffer(so->rel, blk);
-    LockBuffer(nbIter->nodeBuf, BUFFER_LOCK_SHARE);
-    Page cpage = BufferGetPage(nbIter->nodeBuf);
-    DiskAnnNodePage tup_src = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(cpage));
+    nbIter->nodeBuf = InvalidBuffer;
+    nbIter->edgesOwned = true;
+    nbIter->access = so->vectorBufferAccess;
+    nbIter->vectorPayloadStorage = so->enableVectorStorage;
+    nbIter->curHeaptidsLength = 0;
+
+    nodeBuf = ReadBuffer(so->rel, blk);
+    LockBuffer(nodeBuf, BUFFER_LOCK_SHARE);
+    cpage = BufferGetPage(nodeBuf);
+    tup_src = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(cpage));
     if (DiskAnnNodeIsSlave(tup_src->tag)) {
         Assert(tup_src->master != InvalidBlockNumber);
-        Buffer masterBuf = ReadBuffer(so->rel, tup_src->master);
+        masterBuf = ReadBuffer(so->rel, tup_src->master);
         LockBuffer(masterBuf, BUFFER_LOCK_SHARE);
-        Page masterPage = BufferGetPage(masterBuf);
-        tup_src = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(masterPage));
-        UnlockReleaseBuffer(masterBuf);
+        tup_src = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(BufferGetPage(masterBuf)));
         Assert(DiskAnnNodeIsMaster(tup_src->tag));
     }
-    nbIter->edges = (DiskAnnEdgePage)((uint8_t *)tup_src + nbIter->nodeSize);
+    srcEdges = (DiskAnnEdgePage)((uint8_t *)tup_src + nbIter->nodeSize);
+    nbIter->edges = (DiskAnnEdgePage)palloc(sizeof(DiskAnnEdgePageData));
+    rc = memcpy_s(nbIter->edges, sizeof(DiskAnnEdgePageData), srcEdges, sizeof(DiskAnnEdgePageData));
+    if (rc != EOK) {
+        if (masterBuf != InvalidBuffer) {
+            UnlockReleaseBuffer(masterBuf);
+        }
+        UnlockReleaseBuffer(nodeBuf);
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("diskann scan failed to copy edge data: memcpy_s returned %d", rc)));
+    }
+    if (masterBuf != InvalidBuffer) {
+        UnlockReleaseBuffer(masterBuf);
+    }
+    UnlockReleaseBuffer(nodeBuf);
 
     return nbIter;
 }
 
 void ReleaseIterator(VamanaVertexNbIterator *iter)
 {
+    if (iter->curNeighborBuf != InvalidBuffer) {
+        UnlockReleaseBuffer(iter->curNeighborBuf);
+        iter->curNeighborBuf = InvalidBuffer;
+    }
     if (iter->nodeBuf != InvalidBuffer) {
         UnlockReleaseBuffer(iter->nodeBuf);
+    }
+    if (iter->edgesOwned && iter->edges != NULL) {
+        pfree(iter->edges);
+        iter->edges = NULL;
     }
     pfree(iter);
 }
@@ -401,4 +465,3 @@ DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber verte
     iter->nextVertex = InvalidBlockNumber;
     return iter;
 }
-

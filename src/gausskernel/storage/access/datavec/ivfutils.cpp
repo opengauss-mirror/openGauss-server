@@ -24,13 +24,12 @@
 
 #include "access/generic_xlog.h"
 #include "access/datavec/bitvec.h"
-#include "catalog/pg_type.h"
-#include "catalog/index.h"
 #include "fmgr.h"
 #include "access/datavec/halfutils.h"
 #include "access/datavec/halfvec.h"
 #include "access/datavec/ivfflat.h"
 #include "access/datavec/utils.h"
+#include "access/datavec/vector_storage.h"
 #include "storage/buf/bufmgr.h"
 
 /*
@@ -44,6 +43,60 @@ int IvfflatGetLists(Relation index)
         return opts->lists;
 
     return IVFFLAT_DEFAULT_LISTS;
+}
+
+bool IvfflatGetEnableVectorPayloadStorage(Relation index)
+{
+    IvfflatOptions *opts = (IvfflatOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->enableVectorStorage;
+    }
+    return false;
+}
+
+bool IvfflatRelationHasVectorPayloadStorage(
+    Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen)
+{
+    Buffer buf;
+    IvfflatMetaPage metap;
+
+    buf = ReadBuffer(index, IVFFLAT_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    metap = IvfflatPageGetMeta(BufferGetPage(buf));
+    if (metap->magicNumber != IVFFLAT_MAGIC_NUMBER) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("ivfflat index metapage for relation \"%s\" is malformed",
+                RelationGetRelationName(index))));
+    }
+    if (!metap->enableVectorStorage) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+    if (!BlockNumberIsValid(metap->payloadInsertBlkno) || metap->payloadLen < VARHDRSZ ||
+        VEC_PAYLOAD_TUPLE_SIZE(metap->payloadLen) > BLCKSZ) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("ivfflat vector storage metapage for relation \"%s\" is malformed",
+                RelationGetRelationName(index))));
+    }
+    if (payloadInsertBlkno != NULL) {
+        *payloadInsertBlkno = metap->payloadInsertBlkno;
+    }
+    if (payloadLen != NULL) {
+        *payloadLen = metap->payloadLen;
+    }
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+Pointer IvfflatCanonicalVectorPayload(Datum vector, uint32 *payloadLen)
+{
+    /* Preserve the opclass's Datum layout, including halfvec and bit headers. */
+    Pointer value = (Pointer)PG_DETOAST_DATUM(vector);
+    *payloadLen = (uint32)VARSIZE(value);
+    return value;
 }
 
 /*

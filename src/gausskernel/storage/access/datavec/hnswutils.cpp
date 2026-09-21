@@ -30,6 +30,10 @@
 #include "catalog/index.h"
 #include "fmgr.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
+#include "access/datavec/vector_buffer.h"
+#include "access/datavec/vector_storage.h"
+#include "access/relscan.h"
 #include "lib/pairingheap.h"
 #include "access/datavec/halfvec.h"
 #include "access/datavec/sparsevec.h"
@@ -318,11 +322,36 @@ bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value)
 /*
  * New buffer
  */
-Buffer HnswNewBuffer(Relation index, ForkNumber forkNum)
+Buffer HnswNewBuffer(Relation index, ForkNumber forkNum, LWLock *buildExtensionLock)
 {
-    Buffer buf = ReadBufferExtended(index, forkNum, P_NEW, RBM_NORMAL, NULL);
+    Buffer volatile buf = InvalidBuffer;
+    bool volatile lockHeld = false;
 
-    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    PG_TRY();
+    {
+        if (buildExtensionLock != NULL) {
+            LWLockAcquire(buildExtensionLock, LW_EXCLUSIVE);
+            lockHeld = true;
+        }
+        buf = ReadBufferExtended(index, forkNum, P_NEW, RBM_NORMAL, NULL);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        if (lockHeld) {
+            LWLockRelease(buildExtensionLock);
+            lockHeld = false;
+        }
+    }
+    PG_CATCH();
+    {
+        if (lockHeld) {
+            LWLockRelease(buildExtensionLock);
+        }
+        if (BufferIsValid(buf)) {
+            ReleaseBuffer(buf);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     return buf;
 }
 
@@ -378,16 +407,22 @@ void *HnswAlloc(HnswAllocator *allocator, Size size)
 /*
  * Allocate an element
  */
-HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, int maxLevel, HnswAllocator *allocator)
+int HnswChooseLevel(double ml, int maxLevel)
 {
-    HnswElement element = (HnswElement)HnswAlloc(allocator, sizeof(HnswElementData));
-
     int level = static_cast<int>(-log(RandomDouble()) * ml);
     /* Cap level */
     if (level > maxLevel) {
         level = maxLevel;
     }
 
+    return level;
+}
+
+HnswElement HnswInitElementWithLevel(char *base, ItemPointer heaptid, int m, int level, HnswAllocator *allocator)
+{
+    HnswElement element = (HnswElement)HnswAlloc(allocator, sizeof(HnswElementData));
+
+    MemSet(element, 0, sizeof(HnswElementData));
     element->heaptidsLength = 0;
     HnswAddHeapTid(element, heaptid);
 
@@ -399,16 +434,24 @@ HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, i
     HnswInitNeighbors(base, element, m, allocator);
 
     HnswPtrStore(base, element->value, (Pointer)NULL);
+    HnswPtrStore(base, element->pqcodes, (Pointer)NULL);
     HnswPtrStore(base, element->rbqcodes, (Pointer)NULL);
     element->fromMmap = false;
 
     return element;
 }
 
+HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, int maxLevel, HnswAllocator *allocator)
+{
+    int level = HnswChooseLevel(ml, maxLevel);
+
+    return HnswInitElementWithLevel(base, heaptid, m, level, allocator);
+}
+
 /*
  * Add a heap TID to an element
  */
-void HnswAddHeapTid(HnswElement element, ItemPointer heaptid)
+void HnswAddHeapTid(HnswElement element, const ItemPointerData *heaptid)
 {
     element->heaptids[element->heaptidsLength++] = *heaptid;
 }
@@ -418,13 +461,15 @@ void HnswAddHeapTid(HnswElement element, ItemPointer heaptid)
  */
 HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
 {
-    HnswElement element = (HnswElement)palloc(sizeof(HnswElementData));
+    HnswElement element = (HnswElement)palloc0(sizeof(HnswElementData));
     char *base = NULL;
 
     element->blkno = blkno;
     element->offno = offno;
     HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)NULL);
     HnswPtrStore(base, element->value, (Pointer)NULL);
+    HnswPtrStore(base, element->pqcodes, (Pointer)NULL);
+    HnswPtrStore(base, element->rbqcodes, (Pointer)NULL);
     element->fromMmap = false;
     return element;
 }
@@ -440,6 +485,171 @@ static bool HnswIndexRelationSkipsPhysicalMetapage(Relation index)
            RelationIsPartitioned(index) &&
            !RelationIsGlobalIndex(index);
 }
+
+bool HnswRelationHasVectorPayloadStorage(
+    Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen)
+{
+    Buffer buf;
+    Page page;
+    HnswMetaPage metap;
+    HnswVectorStorageMetaLayout layout;
+    uint32 attestedPayloadLen = 0;
+
+    if (index == NULL || HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        return false;
+    }
+
+    buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = HnswPageGetMeta(page);
+    if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "hnsw index is not valid");
+    }
+
+    layout = HnswClassifyVectorStorageMeta(metap, &attestedPayloadLen);
+    if (layout == HNSW_VECTOR_STORAGE_META_INVALID) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("hnsw vector storage metapage for relation \"%s\" is malformed",
+                   RelationGetRelationName(index))));
+    }
+    if (layout == HNSW_VECTOR_STORAGE_META_V2) {
+        if (!BlockNumberIsValid(metap->payloadInsertBlkno)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("hnsw vector storage metapage for relation \"%s\" has no payload insert page",
+                    RelationGetRelationName(index))));
+        }
+        if (payloadInsertBlkno != NULL) {
+            *payloadInsertBlkno = metap->payloadInsertBlkno;
+        }
+        if (payloadLen != NULL) {
+            *payloadLen = attestedPayloadLen;
+        }
+    }
+    UnlockReleaseBuffer(buf);
+    return layout == HNSW_VECTOR_STORAGE_META_V2;
+}
+
+static const char *HnswGraphRelationName(Relation index)
+{
+    return index != NULL ? RelationGetRelationName(index) : "<unknown>";
+}
+
+static bool HnswGraphPageGeometryIsValid(Page page)
+{
+    PageHeader header;
+
+    if (page == NULL) {
+        return false;
+    }
+    header = (PageHeader)page;
+    if (!PageHeaderIsValid(header) || PageGetPageSize(page) != BLCKSZ) {
+        return false;
+    }
+    if (PageGetSpecialSize(page) != MAXALIGN(sizeof(HnswPageOpaqueData))) {
+        return false;
+    }
+    return header->pd_lower >= SizeOfPageHeaderData &&
+        (header->pd_lower - SizeOfPageHeaderData) % sizeof(ItemIdData) == 0 &&
+        header->pd_lower <= header->pd_upper &&
+        header->pd_upper <= header->pd_special &&
+        header->pd_special <= BLCKSZ &&
+        header->pd_special >= SizeOfPageHeaderData &&
+        header->pd_special == MAXALIGN(header->pd_special);
+}
+
+static void HnswCheckVectorStorageGraphPage(Relation index, Page page, BlockNumber blkno)
+{
+    if (!HnswGraphPageGeometryIsValid(page)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("hnsw graph page for relation \"%s\" at block %u has invalid physical layout",
+                   HnswGraphRelationName(index), blkno)));
+    }
+    if (HnswPageGetRole(page) == HNSW_PAGE_ROLE_GRAPH) {
+        return;
+    }
+
+    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+        errmsg("hnsw graph traversal for relation \"%s\" reached payload page at block %u",
+               HnswGraphRelationName(index), blkno)));
+}
+
+static bool HnswGraphTupleInvalid(bool raiseError, Relation index, BlockNumber blkno,
+    OffsetNumber offno, const char *reason)
+{
+    if (raiseError) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("invalid HNSW graph element tuple in relation \"%s\" at block %u offset %u: %s",
+                   HnswGraphRelationName(index), blkno, (uint32)offno, reason)));
+    }
+    return false;
+}
+
+typedef struct HnswGraphTupleLocation {
+    Relation index;
+    BlockNumber blkno;
+    OffsetNumber offno;
+    bool raiseError;
+} HnswGraphTupleLocation;
+
+static bool HnswLocateGraphElementTupleInternal(Page page, const HnswGraphTupleLocation *location,
+    HnswElementTuple *tuple)
+{
+    Relation index = location->index;
+    BlockNumber blkno = location->blkno;
+    OffsetNumber offno = location->offno;
+    bool raiseError = location->raiseError;
+    PageHeader header = NULL;
+    ItemId itemId = NULL;
+    HnswElementTuple elementTuple = NULL;
+    Size itemLen;
+    LocationIndex itemOffset;
+
+    if (tuple != NULL) {
+        *tuple = NULL;
+    }
+    if (tuple == NULL) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "missing tuple output");
+    }
+    if (!HnswGraphPageGeometryIsValid(page) || HnswPageGetRole(page) != HNSW_PAGE_ROLE_GRAPH) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "invalid graph page layout or role");
+    }
+    header = (PageHeader)page;
+    if (!OffsetNumberIsValid(offno) || offno > PageGetMaxOffsetNumber(page)) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "line pointer offset is out of range");
+    }
+    itemId = PageGetItemId(page, offno);
+    if (!ItemIdIsNormal(itemId)) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "line pointer is not normal");
+    }
+    itemOffset = ItemIdGetOffset(itemId);
+    itemLen = ItemIdGetLength(itemId);
+    if (itemOffset < header->pd_upper || itemOffset >= header->pd_special) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "line pointer storage offset is out of range");
+    }
+    if (itemLen > (Size)(header->pd_special - itemOffset)) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "tuple extends past page data");
+    }
+    if (itemLen < offsetof(HnswElementTupleData, data)) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "tuple header is truncated");
+    }
+
+    elementTuple = (HnswElementTuple)PageGetItem(page, itemId);
+    if (!HnswIsElementTuple(elementTuple)) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "tuple type is not element");
+    }
+    if ((elementTuple->unused & HNSW_ELEMENT_FLAG_VECTOR_STORAGE) != 0 &&
+        itemLen != HNSW_ELEMENT_TUPLE_V2_SIZE) {
+        return HnswGraphTupleInvalid(raiseError, index, blkno, offno, "V2 tuple physical length mismatch");
+    }
+    *tuple = elementTuple;
+
+    return true;
+}
+
 
 /*
  * Get the metapage info
@@ -464,23 +674,76 @@ void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint)
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
     metap = HnswPageGetMeta(page);
+    PG_TRY();
+    {
+        if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
+            elog(ERROR, "hnsw index is not valid");
+        }
+
+        if (m != NULL)
+            *m = metap->m;
+
+        if (entryPoint != NULL) {
+            if (BlockNumberIsValid(metap->entryBlkno)) {
+                *entryPoint = HnswInitElementFromBlock(metap->entryBlkno, metap->entryOffno);
+                (*entryPoint)->level = metap->entryLevel;
+            } else {
+                *entryPoint = NULL;
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        UnlockReleaseBuffer(buf);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    UnlockReleaseBuffer(buf);
+}
+
+BlockNumber HnswGetGraphHeadBlkno(Relation index)
+{
+    Buffer buf;
+    Page page;
+    HnswMetaPage metap;
+    BlockNumber graphHeadBlkno;
+    HnswVectorStorageMetaLayout layout;
+
+    if (HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        return HNSW_HEAD_BLKNO;
+    }
+
+    buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = HnswPageGetMeta(page);
     if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
         elog(ERROR, "hnsw index is not valid");
     }
 
-    if (m != NULL)
-        *m = metap->m;
+    layout = HnswClassifyVectorStorageMeta(metap, NULL);
+    if (layout == HNSW_VECTOR_STORAGE_META_INVALID) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("hnsw vector storage metapage for relation \"%s\" is malformed",
+                   RelationGetRelationName(index))));
+    }
 
-    if (entryPoint != NULL) {
-        if (BlockNumberIsValid(metap->entryBlkno)) {
-            *entryPoint = HnswInitElementFromBlock(metap->entryBlkno, metap->entryOffno);
-            (*entryPoint)->level = metap->entryLevel;
-        } else {
-            *entryPoint = NULL;
+    if (layout == HNSW_VECTOR_STORAGE_META_V2) {
+        if (!HnswGetVectorStorageGraphHeadBlkno(metap, &graphHeadBlkno)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("hnsw vector storage index has invalid graph head block")));
         }
+    } else {
+        graphHeadBlkno = HNSW_CHUNK_START_BLKNO + metap->pqTableNblk + metap->pqDisTableNblk +
+                         metap->matrixNblk + metap->otherNblk + metap->lsgSampleNblk;
     }
 
     UnlockReleaseBuffer(buf);
+    return graphHeadBlkno;
 }
 
 /*
@@ -516,6 +779,24 @@ static void HnswUpdateMetaPageInfo(Page page, int updateEntry, HnswElement entry
 
     if (BlockNumberIsValid(insertPage))
         metap->insertPage = insertPage;
+}
+
+static void HnswUpdateMetaPageVectorStorageInfo(Page page, BlockNumber graphHeadBlkno,
+                                                BlockNumber payloadInsertBlkno, uint32 payloadLen,
+                                                uint64 livePayloads)
+{
+    HnswMetaPage metap = HnswPageGetMeta(page);
+
+    metap->version = HNSW_VECTOR_STORAGE_VERSION;
+    metap->flags |= HNSW_META_HAS_VECTOR_STORAGE;
+    metap->payloadFormatVersion = HNSW_PAYLOAD_FORMAT_VERSION;
+    metap->reservedFlags = 0;
+    metap->payloadLen = payloadLen;
+    metap->graphHeadBlkno = graphHeadBlkno;
+    metap->payloadInsertBlkno = payloadInsertBlkno;
+    ItemPointerSetInvalid(&metap->payloadFreeHead);
+    metap->livePayloads = livePayloads;
+    metap->deadPayloads = 0;
 }
 
 /*
@@ -580,6 +861,33 @@ void HnswUpdateMetaPage(Relation index, int updateEntry, HnswElement entryPoint,
     }
 
     HnswUpdateMetaPageInfo(page, updateEntry, entryPoint, insertPage);
+
+    if (building)
+        MarkBufferDirty(buf);
+    else
+        GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
+}
+
+void HnswUpdateMetaPageVectorStorage(Relation index, const HnswVectorStorageMetaUpdate *update,
+                                     ForkNumber forkNum, bool building)
+{
+    Buffer buf;
+    Page page;
+    GenericXLogState *state;
+
+    buf = ReadBufferExtended(index, forkNum, HNSW_METAPAGE_BLKNO, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    if (building) {
+        state = NULL;
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
+
+    HnswUpdateMetaPageVectorStorageInfo(page, update->graphHeadBlkno, update->payloadInsertBlkno,
+                                        update->payloadLen, update->livePayloads);
 
     if (building)
         MarkBufferDirty(buf);
@@ -797,21 +1105,38 @@ void HnswSetElementTuple(char *base, HnswElementTuple etup, HnswElement element,
     securec_check(rc, "\0", "\0");
 }
 
+void HnswCheckNeighborTupleType(HnswNeighborTuple ntup, bool vectorStorage)
+{
+    if (ntup == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("HNSW neighbor tuple is null")));
+    }
+    if (vectorStorage) {
+        if (!HnswIsNeighborTupleV2(ntup)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW vector storage neighbor tuple is missing payload tids; rebuild the index")));
+        }
+    } else if (!HnswIsNeighborTupleLegacy(ntup)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("HNSW neighbor tuple has an unexpected type %u", (unsigned int)ntup->type)));
+    }
+}
+
 /*
  * Set neighbor tuple
  */
-void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m)
+void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m, bool withPayloadTids)
 {
     int idx = 0;
 
-    ntup->type = HNSW_NEIGHBOR_TUPLE_TYPE;
+    ntup->type = withPayloadTids ? HNSW_NEIGHBOR_TUPLE_TYPE_V2 : HNSW_NEIGHBOR_TUPLE_TYPE;
 
     for (int lc = e->level; lc >= 0; lc--) {
         HnswNeighborArray *neighbors = HnswGetNeighbors(base, e, lc);
         int lm = HnswGetLayerM(m, lc);
 
         for (int i = 0; i < lm; i++) {
-            ItemPointer indextid = &ntup->indextids[idx++];
+            ItemPointer indextid = &ntup->indextids[idx];
 
             if (i < neighbors->length) {
                 HnswCandidate *hc = &neighbors->items[i];
@@ -821,11 +1146,39 @@ void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int
             } else {
                 ItemPointerSetInvalid(indextid);
             }
+            idx++;
         }
     }
 
     ntup->count = idx;
     ntup->version = e->version;
+
+    if (!withPayloadTids) {
+        return;
+    }
+
+    idx = 0;
+    for (int lc = e->level; lc >= 0; lc--) {
+        HnswNeighborArray *neighbors = HnswGetNeighbors(base, e, lc);
+        int lm = HnswGetLayerM(m, lc);
+
+        for (int i = 0; i < lm; i++) {
+            ItemPointer payloadTid = &ntup->indextids[ntup->count + idx];
+
+            if (i < neighbors->length) {
+                HnswCandidate *hc = &neighbors->items[i];
+                HnswElement hce = (HnswElement)HnswPtrAccess(base, hc->element);
+                if (!ItemPointerIsValid(&hce->payloadTid)) {
+                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("HNSW vector storage neighbor is missing payload tid")));
+                }
+                ItemPointerCopy(&hce->payloadTid, payloadTid);
+            } else {
+                ItemPointerSetInvalid(payloadTid);
+            }
+            idx++;
+        }
+    }
 }
 
 /*
@@ -864,6 +1217,9 @@ static void LoadNeighborsFromPage(HnswElement element, Relation index, Page page
         }
 
         e = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid), ItemPointerGetOffsetNumber(indextid));
+        if (HnswIsNeighborTupleV2(ntup)) {
+            ItemPointerCopy(&ntup->indextids[ntup->count + i], &e->payloadTid);
+        }
 
         /* Calculate level based on offset */
         level = element->level - i / m;
@@ -888,6 +1244,7 @@ void HnswLoadNeighbors(HnswElement element, Relation index, int m)
     buf = ReadBuffer(index, element->neighborPage);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
+    HnswCheckVectorStorageGraphPage(index, page, element->neighborPage);
 
     LoadNeighborsFromPage(element, index, page, m);
 
@@ -919,8 +1276,16 @@ void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool l
     if (loadVec) {
         char *base = NULL;
         Datum value;
-        if (eRbqDiskVec != NULL) {
+
+        if (DatumGetPointer(eRbqDiskVec) != NULL) {
             value = datumCopy(eRbqDiskVec, false, -1);
+        } else if (HnswElementTupleIsVectorStorage(etup)) {
+            /*
+             * V2 overlay is a payload tid, not a vector varlena. Copying it
+             * as Datum(-1) TRAPs in VARSIZE_ANY (refMask 0x0001 -> 1B_E).
+             */
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("cannot load an inline vector from an HNSW vector-storage element tuple")));
         } else {
             value = datumCopy(PointerGetDatum(&etup->data), false, -1);
         }
@@ -928,6 +1293,45 @@ void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool l
         HnswPtrStore(base, element->value, DatumGetPointer(value));
     }
 }
+
+typedef struct HnswV2PayloadLoadContext {
+    uint8 level;
+    uint8 deleted;
+    uint8 version;
+    const ItemPointerData *heaptids;
+    const ItemPointerData *neighbortid;
+    bool loadHeaptids;
+    bool loadVec;
+    VecPayloadPin *payloadPin;
+} HnswV2PayloadLoadContext;
+
+static void HnswLoadElementFromV2Payload(HnswElement element, const HnswV2PayloadLoadContext *context)
+{
+    element->level = context->level;
+    element->deleted = context->deleted;
+    element->version = context->version;
+    element->neighborPage = ItemPointerGetBlockNumber(context->neighbortid);
+    element->neighborOffno = ItemPointerGetOffsetNumber(context->neighbortid);
+    element->heaptidsLength = 0;
+
+    if (context->loadHeaptids) {
+        for (int i = 0; i < HNSW_HEAPTIDS; i++) {
+            if (!ItemPointerIsValid(&context->heaptids[i])) {
+                break;
+            }
+
+            HnswAddHeapTid(element, &context->heaptids[i]);
+        }
+    }
+
+    if (context->loadVec) {
+        char *base = NULL;
+        Datum value = datumCopy(context->payloadPin->datum, false, -1);
+
+        HnswPtrStore(base, element->value, DatumGetPointer(value));
+    }
+}
+
 static bool HnswElementTupleIsDead(HnswElementTuple etup)
 {
     return etup->deleted || !ItemPointerIsValid(&etup->heaptids[0]);
@@ -1024,6 +1428,119 @@ Datum HnswGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *inde
 }
 
 static inline void HnswScaleDistanceByIso(float *distance, Datum lhs, Datum rhs, FmgrInfo *procinfo, bool enableLsg);
+
+/*
+ * Search V2 prune path: pin by payload_tid already copied from the neighbor
+ * tuple. VBP key stays the payload address. Distance too far → skip E's graph page.
+ */
+static bool HnswShouldPinPayloadTidFirst(HnswElement element, IndexScanDesc scan, bool enablePQ, bool enableRabitQ)
+{
+    HnswScanOpaque scanOpaque;
+
+    if (element == NULL || scan == NULL || enablePQ || enableRabitQ) {
+        return false;
+    }
+    if (!ItemPointerIsValid(&element->payloadTid)) {
+        return false;
+    }
+    scanOpaque = (HnswScanOpaque)scan->opaque;
+    if (scanOpaque == NULL || scanOpaque->vectorBufferAccess == NULL ||
+        scanOpaque->vectorPayloadLen < VARHDRSZ) {
+        return false;
+    }
+    if (scan->heapRelation != NULL && RelationIsUstoreFormat(scan->heapRelation)) {
+        return false;
+    }
+    return true;
+}
+
+typedef struct HnswPayloadTupleSnapshot {
+    ItemPointerData heaptids[HNSW_HEAPTIDS];
+    ItemPointerData neighbortid;
+    uint8 level;
+    uint8 deleted;
+    uint8 version;
+} HnswPayloadTupleSnapshot;
+
+static void HnswReadPayloadTupleSnapshot(Relation index, HnswElement element,
+    HnswPayloadTupleSnapshot *snapshot)
+{
+    Buffer buf = ReadBuffer(index, element->blkno);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    HnswCheckVectorStorageGraphPage(index, page, element->blkno);
+    HnswElementTuple etup;
+    const HnswGraphTupleLocation location = {index, element->blkno, element->offno, true};
+    (void)HnswLocateGraphElementTupleInternal(page, &location, &etup);
+    if (!HnswElementTupleMatchesMetaLayout(etup, HNSW_VECTOR_STORAGE_META_V2)) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("HNSW element tuple format does not match scan metapage layout")));
+    }
+    errno_t rc = memcpy_s(snapshot->heaptids, sizeof(snapshot->heaptids),
+        etup->heaptids, sizeof(snapshot->heaptids));
+    if (rc != EOK) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to copy HNSW element heap TIDs")));
+    }
+    snapshot->neighbortid = etup->neighbortid;
+    snapshot->level = etup->level;
+    snapshot->deleted = etup->deleted;
+    snapshot->version = etup->version;
+    UnlockReleaseBuffer(buf);
+}
+
+static bool HnswLoadElementByPayloadTid(HnswElement element, float *distance, Datum *q, Relation index,
+    FmgrInfo *procinfo, Oid collation, bool loadVec, float *maxDistance, IndexScanDesc scan, bool enableLsg)
+{
+    HnswScanOpaque scanOpaque = (HnswScanOpaque)scan->opaque;
+    VecPayloadDiskRef diskRef;
+    errno_t rc;
+
+    rc = memset_s(&diskRef, sizeof(diskRef), 0, sizeof(diskRef));
+    securec_check(rc, "\0", "\0");
+    ItemPointerCopy(&element->payloadTid, &diskRef.tid);
+    diskRef.payloadLen = scanOpaque->vectorPayloadLen;
+    diskRef.kind = VEC_PAYLOAD_RAW_VECTOR;
+
+    VecPayloadPin payloadPin;
+    const VecPayloadPinRequest request = {
+        VEC_PAYLOAD_RAW_VECTOR, scanOpaque->vectorPayloadLen, scanOpaque->vectorBufferAccess};
+    if (!VecPayloadPinGet(index, &diskRef, &request, &payloadPin)) {
+        ereport(ERROR, (errmsg("failed to pin HNSW vector storage payload")));
+    }
+    if (distance != NULL) {
+        if (DatumGetPointer(*q) == NULL) {
+            *distance = 0;
+        } else {
+            *distance = (float)DatumGetFloat8(FunctionCall2Coll(procinfo, collation, *q, payloadPin.datum));
+            HnswScaleDistanceByIso(distance, *q, payloadPin.datum, procinfo, enableLsg);
+        }
+    }
+    if (distance != NULL && maxDistance != NULL && *distance >= *maxDistance && !loadVec) {
+        VecPayloadUnpin(&payloadPin);
+        return true;
+    }
+
+    HnswPayloadTupleSnapshot snapshot;
+    PG_TRY();
+    {
+        HnswReadPayloadTupleSnapshot(index, element, &snapshot);
+    }
+    PG_CATCH();
+    {
+        VecPayloadUnpin(&payloadPin);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    const HnswV2PayloadLoadContext context = {snapshot.level, snapshot.deleted, snapshot.version,
+        snapshot.heaptids, &snapshot.neighbortid, true, loadVec, &payloadPin};
+    HnswLoadElementFromV2Payload(element, &context);
+    VecPayloadUnpin(&payloadPin);
+    return true;
+}
+
 /*
  * Load an element and optionally get its distance from q
  */
@@ -1041,20 +1558,139 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     PQParams *params;
     Datum eRbqDiskData = NULL;
     Buffer heapbuf = InvalidBuffer;
+    HnswScanOpaque scanOpaque = NULL;
+    bool tupleHasVectorStorage;
+
+    if (HnswShouldPinPayloadTidFirst(element, scan, enablePQ, enableRabitQ)) {
+        return HnswLoadElementByPayloadTid(element, distance, q, index, procinfo, collation, loadVec, maxDistance,
+            scan, enableLsg);
+    }
 
     /* Read vector */
     buf = ReadBuffer(index, element->blkno);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
+    HnswCheckVectorStorageGraphPage(index, page, element->blkno);
+    const HnswGraphTupleLocation tupleLocation = {index, element->blkno, element->offno, true};
+    (void)HnswLocateGraphElementTupleInternal(page, &tupleLocation, &etup);
+    tupleHasVectorStorage = HnswElementTupleIsVectorStorage(etup);
+    if (scan != NULL) {
+        HnswVectorStorageMetaLayout scanLayout;
+        bool scanLayoutValid;
+
+        scanOpaque = (HnswScanOpaque)scan->opaque;
+        scanLayoutValid = scanOpaque != NULL &&
+            ((scanOpaque->vectorBufferAccess == NULL && scanOpaque->vectorPayloadLen == 0) ||
+             (scanOpaque->vectorBufferAccess != NULL && scanOpaque->vectorPayloadLen >= VARHDRSZ));
+        if (!scanLayoutValid) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW scan has an invalid cached vector storage layout")));
+        }
+
+        scanLayout = scanOpaque->vectorBufferAccess == NULL ?
+            HNSW_VECTOR_STORAGE_META_LEGACY : HNSW_VECTOR_STORAGE_META_V2;
+        if (!HnswElementTupleMatchesMetaLayout(etup, scanLayout)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW element tuple format does not match scan metapage layout")));
+        }
+    } else if (!tupleHasVectorStorage && HnswRelationHasVectorPayloadStorage(index, NULL, NULL)) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("HNSW legacy tuple does not match the vector payload storage metapage layout")));
+    }
+
     if (scan != NULL && HnswPageGetOpaque(page)->pageType == HNSW_USTORE_PAGE_TYPE) {
-        HnswScanOpaque so = (HnswScanOpaque)scan->opaque;
-        so->vs.buf = buf;
+        scanOpaque->vs.buf = buf;
         isVisible = VecVisibilityCheck(scan, page, element->offno, &needRecheck);
     }
 
-    etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
+    if (tupleHasVectorStorage) {
+        HnswElementTupleV2PayloadData *payloads = HnswElementTupleGetPayloads(etup);
+        VecPayloadDiskRef rawRef = payloads->raw;
+        uint16 refMask = payloads->refMask;
+        bool payloadTidValid = ItemPointerIsValid(&rawRef.tid);
+        bool payloadRefValid = HnswElementTupleHasVectorStorage(etup);
+        VecPayloadPin payloadPin;
+        ItemPointerData heaptids[HNSW_HEAPTIDS];
+        ItemPointerData neighbortid = etup->neighbortid;
+        uint8 level = etup->level;
+        uint8 deleted = etup->deleted;
+        uint8 version = etup->version;
+        errno_t rc = EOK;
+        bool needPayload = (distance != NULL || loadVec);
+        uint32 scanPayloadLen = 0;
+        VectorBufferAccess *borrowedAccess = NULL;
 
-    Assert(HnswIsElementTuple(etup));
+        rc = memcpy_s(heaptids, sizeof(heaptids), etup->heaptids, sizeof(heaptids));
+        securec_check(rc, "\0", "\0");
+        if (payloadTidValid) {
+            ItemPointerCopy(&rawRef.tid, &element->payloadTid);
+        }
+
+        UnlockReleaseBuffer(buf);
+
+        if (scan != NULL) {
+            Assert(scanOpaque != NULL);
+            Assert(scanOpaque->vectorBufferAccess != NULL);
+            Assert(scanOpaque->vectorPayloadLen >= VARHDRSZ);
+            scanPayloadLen = scanOpaque->vectorPayloadLen;
+            borrowedAccess = scanOpaque->vectorBufferAccess;
+        } else if (!HnswRelationHasVectorPayloadStorage(index, NULL, &scanPayloadLen)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW V2 tuple does not match relation metapage layout")));
+        }
+
+        if (rawRef.payloadLen != scanPayloadLen || rawRef.kind != VEC_PAYLOAD_RAW_VECTOR) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW payload reference does not match metapage layout")));
+        }
+
+        if (enablePQ || enableRabitQ) {
+            ereport(ERROR, (errmsg("HNSW vector storage does not support PQ or RabitQ scan paths")));
+        }
+
+        if (!payloadRefValid) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("corrupted HNSW vector storage payload reference"),
+                errdetail("relation \"%s\", block %u, offset %u, refMask %u, kind %u, payloadLen %u, "
+                          "payloadTidValid %s",
+                          RelationGetRelationName(index), (unsigned int)element->blkno,
+                          (unsigned int)element->offno, (unsigned int)refMask, (unsigned int)rawRef.kind,
+                          (unsigned int)rawRef.payloadLen, payloadTidValid ? "true" : "false")));
+        }
+
+        if (!needPayload) {
+            const HnswV2PayloadLoadContext context = {
+                level, deleted, version, heaptids, &neighbortid, true, false, NULL};
+            HnswLoadElementFromV2Payload(element, &context);
+            return isVisible;
+        }
+
+        const VecPayloadPinRequest request = {VEC_PAYLOAD_RAW_VECTOR, scanPayloadLen, borrowedAccess};
+        if (!VecPayloadPinGet(index, &rawRef, &request, &payloadPin)) {
+            ereport(ERROR, (errmsg("failed to pin HNSW vector storage payload")));
+        }
+
+        if (distance != NULL) {
+            if (DatumGetPointer(*q) == NULL) {
+                *distance = 0;
+            } else {
+                *distance = (float)DatumGetFloat8(FunctionCall2Coll(procinfo, collation, *q, payloadPin.datum));
+                HnswScaleDistanceByIso(distance, *q, payloadPin.datum, procinfo, enableLsg);
+            }
+        }
+
+        if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
+            const HnswV2PayloadLoadContext context = {
+                level, deleted, version, heaptids, &neighbortid, true, loadVec, &payloadPin};
+            HnswLoadElementFromV2Payload(element, &context);
+        }
+
+        VecPayloadUnpin(&payloadPin);
+        return isVisible;
+    }
 
     if (enableRabitQ && HnswElementTupleIsDead(etup)) {
         if (distance != NULL) {
@@ -1363,16 +1999,31 @@ void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int 
     HnswNeighborTuple ntup;
     int start;
     ItemPointerData indextids[HNSW_MAX_M * 2];
+    ItemPointerData payloadtids[HNSW_MAX_M * 2];
+    bool v2Neighbors;
 
     buf = ReadBuffer(index, element->neighborPage);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
+    HnswCheckVectorStorageGraphPage(index, page, element->neighborPage);
 
     ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
     start = (element->level - lc) * m;
+    v2Neighbors = HnswIsNeighborTupleV2(ntup);
+    {
+        bool vectorStorage = HnswRelationHasVectorPayloadStorage(index, NULL, NULL);
+        bool typeOk = vectorStorage ? v2Neighbors : HnswIsNeighborTupleLegacy(ntup);
+        if (!typeOk) {
+            UnlockReleaseBuffer(buf);
+            HnswCheckNeighborTupleType(ntup, vectorStorage);
+        }
+    }
 
     /* Copy to minimize lock time */
     memcpy(&indextids, ntup->indextids + start, lm * sizeof(ItemPointerData));
+    if (v2Neighbors) {
+        memcpy(&payloadtids, ntup->indextids + ntup->count + start, lm * sizeof(ItemPointerData));
+    }
 
     UnlockReleaseBuffer(buf);
 
@@ -1389,8 +2040,12 @@ void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int 
         tidhash_insert(v->tids, *indextid, &found);
 
         if (!found) {
-            unvisited[(*unvisitedLength)++] = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid),
-                                                                       ItemPointerGetOffsetNumber(indextid));
+            HnswElement e = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid),
+                ItemPointerGetOffsetNumber(indextid));
+            if (v2Neighbors) {
+                ItemPointerCopy(&payloadtids[i], &e->payloadTid);
+            }
+            unvisited[(*unvisitedLength)++] = e;
         }
     }
 }
@@ -1514,12 +2169,31 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
 
         cElement = (HnswElement)HnswPtrAccess(base, c->element);
 
+        /*
+         * Iterative scan may resume a discarded candidate that was
+         * distance-pruned (payload pin only; no etup / heaptids yet).
+         * Load graph metadata before reading its neighbor tuple.
+         */
+        if (index != NULL && cElement->heaptidsLength == 0) {
+            bool vacuumVisibility;
+            if (tryMmap) {
+                vacuumVisibility = MmapLoadElement(cElement, NULL, &q, index, procinfo, collation, inserting,
+                    NULL, enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo, tryMmap);
+            } else {
+                vacuumVisibility = HnswLoadElement(cElement, NULL, &q, index, procinfo, collation, inserting,
+                    NULL, enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo, enableLsg);
+            }
+            if (enableRabitQ && !vacuumVisibility) {
+                continue;
+            }
+        }
+
         if (index == NULL) {
             HnswLoadUnvisitedFromMemory(base, cElement, unvisited, &unvisitedLength, v,
                                         lc, neighborhoodData, neighborhoodSize);
         } else {
             if (tryMmap) {
-                HnswLoadUnvisitedFromMmap(cElement, unvisited, &unvisitedLength, v, index, m, lm, lc);
+                HnswLoadUnvisitedFromMmap(cElement, unvisited, &unvisitedLength, v, index, m, lm, lc, tryMmap);
             } else {
                 HnswLoadUnvisitedFromDisk(cElement, unvisited, &unvisitedLength, v, index, m, lm, lc);
             }
@@ -1550,14 +2224,21 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 }
             } else {
                 bool vacuumVisibility;
+                /*
+                 * Once W is full, pass the worst-in-W distance so far hops can
+                 * skip the graph page. discarded != NULL must not disable that:
+                 * iterative scan keeps far candidates as stubs and lazy-loads
+                 * etup only if ResumeScanItems actually expands them.
+                 */
+                float *pruneBound = alwaysAdd ? NULL : &f->distance;
                 if (tryMmap) {
                     vacuumVisibility = MmapLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ, rbqParams,
-                                    rbqDiskParams, NULL, enablePQ, pqinfo);
+                                    pruneBound, enableRabitQ, rbqParams,
+                                    rbqDiskParams, scan, enablePQ, pqinfo, tryMmap);
                 } else {
                     vacuumVisibility = HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ,
-                                    rbqParams, rbqDiskParams, NULL, enablePQ, pqinfo, enableLsg);
+                                    pruneBound, enableRabitQ,
+                                    rbqParams, rbqDiskParams, scan, enablePQ, pqinfo, enableLsg);
                 }
                 if (enableRabitQ && !vacuumVisibility) {
                     continue;
@@ -2228,6 +2909,7 @@ void HnswGetLsgInfoFromMetaPage(Relation index, uint32* lsgCodeBookSize, uint16*
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap)
 {
     const HnswTypeInfo *typeInfo = HnswGetTypeInfo(index);
+
     InitParamsMetaPage(index, params, enablePQ, trymmap);
     int pqMode = HNSW_PQMODE_DEFAULT;
 

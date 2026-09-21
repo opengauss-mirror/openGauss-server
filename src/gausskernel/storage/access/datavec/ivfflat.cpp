@@ -123,6 +123,7 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
         {"by_residual", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, byResidual)},
         {"enable_rabitq", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, enableRabitQ)},
         {"rabitq_fht", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, rabitqFHT)},
+        {"enable_vector_payload_storage", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, enableVectorStorage)},
         {"rabitq_refine_type", RELOPT_TYPE_STRING, offsetof(IvfflatOptions, rabitqRT)},
     };
 
@@ -133,6 +134,15 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
     options = parseRelOptions(reloptions, validate, RELOPT_KIND_IVFFLAT, &numoptions);
     rdopts = (IvfflatOptions *)allocateReloptStruct(sizeof(IvfflatOptions), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(IvfflatOptions), options, numoptions, validate, tab, lengthof(tab));
+
+    if (rdopts->enableVectorStorage) {
+        if (rdopts->enablePQ) {
+            ereport(ERROR, (errmsg("IVFFlat vector storage does not support enable_pq in this phase")));
+        }
+        if (rdopts->enableRabitQ) {
+            ereport(ERROR, (errmsg("IVFFlat vector storage does not support enable_rabitq in this phase")));
+        }
+    }
 
     return (bytea *)rdopts;
 }

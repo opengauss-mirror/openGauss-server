@@ -27,6 +27,7 @@
 #include "access/amapi.h"
 #include "access/relscan.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
 #include "pgstat.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
@@ -50,8 +51,9 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     bool enablePQ = so->enablePQ;
     int hnswEfSearch = so->length;
     int pqMode = so->pqMode;
+    bool tryMmap = so->tryMmap;
     /* Get m and entry point */
-    GetMMapMetaPageInfo(index, &m, (void**)(&entryPoint));
+    GetMMapMetaPageInfo(index, &m, (void**)(&entryPoint), tryMmap);
 
     so->q = q;
     so->m = m;
@@ -87,27 +89,29 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
         pqinfo.pqMode = pqMode;
         pqinfo.lc = entryPoint->level;
         ep = list_make1(MMapEntryCandidate(
-                        base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL, NULL, enablePQ, &pqinfo));
+                        base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL, scan, enablePQ,
+                        &pqinfo, tryMmap));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
             w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
-                                NULL, NULL, true, NULL, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
+                                NULL, NULL, true, NULL, false, NULL, NULL, tryMmap, scan, enablePQ, &pqinfo);
             ep = w;
         }
         pqinfo.lc = 0;
         w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL, &so->v,
                             u_sess->datavec_ctx.hnsw_iterative_scan != HNSW_ITERATIVE_SCAN_OFF ? &so->discarded : NULL,
-                            true, &so->tuples, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
+                            true, &so->tuples, false, NULL, NULL, tryMmap, scan, enablePQ, &pqinfo);
     } else {
-        ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, so->enableRabitQ, so->rbqParams, NULL));
+        ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false,
+                                           so->enableRabitQ, so->rbqParams, NULL, scan, false, NULL, tryMmap));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
-                                NULL, NULL, true, NULL, so->enableRabitQ, so->rbqParams, NULL, true);
+                                NULL, NULL, true, NULL, so->enableRabitQ, so->rbqParams, NULL, tryMmap, scan);
             ep = w;
         }
         w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL, &so->v,
                             u_sess->datavec_ctx.hnsw_iterative_scan != HNSW_ITERATIVE_SCAN_OFF ? &so->discarded : NULL,
-                            true, &so->tuples, so->enableRabitQ, so->rbqParams, NULL, true);
+                            true, &so->tuples, so->enableRabitQ, so->rbqParams, NULL, tryMmap, scan);
     }
     return w;
 }
@@ -122,6 +126,7 @@ static List *ResumeScanItems(IndexScanDesc scan)
     List *ep = NIL;
     char *base = NULL;
     int batchSize = u_sess->datavec_ctx.hnsw_ef_search;
+    bool tryMmap = so->tryMmap;
 
     if (pairingheap_is_empty(so->discarded)) {
         return NIL;
@@ -141,7 +146,7 @@ static List *ResumeScanItems(IndexScanDesc scan)
 
     return HnswSearchLayer(base, so->q, ep, batchSize, 0, index, so->procinfo, so->collation,
                            so->m, false, NULL, &so->v, &so->discarded, false, &so->tuples,
-                           so->enableRabitQ, so->rbqParams, NULL, true);
+                           so->enableRabitQ, so->rbqParams, NULL, tryMmap, scan);
 }
 
 /*
@@ -179,13 +184,24 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     HnswScanOpaque so;
     PQParams params;
     int dim;
+    bool hasVectorStorage;
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
 
     so = (HnswScanOpaque)palloc(sizeof(HnswScanOpaqueData));
+    so->vectorBufferAccess = NULL;
+    so->vectorPayloadLen = 0;
     so->typeInfo = HnswGetTypeInfo(index);
     so->first = true;
     so->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "Hnsw scan temporary context", ALLOCSET_DEFAULT_SIZES);
+
+    hasVectorStorage = HnswRelationHasVectorPayloadStorage(index, NULL, &so->vectorPayloadLen);
+    if (hasVectorStorage) {
+        if (!VectorBufferBeginAccess(&index->rd_node, so->vectorPayloadLen, &so->vectorBufferAccess) ||
+            so->vectorBufferAccess == NULL) {
+            ereport(ERROR, (errmsg("failed to begin HNSW scan vector buffer access")));
+        }
+    }
 
     so->vs.buf = InvalidBuffer;
     so->vs.lastSelfModifiedItup = NULL;
@@ -198,7 +214,8 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
 
     dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
     so->pqMode = HNSW_PQMODE_DEFAULT;
-    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ, true);
+    so->tryMmap = hasVectorStorage ? false : CanUseMmap(index);
+    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ, so->tryMmap);
     so->params = params;
 
     so->rbqParams = (RabitqQueryParams *)palloc0(sizeof(RabitqQueryParams));
@@ -232,6 +249,14 @@ void hnswrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey or
     so->discarded = NULL;
     so->tuples = 0;
     so->previousDistance = -INFINITY;
+    if (so->vectorBufferAccess != NULL) {
+        bool accessIdle = VectorBufferAccessIsIdle(so->vectorBufferAccess);
+
+        Assert(accessIdle);
+        if (!accessIdle) {
+            elog(ERROR, "HNSW scan vector buffer access is not idle during rescan");
+        }
+    }
     MemoryContextReset(so->tmpCtx);
 
     if (keys && scan->numberOfKeys > 0) {
@@ -295,7 +320,7 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Before RABITQ_VERSION_NUM VERSION NUM %u, we do not support rabitq.", RABITQ_VERSION_NUM)));
             }
-            if (CanUseMmap(scan->indexRelation)) {
+            if (so->tryMmap) {
                 ereport(ERROR, (errmsg("HNSW_RABITQ dose not support mmap.")));
             }
             if (IS_HALFVEC(so->procinfo->fn_oid)) {
@@ -437,6 +462,16 @@ void hnswendscan_internal(IndexScanDesc scan)
     HnswScanOpaque so = (HnswScanOpaque)scan->opaque;
 
     FREE_POINTER(so->vs.lastSelfModifiedItup);
+
+    if (so->vectorBufferAccess != NULL) {
+        bool accessIdle = VectorBufferAccessIsIdle(so->vectorBufferAccess);
+
+        Assert(accessIdle);
+        if (!accessIdle) {
+            elog(ERROR, "HNSW scan vector buffer access is not idle at end of scan");
+        }
+        VectorBufferEndAccess(&so->vectorBufferAccess);
+    }
 
     MemoryContextDelete(so->tmpCtx);
 

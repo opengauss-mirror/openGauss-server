@@ -42,10 +42,25 @@
 #include "access/generic_xlog.h"
 #include "commands/vacuum.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
+#include "access/datavec/vector_storage.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "catalog/index.h"
 #include "utils/memutils.h"
+
+static const uint32 HNSW_DEAD_PAYLOADS_INITIAL_CAPACITY = 256;
+
+static void HnswCheckGraphTraversalPage(Relation index, Page page, BlockNumber blkno)
+{
+    uint8 role = HnswPageGetRole(page);
+    if (unlikely(role == HNSW_PAGE_ROLE_PAYLOAD)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("hnsw graph traversal for relation \"%s\" reached payload page at block %u",
+                   RelationGetRelationName(index), blkno)));
+    }
+    Assert(role == HNSW_PAGE_ROLE_GRAPH);
+}
 
 /*
  * Check if deleted list contains an index TID
@@ -88,6 +103,8 @@ static void RemoveHeapTids(HnswVacuumState *vacuumstate)
 
         buf = ReadBufferExtended(index, MAIN_FORKNUM, blkno, RBM_NORMAL, bas);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        page = BufferGetPage(buf);
+        HnswCheckGraphTraversalPage(index, page, blkno);
         state = GenericXLogStart(index);
         page = GenericXLogRegisterBuffer(state, buf, 0);
         maxoffno = PageGetMaxOffsetNumber(page);
@@ -137,6 +154,14 @@ static void RemoveHeapTids(HnswVacuumState *vacuumstate)
 
                 tidhash_insert(vacuumstate->deleted, ip, &found);
                 Assert(!found);
+                if (HnswElementTupleHasVectorStorage(etup)) {
+                    HnswElementTupleV2PayloadData *payloads = HnswElementTupleGetPayloads(etup);
+
+                    if (ItemPointerIsValid(&payloads->raw.tid)) {
+                        /* Retain the owner TID so recycle can clear it atomically. */
+                        tidhash_insert(vacuumstate->deadPayloads, ip, &found);
+                    }
+                }
             } else if (etup->level > highestLevel &&
                        !(entryPoint != NULL && blkno == entryPoint->blkno && offno == entryPoint->offno)) {
                 /* Keep track of highest non-entry point */
@@ -216,7 +241,8 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
     Oid collation = vacuumstate->collation;
     BufferAccessStrategy bas = vacuumstate->bas;
     HnswNeighborTuple ntup = vacuumstate->ntup;
-    Size ntupSize = HNSW_NEIGHBOR_TUPLE_SIZE(element->level, m);
+    Size ntupSize = vacuumstate->vectorPayloadStorage ?
+        HnswNeighborTupleSizeV2(element->level, m) : HNSW_NEIGHBOR_TUPLE_SIZE(element->level, m);
     char *base = NULL;
 
     /* Skip if element is entry point */
@@ -237,7 +263,7 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
 
     /* Update neighbor tuple */
     /* Do this before getting page to minimize locking */
-    HnswSetNeighborTuple(base, ntup, element, m);
+    HnswSetNeighborTuple(base, ntup, element, m, vacuumstate->vectorPayloadStorage);
 
     /* Get neighbor page */
     buf = ReadBufferExtended(index, MAIN_FORKNUM, element->neighborPage, RBM_NORMAL, bas);
@@ -369,15 +395,20 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
         buf = ReadBufferExtended(index, MAIN_FORKNUM, blkno, RBM_NORMAL, bas);
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         page = BufferGetPage(buf);
+        HnswCheckGraphTraversalPage(index, page, blkno);
         maxoffno = PageGetMaxOffsetNumber(page);
-        Buffer heapbuf = InvalidBuffer;
 
-        /* Load items into memory to minimize locking */
+        /*
+         * Only collect live (blkno, offno) while the graph page is locked.
+         * V2 tuples store a payload tid overlay in etup->data, not an inline
+         * vector; HnswLoadElementFromTuple would datumCopy that overlay and
+         * TRAP on an unknown varlena tag. Pin the payload after dropping the
+         * graph buffer (payload-then-graph is the insert lock order; LoadElement
+         * releases the graph buffer before pin).
+         */
         for (offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
             HnswElementTuple etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, offno));
             HnswElement element;
-            Datum eRbqDiskData = NULL;
-            heapbuf = InvalidBuffer;
 
             /* Skip neighbor tuples */
             if (!HnswIsElementTuple(etup))
@@ -387,21 +418,7 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
             if (!ItemPointerIsValid(&etup->heaptids[0]))
                 continue;
 
-            /* Create an element */
             element = HnswInitElementFromBlock(blkno, offno);
-
-            if (vacuumstate->enableRabitQ) {
-                RabitqInsertOnDiskParams *rbqDiskParams = vacuumstate->rbqDiskParams;
-                eRbqDiskData = HnswGetVectorFromHeap(rbqDiskParams->heap, etup->heaptids,
-                                                            rbqDiskParams->indexInfo, rbqDiskParams->heapTuple,
-                                                            vacuumstate->procinfo, rbqDiskParams->normprocinfo,
-                                                            rbqDiskParams->collation, &heapbuf);
-            }
-            HnswLoadElementFromTuple(element, etup, false, true, eRbqDiskData);
-            if (BufferIsValid(heapbuf)) {
-                ReleaseBuffer(heapbuf);
-            }
-
             elements = lappend(elements, element);
         }
 
@@ -414,6 +431,11 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
             HnswElement element = (HnswElement)lfirst(lc2);
             HnswElement entryPoint;
             LOCKMODE lockmode = ShareLock;
+
+            if (!HnswLoadElement(element, NULL, NULL, index, vacuumstate->procinfo, vacuumstate->collation,
+                                 true, NULL, vacuumstate->enableRabitQ, NULL, vacuumstate->rbqDiskParams)) {
+                continue;
+            }
 
             /* Check if any neighbors point to deleted values */
             if (!NeedsUpdated(vacuumstate, element))
@@ -494,6 +516,8 @@ static void MarkDeleted(HnswVacuumState *vacuumstate)
          */
         LockBufferForCleanup(buf);
 
+        page = BufferGetPage(buf);
+        HnswCheckGraphTraversalPage(index, page, blkno);
         state = GenericXLogStart(index);
         page = GenericXLogRegisterBuffer(state, buf, 0);
         maxoffno = PageGetMaxOffsetNumber(page);
@@ -541,15 +565,22 @@ static void MarkDeleted(HnswVacuumState *vacuumstate)
 
             /* Overwrite element */
             etup->deleted = 1;
-            if (vacuumstate->enableRabitQ) {
-                MemSet(&etup->data, 0, vacuumstate->rbqcodesSize);
-            } else {
-                MemSet(&etup->data, 0, VARSIZE_ANY(&etup->data));
+            /* Keep external references until VecPayloadRecycle commits their removal. */
+            if (!HnswElementTupleIsVectorStorage(etup)) {
+                if (vacuumstate->enableRabitQ) {
+                    MemSet(&etup->data, 0, vacuumstate->rbqcodesSize);
+                } else {
+                    MemSet(&etup->data, 0, VARSIZE_ANY(&etup->data));
+                }
             }
 
             /* Overwrite neighbors */
             for (int i = 0; i < ntup->count; i++)
                 ItemPointerSetInvalid(&ntup->indextids[i]);
+            if (HnswIsNeighborTupleV2(ntup)) {
+                for (int i = 0; i < ntup->count; i++)
+                    ItemPointerSetInvalid(&ntup->indextids[ntup->count + i]);
+            }
 
             /* Increment version */
             /* This is used to avoid incorrect reads for iterative scans */
@@ -589,6 +620,26 @@ static void MarkDeleted(HnswVacuumState *vacuumstate)
 }
 
 /*
+ * Payload pages are marked dead only after the graph lock is dropped, so insert
+ * (payload then graph) cannot deadlock with vacuum (graph then payload).
+ */
+static void MarkPayloadsDead(HnswVacuumState *vacuumstate)
+{
+    Relation index = vacuumstate->index;
+    tidhash_iterator iter;
+    TidHashEntry *entry;
+
+    if (vacuumstate->deadPayloads == NULL || !vacuumstate->vectorPayloadStorage) {
+        return;
+    }
+
+    tidhash_start_iterate(vacuumstate->deadPayloads, &iter);
+    while ((entry = tidhash_iterate(vacuumstate->deadPayloads, &iter)) != NULL) {
+        VecPayloadRecycle(index, MAIN_FORKNUM, &entry->tid);
+    }
+}
+
+/*
  * Initialize the vacuum state
  */
 static void InitVacuumRbqState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info, RabitQConfig *rbqConfig, int dim)
@@ -623,8 +674,6 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
                             IndexBulkDeleteCallback callback, void *callbackState)
 {
     Relation index = info->index;
-    uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
     float *centroid;
     int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
@@ -635,6 +684,9 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     vacuumstate->stats = stats;
     vacuumstate->callback = callback;
     vacuumstate->callbackState = callbackState;
+    vacuumstate->vectorPayloadLen = 0;
+    vacuumstate->vectorPayloadStorage =
+        HnswRelationHasVectorPayloadStorage(index, NULL, &vacuumstate->vectorPayloadLen);
     vacuumstate->efConstruction = HnswGetEfConstruction(index);
     vacuumstate->bas = GetAccessStrategy(BAS_BULKREAD);
     vacuumstate->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
@@ -650,16 +702,11 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     RabitQConfig *rbqConfig = InitRbqConfigOnDisk(index, &vacuumstate->enableRabitQ, &centroid, dim);
     InitVacuumRbqState(vacuumstate, info, rbqConfig, dim);
 
-    HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
-    {
-        HnswRbqMetaPageInfo rbqInfo;
-        HnswGetRbqMetaPageInfo(index, &rbqInfo);
-        vacuumstate->hnswHeadBlkno = HNSW_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk +
-                                     rbqInfo.matrixNblk + rbqInfo.otherNblk;
-    }
+    vacuumstate->hnswHeadBlkno = HnswGetGraphHeadBlkno(index);
 
     /* Create hash table */
     vacuumstate->deleted = tidhash_create(CurrentMemoryContext, 256, NULL);
+    vacuumstate->deadPayloads = tidhash_create(CurrentMemoryContext, HNSW_DEAD_PAYLOADS_INITIAL_CAPACITY, NULL);
 }
 
 /*
@@ -668,6 +715,9 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
 static void FreeVacuumState(HnswVacuumState *vacuumstate)
 {
     tidhash_destroy(vacuumstate->deleted);
+    if (vacuumstate->deadPayloads != NULL) {
+        tidhash_destroy(vacuumstate->deadPayloads);
+    }
     FreeAccessStrategy(vacuumstate->bas);
     pfree(vacuumstate->ntup);
     if (vacuumstate->enableRabitQ) {
@@ -698,6 +748,9 @@ IndexBulkDeleteResult *hnswbulkdelete_internal(IndexVacuumInfo *info, IndexBulkD
     /* Pass 3: Mark as deleted */
     MarkDeleted(&vacuumstate);
 
+    /* Pass 4: payload DEAD + VBP invalidate, without holding a graph buffer */
+    MarkPayloadsDead(&vacuumstate);
+
     FreeVacuumState(&vacuumstate);
 
     return vacuumstate.stats;
@@ -708,17 +761,17 @@ IndexBulkDeleteResult *hnswbulkdelete_internal(IndexVacuumInfo *info, IndexBulkD
  */
 IndexBulkDeleteResult *hnswvacuumcleanup_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
-    Relation rel = info->index;
-
     if (info->analyze_only)
         return stats;
 
-    /* stats is NULL if ambulkdelete not called */
-    /* OK to return NULL if index not changed */
+    /*
+     * stats is NULL if ambulkdelete was not called. Cleanup-only VACUUM does
+     * not mutate graph or payload state.
+     */
     if (stats == NULL)
         return NULL;
 
-    stats->num_pages = RelationGetNumberOfBlocks(rel);
+    stats->num_pages = RelationGetNumberOfBlocks(info->index);
 
     return stats;
 }

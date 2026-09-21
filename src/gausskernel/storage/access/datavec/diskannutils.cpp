@@ -29,6 +29,7 @@
 #include "miscadmin.h"
 #include "access/datavec/diskann.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/vector_storage.h"
 #include "access/generic_xlog.h"
 
 #define INDEXING_ALPHA (1.2)
@@ -176,7 +177,8 @@ static void DiskAnnCheckMetaHeader(Relation index, uint32 magic, uint32 version,
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("\"%s\" is not a diskann index", RelationGetRelationName(index))));
     }
-    if (unlikely(version != DISKANN_VERSION && version != DISKANN_VERSION_V2)) {
+    if (unlikely(version != DISKANN_VERSION && version != DISKANN_VERSION_V2 &&
+                 version != DISKANN_VERSION_PAYLOAD)) {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("diskann index \"%s\" has unsupported format version %u, REINDEX it",
                                RelationGetRelationName(index), version)));
@@ -195,9 +197,20 @@ void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta)
     buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
-    Size itemsz = sizeof(DiskAnnMetaPageData);
     metapage = (DiskAnnMetaPage)DiskAnnPageGetMeta(page);
-    errno_t rc = memcpy_s(meta, itemsz, metapage, itemsz);
+    Size itemsz = metapage->version == DISKANN_VERSION ?
+        DISKANN_META_V1_FIELDS_SIZE : sizeof(DiskAnnMetaPageData);
+    Size storedSize = metapage->version == DISKANN_VERSION ? DISKANN_META_V1_SIZE : itemsz;
+    if (metapage->version == DISKANN_VERSION_V2 ||
+        ((PageHeader)page)->pd_lower != (char *)metapage - (char *)page + storedSize) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("diskann index \"%s\" has an incompatible metapage layout, REINDEX it",
+                RelationGetRelationName(index))));
+    }
+    errno_t rc = memset_s(meta, sizeof(*meta), 0, sizeof(*meta));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(meta, sizeof(*meta), metapage, itemsz);
     if (rc != EOK) {
         securec_check(rc, "\0", "\0");
     }
@@ -265,6 +278,7 @@ DiskAnnPageGraphStore::DiskAnnPageGraphStore(Relation relation)
     m_edgeSize = metapage.edgeSize;
     m_itemSize = metapage.itemSize;
     m_dimension = metapage.dimensions;
+    m_vectorPayloadStorage = metapage.enableVectorStorage;
     m_funcType = GetFunctionType(index_getprocinfo(relation, 1, DISKANN_DISTANCE_PROC),
                                  DiskAnnOptionalProcInfo(relation, DISKANN_NORM_PROC));
 }
@@ -279,12 +293,10 @@ void DiskAnnPageGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqr
     Buffer buf;
     Page page;
     IndexTuple ctup;
-    bool isnull;
-    Datum src;
-    Datum dst;
     Vector* vector;
     errno_t rc;
     DiskAnnNodePage ntup;
+    VecPayloadDiskRef diskRef;
 
     buf = ReadBuffer(m_rel, blkno);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -295,26 +307,28 @@ void DiskAnnPageGraphStore::GetVector(BlockNumber blkno, float* vec, double* sqr
     ctup = (IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber));
     *hctid = ctup->t_tid;
 
-    src = index_getattr(ctup, 1, RelationGetDescr(m_rel), &isnull);
-    dst = PointerGetDatum(PG_DETOAST_DATUM(src));
-
-    /* get vector data from index tup */
-    vector = (Vector*)DatumGetPointer(dst);
-    Assert(m_dimension == vector->dim);
-    rc = memcpy_s(vec, (Size)(vector->dim * sizeof(float)), vector->x, (Size)(vector->dim * sizeof(float)));
-    if (rc != EOK) {
-        securec_check(rc, "\0", "\0");
-    }
-
     /* get sqrSum from node tup */
     ntup = DiskAnnPageGetNode(ctup);
     *sqrSum = ntup->sqrSum;
 
-    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
-        pfree(DatumGetPointer(dst));
+    if (m_vectorPayloadStorage) {
+        if (!VecPayloadIndexTupleGetRef(ctup, m_rel, &diskRef)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("diskann vector storage failed to read payload ref for relation \"%s\"",
+                    RelationGetRelationName(m_rel))));
+        }
+        UnlockReleaseBuffer(buf);
+        vector = DiskAnnCopyVectorFromPayloadRef(m_rel, &diskRef, NULL);
+    } else {
+        vector = DiskAnnCopyVectorFromIndexTuple(m_rel, ctup);
+        UnlockReleaseBuffer(buf);
     }
 
-    UnlockReleaseBuffer(buf);
+    Assert(m_dimension == vector->dim);
+    rc = memcpy_s(vec, (Size)(vector->dim * sizeof(float)), vector->x, (Size)(vector->dim * sizeof(float)));
+    securec_check_c(rc, "\0", "\0");
+    pfree(vector);
 }
 
 float DiskAnnPageGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) const
@@ -323,10 +337,9 @@ float DiskAnnPageGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) con
     Page page;
     IndexTuple ctup;
     Vector* vector;
-    Datum src;
-    Datum dst;
-    bool isnull;
     float distance;
+    double sqrSum2;
+    VecPayloadDiskRef diskRef;
 
     /* Read and lock the second block */
     buf = ReadBuffer(m_rel, blk2);
@@ -335,20 +348,24 @@ float DiskAnnPageGraphStore::GetDistance(BlockNumber blk1, BlockNumber blk2) con
     /* Get the vector from the second block */
     page = BufferGetPage(buf);
     ctup = (IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber));
-
-    src = index_getattr(ctup, 1, RelationGetDescr(m_rel), &isnull);
-    dst = PointerGetDatum(PG_DETOAST_DATUM(src));
-    vector = (Vector*)DatumGetPointer(dst);
-
-    /* Calculate distance */
-    distance = ComputeDistance(blk1, vector->x, DiskAnnPageGetNode(ctup)->sqrSum);
-
-    /* Clean up */
-    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
-        pfree(DatumGetPointer(dst));
+    sqrSum2 = DiskAnnPageGetNode(ctup)->sqrSum;
+    if (m_vectorPayloadStorage) {
+        if (!VecPayloadIndexTupleGetRef(ctup, m_rel, &diskRef)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("diskann vector storage failed to read payload ref for relation \"%s\"",
+                    RelationGetRelationName(m_rel))));
+        }
+        UnlockReleaseBuffer(buf);
+        vector = DiskAnnCopyVectorFromPayloadRef(m_rel, &diskRef, NULL);
+    } else {
+        vector = DiskAnnCopyVectorFromIndexTuple(m_rel, ctup);
+        UnlockReleaseBuffer(buf);
     }
 
-    UnlockReleaseBuffer(buf);
+    /* Calculate distance */
+    distance = ComputeDistance(blk1, vector->x, sqrSum2);
+    pfree(vector);
     return distance;
 }
 
@@ -358,10 +375,9 @@ float DiskAnnPageGraphStore::ComputeDistance(BlockNumber blk1, float* vec2, doub
     Page page;
     IndexTuple ctup;
     Vector* vector1;
-    Datum src;
-    Datum dst;
-    bool isnull;
     float distance;
+    double sqrSum1;
+    VecPayloadDiskRef diskRef;
 
     /* Read and lock block 1 */
     buf = ReadBuffer(m_rel, blk1);
@@ -370,19 +386,24 @@ float DiskAnnPageGraphStore::ComputeDistance(BlockNumber blk1, float* vec2, doub
     /* Get the vector from block 1 */
     page = BufferGetPage(buf);
     ctup = (IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber));
-
-    src = index_getattr(ctup, 1, RelationGetDescr(m_rel), &isnull);
-    dst = PointerGetDatum(PG_DETOAST_DATUM(src));
-    vector1 = (Vector*)DatumGetPointer(dst);
+    sqrSum1 = DiskAnnPageGetNode(ctup)->sqrSum;
+    if (m_vectorPayloadStorage) {
+        if (!VecPayloadIndexTupleGetRef(ctup, m_rel, &diskRef)) {
+            UnlockReleaseBuffer(buf);
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("diskann vector storage failed to read payload ref for relation \"%s\"",
+                    RelationGetRelationName(m_rel))));
+        }
+        UnlockReleaseBuffer(buf);
+        vector1 = DiskAnnCopyVectorFromPayloadRef(m_rel, &diskRef, NULL);
+    } else {
+        vector1 = DiskAnnCopyVectorFromIndexTuple(m_rel, ctup);
+        UnlockReleaseBuffer(buf);
+    }
 
     /* Calculate L2 distance */
-    distance = ComputeL2DistanceFast(vector1->x, DiskAnnPageGetNode(ctup)->sqrSum, vec2, sqrSum2, vector1->dim);
-
-    /* Clean up */
-    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
-        pfree(DatumGetPointer(dst));
-    }
-    UnlockReleaseBuffer(buf);
+    distance = ComputeL2DistanceFast(vector1->x, sqrSum1, vec2, sqrSum2, vector1->dim);
+    pfree(vector1);
     return distance;
 }
 
@@ -411,11 +432,34 @@ void DiskAnnPageGraphStore::GetNeighbors(BlockNumber blkno, VectorList<Neighbor>
         nbrs->push_back(Neighbor(etup->nexts[i], etup->distance[i]));
     }
     UnlockReleaseBuffer(buf);
+
+    /* Pruning can leave one-way edges to retired nodes. Never follow their
+     * payload refs, which VACUUM may already have cleared and recycled. */
+    size_t count = 0;
+    for (size_t i = 0; i < nbrs->size(); i++) {
+        if (IsLiveNeighbor((*nbrs)[i].id)) {
+            (*nbrs)[count++] = (*nbrs)[i];
+        }
+    }
+    nbrs->resize(count);
+}
+
+bool DiskAnnPageGraphStore::IsLiveNeighbor(BlockNumber blkno) const
+{
+    return !IsMarkDeleted(m_rel, blkno);
 }
 
 void DiskAnnPageGraphStore::GetEdge(DiskAnnEdgePage edge, BlockNumber blkno) const
 {
     GetEdgeTuple(edge, blkno, m_rel, m_nodeSize, m_edgeSize);
+    uint16 count = 0;
+    for (uint16 i = 0; i < edge->count; i++) {
+        if (IsLiveNeighbor(edge->nexts[i])) {
+            edge->nexts[count] = edge->nexts[i];
+            edge->distance[count++] = edge->distance[i];
+        }
+    }
+    edge->count = count;
 }
 
 void DiskAnnPageGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, bool building) const
@@ -999,6 +1043,109 @@ bool DiskAnnEnablePQ(Relation index)
     return opts ? opts->enablePQ : GENERIC_DEFAULT_ENABLE_PQ;
 }
 
+bool DiskAnnGetEnableVectorPayloadStorage(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+
+    if (opts) {
+        return opts->enableVectorStorage;
+    }
+    return false;
+}
+
+bool DiskAnnRelationHasVectorPayloadStorage(
+    Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen)
+{
+    Buffer buf;
+    DiskAnnMetaPage metap;
+
+    buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    metap = DiskAnnPageGetMeta(BufferGetPage(buf));
+    if (metap->magicNumber != DISKANN_MAGIC_NUMBER) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("diskann index metapage for relation \"%s\" is malformed",
+                RelationGetRelationName(index))));
+    }
+    if (metap->version != DISKANN_VERSION_PAYLOAD) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+    if (((PageHeader)BufferGetPage(buf))->pd_lower !=
+        (char *)metap - (char *)BufferGetPage(buf) + sizeof(*metap) || !metap->enableVectorStorage ||
+        !BlockNumberIsValid(metap->payloadInsertBlkno) || metap->payloadLen < VARHDRSZ ||
+        VEC_PAYLOAD_TUPLE_SIZE(metap->payloadLen) > BLCKSZ) {
+        UnlockReleaseBuffer(buf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("diskann vector storage metapage for relation \"%s\" is malformed",
+                RelationGetRelationName(index))));
+    }
+    if (payloadInsertBlkno != NULL) {
+        *payloadInsertBlkno = metap->payloadInsertBlkno;
+    }
+    if (payloadLen != NULL) {
+        *payloadLen = metap->payloadLen;
+    }
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+Vector *DiskAnnCopyVectorFromPayloadRef(Relation index, const VecPayloadDiskRef *diskRef, VectorBufferAccess *access)
+{
+    VecPayloadPin pin;
+    Vector *pinned;
+    Vector *copy;
+    errno_t rc;
+
+    rc = memset_s(&pin, sizeof(pin), 0, sizeof(pin));
+    securec_check(rc, "\0", "\0");
+    if (diskRef == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("diskann vector storage failed to pin payload for relation \"%s\"",
+                RelationGetRelationName(index))));
+    }
+    const VecPayloadPinRequest request = {VEC_PAYLOAD_RAW_VECTOR, diskRef->payloadLen, access};
+    if (!VecPayloadPinGet(index, diskRef, &request, &pin)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("diskann vector storage failed to pin payload for relation \"%s\"",
+                RelationGetRelationName(index))));
+    }
+    pinned = (Vector *)DatumGetPointer(pin.datum);
+    copy = InitVector(pinned->dim);
+    rc = memcpy_s(copy->x, sizeof(float) * pinned->dim, pinned->x, sizeof(float) * pinned->dim);
+    if (rc != EOK) {
+        VecPayloadUnpin(&pin);
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("diskann vector storage failed to copy pinned payload for relation \"%s\": "
+                   "memcpy_s returned %d", RelationGetRelationName(index), rc)));
+    }
+    VecPayloadUnpin(&pin);
+    return copy;
+}
+
+Vector *DiskAnnCopyVectorFromIndexTuple(Relation index, IndexTuple itup)
+{
+    bool isnull = false;
+    Datum src = index_getattr(itup, 1, RelationGetDescr(index), &isnull);
+    Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
+    Vector *vec = (Vector *)DatumGetPointer(dst);
+
+    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
+        return vec;
+    }
+    {
+        Vector *copy = InitVector(vec->dim);
+        errno_t rc = memcpy_s(copy->x, sizeof(float) * vec->dim, vec->x, sizeof(float) * vec->dim);
+        if (rc != EOK) {
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("diskann vector storage failed to copy index tuple vector for relation \"%s\": "
+                       "memcpy_s returned %d", RelationGetRelationName(index), rc)));
+        }
+        return copy;
+    }
+}
+
 /*
  * Get the number of subquantizer
  */
@@ -1064,6 +1211,10 @@ VamanaVertexNbIterator::VamanaVertexNbIterator(Relation index, BlockNumber blk, 
     curNeighborBuf = InvalidBuffer;
     curNbtup = NULL;
     curItup = NULL;
+    edgesOwned = false;
+    access = NULL;
+    curHeaptidsLength = 0;
+    rel = index;
     Buffer nodeBuf = ReadBuffer(index, blk);
     LockBuffer(nodeBuf, BUFFER_LOCK_SHARE);
     Page page = BufferGetPage(nodeBuf);
@@ -1078,6 +1229,7 @@ VamanaVertexNbIterator::VamanaVertexNbIterator(Relation index, BlockNumber blk, 
         nodeBuf = masterBuf;
         Assert(DiskAnnNodeIsMaster(tup->tag));
     }
+    this->nodeBuf = nodeBuf;
     edges = (DiskAnnEdgePage)((uint8_t *)tup + nodeSize);
 }
 
@@ -1108,7 +1260,7 @@ void VamanaVertexNbIterator::conditionMove(MoveDirection direction)
     if (skipVisited) {
         for (; curNeighborId < edges->count; curNeighborId++) {
             blockhash_insert(blocks, edges->nexts[curNeighborId], &found);
-            if (!found) {
+            if (!found && !IsMarkDeleted(rel, edges->nexts[curNeighborId])) {
                 break;
             }
         }
@@ -1129,18 +1281,31 @@ BlockNumber VamanaVertexNbIterator::getCurNeighborInfo(DiskAnnNeighborInfoT *inf
         nbinfo.distance = edges->distance[curNeighborId];
     }
     if ((infoFlag & DISKANN_NEIGHBOR_VECTOR) == DISKANN_NEIGHBOR_VECTOR) {
+        VecPayloadDiskRef diskRef;
+        Vector *vec;
+
         Assert(curItup != NULL);
         Assert(curNbtup != NULL);
-        TupleDesc tupdesc = RelationGetDescr(rel);
-        bool isnull;
-        Datum src = index_getattr(curItup, 1, tupdesc, &isnull);
-        Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
-        nbinfo.vector = dst;
         nbinfo.sqrSum = curNbtup->sqrSum;
-        if (DatumGetPointer(dst) != DatumGetPointer(src)) {
-            /* Mark vector needs to be released by the user */
-            nbinfo.freeVector = true;
+        curHeaptidsLength = curNbtup->heaptidsLength;
+        for (int i = 0; i < DISKANN_HEAPTIDS; i++) {
+            curHeaptids[i] = curNbtup->heaptids[i];
         }
+        if (vectorPayloadStorage) {
+            if (!VecPayloadIndexTupleGetRef(curItup, rel, &diskRef)) {
+                releaseCurNeighborBuffer();
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("diskann vector storage failed to read payload ref for relation \"%s\"",
+                        RelationGetRelationName(rel))));
+            }
+            releaseCurNeighborBuffer();
+            vec = DiskAnnCopyVectorFromPayloadRef(rel, &diskRef, access);
+        } else {
+            vec = DiskAnnCopyVectorFromIndexTuple(rel, curItup);
+        }
+
+        nbinfo.vector = PointerGetDatum(vec);
+        nbinfo.freeVector = true;
     }
     *info = nbinfo;
     return info->blkno;
@@ -1569,4 +1734,3 @@ DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim
 
     return params;
 }
-
