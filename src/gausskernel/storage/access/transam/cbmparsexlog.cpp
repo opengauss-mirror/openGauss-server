@@ -875,6 +875,7 @@ extern void CBMReadAndParseXLog(void)
             pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
             /* We should reset the cbmReaderNormalContext duo to useless hash left. */
             t_thrd.cbm_cxt.cbmPageHash = NULL;
+            t_thrd.cbm_cxt.preReadBuff = NULL;
             MemoryContextReset(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
             ereport(LOG, (errmsg("Thread CBM Reader %d parse failed and reset cbmPageHash.", t_thrd.cbm_cxt.CBMReaderIndex)));
 	    } else {
@@ -1510,7 +1511,7 @@ static bool ParseXlogIntoCBMPagesByCBMReader(CBM_RECORD* cbmRecord, bool isLastC
         startPoint = InvalidXLogRecPtr; /* continue reading at next record */
     }
     t_thrd.cbm_cxt.CBMReaderStatus->readerTotalPageNum = 0;
-    if (ENABLE_DSS && ENABLE_DMS && AmCBMReaderProcess()) {
+    if (ENABLE_DMS && AmCBMReaderProcess()) {
         /* Only dont need to free under CBM Reader with DSS and DMS. */
         xlogreader->preReadBufOrigin = NULL;
         xlogreader->preReadBuf = NULL;
