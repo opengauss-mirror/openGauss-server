@@ -117,6 +117,8 @@ sections:
         sections:
           - label: Python SDK
             href: ./integrationpython.md
+          - label: Python SDK OpenSearch 适配
+            href: ./opensearch_python_sdk.md
           - label: Java SDK
             href: ./integrationjava.md
           - label: Node.js SDK

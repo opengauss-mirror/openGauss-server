@@ -219,4 +219,6 @@ close_connection(conn, cursor)
 
 openGauss Python SDK 还提供了高级多模检索能力，包括向量检索、BM25 全文检索、混合检索（Hybrid Search）以及 AI 模型集成（Embedding、Rerank、Chat）。详细使用指南请参考 [Python SDK 多模检索使用指南](./multimodal_retrieval_python_sdk.md)。
 
+若业务已使用 OpenSearch 风格的索引/文档/搜索 API，可使用连接器中的兼容层，将 DSL 转换为 openGauss SQL。该接口不是 `opensearch-py` 的零修改替换，安装与限制见 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。
+
 [更多操作示例参考](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)

@@ -149,6 +149,8 @@ sections:
             href: ./integration_python.md
           - label: Python SDK 多模检索
             href: ./multimodal_retrieval_python_sdk.md
+          - label: Python SDK OpenSearch 适配
+            href: ./opensearch_python_sdk.md
           - label: Java SDK
             href: ./integration_java.md
           - label: Node.js SDK
