@@ -3,6 +3,7 @@ AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_datavec_SRC)
 
 set(TGT_datavec_INC
         ${PROJECT_SRC_DIR}/include
+        ${PROJECT_OPENGS_DIR}/contrib/ndpplugin
         ${PROJECT_OPENGS_DIR}/contrib/jieba_tokenizer
         ${LZ4_INCLUDE_PATH}
         ${LIBCGROUP_INCLUDE_PATH}

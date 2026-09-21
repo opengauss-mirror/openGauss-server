@@ -33,6 +33,10 @@
  * resowner.c.
  */
 typedef struct ResourceOwnerData* ResourceOwner;
+#ifndef VECTOR_BUFFER_ACCESS_TYPEDEF
+#define VECTOR_BUFFER_ACCESS_TYPEDEF
+typedef struct VectorBufferAccess VectorBufferAccess;
+#endif
 
 extern THR_LOCAL PGDLLIMPORT ResourceOwner IsolatedResourceOwner;
 
@@ -75,6 +79,11 @@ extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent)
 extern void ResourceOwnerEnlargeBuffers(ResourceOwner owner);
 extern void ResourceOwnerRememberBuffer(ResourceOwner owner, Buffer buffer);
 extern void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer);
+
+/* support for vector buffer access management */
+extern void ResourceOwnerEnlargeVectorBufferAccesses(ResourceOwner owner);
+extern void ResourceOwnerRememberVectorBufferAccess(ResourceOwner owner, VectorBufferAccess* access);
+extern void ResourceOwnerForgetVectorBufferAccess(ResourceOwner owner, VectorBufferAccess* access);
 
 /* support for IO-in-progress management */
 extern void ResourceOwnerEnlargeBufferIOs(ResourceOwner owner);

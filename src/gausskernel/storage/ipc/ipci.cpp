@@ -30,6 +30,7 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/knl_undoworker.h"
 #include "access/datavec/ogai_worker.h"
+#include "access/datavec/vector_buffer.h"
 #include "access/ustore/knl_undorequest.h"
 #include "access/ondemand_extreme_rto/redo_utils.h"
 #include "commands/tablespace.h"
@@ -229,6 +230,7 @@ Size ComputeTotalSizeOfShmem()
         if (g_instance.attr.attr_storage.enable_mmap) {
             size = add_size(size, MmapShmemSize());
         }
+        size = add_size(size, VectorBufferShmemSize());
         return size;
 }
 
@@ -393,6 +395,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     ShareInputShmemInit();
 #endif
     MmapShmemInit();
+    VectorBufferShmemInit();
     {
         CheckpointerShmemInit();
         CBMShmemInit();
@@ -561,5 +564,4 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     if (t_thrd.storage_cxt.shmem_startup_hook)
         t_thrd.storage_cxt.shmem_startup_hook();
 }
-
 

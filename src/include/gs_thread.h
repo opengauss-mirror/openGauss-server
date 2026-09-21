@@ -129,6 +129,7 @@ typedef enum knl_thread_role {
     UNDO_WORKER,
     OGAI_LAUNCHER,
     OGAI_WORKER,
+    VBP_RECLAIM,
     CSNMIN_SYNC,
     GLOBALSTATS_THREAD,
     BARRIER_CREATOR,

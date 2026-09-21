@@ -2096,6 +2096,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_vector_buffer_cache",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Enable the session vector buffer cache for payload reads."),
+            NULL},
+            &u_sess->datavec_ctx.enable_vector_buffer_cache,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"enable_rack_memory_free_test",
             PGC_USERSET,
             NODE_ALL,

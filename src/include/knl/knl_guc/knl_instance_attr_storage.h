@@ -274,6 +274,17 @@ typedef struct knl_instance_attr_storage {
     bool cache_data_on_npu;
     char* ivfflat_npubind_info;
     bool enable_mmap;
+    int vectorBuffers;
+    int vbpChunkSize;
+    int vbpHashPartitions;
+    int vbpMinPayload;
+    int vbpReclaimScanLimit;
+    /* Cold-path reclaim: max entries per VbpColdEvictBatch when caller omits budget. */
+    int vectorBufferReclaimBatchSize;
+    /* Enable dedicated VBP reclaim thread wakeups (SetLatch + ReclaimPass). */
+    bool vbp_cold_evict;
+    /* WaitLatch timeout for VBP reclaim thread (ms). */
+    int vectorBufferReclaimInterval;
     int num_slru_buffers[SLRU_BUFFER_KIND];
     char* num_slru_buffers_str;
     char* ubs_mem_path;

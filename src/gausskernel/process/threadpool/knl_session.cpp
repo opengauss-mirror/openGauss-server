@@ -1617,6 +1617,7 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->diskann_build_in_memory = false;
     datavec_cxt->rbq_refinek = 0.0;
     datavec_cxt->enable_npu = false;
+    datavec_cxt->enable_vector_buffer_cache = false;
 }
 
 #ifdef ENABLE_HTAP
