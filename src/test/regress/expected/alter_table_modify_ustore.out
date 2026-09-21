@@ -3176,6 +3176,36 @@ ALTER TABLE test_at_modify_deferrable_temp ADD CONSTRAINT test_at_modify_deferra
 ERROR:  Ustore table does not support to set deferrable.
 DETAIL:  N/A
 DROP TABLE test_at_modify_deferrable_temp;
+-- test alter column set not null on the column added with a default value
+CREATE TABLE test_at_set_not_null(a int) WITH(STORAGE_TYPE=USTORE);
+INSERT INTO test_at_set_not_null VALUES(1);
+ALTER TABLE test_at_set_not_null ADD COLUMN b int DEFAULT 0;
+SELECT b, b IS NULL FROM test_at_set_not_null;
+ b | ?column? 
+---+----------
+ 0 | f
+(1 row)
+
+ALTER TABLE test_at_set_not_null ALTER COLUMN b SET NOT NULL;
+INSERT INTO test_at_set_not_null VALUES(2);
+INSERT INTO test_at_set_not_null VALUES(3, NULL); -- ERROR
+ERROR:  null value in column "b" violates not-null constraint
+DETAIL:  Failing row contains (3, null).
+SELECT * FROM test_at_set_not_null ORDER BY a;
+ a | b 
+---+---
+ 1 | 0
+ 2 | 0
+(2 rows)
+
+DROP TABLE test_at_set_not_null;
+-- test alter column set not null on the column added without a default value
+CREATE TABLE test_at_set_not_null_no_def(a int) WITH(STORAGE_TYPE=USTORE);
+INSERT INTO test_at_set_not_null_no_def VALUES(1);
+ALTER TABLE test_at_set_not_null_no_def ADD COLUMN b int;
+ALTER TABLE test_at_set_not_null_no_def ALTER COLUMN b SET NOT NULL; -- ERROR
+ERROR:  column "b" contains null values
+DROP TABLE test_at_set_not_null_no_def;
 -- END
 RESET CURRENT_SCHEMA;
 DROP SCHEMA atbdb_ustore_schema CASCADE;

@@ -298,14 +298,22 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
         F_NAMEEQ, CStringGetDatum(oriname));
 
     sd = systable_beginscan(rbRel, RecyclebinDbidNspOrinameIndexId, true, NULL, 3, skey);
-    /* restore drop/truncate use the latest version, purge use the oldest version */
-    ScanDirection scan_direct = (operMode == RB_OPER_PURGE) ? ForwardScanDirection : BackwardScanDirection;
+    /*
+     * Restore-drop fetches the latest version, purge and restore-truncate
+     * fetch the oldest one. Besides, restore-truncate skips the objects that
+     * have already been restored (rcycanrestore is cleared after each swap),
+     * so that a repeated flashback reports an error instead of undoing the
+     * previous restore and silently emptying the table.
+     */
+    ScanDirection scan_direct = (operMode == RB_OPER_RESTORE_DROP) ? BackwardScanDirection
+                                                                   : ForwardScanDirection;
     while ((tup = (HeapTuple)index_getnext(sd->iscan, scan_direct)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
         if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
             (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX) ||
             (operMode == RB_OPER_RESTORE_DROP && rbForm->rcyoperation != 'd') ||
             (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't') ||
+            (operMode == RB_OPER_RESTORE_TRUNCATE && !rbForm->rcycanrestore) ||
             TrFetchMatchAuto(rbRel, tup, InvalidOid)) {
             continue;
         }
@@ -346,6 +354,10 @@ bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMod
             (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
             ereport(ERROR,
                 (errmsg("recycle object \"%s\" desired does not exist", rcyname)));
+        }
+        if (operMode == RB_OPER_RESTORE_TRUNCATE && !rbForm->rcycanrestore) {
+            ereport(ERROR,
+                (errmsg("recycle object \"%s\" cannot be restored", rcyname)));
         }
         if (TrFetchMatchAuto(rbRel, tup, InvalidOid)) {
             ereport(ERROR,
@@ -1298,6 +1310,14 @@ void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup, bool isPart)
     replaces[Anum_pg_recyclebin_rcyfrozenxid64 - 1] = true;
     Datum xid64datum = heap_getattr(relTup, frozenxid64Index, RelationGetDescr(relRel), &isNull);
     values[Anum_pg_recyclebin_rcyfrozenxid64 - 1] = DatumGetTransactionId(xid64datum);
+
+    /*
+     * Mark the object as consumed: after the swap it keeps the relfilenode
+     * swapped out of the base relation instead of any pre-truncate snapshot,
+     * so it must not be selected by a later restore-truncate again.
+     */
+    replaces[Anum_pg_recyclebin_rcycanrestore - 1] = true;
+    values[Anum_pg_recyclebin_rcycanrestore - 1] = BoolGetDatum(false);
 
     newTup = heap_modify_tuple(rbTup, RelationGetDescr(rbRel), values, nulls, replaces);
 
