@@ -31,6 +31,9 @@
 ./share/postgresql/postgres.description
 ./share/postgresql/postgresql.conf.sample
 ./share/postgresql/extension/age--1.0.0.sql
+./share/postgresql/extension/age--1.0.1.sql
+./share/postgresql/extension/age--1.0.0--1.0.1.sql
+./share/postgresql/extension/age--1.0.1--1.0.0.sql
 ./share/postgresql/extension/age.control
 ./share/postgresql/extension/plpgsql--1.0.sql
 ./share/postgresql/extension/hstore.control
