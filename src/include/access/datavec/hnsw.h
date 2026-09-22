@@ -826,6 +826,7 @@ bool HnswTryGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *in
                               FmgrInfo *procinfo, FmgrInfo *normprocinfo, Oid collation, Buffer* userbuf,
                               Datum *origin);
 void HnswComputeVectorRBQCode(HnswElement element, Vector *transformedVec, float *centroid, int funcType, char *base);
+PGDLLEXPORT List *HnswLoadCenters(Relation heap, Relation index, IndexInfo *indexInfo, int centerCount);
 void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildState *buildstate,
                        ForkNumber forkNum, bool insert);
 

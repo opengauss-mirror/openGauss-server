@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 
+#include <cfloat>
 #include <cmath>
 
 #include "access/tableam.h"
@@ -48,6 +49,8 @@
 #define PARALLEL_KEY_HNSW_AREA UINT64CONST(0xA000000000000002)
 #define PARALLEL_KEY_QUERY_TEXT UINT64CONST(0xA000000000000003)
 #define PROGRESS_CREATEIDX_TUPLES_DONE 0
+#define HNSW_DISTRIBUTION_SAMPLE_MULTIPLIER 50
+#define HNSW_DISTRIBUTION_MIN_SAMPLES 10000
 
 #define GENERATIONCHUNK_RAWSIZE (SIZEOF_SIZE_T + SIZEOF_VOID_P * 2)
 
@@ -177,6 +180,188 @@ static void SampleRows(HnswBuildState *buildstate)
         tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo,
                                  false, SampleCallback, (void *) buildstate, NULL, targblock, 1);
     }
+}
+
+static Vector *HnswCopyCenter(Vector *center)
+{
+    Size size = VECTOR_SIZE(center->dim);
+    Vector *copy = (Vector *)palloc0(size);
+    errno_t rc = memcpy_s(copy, size, center, size);
+    securec_check(rc, "\0", "\0");
+
+    return copy;
+}
+
+static void HnswInitDistributionCenters(VectorArray samples, VectorArray centers)
+{
+    int centerCount = centers->maxlen;
+
+    VectorArraySet(centers, 0, VectorArrayGet(samples, random() % samples->length));
+    centers->length = 1;
+
+    for (int centerIndex = 1; centerIndex < centerCount; centerIndex++) {
+        int bestSampleIndex = 0;
+        double bestDistance = -1.0;
+
+        for (int sampleIndex = 0; sampleIndex < samples->length; sampleIndex++) {
+            Vector *sample = (Vector *)VectorArrayGet(samples, sampleIndex);
+            double nearestDistance = DBL_MAX;
+
+            for (int existingCenterIndex = 0; existingCenterIndex < centers->length;
+                 existingCenterIndex++) {
+                Vector *center = (Vector *)VectorArrayGet(centers, existingCenterIndex);
+                double distance = VectorL2SquaredDistance(sample->dim, sample->x,
+                                                          center->x);
+                nearestDistance = Min(nearestDistance, distance);
+            }
+
+            if (nearestDistance > bestDistance) {
+                bestDistance = nearestDistance;
+                bestSampleIndex = sampleIndex;
+            }
+        }
+
+        VectorArraySet(centers, centerIndex, VectorArrayGet(samples, bestSampleIndex));
+        centers->length++;
+    }
+}
+
+static int HnswNearestDistributionCenter(Vector *sample, VectorArray centers)
+{
+    int nearestCenter = 0;
+    double nearestDistance = DBL_MAX;
+
+    for (int centerIndex = 0; centerIndex < centers->length; centerIndex++) {
+        Vector *center = (Vector *)VectorArrayGet(centers, centerIndex);
+        double distance = VectorL2SquaredDistance(sample->dim, sample->x, center->x);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestCenter = centerIndex;
+        }
+    }
+
+    return nearestCenter;
+}
+
+static void HnswKmeansDistributionCenters(VectorArray samples, VectorArray centers)
+{
+    int centerCount = centers->maxlen;
+    int dimensions = centers->dim;
+    const int iterations = 20;
+
+    HnswInitDistributionCenters(samples, centers);
+
+    for (int iteration = 0; iteration < iterations; iteration++) {
+        float *sums = (float *)palloc0(sizeof(float) * centerCount * dimensions);
+        int *counts = (int *)palloc0(sizeof(int) * centerCount);
+
+        for (int sampleIndex = 0; sampleIndex < samples->length; sampleIndex++) {
+            Vector *sample = (Vector *)VectorArrayGet(samples, sampleIndex);
+            int centerIndex = HnswNearestDistributionCenter(sample, centers);
+            float *sum = sums + (centerIndex * dimensions);
+
+            counts[centerIndex]++;
+            for (int dimIndex = 0; dimIndex < dimensions; dimIndex++) {
+                sum[dimIndex] += sample->x[dimIndex];
+            }
+        }
+
+        for (int centerIndex = 0; centerIndex < centerCount; centerIndex++) {
+            if (counts[centerIndex] == 0) {
+                continue;
+            }
+
+            Vector *center = (Vector *)VectorArrayGet(centers, centerIndex);
+            float *sum = sums + (centerIndex * dimensions);
+            for (int dimIndex = 0; dimIndex < dimensions; dimIndex++) {
+                center->x[dimIndex] = sum[dimIndex] / counts[centerIndex];
+            }
+        }
+
+        pfree(sums);
+        pfree(counts);
+    }
+}
+
+/*
+ * Generate vector L2 distribution centers for an HNSW-distributed table.
+ * Centers are trained from heap samples and are not stored in the HNSW index.
+ */
+PGDLLEXPORT List *HnswLoadCenters(Relation heap, Relation index, IndexInfo *indexInfo,
+                                  int centerCount)
+{
+    HnswBuildState buildstate;
+    VectorArray centers = NULL;
+    List *centerList = NIL;
+    int numSamples;
+
+    if (centerCount <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("HNSW center count must be positive")));
+    }
+
+    errno_t rc = memset_s(&buildstate, sizeof(HnswBuildState), 0, sizeof(HnswBuildState));
+    securec_check(rc, "\0", "\0");
+
+    buildstate.heap = heap;
+    buildstate.index = index;
+    buildstate.indexInfo = indexInfo;
+    buildstate.typeInfo = HnswGetTypeInfo(index);
+    buildstate.dimensions = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    buildstate.procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
+    buildstate.normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
+    buildstate.kmeansnormprocinfo = HnswOptionalProcInfo(index, HNSW_KMEANS_NORMAL_PROC);
+    buildstate.collation = index->rd_indcollation[0];
+    buildstate.enableRabitQ = false;
+    buildstate.tmpCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "Hnsw distribution center context",
+                              ALLOCSET_DEFAULT_SIZES);
+
+    if (TupleDescAttr(index->rd_att, 0)->atttypid != VECTOROID) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("HNSW distribution only supports vector columns")));
+    }
+
+    if (buildstate.dimensions < 0) {
+        elog(ERROR, "column does not have dimensions");
+    }
+
+    numSamples = centerCount * HNSW_DISTRIBUTION_SAMPLE_MULTIPLIER;
+    if (numSamples < HNSW_DISTRIBUTION_MIN_SAMPLES) {
+        numSamples = HNSW_DISTRIBUTION_MIN_SAMPLES;
+    }
+
+    buildstate.samples = VectorArrayInit(numSamples, buildstate.dimensions,
+                                         VECTOR_SIZE(buildstate.dimensions));
+    SampleRows(&buildstate);
+
+    if (buildstate.samples->length == 0) {
+        MemoryContextDelete(buildstate.tmpCtx);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("HNSW distribution cannot be created on an empty table")));
+    }
+
+    if (buildstate.samples->length < centerCount) {
+        ereport(NOTICE,
+                (errmsg("HNSW distribution created with fewer samples than centers"),
+                 errdetail("This may reduce routing quality.")));
+    }
+
+    centers = VectorArrayInit(centerCount, buildstate.dimensions,
+                              VECTOR_SIZE(buildstate.dimensions));
+    HnswKmeansDistributionCenters(buildstate.samples, centers);
+
+    for (int centerIndex = 0; centerIndex < centerCount; centerIndex++) {
+        centerList = lappend(centerList,
+                             HnswCopyCenter((Vector *)VectorArrayGet(centers,
+                                                                     centerIndex)));
+    }
+
+    VectorArrayFree(buildstate.samples);
+    VectorArrayFree(centers);
+    MemoryContextDelete(buildstate.tmpCtx);
+
+    return centerList;
 }
 
 PQParams *InitPQParamsInMemory(HnswBuildState *buildstate)

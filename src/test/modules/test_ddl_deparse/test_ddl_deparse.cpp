@@ -21,13 +21,32 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(get_command_type);
 PG_FUNCTION_INFO_V1(get_command_tag);
 PG_FUNCTION_INFO_V1(get_altertable_subcmdtypes);
+PG_FUNCTION_INFO_V1(test_format_type_extended);
 
 extern "C"
 {
     Datum                get_command_type(PG_FUNCTION_ARGS);
     Datum                get_command_tag(PG_FUNCTION_ARGS);
     Datum                get_altertable_subcmdtypes(PG_FUNCTION_ARGS);
+    Datum                test_format_type_extended(PG_FUNCTION_ARGS);
 }
+
+/* SQL-callable test wrapper for the backend-only format_type_extended API. */
+Datum
+test_format_type_extended(PG_FUNCTION_ARGS)
+{
+    Oid typeOid = PG_GETARG_OID(0);
+    int32 typmod = PG_GETARG_INT32(1);
+    bits16 flags = (bits16)PG_GETARG_INT32(2);
+    char* result = format_type_extended(typeOid, typmod, flags);
+
+    if (result == NULL) {
+        PG_RETURN_NULL();
+    }
+
+    PG_RETURN_TEXT_P(cstring_to_text(result));
+}
+
 /*
  * Return the textual representation of the struct type used to represent a
  * command in struct CollectedCommand format.

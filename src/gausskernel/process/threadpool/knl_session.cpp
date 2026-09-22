@@ -1612,6 +1612,8 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->rbq_query_bits = 0;
     datavec_cxt->rbq_sample_rows = 0;
     datavec_cxt->ivfflat_probes = 0;
+    datavec_cxt->ivfflat_distributed_probes = 0;
+    datavec_cxt->hnsw_distributed_probes = 0;
     datavec_cxt->ivfpq_kreorder = 0;
     datavec_cxt->diskann_probes = 0;
     datavec_cxt->diskann_build_in_memory = false;

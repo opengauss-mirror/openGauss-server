@@ -3226,6 +3226,8 @@ typedef struct knl_u_datavec_context {
     int rbq_query_bits;
     int rbq_sample_rows;
     int ivfflat_probes;
+    int ivfflat_distributed_probes;
+    int hnsw_distributed_probes;
     int ivfpq_kreorder;
     int diskann_probes;
     bool diskann_build_in_memory;
