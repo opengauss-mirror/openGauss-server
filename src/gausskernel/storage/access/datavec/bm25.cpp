@@ -393,6 +393,24 @@ Datum bm25options(PG_FUNCTION_ARGS)
     Bm25Options *rdopts;
 
     options = parseRelOptions(reloptions, validate, RELOPT_KIND_BM25, &numoptions);
+    /* Validate explicit paths during DDL, independently of tokenizer cache hits.
+     * Relcache loads (validate=false) must not perform filesystem checks.
+     */
+    if (validate) {
+        for (int i = 0; i < numoptions; i++) {
+            if (!options[i].isset || strcmp(options[i].gen->name, "dict_path") != 0) {
+                continue;
+            }
+            const char* dictPath = options[i].values.string_val;
+            if (dictPath == NULL || dictPath[0] == '\0' ||
+                pg_strcasecmp(dictPath, DEFAULT_TOKENIZER_CACHE_KEY) == 0) {
+                break;
+            }
+            char* resolved = Bm25ValidateDictPath(dictPath);
+            pfree(resolved);
+            break;
+        }
+    }
     rdopts = (Bm25Options *)allocateReloptStruct(sizeof(Bm25Options), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(Bm25Options), options, numoptions, validate, tab, lengthof(tab));
 
