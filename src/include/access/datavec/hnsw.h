@@ -30,10 +30,12 @@
 #include "nodes/execnodes.h"
 #include "port.h" /* for random() */
 #include "access/datavec/vector.h"
-#include "access/datavec/vecindex.h"
 #include "access/datavec/utils.h"
 #include "access/datavec/rabitq.h"
 #include "access/datavec/hnswlsg.h"
+#include "access/datavec/vector_storage.h"
+
+struct VectorBufferAccess;
 
 /* Hash tables */
 typedef struct TidHashEntry {
@@ -87,8 +89,16 @@ typedef union {
 #define HNSW_KMEANS_NORMAL_PROC 4
 
 #define HNSW_VERSION 1
+#define HNSW_VECTOR_STORAGE_VERSION 2
 #define HNSW_MAGIC_NUMBER 0xA953A953
 #define HNSW_PAGE_ID 0xFF90
+
+#define HNSW_META_HAS_VECTOR_STORAGE 0x00000001U
+#define HNSW_PAYLOAD_FORMAT_VERSION 1
+
+#define HNSW_PAGE_ROLE_MASK 0x03
+#define HNSW_PAGE_ROLE_GRAPH 0x00
+#define HNSW_PAGE_ROLE_PAYLOAD 0x01
 
 /* Preserved page numbers */
 #define HNSW_METAPAGE_BLKNO 0
@@ -109,7 +119,9 @@ typedef union {
 #define HNSW_DEFAULT_M 16
 #define HNSW_MIN_M 2
 #define HNSW_MAX_M 100
+#define HNSW_V2_NEIGHBOR_TID_GROUPS 2
 #define HNSW_DEFAULT_EF_CONSTRUCTION 64
+#define HNSW_DEFAULT_ENABLE_VECTOR_STORAGE false
 #define HNSW_MIN_EF_CONSTRUCTION 4
 #define HNSW_MAX_EF_CONSTRUCTION 1000
 #define HNSW_DEFAULT_EF_SEARCH 40
@@ -126,6 +138,7 @@ typedef union {
 /* Tuple types */
 #define HNSW_ELEMENT_TUPLE_TYPE 1
 #define HNSW_NEIGHBOR_TUPLE_TYPE 2
+#define HNSW_NEIGHBOR_TUPLE_TYPE_V2 3
 
 /* page types */
 #define HNSW_DEFAULT_PAGE_TYPE 0
@@ -166,13 +179,11 @@ typedef union {
 #define HNSW_ELEMENT_TUPLE_SIZE(size) MAXALIGN(offsetof(HnswElementTupleData, data) + (size))
 #define HNSW_NEIGHBOR_TUPLE_SIZE(level, m) \
     MAXALIGN(offsetof(HnswNeighborTupleData, indextids) + ((level) + 2) * (m) * sizeof(ItemPointerData))
-
 #define HNSW_NEIGHBOR_ARRAY_SIZE(lm) (offsetof(HnswNeighborArray, items) + sizeof(HnswCandidate) * (lm))
 
 #define HnswPageGetOpaque(page) ((HnswPageOpaque)PageGetSpecialPointer(page))
 #define HnswPageGetMeta(page) ((HnswMetaPageData *)PageGetContents(page))
 #define HnswPageGetAppendMeta(page) ((HnswAppendMetaPageData *)PageGetContents(page))
-
 #define HnswDefaultMaxItemSize                                                                              \
     MAXALIGN_DOWN((BLCKSZ - MAXALIGN(SizeOfPageHeaderData + sizeof(ItemIdData) + sizeof(ItemPointerData)) - \
                    MAXALIGN(sizeof(HnswPageOpaqueData))))
@@ -215,8 +226,6 @@ typedef union {
     } while (0)
 
 #define HnswIsElementTuple(tup) ((tup)->type == HNSW_ELEMENT_TUPLE_TYPE)
-#define HnswIsNeighborTuple(tup) ((tup)->type == HNSW_NEIGHBOR_TUPLE_TYPE)
-
 /* 2 * M connections for ground layer */
 #define HnswGetLayerM(m, layer) ((layer == 0) ? (m) * 2 : (m))
 
@@ -230,7 +239,6 @@ typedef union {
          (sizeof(ItemPointerData)) / (m)) -                                                \
             2,                                                                             \
         255)
-
 #define HnswGetValue(base, element) PointerGetDatum(HnswPtrAccess(base, (element)->value))
 
 #define HnswGetPairingHeapCandidate(membername, ptr) \
@@ -334,6 +342,7 @@ struct HnswElementData {
     OffsetNumber offno;
     OffsetNumber neighborOffno;
     BlockNumber neighborPage;
+    ItemPointerData payloadTid;
     HnswDatumPtr value;
     HnswDatumPtr pqcodes;
     HnswDatumPtr rbqcodes;
@@ -376,6 +385,7 @@ typedef struct HnswOptions {
     bool enableRabitQ;
     bool rabitqFHT;     /* use FHT Matrix or Random Orthogonal Matrix */
     char *rabitqRT;     /* whether to rerank, and the type */
+    bool enableVectorStorage;
 } HnswOptions;
 
 #define HnswOptionsGetStringData(_basePtr, _memberName, _defaultVal)                    \
@@ -396,11 +406,13 @@ typedef struct HnswGraph {
 
     /* Allocations state */
     LWLock allocatorLock;
-    long memoryUsed;
-    long memoryTotal;
+    Size memoryUsed;
+    Size memoryTotal;
 
     /* Flushed state */
     LWLock flushLock;
+    /* Serializes graph and payload P_NEW during parallel build spill. */
+    LWLock extensionLock;
     bool flushed;
 } HnswGraph;
 
@@ -520,6 +532,7 @@ typedef struct HnswBuildState {
     LsgCalculator* LocScalingParam;
 
     /* storage page info */
+    uint32 vectorPayloadLen;
     bool isUStore; /* false means astore */
 } HnswBuildState;
 
@@ -561,9 +574,27 @@ typedef struct HnswMetaPageData {
     uint32 lsgSampleSize;
     uint32 lsgCodeBookSize;
     uint16 lsgSampleNblk;
+
+    /* Vector storage info */
+    uint32 flags;
+    uint16 payloadFormatVersion;
+    uint16 reservedFlags;
+    BlockNumber graphHeadBlkno;
+    BlockNumber payloadInsertBlkno;
+    ItemPointerData payloadFreeHead;
+    uint64 livePayloads;
+    uint64 deadPayloads;
+    uint32 payloadLen;
 } HnswMetaPageData;
 
 typedef HnswMetaPageData *HnswMetaPage;
+
+typedef struct HnswVectorStorageMetaUpdate {
+    BlockNumber graphHeadBlkno;
+    BlockNumber payloadInsertBlkno;
+    uint32 payloadLen;
+    uint64 livePayloads;
+} HnswVectorStorageMetaUpdate;
 
 typedef struct HnswRbqMetaPageInfo {
     bool enableRabitQ;
@@ -629,14 +660,96 @@ typedef struct HnswElementTupleData {
 
 typedef HnswElementTupleData *HnswElementTuple;
 
+#define HNSW_ELEMENT_FLAG_VECTOR_STORAGE 0x0001
+
+#define HNSW_ELEMENT_REF_RAW 0x0001
+/* Reserved on-disk bits; this phase only sets HNSW_ELEMENT_REF_RAW. */
+#define HNSW_ELEMENT_REF_PQ 0x0002
+#define HNSW_ELEMENT_REF_RABITQ 0x0004
+
+typedef struct HnswElementTupleV2PayloadData {
+    uint16 refMask;
+    uint16 reserved;
+    VecPayloadDiskRef raw;
+    /* Reserved sibling slot (PQ/RabitQ); must stay zero in this phase. */
+    VecPayloadDiskRef aux;
+} HnswElementTupleV2PayloadData;
+
+#define HNSW_ELEMENT_TUPLE_V2_SIZE \
+    MAXALIGN(offsetof(HnswElementTupleData, data) + sizeof(HnswElementTupleV2PayloadData))
+
+/* Flag bit only; does not validate the embedded payload tid (see HnswElementTupleHasVectorStorage). */
+static inline bool VecHnswElementTupleHasVectorStorageFlag(const HnswElementTupleData *itup)
+{
+    return (itup->unused & HNSW_ELEMENT_FLAG_VECTOR_STORAGE) != 0;
+}
+
+static inline Size VecHnswElementTupleSize(const HnswElementTupleData *itup)
+{
+    return VecHnswElementTupleHasVectorStorageFlag(itup) ? HNSW_ELEMENT_TUPLE_V2_SIZE :
+                                                          HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY(&itup->data));
+}
+static inline char *VecIndexTupleGetXid(HnswElementTupleData *itup)
+{
+    return ((char *)itup) + VecHnswElementTupleSize(itup);
+}
+
+#include "access/datavec/vecindex.h"
+
 typedef struct HnswNeighborTupleData {
     uint8 type;
     uint8 version;
     uint16 count;
+    /*
+     * Legacy (type=2): indextids[0, count) are graph ItemPointers.
+     * V2 (type=3): indextids[0, count) graph, indextids[count, 2*count) payload tids.
+     */
     ItemPointerData indextids[FLEXIBLE_ARRAY_MEMBER];
 } HnswNeighborTupleData;
 
 typedef HnswNeighborTupleData *HnswNeighborTuple;
+
+static inline Size HnswNeighborTupleSizeV2(int level, int m)
+{
+    return MAXALIGN(offsetof(HnswNeighborTupleData, indextids) +
+        HNSW_V2_NEIGHBOR_TID_GROUPS * (level + 2) * m * sizeof(ItemPointerData));
+}
+
+static inline uint8 HnswPageGetRole(Page page)
+{
+    return HnswPageGetOpaque(page)->unused & HNSW_PAGE_ROLE_MASK;
+}
+
+static inline void HnswPageSetRole(Page page, uint8 role)
+{
+    HnswPageOpaque opaque = HnswPageGetOpaque(page);
+
+    opaque->unused = (uint8)((opaque->unused & (uint8)(~HNSW_PAGE_ROLE_MASK)) |
+        (role & HNSW_PAGE_ROLE_MASK));
+}
+
+static inline bool HnswIsNeighborTupleLegacy(const HnswNeighborTupleData *tuple)
+{
+    return tuple->type == HNSW_NEIGHBOR_TUPLE_TYPE;
+}
+
+static inline bool HnswIsNeighborTupleV2(const HnswNeighborTupleData *tuple)
+{
+    return tuple->type == HNSW_NEIGHBOR_TUPLE_TYPE_V2;
+}
+
+static inline bool HnswIsNeighborTuple(const HnswNeighborTupleData *tuple)
+{
+    return HnswIsNeighborTupleLegacy(tuple) || HnswIsNeighborTupleV2(tuple);
+}
+
+/* V2 stores an additional payload reference for each neighbor. */
+static inline int HnswGetMaxLevelV2(int m)
+{
+    return Min(((BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(HnswPageOpaqueData)) -
+        offsetof(HnswNeighborTupleData, indextids) - sizeof(ItemIdData)) /
+        (HNSW_V2_NEIGHBOR_TID_GROUPS * sizeof(ItemPointerData)) / m) - 2, 255);
+}
 
 typedef struct HnswBuildParams {
     /* build params */
@@ -668,6 +781,8 @@ typedef struct HnswScanOpaqueData {
     int64 tuples;
     double previousDistance;
     MemoryContext tmpCtx;
+    struct VectorBufferAccess *vectorBufferAccess;
+    uint32 vectorPayloadLen;
 
     /* Support functions */
     FmgrInfo *procinfo;
@@ -677,6 +792,7 @@ typedef struct HnswScanOpaqueData {
     bool enablePQ;
     PQParams params;
     int pqMode;
+    bool tryMmap;
 
     bool enableRabitQ;
     RabitqQueryParams *rbqParams;
@@ -697,6 +813,8 @@ typedef struct HnswVacuumState {
     IndexBulkDeleteCallback callback;
     void *callbackState;
     BlockNumber hnswHeadBlkno;
+    bool vectorPayloadStorage;
+    uint32 vectorPayloadLen;
 
     /* Settings */
     int m;
@@ -708,6 +826,7 @@ typedef struct HnswVacuumState {
 
     /* Variables */
     struct tidhash_hash *deleted;
+    struct tidhash_hash *deadPayloads;
     BufferAccessStrategy bas;
     HnswNeighborTuple ntup;
     HnswElementData highestPoint;
@@ -743,6 +862,8 @@ int HnswGetM(Relation index);
 int HnswGetEfConstruction(Relation index);
 bool HnswGetEnablePQ(Relation index);
 bool HnswGetEnableMMap(Relation index);
+/* Build-time reloption; runtime paths must use the metapage. */
+bool HnswGetEnableVectorPayloadStorage(Relation index);
 int HnswGetPqM(Relation index);
 int HnswGetPqKsub(Relation index);
 bool HnswGetEnableLsg(Relation index);
@@ -754,7 +875,7 @@ RefineType HnswGetRefineType(Relation index);
 FmgrInfo *HnswOptionalProcInfo(Relation index, uint16 procnum);
 Datum HnswNormValue(const HnswTypeInfo *typeInfo, Oid collation, Datum value);
 bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
-Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
+Buffer HnswNewBuffer(Relation index, ForkNumber forkNum, LWLock *buildExtensionLock = NULL);
 void HnswInitPage(Buffer buf, Page page);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
                       int m, bool inserting, HnswElement skipElement, VisitedHash *v, pairingheap **discarded,
@@ -763,8 +884,11 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                       bool enablePQ = false, PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
+BlockNumber HnswGetGraphHeadBlkno(Relation index);
 void *HnswAlloc(HnswAllocator *allocator, Size size);
+int HnswChooseLevel(double ml, int maxLevel);
 HnswElement HnswInitElement(char *base, ItemPointer tid, int m, double ml, int maxLevel, HnswAllocator *alloc);
+HnswElement HnswInitElementWithLevel(char *base, ItemPointer tid, int m, int level, HnswAllocator *alloc);
 HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno);
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
                               FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
@@ -776,12 +900,15 @@ HnswCandidate *HnswEntryCandidate(char *base, HnswElement em, Datum q, Relation 
                                   bool enablePQ = false, PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 void HnswUpdateMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber insertPage,
                         ForkNumber forkNum, bool building);
+void HnswUpdateMetaPageVectorStorage(Relation index, const HnswVectorStorageMetaUpdate *update,
+                                     ForkNumber forkNum, bool building);
 void HnswUpdateMetaPageRbq(Relation index, ForkNumber forkNum, bool updateDelay);
-void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m);
-void HnswAddHeapTid(HnswElement element, ItemPointer heaptid);
+void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m, bool withPayloadTids);
+void HnswCheckNeighborTupleType(HnswNeighborTuple ntup, bool vectorStorage);
+void HnswAddHeapTid(HnswElement element, const ItemPointerData *heaptid);
 void HnswInitNeighbors(char *base, HnswElement element, int m, HnswAllocator *alloc);
 bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, ItemPointer heap_tid,
-                           bool building, Relation heap);
+                           bool building, Relation heap, LWLock *buildExtensionLock = NULL);
 void HnswUpdateNeighborsOnDisk(Relation index, FmgrInfo *procinfo, Oid collation, HnswElement e, int m,
                                bool checkExisting, bool building, bool enableRabitQ,
                                RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg = false);
@@ -873,14 +1000,16 @@ static inline HnswNeighborArray *HnswGetNeighbors(char *base, HnswElement elemen
 
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo, Oid collation,
                                     bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqParams, RabitqInsertOnDiskParams *rbqDiskParams,
-                                    IndexScanDesc scan = NULL, bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
+                                    IndexScanDesc scan = NULL, bool enablePQ = false, PQSearchInfo *pqinfo = NULL,
+                                    bool tryMmap = false);
 
 uint8* LoadPQcode(HnswElementTuple tuple);
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
-                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo);
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo,
+                     bool tryMmap);
 void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
-                          VisitedHash *v, Relation index, int m, int lm, int lc);
+                          VisitedHash *v, Relation index, int m, int lm, int lc, bool tryMmap);
 void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
                           VisitedHash *v, Relation index, int m, int lm, int lc);
 #endif

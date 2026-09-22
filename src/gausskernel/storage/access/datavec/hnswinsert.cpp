@@ -42,6 +42,8 @@
 #include "access/generic_xlog.h"
 #include "access/xact.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
+#include "access/datavec/vector_storage.h"
 #include "catalog/index.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
@@ -87,6 +89,11 @@ static bool HnswFreeOffset(Relation index, Buffer buf, Page page, HnswElement el
             continue;
 
         if (etup->deleted) {
+            /* A cancelled VACUUM may still need this tuple to recycle its payload. */
+            if (HnswElementTupleIsVectorStorage(etup) &&
+                ItemPointerIsValid(&HnswElementTupleGetPayloads(etup)->raw.tid)) {
+                continue;
+            }
             BlockNumber elementPage = BufferGetBlockNumber(buf);
             BlockNumber neighborPage = ItemPointerGetBlockNumber(&etup->neighbortid);
             OffsetNumber neighborOffno = ItemPointerGetOffsetNumber(&etup->neighbortid);
@@ -124,31 +131,78 @@ static bool HnswFreeOffset(Relation index, Buffer buf, Page page, HnswElement el
 /*
  * Add a new page
  */
-static void HnswInsertAppendPage(Relation index, Buffer *nbuf, Page *npage, GenericXLogState *state, Page page,
-                                 bool building)
+static void HnswInsertAppendPage(Relation index, Buffer buf, Page *page, Buffer *nbuf, Page *npage,
+                                 GenericXLogState **state, bool building, bool vectorStorage, bool isUStore,
+                                 LWLock *buildExtensionLock)
 {
-    /* Add a new page */
-    LockRelationForExtension(index, ExclusiveLock);
-    *nbuf = HnswNewBuffer(index, MAIN_FORKNUM);
-    UnlockRelationForExtension(index, ExclusiveLock);
+    GenericXLogState *volatile publicationState = NULL;
+    bool volatile extensionLocked = false;
 
-    /* Init new page */
-    if (building)
-        *npage = BufferGetPage(*nbuf);
-    else
-        *npage = GenericXLogRegisterBuffer(state, *nbuf, GENERIC_XLOG_FULL_IMAGE);
+    *nbuf = InvalidBuffer;
+    PG_TRY();
+    {
+        LockRelationForExtension(index, ExclusiveLock);
+        extensionLocked = true;
+        *nbuf = HnswNewBuffer(index, MAIN_FORKNUM, buildExtensionLock);
 
-    HnswInitPage(*nbuf, *npage);
+        if (building) {
+            *npage = BufferGetPage(*nbuf);
+        } else {
+            GenericXLogAbort(*state);
+            *state = NULL;
+            publicationState = GenericXLogStart(index);
+            *page = GenericXLogRegisterBuffer(publicationState, buf, 0);
+            *npage = GenericXLogRegisterBuffer(publicationState, *nbuf, GENERIC_XLOG_FULL_IMAGE);
+        }
 
-    /* Update previous buffer */
-    HnswPageGetOpaque(page)->nextblkno = BufferGetBlockNumber(*nbuf);
+        HnswInitPage(*nbuf, *npage);
+        if (vectorStorage) {
+            HnswPageSetRole(*npage, HNSW_PAGE_ROLE_GRAPH);
+        }
+        if (isUStore) {
+            HnswPageGetOpaque(*npage)->pageType = HNSW_USTORE_PAGE_TYPE;
+        }
+        HnswPageGetOpaque(*page)->nextblkno = BufferGetBlockNumber(*nbuf);
+
+        if (building) {
+            MarkBufferDirty(buf);
+            MarkBufferDirty(*nbuf);
+        } else {
+            GenericXLogFinish(publicationState);
+            publicationState = NULL;
+        }
+        UnlockRelationForExtension(index, ExclusiveLock);
+        extensionLocked = false;
+    }
+    PG_CATCH();
+    {
+        if (publicationState != NULL) {
+            GenericXLogAbort(publicationState);
+        }
+        if (BufferIsValid(*nbuf)) {
+            UnlockReleaseBuffer(*nbuf);
+            *nbuf = InvalidBuffer;
+        }
+        if (extensionLocked) {
+            UnlockRelationForExtension(index, ExclusiveLock);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (!building) {
+        *state = GenericXLogStart(index);
+        *page = GenericXLogRegisterBuffer(*state, buf, 0);
+        *npage = GenericXLogRegisterBuffer(*state, *nbuf, 0);
+    }
 }
 
 /*
  * Add to element and neighbor pages
  */
 static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber insertPage,
-                             BlockNumber *updatedInsertPage, bool building, RabitQConfig *rbqConfig)
+                             BlockNumber *updatedInsertPage, bool building, RabitQConfig *rbqConfig,
+                             LWLock *buildExtensionLock)
 {
     Buffer buf;
     Page page;
@@ -175,11 +229,20 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
     bool enableRabitQ;
     int dim;
     Size rbqcodesSize = 0;
+    bool vectorStorage;
 
     /* Get info from metapage */
     Buffer metaBuf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
     LockBuffer(metaBuf, BUFFER_LOCK_SHARE);
     HnswMetaPage metap = HnswPageGetMeta(BufferGetPage(metaBuf));
+    HnswVectorStorageMetaLayout storageLayout = HnswClassifyVectorStorageMeta(metap, NULL);
+    if (storageLayout == HNSW_VECTOR_STORAGE_META_INVALID) {
+        UnlockReleaseBuffer(metaBuf);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("hnsw vector storage metapage for relation \"%s\" is malformed",
+                RelationGetRelationName(index))));
+    }
+    vectorStorage = storageLayout == HNSW_VECTOR_STORAGE_META_V2;
     enablePQ = metap->enablePQ;
     pqcodesSize = metap->pqcodeSize;
     enableRabitQ = metap->enableRabitQ;
@@ -187,26 +250,48 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
     UnlockReleaseBuffer(metaBuf);
 
     /* Calculate sizes */
-    if (enableRabitQ) {
+    if (vectorStorage) {
+        etupSize = HNSW_ELEMENT_TUPLE_V2_SIZE;
+        pqcodesSize = 0;
+    } else if (enableRabitQ) {
         bool refineSQ8 = rbqConfig->reType == SQ8;
         rbqcodesSize = rbqCodeSize(dim, refineSQ8);
         etupSize = MAXALIGN(offsetof(HnswElementTupleData, data) + rbqcodesSize);
     } else {
         etupSize = HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY(HnswPtrAccess(base, e->value)));
     }
-    ntupSize = HNSW_NEIGHBOR_TUPLE_SIZE(e->level, m);
+    ntupSize = vectorStorage ?
+        HnswNeighborTupleSizeV2(e->level, m) : HNSW_NEIGHBOR_TUPLE_SIZE(e->level, m);
     combinedSize = etupSize + MAXALIGN(pqcodesSize) + ntupSize + sizeof(ItemIdData);
     maxSize = HNSW_MAX_SIZE;
     minCombinedSize = etupSize + MAXALIGN(pqcodesSize) +
-                      HNSW_NEIGHBOR_TUPLE_SIZE(0, m) + sizeof(ItemIdData);
+                      (vectorStorage ?
+                          HnswNeighborTupleSizeV2(0, m) : HNSW_NEIGHBOR_TUPLE_SIZE(0, m)) +
+                      sizeof(ItemIdData);
 
     /* Prepare element tuple */
     etup = (HnswElementTuple)palloc0(etupSize);
-    HnswSetElementTuple(base, etup, e, rbqcodesSize);
+    if (vectorStorage) {
+        VecPayloadDiskRef rawRef;
+        Pointer valuePtr = (Pointer)HnswPtrAccess(base, e->value);
+        errno_t rc = memset_s(&rawRef, sizeof(rawRef), 0, sizeof(rawRef));
+
+        securec_check(rc, "\0", "\0");
+        if (!ItemPointerIsValid(&e->payloadTid)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("HNSW vector storage insert is missing payload tid")));
+        }
+        ItemPointerCopy(&e->payloadTid, &rawRef.tid);
+        rawRef.payloadLen = (uint32)VARSIZE_ANY(valuePtr);
+        rawRef.kind = (uint8)VEC_PAYLOAD_RAW_VECTOR;
+        HnswSetElementTupleV2(etup, e, &rawRef);
+    } else {
+        HnswSetElementTuple(base, etup, e, rbqcodesSize);
+    }
 
     /* Prepare neighbor tuple */
     ntup = (HnswNeighborTuple)palloc0(ntupSize);
-    HnswSetNeighborTuple(base, ntup, e, m);
+    HnswSetNeighborTuple(base, ntup, e, m, vectorStorage);
 
     /* Find a page (or two if needed) to insert the tuples */
     for (;;) {
@@ -258,10 +343,8 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
         /* Skip if both tuples can fit on the same page */
         if (combinedSize > maxSize && PageGetFreeSpace(page) >= etupSize + MAXALIGN(pqcodesSize) &&
             !BlockNumberIsValid(HnswPageGetOpaque(page)->nextblkno)) {
-            HnswInsertAppendPage(index, &nbuf, &npage, state, page, building);
-            if (isUStore) {
-                HnswPageGetOpaque(npage)->pageType = HNSW_USTORE_PAGE_TYPE;
-            }
+            HnswInsertAppendPage(index, buf, &page, &nbuf, &npage, &state, building,
+                vectorStorage, isUStore, buildExtensionLock);
             break;
         }
 
@@ -275,10 +358,8 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
             Buffer newbuf;
             Page newpage;
 
-            HnswInsertAppendPage(index, &newbuf, &newpage, state, page, building);
-            if (isUStore) {
-                HnswPageGetOpaque(npage)->pageType = HNSW_USTORE_PAGE_TYPE;
-            }
+            HnswInsertAppendPage(index, buf, &page, &newbuf, &newpage, &state, building,
+                vectorStorage, isUStore, buildExtensionLock);
             /* Commit */
             if (building) {
                 MarkBufferDirty(buf);
@@ -301,10 +382,8 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
 
             /* Create new page for neighbors if needed */
             if (PageGetFreeSpace(page) < combinedSize) {
-                HnswInsertAppendPage(index, &nbuf, &npage, state, page, building);
-                if (isUStore) {
-                    HnswPageGetOpaque(npage)->pageType = HNSW_USTORE_PAGE_TYPE;
-                }
+                HnswInsertAppendPage(index, buf, &page, &nbuf, &npage, &state, building,
+                    vectorStorage, isUStore, buildExtensionLock);
             } else {
                 nbuf = buf;
                 npage = page;
@@ -503,6 +582,17 @@ void HnswUpdateNeighborsOnDisk(Relation index, FmgrInfo *procinfo, Oid collation
 
                 /* Update neighbor on the buffer */
                 ItemPointerSet(indextid, e->blkno, e->offno);
+                if (HnswIsNeighborTupleV2(ntup)) {
+                    if (!ItemPointerIsValid(&e->payloadTid)) {
+                        if (!building) {
+                            GenericXLogAbort(state);
+                        }
+                        UnlockReleaseBuffer(buf);
+                        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                            errmsg("HNSW vector storage neighbor update is missing payload tid")));
+                    }
+                    ItemPointerCopy(&e->payloadTid, &ntup->indextids[ntup->count + idx]);
+                }
 
                 /* Commit */
                 if (building)
@@ -596,17 +686,44 @@ static bool FindDuplicateOnDisk(Relation index, HnswElement element, bool buildi
  */
 static void UpdateGraphOnDisk(Relation index, FmgrInfo *procinfo, Oid collation, HnswElement element, int m,
                               int efConstruction, HnswElement entryPoint, bool building, bool enableRabitQ,
-                              RabitqInsertOnDiskParams *rbqDiskParams, RabitQConfig *rbqConfig, bool enableLsg)
+                              RabitqInsertOnDiskParams *rbqDiskParams, RabitQConfig *rbqConfig, bool enableLsg,
+                              LWLock *buildExtensionLock)
 {
     BlockNumber newInsertPage = InvalidBlockNumber;
+    char *base = NULL;
 
     /* Look for duplicate */
     if (FindDuplicateOnDisk(index, element, building)) {
         return;
     }
 
-    /* Add element */
-    AddElementOnDisk(index, element, m, GetInsertPage(index), &newInsertPage, building, rbqConfig);
+    BlockNumber startBlkno = InvalidBlockNumber;
+    uint32 payloadLen = 0;
+
+    if (HnswRelationHasVectorPayloadStorage(index, &startBlkno, &payloadLen)) {
+        BlockNumber landedBlkno = InvalidBlockNumber;
+        VecPayloadDiskRef rawRef;
+        Pointer valuePtr = (Pointer)HnswPtrAccess(base, element->value);
+        uint32 valueLen;
+
+        valueLen = (uint32)VARSIZE_ANY(valuePtr);
+        if (valueLen != payloadLen) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("HNSW vector storage requires a fixed payload length"),
+                errdetail("Expected %u bytes, but found %u bytes.", payloadLen, valueLen)));
+        }
+        VecPayloadInput payloadInput = {VEC_PAYLOAD_RAW_VECTOR, valuePtr, payloadLen};
+        VecPayloadInsertRequest request = {
+            MAIN_FORKNUM, startBlkno, &rawRef, &landedBlkno, buildExtensionLock};
+
+        VecPayloadInsert(index, &payloadInput, &request);
+        ItemPointerCopy(&rawRef.tid, &element->payloadTid);
+        AddElementOnDisk(index, element, m, GetInsertPage(index), &newInsertPage, building, rbqConfig,
+            buildExtensionLock);
+    } else {
+        AddElementOnDisk(index, element, m, GetInsertPage(index), &newInsertPage, building, rbqConfig,
+            buildExtensionLock);
+    }
 
     /* Update insert page if needed */
     if (BlockNumberIsValid(newInsertPage)) {
@@ -637,7 +754,7 @@ static bool HnswRabitQEntryPointIsVisible(Relation index, HnswElement entryPoint
  * Insert a tuple into the index
  */
 bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, ItemPointer heap_tid,
-                           bool building, Relation heap)
+                           bool building, Relation heap, LWLock *buildExtensionLock)
 {
     HnswElement entryPoint;
     HnswElement element;
@@ -669,7 +786,8 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, Item
     HnswGetMetaPageInfo(index, &m, &entryPoint);
 
     /* Create an element */
-    element = HnswInitElement(base, heap_tid, m, HnswGetMl(m), HnswGetMaxLevel(m), NULL);
+    element = HnswInitElement(base, heap_tid, m, HnswGetMl(m),
+        HnswRelationHasVectorPayloadStorage(index, NULL, NULL) ? HnswGetMaxLevelV2(m) : HnswGetMaxLevel(m), NULL);
 
     rbqConfig = InitRbqConfigOnDisk(index, &enableRabitQ, &centroid, dim);
     if (enableRabitQ) {
@@ -758,7 +876,7 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, Item
 
     /* Update graph on disk */
     UpdateGraphOnDisk(index, procinfo, collation, element, m, efConstruction, entryPoint, building,
-                      enableRabitQ, &rbqDiskParams, rbqConfig, enableLsg);
+                      enableRabitQ, &rbqDiskParams, rbqConfig, enableLsg, buildExtensionLock);
 
     /* Release lock */
     UnlockPage(index, HNSW_UPDATE_LOCK, lockmode);

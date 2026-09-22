@@ -22,6 +22,7 @@
  */
 #include "access/ubtree.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
 #include "access/datavec/vecindex.h"
 
 bool HnswIsTIDEquals(ItemPointer p1, ItemPointer p2)
@@ -84,7 +85,7 @@ OffsetNumber HnswFindDeleteLocation(Relation index, Buffer buf, HnswElementTuple
                 continue;
             }
 
-            if (!HnswIsETUPEqual(etup, tup)) {
+            if (!HnswElementTupleIsVectorStorage(tup) && !HnswIsETUPEqual(etup, tup)) {
                 continue;
             }
 
@@ -155,19 +156,25 @@ bool HnswDeleteIndex(Relation index, HnswElementTuple etup)
     blkno = InvalidBlockNumber;
     procinfo = index_getprocinfo(index, 1, 1);
     collation = index->rd_indcollation[0];
-    q = (Datum)(&etup->data);
     HnswGetMetaPageInfo(index, &m, &entryPoint);
-    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL));
 
-    for (int lc = entryPoint->level; lc >= 0; lc--) {
-        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, NULL, true, NULL, false, NULL, NULL);
-        ep = w;
-    }
+    if (HnswRelationHasVectorPayloadStorage(index, NULL, NULL)) {
+        blkno = HnswGetGraphHeadBlkno(index);
+    } else {
+        q = (Datum)(&etup->data);
+        ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL));
 
-    foreach (cell, ep) {
-        HnswCandidate *hc = (HnswCandidate *)lfirst(cell);
-        HnswElement element = (HnswElement)HnswPtrAccess(base, hc->element);
-        blkno = element->blkno;
+        for (int lc = entryPoint->level; lc >= 0; lc--) {
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, NULL,
+                true, NULL, false, NULL, NULL);
+            ep = w;
+        }
+
+        foreach (cell, ep) {
+            HnswCandidate *hc = (HnswCandidate *)lfirst(cell);
+            HnswElement element = (HnswElement)HnswPtrAccess(base, hc->element);
+            blkno = element->blkno;
+        }
     }
 
     while (BlockNumberIsValid(blkno)) {

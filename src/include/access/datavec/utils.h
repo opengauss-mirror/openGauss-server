@@ -494,7 +494,7 @@ static inline uint32 InitMmapOff()
 extern void MmapShmemInit(void);
 Size MmapShmemSize();
 void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap);
-void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint);
+void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint, bool trymmap);
 bool IsRelnodeMmapLoad(Oid relNode);
 bool IsDBnodeMmapLoad(Oid dbNode);
 #endif

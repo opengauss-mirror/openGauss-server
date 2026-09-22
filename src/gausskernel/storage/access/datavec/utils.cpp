@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 
+#include "catalog/pg_am.h"
 #include "utils/builtins.h"
 #include "access/datavec/utils.h"
 #include "access/datavec/halfutils.h"
@@ -29,6 +30,7 @@
 #include "access/datavec/bitvec.h"
 #include "access/datavec/vector.h"
 #include "access/datavec/hnsw.h"
+#include "access/datavec/hnsw_vector_storage.h"
 #include "access/tableam.h"
 #include "utils/dynahash.h"
 #include "commands/vacuum.h"
@@ -208,11 +210,28 @@ static void MMapDelete(BufferTag *tag, uint32 hashcode)
     return;
 }
 
+static bool CanUseMmapBase(Relation index)
+{
+    if (index == NULL) {
+        return false;
+    }
+
+    return g_instance.attr.attr_storage.enable_mmap && u_sess->datavec_ctx.hnsw_use_mmap &&
+           g_mmapOff != 0 && (g_mmap_relNode == 0 || index->rd_node.relNode == g_mmap_relNode);
+}
+
 bool CanUseMmap(Relation index)
 {
-    bool result = g_instance.attr.attr_storage.enable_mmap && u_sess->datavec_ctx.hnsw_use_mmap &&
-                    g_mmapOff != 0 && (g_mmap_relNode == 0 || index->rd_node.relNode == g_mmap_relNode);
-    return result;
+    if (!CanUseMmapBase(index)) {
+        return false;
+    }
+
+    if (index->rd_rel != NULL && index->rd_rel->relam == HNSW_AM_OID &&
+        HnswRelationHasVectorPayloadStorage(index, NULL, NULL)) {
+        return false;
+    }
+
+    return true;
 }
 
 bool IsRelnodeMmapLoad(Oid relNode)
@@ -466,9 +485,9 @@ static void* GetMMapMetaPage(Relation index)
     }
     return NULL;
 }
-static void* GetMMapPage(Relation index, BlockNumber block_num)
+static void* GetMMapPage(Relation index, BlockNumber block_num, bool tryMmap)
 {
-    if (!CanUseMmap(index) || index->rd_backend != InvalidBackendId) {
+    if (!tryMmap || !CanUseMmapBase(index) || index->rd_backend != InvalidBackendId) {
         return NULL;
     }
     BufferTag  new_tag;
@@ -492,7 +511,7 @@ static void* GetMMapPage(Relation index, BlockNumber block_num)
 
 void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap)
 {
-    if (trymmap && index->rd_backend == InvalidBackendId && HnswGetEnableMMap(index) && CanUseMmap(index)) {
+    if (trymmap && index->rd_backend == InvalidBackendId && HnswGetEnableMMap(index) && CanUseMmapBase(index)) {
         HnswMetaPage metap = (HnswMetaPage)GetMMapMetaPage(index);
         if (metap != NULL) {
             *enablePQ = metap->enablePQ;
@@ -512,11 +531,11 @@ void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool t
     return;
 }
 
-void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
+void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint, bool trymmap)
 {
     HnswMetaPage metap;
 
-    if (index->rd_backend != InvalidBackendId || !CanUseMmap(index)) {
+    if (!trymmap || index->rd_backend != InvalidBackendId || !CanUseMmapBase(index)) {
         HnswGetMetaPageInfo(index, m, (HnswElement*)entryPoint);
         return;
     }
@@ -543,9 +562,10 @@ void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
 }
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
-                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo,
+                     bool tryMmap)
 {
-    Page page = (Page)GetMMapPage(index, element->blkno);
+    Page page = (Page)GetMMapPage(index, element->blkno, tryMmap);
     if (page == NULL) {
         return HnswLoadElement(element, distance, q, index, procinfo, collation, loadVec, maxDistance,
                                enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
@@ -597,9 +617,9 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo,
                                   Oid collation, bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqParams,
                                   RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ,
-                                  PQSearchInfo *pqinfo)
+                                  PQSearchInfo *pqinfo, bool tryMmap)
 {
-    if (index == NULL || !entryPoint->fromMmap || !CanUseMmap(index)) {
+    if (index == NULL || !tryMmap || !entryPoint->fromMmap || !CanUseMmap(index)) {
         return HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, loadVec, 
                                   enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
     }
@@ -608,18 +628,18 @@ HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, R
     HnswPtrStore(base, hc->element, entryPoint);
 
     MmapLoadElement(entryPoint, &hc->distance, &q, index, procinfo, collation, loadVec,
-                    NULL, enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
+                    NULL, enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo, tryMmap);
     return hc;
 }
 
 
 void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
-                          VisitedHash *v, Relation index, int m, int lm, int lc)
+                          VisitedHash *v, Relation index, int m, int lm, int lc, bool tryMmap)
 {
     HnswNeighborTuple ntup;
     int start;
     ItemPointerData indextids[HNSW_MAX_M * 2];
-    Page page = (Page)GetMMapPage(index, element->neighborPage);
+    Page page = (Page)GetMMapPage(index, element->neighborPage, tryMmap);
     if (page == NULL) {
         HnswLoadUnvisitedFromDisk(element, unvisited, unvisitedLength, v, index, m, lm, lc);
         return;
@@ -627,10 +647,19 @@ void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int 
 
     ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
     start = (element->level - lc) * m;
+    ItemPointerData payloadtids[HNSW_MAX_M * 2];
+    bool v2Neighbors = HnswIsNeighborTupleV2(ntup);
+
+    HnswCheckNeighborTupleType(ntup, HnswRelationHasVectorPayloadStorage(index, NULL, NULL));
 
     /* Copy to minimize lock time */
     errno_t rc = memcpy_s(&indextids, lm * sizeof(ItemPointerData), ntup->indextids + start, lm * sizeof(ItemPointerData));
     securec_check(rc, "\0", "\0");
+    if (v2Neighbors) {
+        rc = memcpy_s(&payloadtids, lm * sizeof(ItemPointerData), ntup->indextids + ntup->count + start,
+            lm * sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+    }
 
     *unvisitedLength = 0;
 
@@ -645,8 +674,12 @@ void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int 
         tidhash_insert(v->tids, *indextid, &found);
 
         if (!found) {
-            unvisited[(*unvisitedLength)++] = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid),
-                                                                       ItemPointerGetOffsetNumber(indextid));
+            HnswElement e = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid),
+                ItemPointerGetOffsetNumber(indextid));
+            if (v2Neighbors) {
+                ItemPointerCopy(&payloadtids[i], &e->payloadTid);
+            }
+            unvisited[(*unvisitedLength)++] = e;
         }
     }
 }

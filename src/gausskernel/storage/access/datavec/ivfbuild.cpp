@@ -607,6 +607,10 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
 
     GetNextTuple(buildstate->sortstate, tupdesc, slot, &itup, &list, buildstate->enableRabitQ);
 
+    if (buildstate->enableVectorStorage) {
+        VecPayloadBeginBuild(&buildstate->payloadState, index, forkNum);
+    }
+
     /* Check vector and pqcode can be on the same page */
     if (list != -1) {
         Size itemsize = MAXALIGN(IndexTupleSize(itup));
@@ -636,6 +640,24 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
 
         /* Get all tuples for list */
         while (list == i) {
+            if (buildstate->enableVectorStorage && itup != NULL) {
+                bool visnull = false;
+                Datum vecDatum = index_getattr(itup, 1, tupdesc, &visnull);
+                uint32 payloadLen = 0;
+                Pointer valuePtr = IvfflatCanonicalVectorPayload(vecDatum, &payloadLen);
+                if (payloadLen != buildstate->payloadLen) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("IVFFlat vector storage requires a fixed payload length")));
+                }
+                VecPayloadDiskRef rawRef;
+                ItemPointerData heapTid = itup->t_tid;
+
+                const VecPayloadInput payload = {VEC_PAYLOAD_RAW_VECTOR, valuePtr, payloadLen};
+                VecPayloadPutBuild(&buildstate->payloadState, &payload, &rawRef);
+                pfree(itup);
+                itup = VecPayloadFormIndexTupleFromRef(index, &rawRef, &heapTid);
+            }
+
             /* Check for free space */
             Size itemsz = MAXALIGN(IndexTupleSize(itup));
             if (PageGetFreeSpace(page) < itemsz + MAXALIGN(pqcodesSize) + MAXALIGN(sizeof(FactorData)))
@@ -689,6 +711,27 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
         /* Set the start and insert pages */
         IvfflatUpdateList(index, buildstate->listInfo[i], insertPage, InvalidBlockNumber, startPage, forkNum,
             tuplePerList);
+    }
+
+    if (buildstate->enableVectorStorage) {
+        VecPayloadEndBuild(&buildstate->payloadState, &buildstate->payloadInsertBlkno);
+        if (buildstate->payloadLen == 0) {
+            buildstate->payloadLen = (uint32)buildstate->typeInfo->itemSize(buildstate->dimensions);
+        }
+        Buffer mbuf = ReadBufferExtended(index, forkNum, IVFFLAT_METAPAGE_BLKNO, RBM_NORMAL, NULL);
+        Page mpage;
+        GenericXLogState *mstate;
+        IvfflatMetaPage metap;
+
+        LockBuffer(mbuf, BUFFER_LOCK_EXCLUSIVE);
+        mstate = GenericXLogStart(index);
+        mpage = GenericXLogRegisterBuffer(mstate, mbuf, 0);
+        metap = IvfflatPageGetMeta(mpage);
+        metap->payloadInsertBlkno = buildstate->payloadInsertBlkno;
+        metap->payloadLen = buildstate->payloadLen;
+        metap->livePayloads = (uint64)inserted;
+        GenericXLogFinish(mstate);
+        UnlockReleaseBuffer(mbuf);
     }
 }
 
@@ -793,6 +836,10 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
     buildstate->ivfleader = NULL;
 
     buildstate->enablePQ = IvfGetEnablePQ(index);
+    buildstate->enableVectorStorage = IvfflatGetEnableVectorPayloadStorage(index);
+    if (buildstate->enableVectorStorage && (buildstate->enablePQ || IvfGetEnableRabitQ(index))) {
+        ereport(ERROR, (errmsg("IVFFlat vector storage does not support PQ or RabitQ in this phase")));
+    }
     if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
         ereport(ERROR, (errmsg("this data type cannot support ivfpq.")));
     }
@@ -846,11 +893,25 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
     buildstate->tidslist = NIL;
     buildstate->curtuple = 0;
     buildstate->enableNPU = u_sess->datavec_ctx.enable_npu;
+    if (buildstate->enableVectorStorage && buildstate->enableNPU) {
+        ereport(ERROR, (errmsg("IVFFlat vector storage does not support NPU in this phase")));
+    }
     if (buildstate->enableNPU && !buildstate->typeInfo->supportNPU) {
         ereport(ERROR, (errmsg("this data type cannot support ivfnpu.")));
     }
     if (buildstate->enableNPU && !g_npu_func.inited) {
         ereport(ERROR, (errmsg("this instance has not currently loaded the ivfflatnpu dynamic library.")));
+    }
+    buildstate->payloadInsertBlkno = InvalidBlockNumber;
+    /* Older halfvec opclasses do not register IVFFLAT_TYPE_INFO_PROC. */
+    buildstate->payloadLen = TupleDescAttr(index->rd_att, 0)->atttypid == HALFVECTOROID ?
+        (uint32)HalfvecItemSize(buildstate->dimensions) :
+        (uint32)buildstate->typeInfo->itemSize(buildstate->dimensions);
+    errno_t prc = memset_s(&buildstate->payloadState, sizeof(buildstate->payloadState), 0,
+        sizeof(buildstate->payloadState));
+    if (prc != EOK) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to initialize IVFFlat payload build state: memset_s returned %d", prc)));
     }
 }
 
@@ -1011,6 +1072,13 @@ static void CreateMetaPage(Relation index, IvfflatBuildState *buildstate, ForkNu
         metap->otherSize = 0;
         metap->otherNblk = 0;
     }
+
+    metap->enableVectorStorage = buildstate->enableVectorStorage;
+    metap->payloadInsertBlkno = InvalidBlockNumber;
+    metap->payloadLen = 0;
+    ItemPointerSetInvalid(&metap->payloadFreeHead);
+    metap->livePayloads = 0;
+    metap->deadPayloads = 0;
 
     ((PageHeader)page)->pd_lower = ((char *)metap + sizeof(IvfflatMetaPageData)) - (char *)page;
 
@@ -2035,9 +2103,15 @@ void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, IvfflatBuil
         IvfFlushPQInfo(buildstate);
     }
 
-    /* Write WAL for initialization fork since GenericXLog functions do not */
-    if (forkNum == INIT_FORKNUM)
+    /*
+     * List pages already go through GenericXLog. Payload pages from
+     * VecPayloadPutBuild are only MarkBufferDirty; without a newpage range
+     * the standby never sees them (blk stays all-zeros, pin fails).
+     */
+    if (forkNum == INIT_FORKNUM ||
+        (buildstate->enableVectorStorage && RelationNeedsWAL(index))) {
         LogNewpageRange(index, forkNum, 0, RelationGetNumberOfBlocksInFork(index, forkNum), true);
+    }
 
     FreeBuildState(buildstate, false);
 }

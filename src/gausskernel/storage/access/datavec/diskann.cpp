@@ -26,6 +26,7 @@
 #include "commands/vacuum.h"
 #include "miscadmin.h"
 #include "storage/freespace.h"
+#include "storage/lmgr.h"
 #include "utils/guc.h"
 #include "utils/selfuncs.h"
 #include "access/datavec/diskann.h"
@@ -95,7 +96,8 @@ static bytea* diskannoptions_internal(Datum reloptions, bool validate)
         {"enable_rabitq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enableRabitq)},
         {"pca_dim", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pcaDim)},
         {"rabitq_bits", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, rabitqBits),
-         offsetof(DiskAnnOptions, rabitqBitsSet)}};
+         offsetof(DiskAnnOptions, rabitqBitsSet)},
+        {"enable_vector_payload_storage", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enableVectorStorage)}};
 
     relopt_value* options;
     int numoptions;
@@ -104,6 +106,15 @@ static bytea* diskannoptions_internal(Datum reloptions, bool validate)
     options = parseRelOptions(reloptions, validate, RELOPT_KIND_DISKANN, &numoptions);
     rdopts = (DiskAnnOptions*)allocateReloptStruct(sizeof(DiskAnnOptions), options, numoptions);
     fillRelOptions((void*)rdopts, sizeof(DiskAnnOptions), options, numoptions, validate, tab, lengthof(tab));
+
+    if (rdopts->enableVectorStorage && rdopts->enablePQ) {
+        ereport(ERROR, (errmsg("DiskANN vector storage does not support enable_pq in this phase")));
+    }
+    if (rdopts->enableVectorStorage && rdopts->enableRabitq) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("enable_vector_payload_storage cannot be combined with enable_rabitq for diskann"),
+            errhint("Disable enable_rabitq or enable_vector_payload_storage.")));
+    }
 
     return (bytea*)rdopts;
 }
@@ -333,21 +344,21 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
         return DiskAnnV2Insert(index, values, isnull, heap_tid, heap);
     }
 
-    Datum dst = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
-    Vector* value = (Vector*)DatumGetPointer(dst);
+    LockPage(index, DISKANN_GRAPH_LOCK, ShareLock);
 
     DiskAnnMetaPageData metapage;
     DiskANNGetMetaPageInfo(index, &metapage);
     FmgrInfo* procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ, true);
 
-    BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage, false);
+    DiskAnnInsertContext context = {&metapage, false, NULL};
+    BlockNumber blkno = InsertTuple(index, values, heap_tid, &context);
 
     if (0 == metapage.nfrozen) {
         ItemPointerData hctid;
         ItemPointerSetInvalid(&hctid);
 
-        BlockNumber frozen = InsertTuple(index, values, &hctid, &metapage, false);
+        BlockNumber frozen = InsertTuple(index, values, &hctid, &context);
         InsertFrozenPoint(index, frozen, false);
         DiskANNGetMetaPageInfo(index, &metapage);
     }
@@ -356,16 +367,10 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
     DiskAnnGraph graph(index, metapage.dimensions, metapage.frozenBlkno[0], graphStore);
     graph.Link(blkno, metapage.indexSize, false);
 
+    UnlockPage(index, DISKANN_GRAPH_LOCK, ShareLock);
     return false;
 }
-IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
-                                                  IndexBulkDeleteCallback callback, void* callbackState)
-{
-    if (DiskAnnGetFormatVersion(info->index) == DISKANN_VERSION_V2) {
-        return DiskAnnV2BulkDelete(info, stats, callback, callbackState);
-    }
-    return NULL;
-}
+
 IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats)
 {
     if (DiskAnnGetFormatVersion(info->index) == DISKANN_VERSION_V2) {

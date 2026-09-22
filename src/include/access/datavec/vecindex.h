@@ -26,8 +26,6 @@
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 
-#define VecIndexTupleGetXid(itup) (((char *)(itup)) + HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY(&(itup)->data)))
-
 struct VectorScanData {
     /*
      * used in ustore only, indicate the last returned index tuple which is modified

@@ -101,6 +101,7 @@ static bytea *hnswoptions_internal(Datum reloptions, bool validate)
         {"enable_rabitq", RELOPT_TYPE_BOOL, offsetof(HnswOptions, enableRabitQ)},
         {"rabitq_fht", RELOPT_TYPE_BOOL, offsetof(HnswOptions, rabitqFHT)},
         {"rabitq_refine_type", RELOPT_TYPE_STRING, offsetof(HnswOptions, rabitqRT)},
+        {"enable_vector_payload_storage", RELOPT_TYPE_BOOL, offsetof(HnswOptions, enableVectorStorage)},
     };
 
     relopt_value *options;
@@ -111,7 +112,29 @@ static bytea *hnswoptions_internal(Datum reloptions, bool validate)
     rdopts = (HnswOptions *)allocateReloptStruct(sizeof(HnswOptions), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(HnswOptions), options, numoptions, validate, tab, lengthof(tab));
 
+    if (rdopts->enableVectorStorage &&
+        (rdopts->useMmap || rdopts->enablePQ || rdopts->enableRabitQ)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("enable_vector_payload_storage cannot be combined with use_mmap, enable_pq or enable_rabitq"),
+            errhint("Disable use_mmap, enable_pq and enable_rabitq, or disable enable_vector_payload_storage.")));
+    }
+
     return (bytea *)rdopts;
+}
+
+/*
+ * Reloption: CREATE INDEX ... WITH (enable_vector_payload_storage). Built indexes are
+ * identified by HnswRelationHasVectorPayloadStorage() on the metapage instead.
+ */
+bool HnswGetEnableVectorPayloadStorage(Relation index)
+{
+    HnswOptions *opts = (HnswOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->enableVectorStorage;
+    }
+
+    return HNSW_DEFAULT_ENABLE_VECTOR_STORAGE;
 }
 
 /*

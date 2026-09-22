@@ -34,9 +34,11 @@
 #include "sampling.h"
 #include "utils/tuplesort.h"
 #include "access/datavec/vector.h"
+#include "access/datavec/vector_storage.h"
 #include "access/datavec/utils.h"
 #include "postmaster/bgworker.h"
 #include "access/datavec/rabitq.h"
+#include "storage/item/itemid.h"
 
 #ifdef IVFFLAT_BENCH
 #include "portability/instr_time.h"
@@ -54,6 +56,12 @@
 #define IVFFLAT_VERSION 1
 #define IVFFLAT_MAGIC_NUMBER 0x14FF1A7
 #define IVFFLAT_PAGE_ID 0xFF84
+
+/* Search skips LP_DEAD; vacuum keeps the tuple until the payload slot is recycled. */
+static inline bool IvfflatItemIdIsLive(ItemId itemid)
+{
+    return ItemIdIsUsed(itemid) && !ItemIdIsDead(itemid);
+}
 
 /* Preserved page numbers */
 #define IVFFLAT_METAPAGE_BLKNO 0
@@ -128,6 +136,7 @@ typedef struct IvfflatOptions {
     bool byResidual;    /* whether to quantify by residual */
     bool enableRabitQ;
     bool rabitqFHT;
+    bool enableVectorStorage;
     char *rabitqRT;
 } IvfflatOptions;
 
@@ -272,6 +281,12 @@ typedef struct IvfflatBuildState {
     List *tupleslist;
     List *tidslist;
     bool enableNPU;
+
+    /* Vector storage */
+    bool enableVectorStorage;
+    VecPayloadBuildState payloadState;
+    BlockNumber payloadInsertBlkno;
+    uint32 payloadLen;
 } IvfflatBuildState;
 
 typedef struct IvfflatMetaPageData {
@@ -302,6 +317,14 @@ typedef struct IvfflatMetaPageData {
     RefineType reType;
     uint16 otherNblk;
     uint32 otherSize; /* centroid + (min + diff) if reType == SQ8 */
+
+    /* Vector storage (payload pages use the HNSW payload opaque + GenericXLog path) */
+    bool enableVectorStorage;
+    BlockNumber payloadInsertBlkno;
+    uint32 payloadLen;
+    ItemPointerData payloadFreeHead;
+    uint64 livePayloads;
+    uint64 deadPayloads;
 } IvfflatMetaPageData;
 
 typedef IvfflatMetaPageData *IvfflatMetaPage;
@@ -368,6 +391,11 @@ typedef struct IvfflatScanOpaqueData {
     RabitqQueryParams *rbqParams;
     MemoryContext RabitqCtx;
 
+    /* Vector storage / VBP */
+    bool enableVectorStorage;
+    uint32 vectorPayloadLen;
+    VectorBufferAccess *vectorBufferAccess;
+
     /* Lists */
     pairingheap *listQueue;
     IvfflatScanList lists[FLEXIBLE_ARRAY_MEMBER]; /* must come last */
@@ -396,6 +424,10 @@ FmgrInfo *IvfflatOptionalProcInfo(Relation index, uint16 procnum);
 Datum IvfflatNormValue(const IvfflatTypeInfo *typeInfo, Oid collation, Datum value);
 bool IvfflatCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
 int IvfflatGetLists(Relation index);
+bool IvfflatGetEnableVectorPayloadStorage(Relation index);
+bool IvfflatRelationHasVectorPayloadStorage(
+    Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen);
+Pointer IvfflatCanonicalVectorPayload(Datum vector, uint32 *payloadLen);
 void IvfflatGetMetaPageInfo(Relation index, int *lists, int *dimensions);
 void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage, BlockNumber originalInsertPage,
                        BlockNumber startPage, ForkNumber forkNum, int addNums);

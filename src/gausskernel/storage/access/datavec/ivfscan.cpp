@@ -36,6 +36,30 @@
 
 #define IvfflatNPUGetListInfo(i) (((IvfListInfo *)g_instance.npu_cxt.ivf_lists_info)[i])
 
+static Datum IvfflatScanTupleVector(IndexScanDesc scan, IndexTuple itup, VecPayloadPin *pin, bool *isnull)
+{
+    Relation index = scan->indexRelation;
+    IvfflatScanOpaque so = (IvfflatScanOpaque)scan->opaque;
+    TupleDesc tupdesc = RelationGetDescr(index);
+    VecPayloadDiskRef diskRef;
+
+    if (!so->enableVectorStorage) {
+        return index_getattr(itup, 1, tupdesc, isnull);
+    }
+    *isnull = false;
+    if (!VecPayloadIndexTupleGetRef(itup, index, &diskRef)) {
+        *isnull = true;
+        return (Datum)0;
+    }
+    const VecPayloadPinRequest request = {
+        VEC_PAYLOAD_RAW_VECTOR, diskRef.payloadLen, so->vectorBufferAccess};
+    if (!VecPayloadPinGet(index, &diskRef, &request, pin)) {
+        *isnull = true;
+        return (Datum)0;
+    }
+    return pin->datum;
+}
+
 /*
  * Compare list distances
  */
@@ -148,7 +172,6 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
 static void GetScanItems(IndexScanDesc scan, Datum value)
 {
     IvfflatScanOpaque so = (IvfflatScanOpaque)scan->opaque;
-    TupleDesc tupdesc = RelationGetDescr(scan->indexRelation);
     double tuples = 0;
     TupleTableSlot *slot = MakeSingleTupleTableSlot(so->tupdesc);
 
@@ -188,24 +211,30 @@ static void GetScanItems(IndexScanDesc scan, Datum value)
                 Datum datum;
                 bool isnull;
                 ItemId itemid = PageGetItemId(page, offno);
-
+                if (!IvfflatItemIdIsLive(itemid)) {
+                    continue;
+                }
                 itup = (IndexTuple)PageGetItem(page, itemid);
-                datum = index_getattr(itup, 1, tupdesc, &isnull);
-
-                /*
-                 * Add virtual tuple
-                 *
-                 * Use procinfo from the index instead of scan key for
-                 * performance
-                 */
-                ExecClearTuple(slot);
-                slot->tts_values[0] = so->distfunc(so->procinfo, so->collation, datum, value);
-                slot->tts_isnull[0] = false;
-                slot->tts_values[1] = PointerGetDatum(&itup->t_tid);
-                slot->tts_isnull[1] = false;
-                ExecStoreVirtualTuple(slot);
-
-                tuplesort_puttupleslot(so->sortstate, slot);
+                {
+                    VecPayloadPin pin;
+                    errno_t prc = memset_s(&pin, sizeof(pin), 0, sizeof(pin));
+                    if (prc != EOK) {
+                        UnlockReleaseBuffer(buf);
+                        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("failed to initialize IVF vector payload pin")));
+                    }
+                    datum = IvfflatScanTupleVector(scan, itup, &pin, &isnull);
+                    ExecClearTuple(slot);
+                    slot->tts_values[0] = so->distfunc(so->procinfo, so->collation, datum, value);
+                    slot->tts_isnull[0] = false;
+                    slot->tts_values[1] = PointerGetDatum(&itup->t_tid);
+                    slot->tts_isnull[1] = false;
+                    ExecStoreVirtualTuple(slot);
+                    tuplesort_puttupleslot(so->sortstate, slot);
+                    if (so->enableVectorStorage) {
+                        VecPayloadUnpin(&pin);
+                    }
+                }
 
                 tuples++;
             }
@@ -320,10 +349,18 @@ static void GetScanItemsNPUWithoutCache(IndexScanDesc scan, Datum value)
             for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
                 bool isnull;
                 ItemId itemid = PageGetItemId(page, offno);
-                IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
-                Datum datum = index_getattr(itup, 1, tupdesc, &isnull);
-                float *vec = DatumGetVector(datum)->x;
-                int vecLen = so->dimensions * sizeof(float);
+                IndexTuple itup;
+                Datum datum;
+                float *vec;
+                int vecLen;
+
+                if (!IvfflatItemIdIsLive(itemid)) {
+                    continue;
+                }
+                itup = (IndexTuple)PageGetItem(page, itemid);
+                datum = index_getattr(itup, 1, tupdesc, &isnull);
+                vec = DatumGetVector(datum)->x;
+                vecLen = so->dimensions * sizeof(float);
                 tids[curTupleNum] = itup->t_tid;
                 if (isL2Dis(so->procinfo)) {
                     norms[curTupleNum] = VectorSquareNorm(vec, so->dimensions);
@@ -335,7 +372,16 @@ static void GetScanItemsNPUWithoutCache(IndexScanDesc scan, Datum value)
             searchPage = IvfflatPageGetOpaque(page)->nextblkno;
             UnlockReleaseBuffer(buf);
         }
-        int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions,
+        if (curTupleNum == 0) {
+            pfree(tupleMatrix);
+            pfree(tids);
+            if (norms != NULL) {
+                pfree(norms);
+            }
+            pfree_ext(resMatrix);
+            continue;
+        }
+        int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, curTupleNum, 1, so->dimensions,
             &tupleDevice, listId, false);
         if (ret != 0) {
             pfree(tupleMatrix);
@@ -347,7 +393,7 @@ static void GetScanItemsNPUWithoutCache(IndexScanDesc scan, Datum value)
             FreeAccessStrategy(bas);
             ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
         }
-        addSlots(so, norms, tids, list->tupleNum, isL2, resMatrix);
+        addSlots(so, norms, tids, curTupleNum, isL2, resMatrix);
         pfree(tupleMatrix);
         pfree(tids);
         if (norms != NULL) {
@@ -425,8 +471,14 @@ static void GetScanItemsNPUWithCache(IndexScanDesc scan, Datum value)
                     for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
                         bool isnull;
                         ItemId itemid = PageGetItemId(page, offno);
-                        IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
-                        Datum datum = index_getattr(itup, 1, tupdesc, &isnull);
+                        IndexTuple itup;
+                        Datum datum;
+
+                        if (!IvfflatItemIdIsLive(itemid)) {
+                            continue;
+                        }
+                        itup = (IndexTuple)PageGetItem(page, itemid);
+                        datum = index_getattr(itup, 1, tupdesc, &isnull);
                         float *vec = DatumGetVector(datum)->x;
                         int vecLen = so->dimensions * sizeof(float);
                         tids[curTupleNum] = itup->t_tid;
@@ -440,22 +492,27 @@ static void GetScanItemsNPUWithCache(IndexScanDesc scan, Datum value)
                     searchPage = IvfflatPageGetOpaque(page)->nextblkno;
                     UnlockReleaseBuffer(buf);
                 }
-                int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions,
-                    &tupleDevice, listId, true);
-                if (ret != 0) {
+                if (curTupleNum == 0) {
                     pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
                     pfree(tupleMatrix);
-                    pfree_ext(resMatrix);
-                    ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
+                } else {
+                    int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, curTupleNum, 1, so->dimensions,
+                        &tupleDevice, listId, true);
+                    if (ret != 0) {
+                        pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
+                        pfree(tupleMatrix);
+                        pfree_ext(resMatrix);
+                        ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
+                    }
+                    IvfflatNPUGetListInfo(listId).tupleTids = tids;
+                    IvfflatNPUGetListInfo(listId).tupleNorms = norms;
+                    IvfflatNPUGetListInfo(listId).deviceVecs = tupleDevice;
+                    IvfflatNPUGetListInfo(listId).initialized = true;
+                    addSlots(so, IvfflatNPUGetListInfo(listId).tupleNorms, IvfflatNPUGetListInfo(listId).tupleTids,
+                        curTupleNum, isL2, resMatrix);
+                    pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
+                    pfree(tupleMatrix);
                 }
-                IvfflatNPUGetListInfo(listId).tupleTids = tids;
-                IvfflatNPUGetListInfo(listId).tupleNorms = norms;
-                IvfflatNPUGetListInfo(listId).deviceVecs = tupleDevice;
-                IvfflatNPUGetListInfo(listId).initialized = true;
-                addSlots(so, IvfflatNPUGetListInfo(listId).tupleNorms, IvfflatNPUGetListInfo(listId).tupleTids,
-                    list->tupleNum, isL2, resMatrix);
-                pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
-                pfree(tupleMatrix);
             } else {
                 uint8_t *tupleDevice = IvfflatNPUGetListInfo(listId).deviceVecs;
                 int ret = MatrixMulOnNPU(NULL, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions, &tupleDevice,
@@ -610,7 +667,9 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
                 double maxDistance = DBL_MAX;
 
                 ItemId itemid = PageGetItemId(page, offno);
-
+                if (!IvfflatItemIdIsLive(itemid)) {
+                    continue;
+                }
                 itup = (IndexTuple)PageGetItem(page, itemid);
                 datum = index_getattr(itup, 1, tupdesc, &isnull);
                 code = LoadPQCode(itup);
@@ -702,8 +761,14 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
             }
 
             ItemId itemid = PageGetItemId(page, node->indexOff);
-            IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
-            Datum datum = index_getattr(itup, 1, tupdesc, &isnull);
+            IndexTuple itup;
+            Datum datum;
+
+            if (!IvfflatItemIdIsLive(itemid)) {
+                continue;
+            }
+            itup = (IndexTuple)PageGetItem(page, itemid);
+            datum = index_getattr(itup, 1, tupdesc, &isnull);
 
             /* Add virtual tuple */
             ExecClearTuple(slot);
@@ -836,6 +901,9 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
                 double maxDistance = DBL_MAX;
                 errno_t rc = EOK;
 
+                if (!IvfflatItemIdIsLive(itemid)) {
+                    continue;
+                }
                 itup = (IndexTuple)PageGetItem(page, itemid);
                 datum = index_getattr(itup, 1, rbqTupdesc, &isnull);
 
@@ -948,8 +1016,14 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
             }
 
             ItemId itemid = PageGetItemId(page, node->indexOff);
-            IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
-            Datum datum = index_getattr(itup, 1, rbqTupdesc, &isnull);
+            IndexTuple itup;
+            Datum datum;
+
+            if (!IvfflatItemIdIsLive(itemid)) {
+                continue;
+            }
+            itup = (IndexTuple)PageGetItem(page, itemid);
+            datum = index_getattr(itup, 1, rbqTupdesc, &isnull);
 
             bool refineSQ8 = so->rbqParams->rbqConfig->reType == SQ8;
             RabitqVector *rbqVec = (RabitqVector *)palloc0(rbqCodeSize(so->rbqParams->dim, refineSQ8));
@@ -1124,6 +1198,15 @@ IndexScanDesc ivfflatbeginscan_internal(Relation index, int nkeys, int norderbys
     so->probes = probes;
     so->dimensions = dimensions;
     so->kreorder = u_sess->datavec_ctx.ivfpq_kreorder;
+    so->vectorPayloadLen = 0;
+    so->vectorBufferAccess = NULL;
+    so->enableVectorStorage =
+        IvfflatRelationHasVectorPayloadStorage(index, NULL, &so->vectorPayloadLen);
+    if (so->enableVectorStorage) {
+        if (!VectorBufferBeginAccess(&index->rd_node, so->vectorPayloadLen, &so->vectorBufferAccess)) {
+            so->vectorBufferAccess = NULL;
+        }
+    }
 
     /* Set support functions */
     so->procinfo = index_getprocinfo(index, 1, IVFFLAT_DISTANCE_PROC);
@@ -1364,6 +1447,11 @@ void ivfflatendscan_internal(IndexScanDesc scan)
         }
         pfree(so->rbqParams);
         so->rbqParams = NULL;
+    }
+
+    if (so->vectorBufferAccess != NULL) {
+        VectorBufferEndAccess(&so->vectorBufferAccess);
+        so->vectorBufferAccess = NULL;
     }
 
     pfree(so);

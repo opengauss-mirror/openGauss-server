@@ -15,7 +15,10 @@
 
 #include "access/generic_xlog.h"
 #include "access/xlogproc.h"
+#include "access/xlogutils.h"
+#include "access/datavec/vector_storage.h"
 #include "miscadmin.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/memutils.h"
 
 /*-------------------------------------------------------------------------
@@ -381,6 +384,20 @@ applyPageRedo(Page page, Pointer data, Size dataSize)
     }
 }
 
+static void
+genericRedoInvalidatePayload(XLogRedoAction action, const RelFileNode *rnode, BlockNumber blknum,
+    Page oldPage, Page newPage)
+{
+    if (rnode == NULL || newPage == NULL) {
+        return;
+    }
+    if (action == BLK_NEEDS_REDO) {
+        VecPayloadRedoInvalidateChangedSlots(rnode, blknum, oldPage, newPage);
+    } else if (action == BLK_RESTORED) {
+        VecPayloadRedoInvalidateIfNeeded(rnode, blknum, newPage);
+    }
+}
+
 /*
  * Redo function for generic xlog record.
  */
@@ -388,7 +405,7 @@ void
 generic_redo(XLogReaderState *record)
 {
     uint8 block_id;
-    RedoBufferInfo buffers[MAX_GENERIC_XLOG_PAGES];
+    RedoBufferInfo buffers[MAX_GENERIC_XLOG_PAGES] = {};
     XLogRecPtr lsn = record->EndRecPtr;
 
     Assert(record->max_block_id < MAX_GENERIC_XLOG_PAGES);
@@ -407,13 +424,36 @@ generic_redo(XLogReaderState *record)
             Pointer blockData;
             Size blockDataSize;
             Page page;
+            char oldImage[BLCKSZ];
+            Page oldPage = NULL;
+            RelFileNode rnode;
+            ForkNumber forknum;
+            BlockNumber blknum;
 
             page = BufferGetPage(buffers[block_id].buf);
+            if (VecPayloadRedoNeedsOldImage(page)) {
+                errno_t rc = memcpy_s(oldImage, BLCKSZ, page, BLCKSZ);
+                if (rc != EOK) {
+                    ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("failed to copy page image during generic redo: memcpy_s returned %d", rc)));
+                }
+                oldPage = (Page)oldImage;
+            }
             blockData = XLogRecGetBlockData(record, block_id, &blockDataSize);
             applyPageRedo(page, blockData, blockDataSize);
 
             PageSetLSN(page, lsn);
             MarkBufferDirty(buffers[block_id].buf);
+            BufferGetTag(buffers[block_id].buf, &rnode, &forknum, &blknum);
+            genericRedoInvalidatePayload(action, &rnode, blknum, oldPage, page);
+        } else if (BufferIsValid(buffers[block_id].buf)) {
+            RelFileNode rnode;
+            ForkNumber forknum;
+            BlockNumber blknum;
+            Page page = BufferGetPage(buffers[block_id].buf);
+
+            BufferGetTag(buffers[block_id].buf, &rnode, &forknum, &blknum);
+            genericRedoInvalidatePayload(action, &rnode, blknum, NULL, page);
         }
     }
 
@@ -429,18 +469,49 @@ GenericRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
 {
     XLogRedoAction action = XLogCheckBlockDataRedoAction(blockdatarec, bufferinfo);
     XLogRecPtr lsn = bufferinfo->lsn;
+    RelFileNode rnode;
+    BlockNumber blknum = InvalidBlockNumber;
+    Page page = NULL;
+
+    if (blockhead != NULL) {
+        rnode.spcNode = XLogBlockHeadGetSpcNode(blockhead);
+        rnode.dbNode = XLogBlockHeadGetDbNode(blockhead);
+        rnode.relNode = XLogBlockHeadGetRelNode(blockhead);
+        rnode.bucketNode = XLogBlockHeadGetBucketId(blockhead);
+        rnode.opt = XLogBlockHeadGetCompressOpt(blockhead);
+        blknum = XLogBlockHeadGetBlockNum(blockhead);
+    }
+    if (bufferinfo != NULL) {
+        page = bufferinfo->pageinfo.page;
+    }
 
     if (action == BLK_NEEDS_REDO) {
         Pointer blockData;
-        Page page;
-
+        char oldImage[BLCKSZ];
+        Page oldPage = NULL;
         Size blkdatalen = 0;
-        page = bufferinfo->pageinfo.page;
+
+        if (page == NULL) {
+            return;
+        }
+        if (VecPayloadRedoNeedsOldImage(page)) {
+            errno_t rc = memcpy_s(oldImage, BLCKSZ, page, BLCKSZ);
+            if (rc != EOK) {
+                ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                    errmsg("failed to copy page image during generic block redo: memcpy_s returned %d", rc)));
+            }
+            oldPage = (Page)oldImage;
+        }
         blockData = XLogBlockDataGetBlockData(blockdatarec, &blkdatalen);
 
         applyPageRedo(page, blockData, blkdatalen);
         PageSetLSN(page, lsn);
         MarkBufferDirty(bufferinfo->buf);
+        if (blockhead != NULL) {
+            genericRedoInvalidatePayload(action, &rnode, blknum, oldPage, page);
+        }
+    } else if (action == BLK_RESTORED && blockhead != NULL && page != NULL) {
+        genericRedoInvalidatePayload(action, &rnode, blknum, NULL, page);
     }
 }
 

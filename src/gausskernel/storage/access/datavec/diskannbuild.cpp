@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "storage/freespace.h"
 #include "access/datavec/diskann.h"
+#include "access/datavec/vector_storage.h"
 #include "access/datavec/diskannv2.h"
 #include "access/generic_xlog.h"
 #include "access/tableam.h"
@@ -89,6 +90,10 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     }
 
     buildstate->enablePQ = DiskAnnEnablePQ(index);
+    buildstate->enableVectorStorage = DiskAnnGetEnableVectorPayloadStorage(index);
+    if (buildstate->enableVectorStorage && buildstate->enablePQ) {
+        ereport(ERROR, (errmsg("DiskANN vector storage does not support enable_pq in this phase")));
+    }
     if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
         ereport(ERROR, (errmsg("this data type cannot support diskann pq.")));
     }
@@ -125,6 +130,14 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     buildstate->edgeSize = sizeof(DiskAnnEdgePageData);
     buildstate->itemSize = buildstate->nodeSize + buildstate->edgeSize;
     buildstate->graphStore = nullptr;
+    buildstate->payloadInsertBlkno = InvalidBlockNumber;
+    buildstate->payloadLen = (uint32)VECTOR_SIZE(buildstate->dimensions);
+    errno_t prc = memset_s(&buildstate->payloadState, sizeof(buildstate->payloadState), 0,
+        sizeof(buildstate->payloadState));
+    if (prc != EOK) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to initialize diskann payload build state: memset_s returned %d", prc)));
+    }
     buildstate->tmpCtx =
         AllocSetContextCreate(CurrentMemoryContext, "diskann build temporary context", ALLOCSET_DEFAULT_SIZES);
 }
@@ -173,7 +186,7 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     /* Set metapage data */
     metap = DiskAnnPageGetMeta(page);
     metap->magicNumber = DISKANN_MAGIC_NUMBER;
-    metap->version = DISKANN_VERSION;
+    metap->version = buildstate->enableVectorStorage ? DISKANN_VERSION_PAYLOAD : DISKANN_VERSION;
     metap->indexSize = buildstate->indexSize;
     metap->dimensions = buildstate->dimensions;
     metap->nodeSize = buildstate->nodeSize;
@@ -205,7 +218,14 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
         metap->pqOffsetblk = 0;
     }
     metap->params = buildstate->params;
-    ((PageHeader)page)->pd_lower = ((char*)metap + sizeof(DiskAnnMetaPageData)) - (char*)page;
+    metap->enableVectorStorage = buildstate->enableVectorStorage;
+    metap->payloadInsertBlkno = InvalidBlockNumber;
+    metap->payloadLen = buildstate->payloadLen;
+    ItemPointerSetInvalid(&metap->payloadFreeHead);
+    metap->livePayloads = 0;
+    metap->deadPayloads = 0;
+    Size metaSize = buildstate->enableVectorStorage ? sizeof(DiskAnnMetaPageData) : DISKANN_META_V1_SIZE;
+    ((PageHeader)page)->pd_lower = ((char*)metap + metaSize) - (char*)page;
 
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
@@ -261,7 +281,7 @@ VectorArray CreateVectorForExistingData(float *data, int dim, int len = 1)
  * Insert vector into page, reserve and initialize node & edge page
  */
 static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrSum, ItemPointer heaptid,
-                                        DiskAnnMetaPage metaPage, bool building)
+                                        DiskAnnMetaPage metaPage, bool building, VecPayloadBuildState *payloadState)
 {
     Buffer buf;
     Page page;
@@ -271,8 +291,33 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     bool isnull[1] = {false};
 
     /* form index tuple */
-    itup = index_form_tuple(RelationGetDescr(index), &value, isnull);
-    itup->t_tid = *heaptid;
+    if (metaPage->enableVectorStorage) {
+        if (building && payloadState != NULL) {
+            VecPayloadDiskRef rawRef;
+            uint32 payloadLen = (uint32)VECTOR_SIZE(vec->dim);
+
+            const VecPayloadInput payload = {VEC_PAYLOAD_RAW_VECTOR, vec, payloadLen};
+            VecPayloadPutBuild(payloadState, &payload, &rawRef);
+            itup = VecPayloadFormIndexTupleFromRef(index, &rawRef, heaptid);
+        } else {
+            BlockNumber landedBlkno = InvalidBlockNumber;
+            uint32 payloadLen = (uint32)VECTOR_SIZE(vec->dim);
+            if (!BlockNumberIsValid(metaPage->payloadInsertBlkno) || metaPage->payloadLen != payloadLen) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("diskann vector storage metapage for relation \"%s\" is malformed",
+                        RelationGetRelationName(index))));
+            }
+            VecPayloadInput payloadInput = {VEC_PAYLOAD_RAW_VECTOR, vec, payloadLen};
+            VecPayloadInsertIndexTupleRequest request = {
+                MAIN_FORKNUM, metaPage->payloadInsertBlkno, heaptid, &landedBlkno, NULL};
+
+            itup = VecPayloadInsertIndexTuple(index, &payloadInput, &request);
+            (void)landedBlkno;
+        }
+    } else {
+        itup = index_form_tuple(RelationGetDescr(index), &value, isnull);
+        itup->t_tid = *heaptid;
+    }
 
     Size itemsz = MAXALIGN(IndexTupleSize(itup));
     Assert(itemsz <=
@@ -344,8 +389,12 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     return blkno;
 }
 
-BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage, bool building)
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid,
+                        const DiskAnnInsertContext *context)
 {
+    DiskAnnMetaPage metaPage = context->metaPage;
+    bool building = context->building;
+    VecPayloadBuildState *payloadState = context->payloadState;
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     /* Normalize if needed */
     FmgrInfo* normprocinfo = DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC);
@@ -368,7 +417,7 @@ BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, Disk
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(index, vec,
                                              -1,  // calculate sqrSum by VectorSquareNorm
-                                             heaptid, metaPage, building);
+                                             heaptid, metaPage, building, payloadState);
 
     BlockNumber currentPage = GetInsertPage(index);
     if (BlockNumberIsValid(blkno) && blkno != currentPage) {
@@ -393,7 +442,8 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum* values, DiskA
     securec_check_c(rc, "\0", "\0");
     insertValue[0] = PointerGetDatum(insertVector);
 
-    blkno = InsertTuple(index, insertValue, tid, &buildstate->metaPage, true);
+    DiskAnnInsertContext context = {&buildstate->metaPage, true, &buildstate->payloadState};
+    blkno = InsertTuple(index, insertValue, tid, &context);
     // parallel build
     if (buildstate->diskannleader) {
         DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
@@ -600,7 +650,7 @@ static double AssignTuples(DiskAnnBuildState* buildstate)
     }
 
     int parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
-    if (parallelWorkers > 0) {
+    if (parallelWorkers > 0 && !buildstate->enableVectorStorage) {
         DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::CREATE_ENTRY_PAGE);
     }
 
@@ -656,7 +706,7 @@ static BlockNumber GenerateFrozenPoint(DiskAnnBuildState* buildstate)
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(buildstate->index, vector,
                                              sqrSum,  // use vec sqrsum
-                                             &hctid, &buildstate->metaPage, true);
+                                             &hctid, &buildstate->metaPage, true, &buildstate->payloadState);
 
     pfree(vector);
     pfree(vec);
@@ -671,6 +721,9 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
     }
 
     BlockNumber frozen = GenerateFrozenPoint(buildstate);
+    if (buildstate->enableVectorStorage) {
+        VecPayloadFlushBuild(&buildstate->payloadState);
+    }
     InsertFrozenPoint(buildstate->index, frozen, true);
 
     int parallelWorkers = 0;
@@ -809,9 +862,44 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
 
     buildstate->graphStore = New(CurrentMemoryContext) DiskAnnPageGraphStore(index);
     DiskANNGetMetaPageInfo(index, &buildstate->metaPage);
+    if (buildstate->enableVectorStorage) {
+        VecPayloadBeginBuild(&buildstate->payloadState, index, forkNum);
+    }
     CreateEntryPages(buildstate);
+    if (buildstate->enableVectorStorage) {
+        /*
+         * PutBuild holds the current payload page exclusive. Graph construction
+         * reads those pages (frozen point + Link), so drop the lock first.
+         */
+        VecPayloadFlushBuild(&buildstate->payloadState);
+    }
 
     BuildVamanaIndex(buildstate);
+
+    if (buildstate->enableVectorStorage) {
+        VecPayloadEndBuild(&buildstate->payloadState, &buildstate->payloadInsertBlkno);
+        Buffer mbuf = ReadBufferExtended(index, forkNum, DISKANN_METAPAGE_BLKNO, RBM_NORMAL, NULL);
+        Page mpage;
+        GenericXLogState *mstate;
+        DiskAnnMetaPage metap;
+
+        LockBuffer(mbuf, BUFFER_LOCK_EXCLUSIVE);
+        mstate = GenericXLogStart(index);
+        /*
+         * CreateMetaPage has not WAL-logged this page yet. Recovery must be
+         * able to create it before the final LogNewpageRange below runs.
+         */
+        mpage = GenericXLogRegisterBuffer(mstate, mbuf, GENERIC_XLOG_FULL_IMAGE);
+        metap = DiskAnnPageGetMeta(mpage);
+        metap->payloadInsertBlkno = buildstate->payloadInsertBlkno;
+        metap->payloadLen = buildstate->payloadLen;
+        metap->livePayloads = (uint64)buildstate->indtuples;
+        if (buildstate->blocksList.size() > 0) {
+            metap->livePayloads++;
+        }
+        GenericXLogFinish(mstate);
+        UnlockReleaseBuffer(mbuf);
+    }
     
     if (RelationNeedsWAL(index) || forkNum == INIT_FORKNUM)
         LogNewpageRange(index, forkNum, 0, RelationGetNumberOfBlocksInFork(index, forkNum), true);
@@ -941,6 +1029,12 @@ void DiskAnnValidateRabitqOptions(Relation index, int dim, double reltuples)
     int rabitqBits = DiskAnnGetRabitqBits(index);
     bool rabitqBitsSet = opts ? opts->rabitqBitsSet : false;
 
+    if (enableRabitq && DiskAnnGetEnableVectorPayloadStorage(index)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("enable_vector_payload_storage cannot be combined with enable_rabitq for diskann"),
+            errhint("Disable enable_rabitq or enable_vector_payload_storage.")));
+    }
+
     if (enableRabitq && enablePQ) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("enable_pq and enable_rabitq cannot both be on for diskann")));
@@ -1015,4 +1109,3 @@ void diskannbuildempty_internal(Relation index)
 
     BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM);
 }
-
