@@ -143,6 +143,9 @@ typedef struct PgStatPendingDataChangedEntry {
 /* Minimum receive buffer size for the collector's socket. */
 #define PGSTAT_MIN_RCVBUF (100 * 1024)
 
+/* numeric values in /proc/meminfo are kB-sized, multiply by MEM_INFO_KB to convert to bytes */
+#define MEM_INFO_KB 1024
+
 /* ----------
  * The initial size hints for the hash tables used in the collector.
  * ----------
@@ -356,8 +359,91 @@ const OSRunInfoDesc osStatDescArrayOrg[TOTAL_OS_RUN_INFO_TYPES] = {
         "operating-system scheduler to run. On many platforms, this statistic reflects the average load over the past "
         "minute."},
 
-    /* physical memory size */
-    {Int64GetNumberDatum, "PHYSICAL_MEMORY_BYTES", false, false, "Total number of bytes of physical memory"}};
+    /* os physical memory info (parsed from /proc/meminfo) */
+    {Int64GetNumberDatum,
+        "PHYSICAL_MEMORY_BYTES",
+        false,
+        false,
+        "Total number of bytes of physical memory in the operating system"},
+    {Int64GetNumberDatum,
+        "MEM_FREE_BYTES",
+        false,
+        false,
+    "Free physical memory bytes in the operating system"},
+    {Int64GetNumberDatum,
+        "MEM_AVAILABLE_BYTES",
+        false,
+        false,
+    "Estimated allocatable physical memory bytes in the operating system, judge whether OOM will be triggered"},
+    {Int64GetNumberDatum,
+        "MEM_BUFFERS_BYTES",
+        false,
+        false,
+    "Kernel buffer bytes for disk block devices in the operating system"},
+    {Int64GetNumberDatum,
+        "MEM_CACHED_BYTES",
+        false,
+        false,
+    "Page cache bytes of file system data in the operating system, improve database read performance"},
+    {Int64GetNumberDatum,
+        "MEM_SRECLAIMABLE_BYTES",
+        false,
+        false,
+    "Reclaimable kernel slab cache bytes in the operating system, can be released when memory is tight"},
+    {Int64GetNumberDatum,
+        "MEM_SUNRECLAIMABLE_BYTES",
+        false,
+        false,
+    "Unreclaimable kernel slab cache bytes in the operating system, used to locate kernel memory leak"},
+    {Int64GetNumberDatum,
+        "MEM_MLOCKED_BYTES",
+        false,
+        false,
+    "Physical memory bytes locked by mlock in the operating system, cannot be swapped out"},
+    {Int64GetNumberDatum,
+        "MEM_SHARED_BYTES",
+        false,
+        false,
+    "Shared memory bytes of tmpfs and shm in the operating system, continuous growth without release means "
+    "shared memory leak"},
+    {Int64GetNumberDatum,
+        "HUGEPAGES_TOTAL_COUNT",
+        false,
+        false,
+    "Total pre-allocated hugepage count in operating system"},
+    {Int64GetNumberDatum,
+        "HUGEPAGES_FREE_COUNT",
+        false,
+        false,
+    "Remaining free hugepage count, insufficient hugepages lead to database startup failure and inability to "
+    "use hugepage optimization"},
+    {Int64GetNumberDatum,
+        "HUGEPAGE_SINGLE_SIZE_BYTES",
+        false,
+        false,
+    "Single hugepage capacity in bytes, used to calculate total memory occupied by hugepages"},
+    {Int64GetNumberDatum,
+        "SWAP_TOTAL_BYTES",
+        false,
+        false,
+    "Total capacity bytes of swap partition (disk virtual memory)"},
+    {Int64GetNumberDatum,
+        "SWAP_FREE_BYTES",
+        false,
+        false,
+    "Idle capacity bytes of swap partition"},
+    {Int64GetNumberDatum,
+        "MEM_USED_BYTES",
+        false,
+        false,
+    "Used physical memory bytes of the operating system, exclude all recyclable system cache"},
+    {Int64GetNumberDatum,
+        "SWAP_USED_BYTES",
+        false,
+        false,
+    "Used capacity bytes of swap partition, continuous rising indicates insufficient physical memory and sharp"
+    " database performance drop"}
+};
 
 /* ----------
  * Local function forward declarations
@@ -7868,8 +7954,8 @@ void getTotalMem(void)
             temp = line + sizeof("MemTotal:");
             ret = strtoul(temp, NULL, 10);
 
-            if (ret < ULONG_MAX / 1024) {
-                u_sess->stat_cxt.osStatDataArray[PHYSICAL_MEMORY_BYTES].int64Value = ret * 1024;
+            if (ret < ULONG_MAX / MEM_INFO_KB) {
+                u_sess->stat_cxt.osStatDataArray[PHYSICAL_MEMORY_BYTES].int64Value = ret * MEM_INFO_KB;
                 u_sess->stat_cxt.osStatDescArray[PHYSICAL_MEMORY_BYTES].got = true;
             }
         }
@@ -7878,6 +7964,101 @@ void getTotalMem(void)
             pfree(line);
         (void)fclose(fd);
     }
+}
+
+void GetOsMemDetail(void)
+{
+    const char* memInfoPath = "/proc/meminfo";
+    FILE* fd = NULL;
+    /* open /proc/meminfo file. */
+    if ((fd = fopen(memInfoPath, "r")) == NULL) {
+        ereport(LOG, (errmsg("cannot open /proc/meminfo for reading memory stats")));
+        return;
+    }
+    static MemField memFields[] ={
+        {"MemTotal:", PHYSICAL_MEMORY_BYTES, 0},
+        {"MemFree:", MEM_FREE_BYTES, 0},
+        {"MemAvailable:", MEM_AVAILABLE_BYTES, 0},
+        {"Buffers:", MEM_BUFFERS_BYTES, 0},
+        {"Cached:", MEM_CACHED_BYTES, 0},
+        {"SReclaimable:", MEM_SRECLAIMABLE_BYTES, 0},
+        {"SUnreclaim:", MEM_SUNRECLAIMABLE_BYTES, 0},
+        {"Mlocked:", MEM_MLOCKED_BYTES, 0},
+        {"Shmem:", MEM_SHARED_BYTES, 0},
+        {"HugePages_Total:", HUGEPAGES_TOTAL_COUNT, 1},
+        {"HugePages_Free:", HUGEPAGES_FREE_COUNT, 1},
+        {"Hugepagesize:", HUGEPAGE_SINGLE_SIZE_BYTES, 0},
+        {"SwapTotal:", SWAP_TOTAL_BYTES, 0},
+        {"SwapFree:", SWAP_FREE_BYTES, 0},
+    };
+
+    const int numMemFields = sizeof(memFields) / sizeof(memFields[0]);
+    char *line = NULL;
+    char* temp = NULL;
+    uint64 ret = 0;
+    size_t len = 0;
+    ssize_t nread;
+
+    for (int i = 0; i < numMemFields; i++) {
+        u_sess->stat_cxt.osStatDescArray[memFields[i].startIndex].got = false;
+    }
+    u_sess->stat_cxt.osStatDescArray[MEM_USED_BYTES].got = false;
+    u_sess->stat_cxt.osStatDescArray[SWAP_USED_BYTES].got = false;
+
+    while ((nread = gs_getline(&line, &len, fd)) > 0) {
+        for (int i = 0; i < numMemFields; i++) {
+            size_t nameLen = strlen(memFields[i].name);
+            if (strncmp(line, memFields[i].name, nameLen) != 0) {
+                continue;
+            }
+            temp = line + nameLen;
+            if (*temp != ' ' && *temp != '\t') {
+                continue;
+            }
+
+            ret = strtoul(temp, NULL, 10);
+            if (ret < ULONG_MAX / MEM_INFO_KB) {
+                u_sess->stat_cxt.osStatDataArray[memFields[i].startIndex].int64Value =
+                    ret * (memFields[i].unit == 0 ? MEM_INFO_KB : 1);
+                u_sess->stat_cxt.osStatDescArray[memFields[i].startIndex].got = true;
+            }
+            break;
+        }
+    }
+    if (line) {
+        pfree(line);
+    }
+    fclose(fd);
+
+    /* Calculate derived metrics MEM_USED_BYTES and SWAP_USED_BYTES (only if basic data is valid) */
+    #define SET_DERIVED(index, expr) \
+        do { \
+            int64 val = (expr); \
+            u_sess->stat_cxt.osStatDataArray[index].int64Value = val; \
+            u_sess->stat_cxt.osStatDescArray[index].got = true; \
+        } while(0)
+
+    if (u_sess->stat_cxt.osStatDescArray[PHYSICAL_MEMORY_BYTES].got &&
+        u_sess->stat_cxt.osStatDescArray[MEM_FREE_BYTES].got &&
+        u_sess->stat_cxt.osStatDescArray[MEM_BUFFERS_BYTES].got &&
+        u_sess->stat_cxt.osStatDescArray[MEM_CACHED_BYTES].got) {
+        int64 shmem = u_sess->stat_cxt.osStatDescArray[MEM_SHARED_BYTES].got ?
+            u_sess->stat_cxt.osStatDataArray[MEM_SHARED_BYTES].int64Value : 0;
+        SET_DERIVED(MEM_USED_BYTES,
+            u_sess->stat_cxt.osStatDataArray[PHYSICAL_MEMORY_BYTES].int64Value -
+            u_sess->stat_cxt.osStatDataArray[MEM_FREE_BYTES].int64Value -
+            u_sess->stat_cxt.osStatDataArray[MEM_BUFFERS_BYTES].int64Value -
+            u_sess->stat_cxt.osStatDataArray[MEM_CACHED_BYTES].int64Value +
+            shmem);
+    }
+
+    if (u_sess->stat_cxt.osStatDescArray[SWAP_TOTAL_BYTES].got &&
+        u_sess->stat_cxt.osStatDescArray[SWAP_FREE_BYTES].got) {
+        SET_DERIVED(SWAP_USED_BYTES,
+            u_sess->stat_cxt.osStatDataArray[SWAP_TOTAL_BYTES].int64Value -
+            u_sess->stat_cxt.osStatDataArray[SWAP_FREE_BYTES].int64Value);
+    }
+    #undef SET_DERIVED
 }
 
 /*

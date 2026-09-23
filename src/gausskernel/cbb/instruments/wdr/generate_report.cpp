@@ -3959,6 +3959,8 @@ static void AppendQueryOne(StringInfoData& query)
         "    snap_2.load as \"Load Average End\", "
         "    pg_catalog.round(coalesce((snap_2.user_time - snap_1.user_time), 0) / "
         "        greatest(coalesce((snap_2.total_time - snap_1.total_time), 0), 1)  * 100, 2) as \"%%User\", "
+        "    pg_catalog.round(coalesce((snap_2.nice_time - snap_1.nice_time), 0) / "
+        "        greatest(coalesce((snap_2.total_time - snap_1.total_time), 0), 1)  * 100, 2) as \"%%Nice\", "
         "    pg_catalog.round(coalesce((snap_2.sys_time - snap_1.sys_time), 0) / "
         "        greatest(coalesce((snap_2.total_time - snap_1.total_time), 0), 1) * 100, 2) as \"%%System\", "
         "    pg_catalog.round(coalesce((snap_2.iowait_time - snap_1.iowait_time), 0) / "
@@ -3971,9 +3973,10 @@ static void AppendQueryOne(StringInfoData& query)
 static void AppendQueryTwo(StringInfoData& query, report_params* params)
 {
     appendStringInfo(&query,
-        "    (select H.cpus, H.cores, H.sockets, H.idle_time, H.user_time, H.sys_time, H.iowait_time, "
-        "    (H.idle_time + H.user_time + H.sys_time + H.iowait_time) AS total_time, H.load from "
-        "    (select C.cpus, E.cores, T.sockets, I.idle_time, U.user_time, S.sys_time, W.iowait_time, L.load from "
+        "    (select H.cpus, H.cores, H.sockets, H.idle_time, H.user_time, H.nice_time, H.sys_time, H.iowait_time, "
+        "    (H.idle_time + H.user_time + H.nice_time + H.sys_time + H.iowait_time) AS total_time, H.load from "
+        "    (select C.cpus, E.cores, T.sockets, I.idle_time, U.user_time, N.nice_time, S.sys_time, W.iowait_time, "
+        "     L.load from "
         "    (select snap_value as cpus from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'NUM_CPUS')) AS C, "
         "    (select snap_value as cores from snapshot.snap_global_os_runtime "
@@ -3984,15 +3987,18 @@ static void AppendQueryTwo(StringInfoData& query, report_params* params)
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'IDLE_TIME')) AS I, "
         "    (select snap_value as user_time from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'USER_TIME')) AS U, "
+        "    (select snap_value as nice_time from snapshot.snap_global_os_runtime "
+        "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'NICE_TIME')) AS N, "
         "    (select snap_value as sys_time from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'SYS_TIME')) AS S, "
         "    (select snap_value as iowait_time from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'IOWAIT_TIME')) AS W, "
         "    (select snap_value as load from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'LOAD')) AS L ) as H ) as snap_2, "
-        "    (select H.cpus, H.cores, H.sockets, H.idle_time, H.user_time, H.sys_time, H.iowait_time, "
-        "    (H.idle_time + H.user_time + H.sys_time + H.iowait_time) AS total_time, H.load from "
-        "    (select C.cpus, E.cores, T.sockets, I.idle_time, U.user_time, S.sys_time, W.iowait_time, L.load from "
+        "    (select H.cpus, H.cores, H.sockets, H.idle_time, H.user_time, H.nice_time, H.sys_time, H.iowait_time, "
+        "    (H.idle_time + H.user_time + H.nice_time + H.sys_time + H.iowait_time) AS total_time, H.load from "
+        "    (select C.cpus, E.cores, T.sockets, I.idle_time, U.user_time, N.nice_time, S.sys_time, W.iowait_time, "
+        "     L.load from "
         "    (select snap_value as cpus from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'NUM_CPUS')) AS C, "
         "    (select snap_value as cores from snapshot.snap_global_os_runtime "
@@ -4003,6 +4009,8 @@ static void AppendQueryTwo(StringInfoData& query, report_params* params)
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'IDLE_TIME')) AS I, "
         "    (select snap_value as user_time from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'USER_TIME')) AS U, "
+        "    (select snap_value as nice_time from snapshot.snap_global_os_runtime "
+        "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'NICE_TIME')) AS N, "
         "    (select snap_value as sys_time from snapshot.snap_global_os_runtime "
         "     where (snapshot_id = %ld and snap_node_name = '%s' and snap_name = 'SYS_TIME')) AS S, "
         "    (select snap_value as iowait_time from snapshot.snap_global_os_runtime "
@@ -4024,6 +4032,10 @@ static void AppendQueryTwo(StringInfoData& query, report_params* params)
         params->end_snap_id,
         get_report_node(params),
         params->end_snap_id,
+        get_report_node(params),
+        params->end_snap_id,
+        get_report_node(params),
+        params->begin_snap_id,
         get_report_node(params),
         params->begin_snap_id,
         get_report_node(params),
@@ -4070,6 +4082,121 @@ static void get_summary_host_cpu(report_params* params)
     initStringInfo(&query);
     AppendQueryOne(query);
     AppendQueryTwo(query, params);
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+static void AppendQueryHostMemory(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        SELECT
+           'SnapEnd' AS '\',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'PHYSICAL_MEMORY_BYTES' THEN snap_value END)) AS 'MemTotal',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_FREE_BYTES' THEN snap_value END)) AS 'MemFree',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_USED_BYTES' THEN snap_value END)) AS 'MemUsed',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_AVAILABLE_BYTES' THEN snap_value END)) AS 'MemAvailable',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_BUFFERS_BYTES' THEN snap_value END)) AS 'Buffers',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_CACHED_BYTES' THEN snap_value END)) AS 'Cached',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_SRECLAIMABLE_BYTES' THEN snap_value END)) AS 'SReclaimable',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_SUNRECLAIMABLE_BYTES' THEN snap_value END)) AS 'SUnreclaim',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_MLOCKED_BYTES' THEN snap_value END)) AS 'Mlocked',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_SHARED_BYTES' THEN snap_value END)) AS 'Shmem',
+            MAX(CASE snap_name WHEN 'HUGEPAGES_TOTAL_COUNT' THEN snap_value END) AS 'HugePagesTotal',
+            MAX(CASE snap_name WHEN 'HUGEPAGES_FREE_COUNT' THEN snap_value END) AS 'HugePagesFree',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'HUGEPAGE_SINGLE_SIZE_BYTES' THEN snap_value END)) AS 'Hugepagesize',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_TOTAL_BYTES' THEN snap_value END)) AS 'SwapTotal',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_USED_BYTES' THEN snap_value END)) AS 'SwapUsed',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_FREE_BYTES' THEN snap_value END)) AS 'SwapFree'
+        FROM snapshot.snap_global_os_runtime
+        WHERE
+            snapshot_id = %ld and snap_node_name = '%s'
+            and snap_name IN (
+                'PHYSICAL_MEMORY_BYTES', 'MEM_FREE_BYTES', 'MEM_USED_BYTES', 'MEM_AVAILABLE_BYTES',
+                'MEM_BUFFERS_BYTES', 'MEM_CACHED_BYTES', 'MEM_SRECLAIMABLE_BYTES',
+                'MEM_SUNRECLAIMABLE_BYTES', 'MEM_MLOCKED_BYTES', 'MEM_SHARED_BYTES',
+                'HUGEPAGES_TOTAL_COUNT','HUGEPAGES_FREE_COUNT', 'HUGEPAGE_SINGLE_SIZE_BYTES',
+                'SWAP_TOTAL_BYTES', 'SWAP_USED_BYTES', 'SWAP_FREE_BYTES'
+            )
+        GROUP BY snap_node_name
+        union
+        SELECT
+           'SnapStart' AS '\',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'PHYSICAL_MEMORY_BYTES' THEN snap_value END)) AS 'MemTotal',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_FREE_BYTES' THEN snap_value END)) AS 'MemFree',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_USED_BYTES' THEN snap_value END)) AS 'MemUsed',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_AVAILABLE_BYTES' THEN snap_value END)) AS 'MemAvailable',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_BUFFERS_BYTES' THEN snap_value END)) AS 'Buffers',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_CACHED_BYTES' THEN snap_value END)) AS 'Cached',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_SRECLAIMABLE_BYTES' THEN snap_value END)) AS 'SReclaimable',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'MEM_SUNRECLAIMABLE_BYTES' THEN snap_value END)) AS 'SUnreclaim',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_MLOCKED_BYTES' THEN snap_value END)) AS 'Mlocked',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'MEM_SHARED_BYTES' THEN snap_value END)) AS 'Shmem',
+            MAX(CASE snap_name WHEN 'HUGEPAGES_TOTAL_COUNT' THEN snap_value END) AS 'HugePagesTotal',
+            MAX(CASE snap_name WHEN 'HUGEPAGES_FREE_COUNT' THEN snap_value END) AS 'HugePagesFree',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name
+                WHEN 'HUGEPAGE_SINGLE_SIZE_BYTES' THEN snap_value END)) AS 'Hugepagesize',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_TOTAL_BYTES' THEN snap_value END)) AS 'SwapTotal',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_USED_BYTES' THEN snap_value END)) AS 'SwapUsed',
+            pg_catalog.pg_size_pretty(MAX(CASE snap_name WHEN 'SWAP_FREE_BYTES' THEN snap_value END)) AS 'SwapFree'
+        FROM snapshot.snap_global_os_runtime
+        WHERE
+            snapshot_id = %ld and snap_node_name = '%s'
+            and snap_name IN (
+                'PHYSICAL_MEMORY_BYTES', 'MEM_FREE_BYTES', 'MEM_USED_BYTES', 'MEM_AVAILABLE_BYTES',
+                'MEM_BUFFERS_BYTES', 'MEM_CACHED_BYTES', 'MEM_SRECLAIMABLE_BYTES',
+                'MEM_SUNRECLAIMABLE_BYTES', 'MEM_MLOCKED_BYTES', 'MEM_SHARED_BYTES',
+                'HUGEPAGES_TOTAL_COUNT', 'HUGEPAGES_FREE_COUNT', 'HUGEPAGE_SINGLE_SIZE_BYTES',
+                'SWAP_TOTAL_BYTES', 'SWAP_USED_BYTES', 'SWAP_FREE_BYTES'
+            )
+        GROUP BY snap_node_name
+    )";
+
+    appendStringInfo(&query,
+        sql,
+        params->end_snap_id,
+        get_report_node(params),
+        params->begin_snap_id,
+        get_report_node(params));
+}
+
+/* summary -host memory */
+static void get_summary_host_memory(report_params* params)
+{
+    /* supported report type: summary/all */
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node host memory";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Host Memory";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    AppendQueryHostMemory(query, params);
+
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     pfree(query.data);
 
@@ -4555,8 +4682,9 @@ void GenReport::get_report_data(report_params* params)
     /* summary - Wait Classes by Total Wait Time */
     get_summary_wait_classes(params);
 
-    /* summary - Host CPU */
+    /* summary - Host CPU memory */
     get_summary_host_cpu(params);
+    get_summary_host_memory(params);
 
     /* summary - IO Profile */
     get_summary_io_profile(params);
