@@ -690,6 +690,9 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     stat_cxt->stbyStmtHistFast = NULL;
     stat_cxt->stbyStmtHistSlow = NULL;
     stat_cxt->InstrUserHTAB = NULL;
+    stat_cxt->DatabaseSQLStatContext = NULL;
+    stat_cxt->DatabaseSQLStatHTAB = NULL;
+    SpinLockInit(&stat_cxt->DatabaseSQLStatLock);
     stat_cxt->force_process = false;
     stat_cxt->RTPERCENTILE[0] = 0;
     stat_cxt->RTPERCENTILE[1] = 0;
@@ -701,6 +704,12 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     errno_t rc;
     rc = memset_s(
         stat_cxt->gInstanceTimeInfo, TOTAL_TIME_INFO_TYPES * sizeof(int64), 0, TOTAL_TIME_INFO_TYPES * sizeof(int64));
+    securec_check(rc, "\0", "\0");
+
+    stat_cxt->gInstanceCountInfo = (int64*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), TOTAL_TIME_INFO_TYPES * sizeof(int64));
+    rc = memset_s(
+        stat_cxt->gInstanceCountInfo, TOTAL_TIME_INFO_TYPES * sizeof(int64), 0, TOTAL_TIME_INFO_TYPES * sizeof(int64));
     securec_check(rc, "\0", "\0");
 
     stat_cxt->snapshot_thread_counter = 0;

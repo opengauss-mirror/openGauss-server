@@ -24,6 +24,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "instruments/instr_unique_sql.h"
+#include "instruments/instr_database_sql.h"
 #include "instruments/instr_statement.h"
 #include "instruments/instr_slow_query.h"
 #include "instruments/unique_query.h"
@@ -708,6 +709,7 @@ void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
             (errmodule(MOD_INSTR), errmsg("[UniqueSQL] unique id: %lu, update entry n_calls", key.unique_sql_id)));
         UpdateUniqueSQLCalls(entry);
         UpdateUniqueSQLElapseTime(entry, elapse_start_time);
+        UpdateDatabaseSQLStat(elapse_start_time);
         UpdateUniqueSQLStatDetail(entry, NULL, u_sess->unique_sql_cxt.unique_sql_returned_rows_counter);
         u_sess->unique_sql_cxt.need_update_calls = false;
     } else if (IS_PGXC_DATANODE && agg_table_stat != NULL) {

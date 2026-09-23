@@ -403,11 +403,12 @@ private:
 class OgRecordStat : public BaseObject {
 public:
     /**
-     * Bind old stat memory of local_time_info and loca_net_info
+     * Bind old stat memory of local_time_info / local_time_count / loca_net_info
      * @param local_time_info the TimeInfoType memory
+     * @param local_time_count the TimeInfoType count memory
      * @param loca_net_info the NetInfoType memory
      */
-    OgRecordStat(int64* local_time_info, uint64* loca_net_info);
+    OgRecordStat(int64* local_time_info, int64* local_time_count, uint64* loca_net_info);
     virtual ~OgRecordStat();
     /**
      * This used by DELETE_EX macro
@@ -520,6 +521,7 @@ private:
     OgTimeDataStack records_stack;
     OgTimeDataStack pre_records_stack;
     int64* local_time_info;
+    int64* local_time_count;
     uint64* local_net_info;
     int depth;
     int64 time_unique_id;

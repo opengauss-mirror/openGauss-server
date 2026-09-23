@@ -30,6 +30,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = instr_user.o
+OBJS = instr_user.o instr_database_sql.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

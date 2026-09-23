@@ -105,6 +105,8 @@ void og_record_time_reinit()
     og_get_record_stat()->reinit();
     ResetMemory(u_sess->stat_cxt.localTimeInfoArray,
         sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+    ResetMemory(u_sess->stat_cxt.localTimeCountArray,
+        sizeof(int64) * TOTAL_TIME_INFO_TYPES);
     ResetMemory(u_sess->stat_cxt.localNetInfo,
         sizeof(uint64) * TOTAL_NET_INFO_TYPES);
 }
@@ -485,12 +487,13 @@ void OgTimeDataStack::smart_reset()
     data_list[0].reset();
 }
 
-OgRecordStat::OgRecordStat(int64* local_time_info, uint64* loca_net_info)
+OgRecordStat::OgRecordStat(int64* local_time_info, int64* local_time_count, uint64* loca_net_info)
 :first_record_opt(false, DB_TIME)
 {
     log_trace_msg = makeStringInfo();
     record_start = false;
     this->local_time_info = local_time_info;
+    this->local_time_count = local_time_count;
     this->local_net_info = loca_net_info;
     time_unique_id = 0;
     db_time_baseline = DEFAULT_DB_TIME_BASELINE;
@@ -703,7 +706,11 @@ inline bool OgRecordStat::already_start() const
 void OgRecordStat::update_record_time(const RecordType& record_type, int64 cost)
 {
     if (record_type.get_record_time_type() == TIME_INFO) {
-        local_time_info[record_type.position()] += cost;
+        int pos = record_type.position();
+        local_time_info[pos] += cost;
+        if (local_time_count != NULL) {
+            local_time_count[pos]++;
+        }
     } else if (record_type.get_record_time_type() == SELF_INFO) {
         // not use, only for add new time record to quick debug
     } else {

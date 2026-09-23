@@ -83,7 +83,7 @@ CREATE VIEW dbe_perf.instance_time AS
   SELECT * FROM pv_instance_time();
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_instance_time
-  (OUT node_name name, OUT stat_id integer, OUT stat_name text, OUT value bigint)
+  (OUT node_name name, OUT stat_id integer, OUT stat_name text, OUT value bigint, OUT n_calls bigint)
 RETURNS setof record
 AS $$
 DECLARE
@@ -101,6 +101,7 @@ DECLARE
         stat_id := row_data.stat_id;
         stat_name := row_data.stat_name;
         value := row_data.value;
+        n_calls := row_data.n_calls;
         return next;
       END LOOP;
     END LOOP;
@@ -4474,6 +4475,32 @@ CREATE VIEW dbe_perf.statement_responsetime_percentile AS
 
 CREATE VIEW dbe_perf.user_login AS
   SELECT * FROM get_instr_user_login();
+
+CREATE VIEW dbe_perf.database_sql_stat AS
+  SELECT * FROM get_database_sql_stat();
+
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_database_sql_stat()
+RETURNS SETOF dbe_perf.database_sql_stat
+AS $$
+DECLARE
+  ROW_DATA dbe_perf.database_sql_stat%ROWTYPE;
+  ROW_NAME RECORD;
+  QUERY_STR TEXT;
+  QUERY_STR_NODES TEXT;
+  BEGIN
+    QUERY_STR_NODES := 'select * from dbe_perf.node_name';
+    FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
+      QUERY_STR := 'SELECT * FROM dbe_perf.database_sql_stat';
+      FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
+        RETURN NEXT ROW_DATA;
+      END LOOP;
+    END LOOP;
+    RETURN;
+  END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+
+CREATE VIEW dbe_perf.summary_database_sql_stat AS
+  SELECT * FROM dbe_perf.get_summary_database_sql_stat();
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_summary_user_login()
 RETURNS SETOF dbe_perf.user_login

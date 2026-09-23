@@ -8104,6 +8104,11 @@ void initMySessionTimeEntry(void)
         0,
         sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array));
     securec_check(rc, "\0", "\0");
+    rc = memset_s((int64*)t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count,
+        sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count),
+        0,
+        sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count));
+    securec_check(rc, "\0", "\0");
 
     t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
     Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
@@ -8120,6 +8125,7 @@ static void DetachMySessionTimeEntry(volatile SessionTimeEntry* pEntry)
     /* save logout session's timeinfo into gInstanceTimeInfo */
     for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
         g_instance.stat_cxt.gInstanceTimeInfo[idx] += pEntry->array[idx];
+        g_instance.stat_cxt.gInstanceCountInfo[idx] += pEntry->count[idx];
     }
 
     /* mark my entry not active. */
@@ -8177,6 +8183,11 @@ void AttachMySessionTimeEntry(void)
             0,
             sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array));
         securec_check(rc, "\0", "\0");
+        rc = memset_s((int64*)t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count,
+            sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count),
+            0,
+            sizeof(t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count));
+        securec_check(rc, "\0", "\0");
         t_thrd.shemem_ptr_cxt.mySessionTimeEntry->isActive = true;
     }
 
@@ -8189,6 +8200,10 @@ static void addThreadTimeEntry()
     for (int i = 0; i < TOTAL_TIME_INFO_TYPES; i++) {
         t_thrd.shemem_ptr_cxt.mySessionTimeEntry->array[i] +=
             u_sess->stat_cxt.localTimeInfoArray[i];
+        if (u_sess->stat_cxt.localTimeCountArray != NULL) {
+            t_thrd.shemem_ptr_cxt.mySessionTimeEntry->count[i] +=
+                u_sess->stat_cxt.localTimeCountArray[i];
+        }
     }
 }
 void ResetMemory(void* dest, size_t size)
@@ -8251,6 +8266,10 @@ void update_sql_state(void)
 
     ResetMemory(u_sess->stat_cxt.localTimeInfoArray,
         sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+    if (u_sess->stat_cxt.localTimeCountArray != NULL) {
+        ResetMemory(u_sess->stat_cxt.localTimeCountArray,
+            sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+    }
     ResetMemory(u_sess->stat_cxt.localNetInfo,
         sizeof(uint64) * TOTAL_NET_INFO_TYPES);
 }
@@ -8291,13 +8310,17 @@ SessionTimeEntry* getInstanceTimeStatus()
         entry = &(t_thrd.shemem_ptr_cxt.sessionTimeArray[entryIndex]);
         if (entry->isActive) {
             READ_AN_ENTRY(&localEntry, entry, entry->changeCount, SessionTimeEntry);
-            for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++)
+            for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
                 retEntry->array[idx] += localEntry.array[idx];
+                retEntry->count[idx] += localEntry.count[idx];
+            }
         }
     }
 
-    for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++)
+    for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
         retEntry->array[idx] += g_instance.stat_cxt.gInstanceTimeInfo[idx];
+        retEntry->count[idx] += g_instance.stat_cxt.gInstanceCountInfo[idx];
+    }
 
     LWLockRelease(InstanceTimeLock);
 
