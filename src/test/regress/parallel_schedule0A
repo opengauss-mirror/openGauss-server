@@ -26,6 +26,7 @@ test: AMHeap_logical_scan
 test: copy
 test: hnsw_rabitq_vector
 test: hnsw_lsg_vector
+test: vector_buffer
 
 test: sqlbypass_partition
 test: sqlpatch_base

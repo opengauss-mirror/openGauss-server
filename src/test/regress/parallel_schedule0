@@ -13,6 +13,7 @@ test: ai_vector
 test: diskann_vector
 test: hnsw_rabitq_vector
 test: hnsw_lsg_vector
+test: vector_buffer
 test: timecapsule_partition_ustore_test_1
 test: timecapsule_partition_ustore_test_2
 test: ddl

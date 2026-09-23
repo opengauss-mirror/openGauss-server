@@ -1871,6 +1871,21 @@ CREATE VIEW pg_stat_bgwriter AS
         pg_catalog.pg_stat_get_buf_alloc() AS buffers_alloc,
         pg_catalog.pg_stat_get_bgwriter_stat_reset_time() AS stats_reset;
 
+CREATE VIEW pg_stat_vector_buffer_hit_rate AS
+    SELECT * FROM pg_catalog.pg_stat_get_vector_buffer_hit_rate();
+
+CREATE VIEW pg_stat_vector_buffer AS
+    SELECT * FROM pg_catalog.pg_stat_get_vector_buffer();
+
+CREATE VIEW pg_stat_vector_buffer_pool AS
+    SELECT * FROM pg_catalog.pg_stat_get_vector_buffer_pool();
+
+CREATE VIEW pg_stat_vector_buffer_chunk AS
+    SELECT * FROM pg_catalog.pg_stat_get_vector_buffer_chunk();
+
+CREATE VIEW pg_stat_vector_buffer_hash_chain AS
+    SELECT * FROM pg_catalog.pg_stat_get_vector_buffer_hash_chain();
+
 CREATE VIEW pg_user_mappings AS
     SELECT
         U.oid       AS umid,
