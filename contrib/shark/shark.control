@@ -1,4 +1,4 @@
 comment = 'extension for D compatibility'
-default_version = '4.0'
+default_version = '5.0'
 module_pathname = '$libdir/shark'
 relocatable = false

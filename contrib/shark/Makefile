@@ -4,11 +4,11 @@ BASECODEDIR=src
 BEPARSERDIR=src/backend_parser
 PLDIR=src/pltsql
 
-shark--4.0.sql: shark--1.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--3.0.sql upgrade_script/shark--3.0--4.0.sql
+shark--5.0.sql: shark--1.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--3.0.sql upgrade_script/shark--3.0--4.0.sql upgrade_script/shark--4.0--5.0.sql
 	cat $^ > $@
 
-DATA_built = shark--4.0.sql
-DATA = shark--4.0.sql upgrade_script/shark--3.0--4.0.sql rollback_script/shark--4.0--3.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--3.0.sql rollback_script/shark--3.0--2.0.sql rollback_script/shark--2.0--1.0.sql upgrade_script/shark--2.0--2.0.1.sql rollback_script/shark--2.0.1--2.0.sql
+DATA_built = shark--5.0.sql
+DATA = shark--5.0.sql upgrade_script/shark--4.0--5.0.sql rollback_script/shark--5.0--4.0.sql upgrade_script/shark--3.0--4.0.sql rollback_script/shark--4.0--3.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--3.0.sql rollback_script/shark--3.0--2.0.sql rollback_script/shark--2.0--1.0.sql upgrade_script/shark--2.0--2.0.1.sql rollback_script/shark--2.0.1--2.0.sql
 REGRESS = dummy
 
 ifeq (,$(wildcard ../../src/Makefile.global))
