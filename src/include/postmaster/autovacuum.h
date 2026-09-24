@@ -179,6 +179,7 @@ typedef struct WorkerInfoData {
     Oid wi_parentoid;
     bool wi_ispartition;
     bool wi_sharedrel;
+    bool wi_freeze_on;
     PGPROC* wi_proc;
     TimestampTz wi_launchtime;
     int wi_cost_delay;

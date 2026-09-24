@@ -185,6 +185,7 @@ typedef struct knl_session_attr_storage {
     int autoanalyze_timeout;
     int autovacuum_vac_thresh;
     int autovacuum_anl_thresh;
+    int autovacuum_max_freeze_workers;
     int adioPrefetchQuantity;
     int backwrite_quantity;
     int cstore_prefetch_quantity;
