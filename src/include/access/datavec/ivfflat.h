@@ -347,6 +347,19 @@ typedef struct IvfflatListData {
 
 typedef IvfflatListData *IvfflatList;
 
+typedef struct IvfflatCenterData {
+    int id;
+    BlockNumber startPage;
+    Vector *center;
+} IvfflatCenterData;
+
+typedef struct IvfflatCenterDistanceData {
+    int id;
+    BlockNumber startPage;
+    double distance;
+    Vector *center;
+} IvfflatCenterDistanceData;
+
 typedef struct IvfflatScanList {
     pairingheap_node ph_node;
     BlockNumber startPage;
@@ -429,6 +442,9 @@ bool IvfflatRelationHasVectorPayloadStorage(
     Relation index, BlockNumber *payloadInsertBlkno, uint32 *payloadLen);
 Pointer IvfflatCanonicalVectorPayload(Datum vector, uint32 *payloadLen);
 void IvfflatGetMetaPageInfo(Relation index, int *lists, int *dimensions);
+PGDLLEXPORT List *IvfflatLoadCenters(Relation index);
+PGDLLEXPORT int IvfflatNearestCenter(Relation index, Datum value, List *centers, Oid collation, double *distance);
+PGDLLEXPORT List *IvfflatNearestCenters(Relation index, Datum value, List *centers, int probes, Oid collation);
 void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage, BlockNumber originalInsertPage,
                        BlockNumber startPage, ForkNumber forkNum, int addNums);
 void IvfflatCommitBuffer(Buffer buf, GenericXLogState *state);

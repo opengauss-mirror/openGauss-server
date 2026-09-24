@@ -22,6 +22,8 @@
  */
 #include "postgres.h"
 
+#include <cfloat>
+
 #include "access/generic_xlog.h"
 #include "access/datavec/bitvec.h"
 #include "fmgr.h"
@@ -217,6 +219,168 @@ void IvfflatGetMetaPageInfo(Relation index, int *lists, int *dimensions)
         *dimensions = metap->dimensions;
 
     UnlockReleaseBuffer(buf);
+}
+
+static Vector *IvfflatCopyCenter(Vector *center)
+{
+    Size size = VECTOR_SIZE(center->dim);
+    Vector *copy = (Vector *)palloc0(size);
+    errno_t rc = memcpy_s(copy, size, center, size);
+    securec_check(rc, "\0", "\0");
+
+    return copy;
+}
+
+static BlockNumber IvfflatFirstListBlock(Relation index)
+{
+    uint16 pqTableNblk;
+    uint32 pqDisTableNblk;
+    uint16 matrixNblk;
+    uint16 otherNblk;
+
+    IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
+    IvfflatGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, &matrixNblk, NULL,
+                                  &otherNblk, NULL, NULL, NULL);
+
+    return IVFFLAT_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk + matrixNblk + otherNblk;
+}
+
+/*
+ * Load IVF centers from list pages. The returned list contains
+ * IvfflatCenterData entries in center id order.
+ */
+PGDLLEXPORT List *IvfflatLoadCenters(Relation index)
+{
+    List *centerList = NIL;
+    BlockNumber nextblkno = IvfflatFirstListBlock(index);
+    int centerId = 0;
+
+    while (BlockNumberIsValid(nextblkno)) {
+        Buffer cbuf;
+        Page cpage;
+        OffsetNumber maxoffno;
+
+        cbuf = ReadBuffer(index, nextblkno);
+        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+        cpage = BufferGetPage(cbuf);
+        maxoffno = PageGetMaxOffsetNumber(cpage);
+
+        for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
+            IvfflatList list = (IvfflatList)PageGetItem(cpage, PageGetItemId(cpage, offno));
+            IvfflatCenterData *center = (IvfflatCenterData *)palloc0(sizeof(IvfflatCenterData));
+
+            center->id = centerId++;
+            center->startPage = list->startPage;
+            center->center = IvfflatCopyCenter(&list->center);
+            centerList = lappend(centerList, center);
+        }
+
+        nextblkno = IvfflatPageGetOpaque(cpage)->nextblkno;
+        UnlockReleaseBuffer(cbuf);
+    }
+
+    return centerList;
+}
+
+static Datum IvfflatPrepareCenterSearchValue(Relation index, Datum value, Oid collation)
+{
+    FmgrInfo *normprocinfo = IvfflatOptionalProcInfo(index, IVFFLAT_NORM_PROC);
+
+    if (normprocinfo != NULL) {
+        const IvfflatTypeInfo *typeInfo = IvfflatGetTypeInfo(index);
+        return IvfflatNormValue(typeInfo, collation, value);
+    }
+
+    return value;
+}
+
+static double IvfflatCenterDistance(Relation index, Datum value, Oid collation, Vector *center)
+{
+    FmgrInfo *procinfo = index_getprocinfo(index, 1, IVFFLAT_DISTANCE_PROC);
+
+    return DatumGetFloat8(FunctionCall2Coll(procinfo, collation, PointerGetDatum(center), value));
+}
+
+static int IvfflatCompareCenterDistances(const void *left, const void *right)
+{
+    const IvfflatCenterDistanceData *leftDistance = (const IvfflatCenterDistanceData *)left;
+    const IvfflatCenterDistanceData *rightDistance = (const IvfflatCenterDistanceData *)right;
+
+    if (leftDistance->distance < rightDistance->distance) {
+        return -1;
+    }
+    if (leftDistance->distance > rightDistance->distance) {
+        return 1;
+    }
+
+    return leftDistance->id - rightDistance->id;
+}
+
+/*
+ * Return the nearest center id for a query vector.
+ */
+PGDLLEXPORT int IvfflatNearestCenter(Relation index, Datum value, List *centers, Oid collation, double *distance)
+{
+    List *nearestCenters = IvfflatNearestCenters(index, value, centers, 1, collation);
+    IvfflatCenterDistanceData *nearest = NULL;
+
+    if (nearestCenters == NIL) {
+        if (distance != NULL) {
+            *distance = DBL_MAX;
+        }
+        return -1;
+    }
+
+    nearest = (IvfflatCenterDistanceData *)linitial(nearestCenters);
+    if (distance != NULL) {
+        *distance = nearest->distance;
+    }
+
+    return nearest->id;
+}
+
+/*
+ * Return the nearest probes centers sorted by distance. The returned list
+ * contains IvfflatCenterDistanceData entries.
+ */
+PGDLLEXPORT List *IvfflatNearestCenters(Relation index, Datum value, List *centers, int probes, Oid collation)
+{
+    int centerCount = list_length(centers);
+    IvfflatCenterDistanceData *distances = NULL;
+    List *nearestCenters = NIL;
+    ListCell *cell = NULL;
+    Datum normalizedValue;
+    int resultCount;
+    int centerIndex = 0;
+
+    if (centerCount <= 0 || probes <= 0) {
+        return NIL;
+    }
+
+    resultCount = Min(probes, centerCount);
+    normalizedValue = IvfflatPrepareCenterSearchValue(index, value, collation);
+    distances = (IvfflatCenterDistanceData *)palloc0(sizeof(IvfflatCenterDistanceData) * centerCount);
+
+    foreach (cell, centers) {
+        IvfflatCenterData *center = (IvfflatCenterData *)lfirst(cell);
+
+        distances[centerIndex].id = center->id;
+        distances[centerIndex].startPage = center->startPage;
+        distances[centerIndex].center = center->center;
+        distances[centerIndex].distance = IvfflatCenterDistance(index, normalizedValue, collation, center->center);
+        centerIndex++;
+    }
+
+    qsort(distances, centerCount, sizeof(IvfflatCenterDistanceData), IvfflatCompareCenterDistances);
+
+    for (int i = 0; i < resultCount; i++) {
+        IvfflatCenterDistanceData *result =
+            (IvfflatCenterDistanceData *)palloc0(sizeof(IvfflatCenterDistanceData));
+        *result = distances[i];
+        nearestCenters = lappend(nearestCenters, result);
+    }
+
+    return nearestCenters;
 }
 
 /*

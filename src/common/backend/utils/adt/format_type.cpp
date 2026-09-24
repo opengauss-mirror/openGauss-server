@@ -35,8 +35,8 @@ char* printTypmod(const char* typname, int32 typmod, Oid typmodout);
 static char* psnprintf(size_t len, const char* fmt, ...)
     /* This lets gcc check the format string for consistency. */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
-static char* get_buf(Oid type_oid, int32 typemod, Form_pg_type typeform, bits16 flags);
-static bool is_reg_array(Oid type_oid, Form_pg_type *typeform, HeapTuple tuple, bits16 flags);
+static char* get_buf(
+    Oid type_oid, int32 typemod, Form_pg_type typeform, bits16 flags, bool with_typemod);
 
 /*
  * SQL function: format_type(type_oid, typemod)
@@ -115,9 +115,10 @@ char* format_type_extended(Oid type_oid, int32 typemod, bits16 flags)
 {
     HeapTuple tuple;
     Form_pg_type typeform;
-    bool is_array;
+    Oid array_base_type;
+    bool is_array = false;
     char* buf;
-    bool with_typemod;
+    bool with_typemod = (flags & FORMAT_TYPE_TYPEMOD_GIVEN) != 0 && typemod >= 0;
 
     if (type_oid == InvalidOid) {
         if ((flags & FORMAT_TYPE_INVALID_AS_NULL) != 0) {
@@ -138,8 +139,32 @@ char* format_type_extended(Oid type_oid, int32 typemod, bits16 flags)
     }
     typeform = (Form_pg_type)GETSTRUCT(tuple);
 
-    is_array = is_reg_array(type_oid, &typeform, tuple, flags);
-    buf = get_buf(type_oid, typemod, typeform, flags);
+    /*
+     * Keep the cache tuple, type form and type OID in sync while switching
+     * from an array type to its element type.  In particular, the tuple that
+     * remains in this variable is the one released at the end of the
+     * function.
+     */
+    array_base_type = typeform->typelem;
+    if (array_base_type != InvalidOid && typeform->typstorage != 'p' && type_oid != OIDVECTOREXTENDOID &&
+        type_oid != INT2VECTOREXTENDOID && typeform->typtype != TYPTYPE_TABLEOF) {
+        ReleaseSysCache(tuple);
+        tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));
+        if (!HeapTupleIsValid(tuple)) {
+            if ((flags & FORMAT_TYPE_INVALID_AS_NULL) != 0) {
+                return NULL;
+            } else if ((flags & FORMAT_TYPE_ALLOW_INVALID) != 0) {
+                return pstrdup("???[]");
+            } else {
+                elog(ERROR, "cache lookup failed for type %u", type_oid);
+            }
+        }
+        typeform = (Form_pg_type)GETSTRUCT(tuple);
+        type_oid = array_base_type;
+        is_array = true;
+    }
+
+    buf = get_buf(type_oid, typemod, typeform, flags, with_typemod);
     if (buf == NULL) {
         /*
          * Default handling: report the name as it appears in the catalog.
@@ -168,46 +193,9 @@ char* format_type_extended(Oid type_oid, int32 typemod, bits16 flags)
     return buf;
 }
 
-static bool is_reg_array(Oid type_oid, Form_pg_type *typeform, HeapTuple tuple, bits16 flags)
-{
-    Oid array_base_type = InvalidOid;
-    bool is_array = false;
-    /*
-     * Check if it's a regular (variable length) array type.  Fixed-length
-     * array types such as "name" shouldn't get deconstructed.  As of Postgres
-     * 8.1, rather than checking typlen we check the toast property, and don't
-     * deconstruct "plain storage" array types --- this is because we don't
-     * want to show oidvector as oid[].
-     */
-    array_base_type = (*typeform)->typelem;
-    if (array_base_type != InvalidOid && (*typeform)->typstorage != 'p') {
-        /* Switch our attention to the array element type */
-        ReleaseSysCache(tuple);
-        tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));
-        if (!HeapTupleIsValid(tuple)) {
-            if ((flags & FORMAT_TYPE_INVALID_AS_NULL) != 0) {
-                return NULL;
-            } else if ((flags & FORMAT_TYPE_ALLOW_INVALID) != 0) {
-                return pstrdup("???[]");
-            } else {
-                elog(ERROR, "cache lookup failed for type %u", type_oid);
-            }
-        }
-        *typeform = (Form_pg_type)GETSTRUCT(tuple);
-        type_oid = array_base_type;
-        is_array = true;
-    } else {
-        is_array = false;
-    }
-    return is_array;
-}
-
-static char* get_buf(Oid type_oid, int32 typemod, Form_pg_type typeform, bits16 flags)
+static char* get_buf(Oid type_oid, int32 typemod, Form_pg_type typeform, bits16 flags, bool with_typemod)
 {
     char* buf = NULL; /* flag for no special case */
-    bool with_typemod = false;
-
-    with_typemod = (flags & FORMAT_TYPE_TYPEMOD_GIVEN) != 0 && (typemod >= 0);
     /*
      * See if we want to special-case the output for certain built-in types.
      * Note that these special cases should all correspond to special

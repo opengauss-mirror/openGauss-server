@@ -14,3 +14,7 @@ CREATE FUNCTION get_command_tag(pg_ddl_command)
 CREATE FUNCTION get_altertable_subcmdtypes(pg_ddl_command)
   RETURNS text[] IMMUTABLE STRICT
   AS 'MODULE_PATHNAME' LANGUAGE C;
+
+CREATE FUNCTION test_format_type_extended(oid, integer, integer)
+  RETURNS text STABLE STRICT
+  AS 'MODULE_PATHNAME' LANGUAGE C NOT FENCED;
