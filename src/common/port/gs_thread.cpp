@@ -939,4 +939,77 @@ static void clean_kerberos_cache()
 #endif
 }
 
+static inline PgStat_ThreadIOStats *get_local_thread_io_stat(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
+{
+    Assert(obj_type < THREAD_IO_OBJECT_MAX);
+    Assert(ctx_type < THREAD_IO_CONTEXT_MAX);
+    return &t_thrd.local_thread_io_stats[obj_type][ctx_type];
+}
+
+static inline void accum_thread_io_time(uint64 io_cost_us, int64 *total_time, int64 *max_time)
+{
+    *total_time += (int64)io_cost_us;
+    if ((int64)io_cost_us > *max_time)
+        *max_time = (int64)io_cost_us;
+}
+
+void pgstat_track_thread_io(ThreadIOObjectType obj_type,
+                            ThreadIOContextType ctx_type,
+                            uint64 io_bytes,
+                            uint64 io_cost_us,
+                            bool isWrite)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    if (!isWrite) {
+        stat->num_reads++;
+        stat->bytes_read += io_bytes;
+        accum_thread_io_time(io_cost_us, &stat->read_time, &stat->max_read_time);
+    } else {
+        stat->num_writes++;
+        stat->bytes_written += io_bytes;
+        accum_thread_io_time(io_cost_us, &stat->write_time, &stat->max_write_time);
+    }
+}
+
+void pgstat_track_thread_io_writeback(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_blocks,
+    uint64 io_cost_us)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->writebacks += io_blocks;
+    accum_thread_io_time(io_cost_us, &stat->writeback_time, &stat->max_writeback_time);
+}
+
+void pgstat_track_thread_io_extend(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_bytes,
+    uint64 io_cost_us)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->extend_bytes += io_bytes;
+    accum_thread_io_time(io_cost_us, &stat->extend_time, &stat->max_extend_time);
+}
+
+void pgstat_track_thread_io_fsync(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_cost_us)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->fsyncs++;
+    stat->total_fsync_time += io_cost_us;
+}
+
+void pgstat_track_thread_io_hit(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->hits++;
+}
+
+void pgstat_track_thread_io_evict(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->evictions++;
+}
+
+void pgstat_track_thread_io_reuse(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
+{
+    PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
+    stat->reuses++;
+}
+
 #endif

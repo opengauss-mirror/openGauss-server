@@ -327,6 +327,8 @@ test: tablespace_limit tablespace_limit3
 test: tablespace_limit2
 test: quality_derive
 test: hw_dfx_thread_status
+test: thread_io_stat
+
 test: os_disk_io_info os_net_dev_info
 test: wdr_key_activity
 test: lwlock_wait_events

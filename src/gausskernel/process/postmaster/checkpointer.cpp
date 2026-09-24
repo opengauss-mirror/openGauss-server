@@ -617,6 +617,7 @@ void CheckpointerMain(void)
          * stats message types.)
          */
         pgstat_send_bgwriter();
+        pgstat_send_threadio_stats();
 
         /*
          * Sleep until we are signaled or it's time for another checkpoint or
@@ -774,6 +775,7 @@ void CheckpointWriteDelay(int flags, double progress)
          * Report interim activity statistics to the stats collector.
          */
         pgstat_send_bgwriter();
+        pgstat_send_threadio_stats();
 
         /*
          * This sleep used to be connected to bgwriter_delay, typically 200ms.

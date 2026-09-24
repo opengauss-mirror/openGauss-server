@@ -671,6 +671,65 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.global_thread_wait_status AS
   SELECT * FROM dbe_perf.get_global_thread_wait_status();
 
+CREATE VIEW dbe_perf.thread_io_stat AS
+  SELECT * FROM pg_thread_io_stat();
+
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_thread_io_stat
+  (OUT node_name name, OUT io_role_id integer, OUT role_name text,
+   OUT object_name text, OUT context_name text,
+   OUT num_reads bigint, OUT num_writes bigint, OUT bytes_read bigint, OUT bytes_written bigint,
+   OUT read_time_ms double precision, OUT write_time_ms double precision, OUT writebacks bigint,
+   OUT writeback_time_ms double precision, OUT max_writeback_time_ms double precision, OUT extend_bytes bigint,
+   OUT extend_time_ms double precision, OUT max_extend_time_ms double precision, OUT hits bigint,
+   OUT evictions bigint, OUT reuses bigint, OUT fsyncs bigint, OUT total_fsync_time_ms double precision,
+   OUT max_read_time_ms double precision, OUT max_write_time_ms double precision)
+RETURNS setof record
+AS $$
+DECLARE
+  row_data dbe_perf.thread_io_stat%rowtype;
+  row_name record;
+  query_str text;
+  query_str_nodes text;
+  BEGIN
+    --Get all the node names
+    query_str_nodes := 'select * from dbe_perf.node_name';
+    FOR row_name IN EXECUTE(query_str_nodes) LOOP
+      query_str := 'SELECT * FROM dbe_perf.thread_io_stat';
+      FOR row_data IN EXECUTE(query_str) LOOP
+        node_name := row_name.node_name;
+        io_role_id := row_data.io_role_id;
+        role_name := row_data.role_name;
+        object_name := row_data.object_name;
+        context_name := row_data.context_name;
+        num_reads := row_data.num_reads;
+        num_writes := row_data.num_writes;
+        bytes_read := row_data.bytes_read;
+        bytes_written := row_data.bytes_written;
+        read_time_ms := row_data.read_time_ms;
+        write_time_ms := row_data.write_time_ms;
+        writebacks := row_data.writebacks;
+        writeback_time_ms := row_data.writeback_time_ms;
+        max_writeback_time_ms := row_data.max_writeback_time_ms;
+        extend_bytes := row_data.extend_bytes;
+        extend_time_ms := row_data.extend_time_ms;
+        max_extend_time_ms := row_data.max_extend_time_ms;
+        hits := row_data.hits;
+        evictions := row_data.evictions;
+        reuses := row_data.reuses;
+        fsyncs := row_data.fsyncs;
+        total_fsync_time_ms := row_data.total_fsync_time_ms;
+        max_read_time_ms := row_data.max_read_time_ms;
+        max_write_time_ms := row_data.max_write_time_ms;
+        return next;
+      END LOOP;
+    END LOOP;
+    return;
+  END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+
+CREATE VIEW dbe_perf.global_thread_io_stat AS
+  SELECT DISTINCT * FROM dbe_perf.get_global_thread_io_stat();
+
 /* WLM */
 CREATE VIEW DBE_PERF.wlm_user_resource_runtime AS 
   SELECT

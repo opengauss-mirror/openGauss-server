@@ -254,6 +254,7 @@ extern Datum pv_os_run_info(PG_FUNCTION_ARGS);
 extern Datum pg_os_disk_io_info(PG_FUNCTION_ARGS);
 extern Datum pg_os_net_dev_ext(PG_FUNCTION_ARGS);
 extern Datum pg_os_net_dev_info(PG_FUNCTION_ARGS);
+extern Datum pg_thread_io_stat(PG_FUNCTION_ARGS);
 extern Datum pv_session_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_session_memory_detail(PG_FUNCTION_ARGS);
 extern Datum pg_shared_memory_detail(PG_FUNCTION_ARGS);
@@ -8653,6 +8654,236 @@ Datum pv_os_run_info(PG_FUNCTION_ARGS)
     }
     /* do when there is no more left */
     SRF_RETURN_DONE(funcctx);
+}
+
+/*
+ * Thread-IO dimension ID -> name mapping helpers.
+ *
+ * The IDs stored in PgStat_StatThreadIOKey are the compact IO roles
+ * (knl_thread_io_role), IO object types (ThreadIOObjectType) and IO context
+ * types (ThreadIOContextType). These helpers map each ID back to its enum
+ * symbol name so the view exposes readable names instead of raw numeric IDs.
+ */
+static const char *thread_io_role_name(uint32 role_id)
+{
+    const char *name = NULL;
+
+    switch ((knl_thread_io_role)role_id) {
+        case IO_WORKER:
+            name = "Worker";
+            break;
+        case IO_WALWRITER:
+            name = "WalWriter";
+            break;
+        case IO_CHECKPOINTER:
+            name = "Checkpointer";
+            break;
+        case IO_BGWRITER:
+            name = "BgWriter";
+            break;
+        case IO_WAL_SENDER:
+            name = "WalSender";
+            break;
+        case IO_STARTUP:
+            name = "Startup";
+            break;
+        case IO_WALRECWRITE:
+            name = "WalRcvWriter";
+            break;
+        case IO_ARCH:
+            name = "Archiver";
+            break;
+        case IO_AUTOVACUUM_WORKER:
+            name = "AutoVacWorker";
+            break;
+        case IO_UNDO_WORKER:
+            name = "UndoWorker";
+            break;
+        case IO_PARALLEL_DECODE:
+            name = "ParallelDecode";
+            break;
+        case IO_APPLY_WORKER:
+            name = "ApplyWorker";
+            break;
+        case IO_DATARECWRITER:
+            name = "DataRcvWriter";
+            break;
+        case IO_CATCHUP:
+            name = "Catchup";
+            break;
+        case IO_PAGEWRITER:
+            name = "PageWriter";
+            break;
+        case IO_BGWORKER:
+            name = "BgWorker";
+            break;
+        default:
+            name = "Unknown";
+            elog(DEBUG1, "thread_io_role_name: unrecognized role_id %u, fallback to Unknown",
+                (unsigned int)role_id);
+            break;
+    }
+    return name;
+}
+
+static const char *thread_io_object_name(uint32 object_id)
+{
+    const char *name = NULL;
+    switch ((ThreadIOObjectType)object_id) {
+        case IO_OBJECT_RELATION:
+            name = "Relation";
+            break;
+        case IO_OBJECT_TEMP_RELATION:
+            name = "TempRelation";
+            break;
+        case IO_OBJECT_WAL:
+            name = "Wal";
+            break;
+        case IO_OBJECT_UNDO:
+            name = "Undo";
+            break;
+        case IO_OBJECT_ARCHIVE:
+            name = "Archive";
+            break;
+        default:
+            name = "Other";
+            break;
+    }
+    return name;
+}
+
+static const char *thread_io_context_name(uint32 context_id)
+{
+    const char *name = NULL;
+
+    switch ((ThreadIOContextType)context_id) {
+        case IO_CONTEXT_NORMAL:
+            name = "Normal";
+            break;
+        case IO_CONTEXT_BULKREAD:
+            name = "BulkRead";
+            break;
+        case IO_CONTEXT_BULKWRITE:
+            name = "BulkWrite";
+            break;
+        case IO_CONTEXT_VACUUM:
+            name = "Vacuum";
+            break;
+        case IO_CONTEXT_RECOVERY:
+            name = "Recovery";
+            break;
+        case IO_CONTEXT_REPLICATION:
+            name = "Replication";
+            break;
+        default:
+            name = "Unknown";
+            elog(WARNING, "thread_io_context_name: unrecognized context_id %u, fallback to Unknown",
+                (unsigned int)context_id);
+            break;
+    }
+    return name;
+}
+
+/*
+ * pg_thread_io_stat() -
+ *
+ *    Query thread-level IO statistics from the current statistics snapshot.
+ *    Each row is one (thread role, IO object, IO context)
+ *    combination with the aggregated IO counters.
+ *
+ *    Time fields are stored in microseconds and exposed in milliseconds
+ *    as double precision, per PgStat_ThreadIOStats unit convention.
+ */
+Datum pg_thread_io_stat(PG_FUNCTION_ARGS)
+{
+    const int ATT_NUM = 23;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "io_role_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "role_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "object_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "context_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "num_reads", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "num_writes", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "bytes_read", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "bytes_written", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "read_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "write_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)11, "writebacks", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)12, "writeback_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "max_writeback_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)14, "extend_bytes", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "extend_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)16, "max_extend_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)17, "hits", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)18, "evictions", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)19, "reuses", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)20, "fsyncs", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)21, "total_fsync_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)22, "max_read_time_ms", FLOAT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)23, "max_write_time_ms", FLOAT8OID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    PgStat_StatDBEntry *dbentry = pgstat_fetch_stat_dbentry(InvalidOid);
+    if (dbentry != NULL && dbentry->thread_io != NULL) {
+        HASH_SEQ_STATUS iostat;
+        hash_seq_init(&iostat, dbentry->thread_io);
+        PgStat_StatThreadIOEntry *threadioentry = NULL;
+        while ((threadioentry = (PgStat_StatThreadIOEntry *)hash_seq_search(&iostat)) != NULL) {
+            Datum values[ATT_NUM];
+            bool nulls[ATT_NUM] = {false};
+            errno_t rc = 0;
+            PgStat_ThreadIOStats *stats = &threadioentry->stats;
+
+            rc = memset_s(values, sizeof(values), 0, sizeof(values));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+            securec_check(rc, "\0", "\0");
+
+            values[0] = Int32GetDatum((int32)threadioentry->key.role_id);
+            const char *role_name = thread_io_role_name(threadioentry->key.role_id);
+            const char *object_name = thread_io_object_name(threadioentry->key.object_id);
+            const char *context_name = thread_io_context_name(threadioentry->key.context_id);
+
+            values[1] = CStringGetTextDatum(role_name);
+            values[2] = CStringGetTextDatum(object_name);
+            values[3] = CStringGetTextDatum(context_name);
+
+            values[4] = Int64GetDatum(stats->num_reads);
+            values[5] = Int64GetDatum(stats->num_writes);
+            values[6] = Int64GetDatum(stats->bytes_read);
+            values[7] = Int64GetDatum(stats->bytes_written);
+            values[8] = Float8GetDatum((double)stats->read_time / 1000.0);
+            values[9] = Float8GetDatum((double)stats->write_time / 1000.0);
+            values[10] = Int64GetDatum(stats->writebacks);
+            values[11] = Float8GetDatum((double)stats->writeback_time / 1000.0);
+            values[12] = Float8GetDatum((double)stats->max_writeback_time / 1000.0);
+            values[13] = Int64GetDatum(stats->extend_bytes);
+            values[14] = Float8GetDatum((double)stats->extend_time / 1000.0);
+            values[15] = Float8GetDatum((double)stats->max_extend_time / 1000.0);
+            values[16] = Int64GetDatum(stats->hits);
+            values[17] = Int64GetDatum(stats->evictions);
+            values[18] = Int64GetDatum(stats->reuses);
+            values[19] = Int64GetDatum(stats->fsyncs);
+            values[20] = Float8GetDatum((double)stats->total_fsync_time / 1000.0);
+            values[21] = Float8GetDatum((double)stats->max_read_time / 1000.0);
+            values[22] = Float8GetDatum((double)stats->max_write_time / 1000.0);
+
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        }
+    }
+
+    MemoryContextSwitchTo(oldcontext);
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum)0;
 }
 
 /*

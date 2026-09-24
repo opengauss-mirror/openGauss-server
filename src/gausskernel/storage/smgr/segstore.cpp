@@ -1551,6 +1551,9 @@ struct ExtendStat {
         msg.mintim = time_diff;
         msg.maxtim = time_diff;
         reportFileStat(&msg);
+
+        uint64 extend_cost_us = u_sess->attr.attr_common.track_io_timing ? (uint64)time_diff : 0;
+        pgstat_track_thread_io_extend(IO_OBJECT_RELATION, t_thrd.cur_thread_io_context, BLCKSZ, extend_cost_us);
     }
 };
 
@@ -1829,7 +1832,9 @@ void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, 
                            reln->smgr_rnode.node.dbNode)));
             return;
         }
+        ThreadIoTimer timer;
         spc_writeback(reln->seg_space, rNode, forknum, blocknum, nblocks);
+        pgstat_track_thread_io_writeback(IO_OBJECT_RELATION, t_thrd.cur_thread_io_context, (uint64)nblocks, timer.elapsed_us());
     } else {
         /*
          * Logical writes are continues in each extent.
@@ -1856,9 +1861,11 @@ void seg_writeback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, 
                 nflush = ext_size;
             }
 
+            ThreadIoTimer timer;
             spc_writeback(reln->seg_space,
                           EXTENT_GROUP_RNODE(reln->seg_space, loc1.extent_size, rNode.opt),
                           forknum, curr_ext_start, nflush);
+            pgstat_track_thread_io_writeback(IO_OBJECT_RELATION, t_thrd.cur_thread_io_context, (uint64)nflush, timer.elapsed_us());
             nblocks -= nflush;
 
             if (nblocks > 0) {

@@ -56,6 +56,7 @@
 #include "storage/file/fio_device.h"
 #include "utils/guc.h"
 #include "utils/ps_status.h"
+#include "pgstat.h"
 
 #include "gssignal/gs_signal.h"
 #include "alarm/alarm.h"
@@ -492,6 +493,8 @@ static void pgarch_MainLoop(void)
 #endif
         }
 
+        pgstat_send_threadio_stats();
+
         /*
          * Sleep until a signal is received, or until a poll is forced by
          * PGARCH_AUTOWAKE_INTERVAL having passed since last_copy_time, or
@@ -647,10 +650,23 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
         if ((fdDest = open(archPath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
             char pbuff[ARCHIVE_BUF_SIZE] = {0};
 
-            while ((fileBytes = read(fdSrc, pbuff, sizeof(pbuff))) > 0) {
-                if (write(fdDest, pbuff, fileBytes) != fileBytes) {
-                    close(fdSrc);
-                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", archPath)));
+            while (true) {
+                ThreadIoTimer read_timer;
+                fileBytes = read(fdSrc, pbuff, sizeof(pbuff));
+                if (fileBytes <= 0) {
+                    break;
+                }
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                    (uint64)fileBytes, read_timer.elapsed_us(), false);
+
+                {
+                    ThreadIoTimer write_timer;
+                    if (write(fdDest, pbuff, fileBytes) != fileBytes) {
+                        close(fdSrc);
+                        ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", archPath)));
+                    }
+                    pgstat_track_thread_io(IO_OBJECT_ARCHIVE, IO_CONTEXT_NORMAL,
+                        (uint64)fileBytes, write_timer.elapsed_us(), true);
                 }
                 (void)memset_s(pbuff, sizeof(pbuff), 0, sizeof(pbuff));
             }

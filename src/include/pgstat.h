@@ -33,6 +33,7 @@
 #include "instruments/unique_sql_basic.h"
 #include "knl/knl_instance.h"
 #include "og_record_time.h"
+#include "pgstat_threadio_stats.h"
 
 
 /* Values for track_functions GUC variable --- order is significant! */
@@ -80,7 +81,8 @@ typedef enum StatMsgType {
     PGSTAT_MTYPE_RESPONSETIME,
     PGSTAT_MTYPE_PROCESSPERCENTILE,
     PGSTAT_MTYPE_CLEANUPHOTKEYS,
-    PGSTAT_MTYPE_PRUNESTAT
+    PGSTAT_MTYPE_PRUNESTAT,
+    PGSTAT_MTYPE_THREADIOSTATS
 } StatMsgType;
 
 /* ----------
@@ -992,11 +994,12 @@ typedef struct PgStat_StatDBEntry {
     TimestampTz stat_reset_timestamp;
 
     /*
-     * tables and functions must be last in the struct, because we don't write
-     * the pointers out to the stats file.
+     * tables, functions and thread_io must be last in the struct, because we
+     * don't write the pointers out to the stats file.
      */
     HTAB* tables;
     HTAB* functions;
+    HTAB* thread_io;
 } PgStat_StatDBEntry;
 
 #define START_BLOCK_ARRAY_SIZE 20
@@ -1125,6 +1128,21 @@ typedef struct PgStat_StatFuncEntry {
     PgStat_Counter f_total_time; /* times in microseconds */
     PgStat_Counter f_self_time;
 } PgStat_StatFuncEntry;
+
+/* ----------
+ * PgStat_StatThreadIOEntry		Snapshot entry per thread IO combination
+ * ----------
+ */
+typedef struct PgStat_StatThreadIOKey {
+    uint32 role_id;
+    uint32 object_id;
+    uint32 context_id;
+} PgStat_StatThreadIOKey;
+
+typedef struct PgStat_StatThreadIOEntry {
+    PgStat_StatThreadIOKey key;
+    PgStat_ThreadIOStats stats;
+} PgStat_StatThreadIOEntry;
 
 /*
  * Global statistics kept in the stats collector
@@ -2463,6 +2481,49 @@ extern void pgstat_twophase_postabort(TransactionId xid, uint16 info, void* recd
 
 extern void pgstat_send_bgwriter(void);
 
+/* Send thread-level IO statistics accumulated in t_thrd.local_thread_io_stats to the collector. */
+extern void pgstat_send_threadio_stats(void);
+extern void pgstat_flush_threadio_stats(void);
+
+/*
+ * Thread-level I/O statistics hook. Called from storage manager (md) layer
+ * with the actual bytes transferred and elapsed time for read/write I/O.
+ */
+struct ThreadIoTimer {
+    ThreadIoTimer() : track_io_(u_sess->attr.attr_common.track_io_timing), start_()
+    {
+        if (track_io_) {
+            (void)INSTR_TIME_SET_CURRENT(start_);
+        }
+    }
+
+    uint64 elapsed_us() const
+    {
+        if (!track_io_) {
+            return 0;
+        }
+        instr_time end;
+        (void)INSTR_TIME_SET_CURRENT(end);
+        INSTR_TIME_SUBTRACT(end, start_);
+        return (uint64)INSTR_TIME_GET_MICROSEC(end);
+    }
+
+private:
+    bool track_io_;
+    instr_time start_;
+};
+
+extern void pgstat_track_thread_io(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_bytes,
+    uint64 io_cost_us, bool is_write);
+extern void pgstat_track_thread_io_writeback(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_blocks,
+    uint64 io_cost_us);
+extern void pgstat_track_thread_io_extend(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_bytes,
+    uint64 io_cost_us);
+extern void pgstat_track_thread_io_fsync(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_cost_us);
+extern void pgstat_track_thread_io_hit(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type);
+extern void pgstat_track_thread_io_evict(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type);
+extern void pgstat_track_thread_io_reuse(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type);
+
 /* ----------
  * Support functions for the SQL-callable functions to
  * generate the pgstat* views.
@@ -3384,5 +3445,21 @@ typedef struct BadBlockEntry {
     TimestampTz repair_time;
     XLogPhyBlock pblk;
 } BadBlockEntry;
+
+typedef struct PgStat_MsgThreadIOEntry {
+    uint32 role_id;
+    uint32 object_id;
+    uint32 context_id;
+    PgStat_ThreadIOStats stats;
+} PgStat_MsgThreadIOEntry;
+
+#define PGSTAT_NUM_THREADIO_ENTRIES \
+    ((PGSTAT_MSG_PAYLOAD - sizeof(int)) / sizeof(PgStat_MsgThreadIOEntry))
+
+typedef struct PgStat_MsgThreadIO {
+    PgStat_MsgHdr m_hdr;
+    int m_nentries;
+    PgStat_MsgThreadIOEntry m_stats[PGSTAT_NUM_THREADIO_ENTRIES];
+} PgStat_MsgThreadIO;
 
 #endif /* PGSTAT_H */

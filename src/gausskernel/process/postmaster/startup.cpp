@@ -382,6 +382,9 @@ void StartupProcessMain(void)
         StartupXLOG();
     }
 
+    /* Send off thread IO statistics collected during recovery */
+    pgstat_send_threadio_stats();
+
     /* release compression ctx */
     crps_destory_ctxs();
 

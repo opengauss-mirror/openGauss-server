@@ -28,6 +28,7 @@
 #define PGSTAT_DB_NPARTITIONS 16
 #define PGSTAT_TAB_NPARTITIONS 512
 #define PGSTAT_FUNC_NPARTITIONS 16
+#define PGSTAT_THREADIO_NPARTITIONS 4
 
 typedef struct PgStatSharedDBEntry {
     Oid databaseid;
@@ -122,15 +123,28 @@ typedef struct PgStatSharedFuncEntry {
     PgStat_Counter f_self_time;
 } PgStatSharedFuncEntry;
 
+typedef struct PgStatSharedThreadIOKey {
+    uint32 role_id;
+    uint32 object_id;
+    uint32 context_id;
+} PgStatSharedThreadIOKey;
+
+typedef struct PgStatSharedThreadIOEntry {
+    PgStatSharedThreadIOKey key;
+    PgStat_ThreadIOStats stats;
+} PgStatSharedThreadIOEntry;
+
 typedef struct PgStatSharedState {
     LWLockPadded db_locks[PGSTAT_DB_NPARTITIONS];
     LWLockPadded tab_locks[PGSTAT_TAB_NPARTITIONS];
     LWLockPadded func_locks[PGSTAT_FUNC_NPARTITIONS];
+    LWLockPadded threadio_locks[PGSTAT_THREADIO_NPARTITIONS];
     LWLockPadded global_lock;
 
     HTAB* db_hash;
     HTAB* tab_hash;
     HTAB* func_hash;
+    HTAB* threadio_hash;
 
     PgStat_GlobalStats global_stats;
     /* true after first attempt to load permanent stats file into shmem (used for lazy load in backend). */
@@ -162,6 +176,13 @@ extern PgStatSharedTabEntry* pgstat_shared_get_tab_entry_under_tablock(const PgS
 extern PgStatSharedTabEntry* pgstat_shared_get_tab_entry(const PgStatSharedTabKey* key, bool create,
     LWLockMode mode, LWLock** lock, bool* found);
 extern PgStatSharedFuncEntry* pgstat_shared_get_func_entry(const PgStatSharedFuncKey* key, bool create,
+    LWLockMode mode, LWLock** lock, bool* found);
+
+extern uint32 pgstat_threadio_partition_index(const PgStatSharedThreadIOKey* key);
+extern LWLock* pgstat_shared_threadio_lock_for_key(const PgStatSharedThreadIOKey* key);
+extern PgStatSharedThreadIOEntry* pgstat_shared_get_threadio_entry_under_threadiolock(const PgStatSharedThreadIOKey* key,
+    bool create, bool* found);
+extern PgStatSharedThreadIOEntry* pgstat_shared_get_threadio_entry(const PgStatSharedThreadIOKey* key, bool create,
     LWLockMode mode, LWLock** lock, bool* found);
 
 extern void pgstat_shared_release_lock(LWLock* lock);

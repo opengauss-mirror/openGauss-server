@@ -3931,11 +3931,20 @@ static int WSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
         return -1;
     }
 
-    if (read(ws_private->xlogreadfd, readBuf, XLOG_BLCKSZ) != XLOG_BLCKSZ) {
-        Assert(false);
-        ereport(WARNING, (errmsg("could not read the request %d bytes in the xlog file %s: %s.", reqLen, xlogfpath,
-                                 gs_strerror(errno))));
-        return -1;
+    {
+        int readbytes;
+        ThreadIoTimer timer;
+
+        readbytes = read(ws_private->xlogreadfd, readBuf, XLOG_BLCKSZ);
+        if (readbytes != XLOG_BLCKSZ) {
+            Assert(false);
+            ereport(WARNING, (errmsg("could not read the request %d bytes in the xlog file %s: %s.", reqLen, xlogfpath,
+                                     gs_strerror(errno))));
+            return -1;
+        }
+        /* track thread IO for WAL page read (WAL streaming sender path) */
+        uint64 io_cost_us = timer.elapsed_us();
+        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
     }
 
     *pageTLI = ws_private->tli;
@@ -4475,6 +4484,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             if (t_thrd.walsender_cxt.response_switchover_requested || t_thrd.worker_sig_flags.shutdown_requested) {
                 sleeptime = 100; /* 0.1s */
             }
+
+            /* Send off thread IO statistics collected during WAL sending */
+            pgstat_send_threadio_stats();
 
             /* Sleep until something happens or we time out */
             pgstat_report_activity(STATE_IDLE, NULL);
@@ -5104,6 +5116,7 @@ retry:
         }
 
         pgstat_report_waitevent(WAIT_EVENT_WAL_READ);
+        ThreadIoTimer timer;
         /* consider O_DIRECT in dss mode */
         if (is_dss_fd(t_thrd.walsender_cxt.sendFile)) {
             off_t oldStartPos = dss_seek_file(t_thrd.walsender_cxt.sendFile, 0, SEEK_CUR);
@@ -5133,6 +5146,12 @@ retry:
                             errmsg("could not read from log segment %s, offset %u, length %lu: %m",
                                    XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo),
                                    t_thrd.walsender_cxt.sendOff, INT2ULONG(segbytes))));
+        }
+
+        /* track thread IO for WAL segment read (both normal and DSS O_DIRECT aligned path) */
+        {
+            uint64 io_cost_us = timer.elapsed_us();
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
         }
 
         /* Update state for read */
