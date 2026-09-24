@@ -740,6 +740,7 @@
 ./share/postgresql/tsearch_data/swedish.stop
 ./share/postgresql/tsearch_data/ispell_sample.dict
 ./share/postgresql/tsearch_data/italian.stop
+./share/postgresql/tsearch_data/dict.utf8.xdb
 ./share/postgresql/information_schema.sql
 ./share/postgresql/timezonesets/Antarctica.txt
 ./share/postgresql/timezonesets/Australia.txt
