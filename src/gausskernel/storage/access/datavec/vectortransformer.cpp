@@ -613,7 +613,8 @@ static void PcaComponents(const float *samples, int nSamples, const VectorTransf
     int d = vtrans->dimIn;
     int dimOut = vtrans->dimOut;
     const float *mean = vtrans->mean;
-    double *cov = (double *)palloc0(sizeof(double) * (Size)d * d);
+    /* A covariance matrix for a high-dimensional vector can exceed MaxAllocSize. */
+    double *cov = (double *)palloc0_huge(CurrentMemoryContext, sizeof(double) * (Size)d * d);
     double *chunk = (double *)palloc(sizeof(double) * (Size)PCA_COV_CHUNK * d);
     int pos = 0;
     while (pos < nSamples) {

@@ -9,7 +9,7 @@
 >[!NOTE]**说明**
 >
 >本特性支持ARM/x86架构环境。<br>
->本特性基于DiskANN，仅支持vector数据类型，最高维度支持1536维，在其他向量数据类型上构建会报错。<br>
+>本特性基于DiskANN，仅支持vector数据类型，最高维度支持16000维，与vector类型的维度上限一致，在其他向量数据类型上构建会报错。<br>
 >本特性与PQ互斥，`enable_rabitq`和`enable_pq`不能同时开启。开启后索引不再保存原始向量。<br>
 >本特性不支持表达式索引，需要直接对向量列创建索引。<br>
 >本特性支持普通行存表，临时表，Toast表，Unlogged表，段页式表等，不支持ustore表。<br>
@@ -70,7 +70,7 @@ DISKANN索引操作符`[TYPE]_[DISTANCE_FUN]_ops`格式：
 
 名称 | 维度限制
 --- | ---
-vector | 1,536
+vector | 16,000
 
 - `DISTANCE_FUN` - 距离函数
     - l2
@@ -188,11 +188,12 @@ openGauss=# REINDEX INDEX items_embedding_idx;
 - 向量维度高、数据量在千万级以上时，建议设置`pca_dim`与`rabitq_bits = 2`，并根据召回情况提高`diskann_probes`。
 - 建议先导入数据再创建索引，设置`pca_dim`前确认表中数据量不少于16384行。
 - 构建机器内存充足时，可设置`diskann_build_in_memory = on`缩短构建时间。
+- 高维向量的PCA训练和随机正交旋转会增加构建时间及变换矩阵内存，应根据数据维度预留资源。
 
 ## 约束
 
 - 向量索引仅支持普通行存表，临时表，Toast表，Unlogged表，段页式表等，其他表仅支持对向量数据创建btree和ubtree索引。
-- 仅支持vector数据类型，未指定向量列维度时无法构建向量索引，维度不超过1536。
+- 仅支持vector数据类型，未指定向量列维度时无法构建向量索引，维度不超过16000。未开启`enable_rabitq`的DiskANN索引仍受1536维限制。
 - 不支持表达式索引。
 - DISKANN索引不支持ustore存储。
 - `enable_rabitq`与`enable_pq`不能同时开启；`pca_dim`、`rabitq_bits`需在`enable_rabitq = on`时使用。

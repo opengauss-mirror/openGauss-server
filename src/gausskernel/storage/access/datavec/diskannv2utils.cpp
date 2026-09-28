@@ -82,14 +82,13 @@ static bool DiskAnnV2FillVector(const Vector* v, bool normalize, int dim, float*
 
 /*
  * Fetch the indexed vector of the heap row at `tid` into `out` (dim floats),
- * normalizing for the cosine opclass. SnapshotAny: any version at that TID
- * carries the same indexed value (HOT updates never change indexed columns),
- * so a dead root still prices a live HOT successor; visibility of the
- * returned TIDs is the executor's job. Returns false when the line pointer
- * holds no tuple any more (pruned / vacuumed) or the value is unusable.
- * Used by the build (buffer-pool vector source), INSERT and the scan rerank.
+ * normalizing for the cosine opclass. Follow the HOT chain using the caller's
+ * snapshot before detoasting: an invisible old version may reference TOAST
+ * chunks that have already been vacuumed. Scans use their query snapshot,
+ * INSERT uses SnapshotSelf, and the locked build uses SnapshotAny.
+ * Returns false if no matching tuple exists or the value is unusable.
  */
-bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args)
+bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args, Snapshot snapshot)
 {
     HeapTupleData tup;
     union {
@@ -105,7 +104,7 @@ bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args)
     ItemPointerData hotTid = *args->tid;
     Buffer buf = ReadBuffer(args->heap, ItemPointerGetBlockNumber(&hotTid));
     LockBuffer(buf, BUFFER_LOCK_SHARE);
-    bool found = heap_hot_search_buffer(&hotTid, args->heap, buf, SnapshotAny, &tup, (HeapTupleHeader)uncompressed.data,
+    bool found = heap_hot_search_buffer(&hotTid, args->heap, buf, snapshot, &tup, (HeapTupleHeader)uncompressed.data,
                                         NULL, true);
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     if (!found) {
@@ -175,10 +174,15 @@ static void DiskAnnV2CheckLayout(void)
 void DiskAnnV2ComputeGeometry(DiskAnnV2Meta* meta)
 {
     DiskAnnV2CheckLayout();
-    if (meta->dimOut < 1 || meta->dimOut > DISKANN_MAX_DIM) {
+    if (meta->dimIn < 1 || meta->dimIn > DISKANN_V2_MAX_DIM) {
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("diskann: input dimension %u is outside the supported range [1, %d]", meta->dimIn,
+                               DISKANN_V2_MAX_DIM)));
+    }
+    if (meta->dimOut < 1 || meta->dimOut > meta->dimIn) {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("diskann: code dimension %u is outside the supported range [1, %d]", meta->dimOut,
-                               DISKANN_MAX_DIM)));
+                               (int)meta->dimIn)));
     }
     if (meta->rabitqBits != 1 && meta->rabitqBits != RBQ_TWO_BIT) {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
