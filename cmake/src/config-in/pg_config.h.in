@@ -119,6 +119,9 @@
 /* Define to 1 if you have the `class' function. */
 #cmakedefine HAVE_CLASS 1
 
+/* Define to 1 if your compiler handles computed gotos. */
+#cmakedefine HAVE_COMPUTED_GOTO 1
+
 /* Define to 1 if you have the <crtdefs.h> header file. */
 #cmakedefine HAVE_CRTDEFS_H 1
 

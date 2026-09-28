@@ -213,10 +213,9 @@ bool BaseAggRunner::match_key(VectorBatch* batch, int batchIdx, hashCell* cell)
     int i;
     ScalarVector* pVector = NULL;
     hashVal* hashval = NULL;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
 
-    fcinfo.arg = &args[0];
 
     for (i = 0; i < m_key; i++) {
         pVector = &batch->m_arr[m_keyIdx[i]];
@@ -229,10 +228,10 @@ bool BaseAggRunner::match_key(VectorBatch* batch, int batchIdx, hashCell* cell)
                 else
                     return false;
             } else {
-                fcinfo.arg[0] = ScalarVector::Decode(pVector->m_vals[batchIdx]);
-                fcinfo.arg[1] = ScalarVector::Decode(hashval->val);
-                fcinfo.flinfo = (m_eqfunctions + i);
-                match = m_eqfunctions[i].fn_addr(&fcinfo);
+                fcinfo->args[0].value = ScalarVector::Decode(pVector->m_vals[batchIdx]);
+                fcinfo->args[1].value = ScalarVector::Decode(hashval->val);
+                fcinfo->flinfo = (m_eqfunctions + i);
+                match = m_eqfunctions[i].fn_addr(fcinfo);
                 if (match == false)
                     return false;
             }

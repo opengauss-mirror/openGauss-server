@@ -4586,15 +4586,15 @@ Datum xmltype_getstringval_array(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     VarChar* resvalue;
-    FunctionCallInfoData info;
+    LOCAL_FCINFO(info, 2);
 
-    InitFunctionCallInfoData(info, fcinfo->flinfo, 2, InvalidOid, NULL, NULL);
-    info.arg[0] = fcinfo->arg[0];
-    info.arg[1] = CStringGetTextDatum(" \n");
-    info.argnull[0] = false;
-    info.argnull[1] = false;
+    InitFunctionCallInfoData(*info, fcinfo->flinfo, 2, InvalidOid, NULL, NULL);
+    info->args[0].value = fcinfo->args[0].value;
+    info->args[1].value = CStringGetTextDatum(" \n");
+    info->args[0].isnull = false;
+    info->args[1].isnull = false;
 
-    resvalue = (VarChar*)DatumGetPointer(array_to_text(&info));
+    resvalue = (VarChar*)DatumGetPointer(array_to_text(info));
     PG_RETURN_VARCHAR_P(resvalue);
 #else
     NO_XML_SUPPORT();

@@ -2284,7 +2284,7 @@ bytea *heap_reloptions(char relkind, Datum reloptions, bool validate)
 bytea *index_reloptions_internal(RegProcedure amoptions, Datum reloptions, bool validate)
 {
     FmgrInfo flinfo;
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
     Datum result;
 
     Assert(RegProcedureIsValid(amoptions));
@@ -2296,15 +2296,16 @@ bytea *index_reloptions_internal(RegProcedure amoptions, Datum reloptions, bool 
     /* Can't use OidFunctionCallN because we might get a NULL result */
     fmgr_info(amoptions, &flinfo);
 
-    InitFunctionCallInfoData(fcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(*fcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
 
-    fcinfo.arg[0] = reloptions;
-    fcinfo.arg[1] = BoolGetDatum(validate);
-    fcinfo.argnull[0] = false;
-    fcinfo.argnull[1] = false;
-    result = FunctionCallInvoke(&fcinfo);
-    if (fcinfo.isnull || DatumGetPointer(result) == NULL)
+    fcinfo->args[0].value = reloptions;
+    fcinfo->args[1].value = BoolGetDatum(validate);
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].isnull = false;
+    result = FunctionCallInvoke(fcinfo);
+    if (fcinfo->isnull || DatumGetPointer(result) == NULL) {
         return NULL;
+    }
 
     return DatumGetByteaP(result);
 }

@@ -1557,7 +1557,11 @@ void GlobalSysTupCache::InitRelationInfo()
          * Do equality-function lookup (we assume this won't need a catalog
          * lookup for any supported type)
          */
-        pfree_ext(cc_skey[i].sk_func.fnLibPath);
+        if (cc_skey[i].sk_func.fn_ext != NULL) {
+            pfree_ext(cc_skey[i].sk_func.fn_ext->fn_lib_path);
+            pfree_ext(cc_skey[i].sk_func.fn_ext);
+            cc_skey[i].sk_func.fn_ext = NULL;
+        }
         fmgr_info_cxt(eqfunc, &cc_skey[i].sk_func, m_dbEntry->GetRandomMemCxt());
         /* Initialize sk_attno suitably for HeapKeyTest() and heap scans */
         cc_skey[i].sk_attno = m_relinfo.cc_keyno[i];

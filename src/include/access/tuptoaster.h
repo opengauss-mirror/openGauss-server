@@ -217,6 +217,7 @@ extern struct varlena* heap_internal_toast_fetch_datum(struct varatt_external to
  * ----------
  */
 extern struct varlena* heap_tuple_untoast_attr(struct varlena* attr, ScalarVector *arr = NULL);
+extern struct varlena* heap_tuple_untoast_attr_buffered(struct varlena* attr, void *buffer, Size bufsize);
 
 /* ----------
  * heap_tuple_untoast_attr_slice() -

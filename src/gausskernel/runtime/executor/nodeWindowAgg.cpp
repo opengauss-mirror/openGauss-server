@@ -227,8 +227,8 @@ static void advance_windowaggregate(
 {
     WindowFuncExprState* wfuncstate = perfuncstate->wfuncstate;
     int num_arguments = perfuncstate->numArguments;
-    FunctionCallInfoData fcinfodata;
-    FunctionCallInfo fcinfo = &fcinfodata;
+    LOCAL_FCINFO(fcinfodata, 2);
+    FunctionCallInfo fcinfo = fcinfodata;
     Datum new_val;
     ListCell* arg = NULL;
     int i;
@@ -241,6 +241,14 @@ static void advance_windowaggregate(
 
     old_context = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
 
+    if (num_arguments + 1 > 2) {
+        fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(num_arguments + 1));
+    } else {
+        /* zero flinfo/extra so the fenced-function check cannot read garbage stack data */
+        errno_t rc = memset_sp(fcinfodata, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
+        securec_check(rc, "\0", "\0");
+    }
+
     /* init the number of arguments to a function. */
     InitFunctionCallInfoArgs(*fcinfo, num_arguments + 1, 1);
 
@@ -249,8 +257,7 @@ static void advance_windowaggregate(
     foreach (arg, wfuncstate->args) {
         ExprState* arg_state = (ExprState*)lfirst(arg);
 
-        fcinfo->arg[i] = ExecEvalExpr(arg_state, econtext, &fcinfo->argnull[i]);
-        fcinfo->argTypes[i] = arg_state->resultType;
+        fcinfo->args[i].value = ExecEvalExpr(arg_state, econtext, &fcinfo->args[i].isnull);
         i++;
     }
 
@@ -263,7 +270,7 @@ static void advance_windowaggregate(
             Oid aggtranstype = perfuncstate->wfunc->wintype;
             ListCell* arg = list_head(perfuncstate->wfunc->args);
             TargetEntry *tle = (TargetEntry *)lfirst(arg);
-            if (fcinfo->argnull[i] && strcmp(get_func_name(perfuncstate->wfunc->winfnoid), "bit_and") == 0 &&
+            if (fcinfo->args[i].isnull && strcmp(get_func_name(perfuncstate->wfunc->winfnoid), "bit_and") == 0 &&
                 is_binary_type_in_dolphin(aggtranstype) &&
                 peraggstate->transValueIsNull && IsA(tle, Var)) {
                 MemoryContextSwitchTo(old_context);
@@ -271,7 +278,7 @@ static void advance_windowaggregate(
                 peraggstate->transValue = get_bit_and_initval(aggtranstype, var->vartypmod);
                 peraggstate->transValueIsNull = false;
                 return;
-            } else if (fcinfo->argnull[i]) {
+            } else if (fcinfo->args[i].isnull) {
                 MemoryContextSwitchTo(old_context);
                 return;
             }
@@ -287,7 +294,8 @@ static void advance_windowaggregate(
              * do not need to pfree the old transValue, since it's NULL.
              */
             MemoryContextSwitchTo(winstate->aggcontext);
-            peraggstate->transValue = datumCopy(fcinfo->arg[1], peraggstate->transtypeByVal, peraggstate->transtypeLen);
+            peraggstate->transValue = datumCopy(fcinfo->args[1].value,
+                                                peraggstate->transtypeByVal, peraggstate->transtypeLen);
             peraggstate->transValueIsNull = false;
             peraggstate->noTransValue = false;
             MemoryContextSwitchTo(old_context);
@@ -310,9 +318,8 @@ static void advance_windowaggregate(
      */
     InitFunctionCallInfoData(
         *fcinfo, &(peraggstate->transfn), num_arguments + 1, perfuncstate->winCollation, (Node*)winstate, NULL);
-    fcinfo->arg[0] = peraggstate->transValue;
-    fcinfo->argnull[0] = peraggstate->transValueIsNull;
-    fcinfo->argTypes[0] = InvalidOid;
+    fcinfo->args[0].value = peraggstate->transValue;
+    fcinfo->args[0].isnull = peraggstate->transValueIsNull;
     new_val = FunctionCallInvoke(fcinfo);
     /*
      * If pass-by-ref datatype, must copy the new value into aggcontext and
@@ -348,19 +355,19 @@ static void finalize_windowaggregate(WindowAggState* winstate, WindowStatePerFun
      * Apply the agg's finalfn if one is provided, else return transValue.
      */
     if (OidIsValid(peraggstate->finalfn_oid)) {
-        FunctionCallInfoData fcinfo;
+        LOCAL_FCINFO(fcinfo, 1);
 
-        InitFunctionCallInfoData(fcinfo, &(peraggstate->finalfn), 1, perfuncstate->winCollation, (Node*)winstate, NULL);
-        fcinfo.arg[0] = peraggstate->transValue;
-        fcinfo.argnull[0] = peraggstate->transValueIsNull;
-        fcinfo.argTypes[0] = InvalidOid;
-        if (fcinfo.flinfo->fn_strict && peraggstate->transValueIsNull) {
+        InitFunctionCallInfoData(*fcinfo, &(peraggstate->finalfn), 1,
+                                 perfuncstate->winCollation, (Node*)winstate, NULL);
+        fcinfo->args[0].value = peraggstate->transValue;
+        fcinfo->args[0].isnull = peraggstate->transValueIsNull;
+        if (fcinfo->flinfo->fn_strict && peraggstate->transValueIsNull) {
             /* don't call a strict function with NULL inputs */
             *result = (Datum)0;
             *is_null = true;
         } else {
-            *result = FunctionCallInvoke(&fcinfo);
-            *is_null = fcinfo.isnull;
+            *result = FunctionCallInvoke(fcinfo);
+            *is_null = fcinfo->isnull;
         }
     } else {
         *result = peraggstate->transValue;
@@ -586,9 +593,14 @@ static void eval_windowaggregates(WindowAggState* winstate)
  */
 static void eval_windowfunction(WindowAggState* winstate, WindowStatePerFunc perfuncstate, Datum* result, bool* is_null)
 {
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
+    FunctionCallInfoData* fcinfo_ptr = fcinfo;
     MemoryContext old_context;
     errno_t errorno = EOK;
+
+    if (perfuncstate->numArguments > 2) {
+        fcinfo_ptr = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(perfuncstate->numArguments));
+    }
 
     old_context = MemoryContextSwitchTo(winstate->ss.ps.ps_ExprContext->ecxt_per_tuple_memory);
 
@@ -598,27 +610,29 @@ static void eval_windowfunction(WindowAggState* winstate, WindowStatePerFunc per
      * implementations to support varying numbers of arguments.  The real info
      * goes through the WindowObject, which is passed via fcinfo->context.
      */
-    InitFunctionCallInfoData(fcinfo,
+    InitFunctionCallInfoData(*fcinfo_ptr,
         &(perfuncstate->flinfo),
         perfuncstate->numArguments,
         perfuncstate->winCollation,
         (Node*)perfuncstate->winobj,
         NULL);
     /* Just in case, make all the regular argument slots be null */
-    errorno = memset_s(fcinfo.argnull, perfuncstate->numArguments, true, perfuncstate->numArguments);
-    securec_check(errorno, "\0", "\0");
+    for (int si = 0; si < perfuncstate->numArguments; si++) {
+        fcinfo_ptr->args[si].isnull = true;
+    }
 
-    *result = FunctionCallInvoke(&fcinfo);
-    *is_null = fcinfo.isnull;
+    *result = FunctionCallInvoke(fcinfo_ptr);
+    *is_null = fcinfo_ptr->isnull;
 
     /*
      * Make sure pass-by-ref data is allocated in the appropriate context. (We
      * need this in case the function returns a pointer into some short-lived
      * tuple, as is entirely possible.)
      */
-    if (!perfuncstate->resulttypeByVal && !fcinfo.isnull &&
-        !MemoryContextContains(CurrentMemoryContext, DatumGetPointer(*result)))
+    if (!perfuncstate->resulttypeByVal && !fcinfo_ptr->isnull &&
+        !MemoryContextContains(CurrentMemoryContext, DatumGetPointer(*result))) {
         *result = datumCopy(*result, perfuncstate->resulttypeByVal, perfuncstate->resulttypeLen);
+    }
 
     MemoryContextSwitchTo(old_context);
 }

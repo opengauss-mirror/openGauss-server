@@ -592,8 +592,8 @@ static char* GetBasicUDFInformation(FunctionCallInfoData* fcinfo)
     Oid lagOid = 0;
     char fnVolatile;
     FmgrInfo* flinfo = fcinfo->flinfo;
-    char* readPtr = fcinfo->udfInfo.udfMsgBuf->data;
-    uint remainLen = fcinfo->udfInfo.udfMsgBuf->len;
+    char* readPtr = fcinfo->extra->udfInfo.udfMsgBuf->data;
+    uint remainLen = fcinfo->extra->udfInfo.udfMsgBuf->len;
 
     /* Get Message type */
     short msgType;
@@ -621,21 +621,21 @@ static char* GetBasicUDFInformation(FunctionCallInfoData* fcinfo)
 
         /* Get Language Oid */
         GetFixedMsgValSafe(readPtr, (char*)&lagOid, sizeof(lagOid), sizeof(lagOid), remainLen);
-        flinfo->fn_languageId = lagOid;
+        flinfo->fn_ext->fn_language_id = lagOid;
 
         /* Get func volatile propertie */
         GetFixedMsgValSafe(readPtr, (char*)&fnVolatile, sizeof(fnVolatile), sizeof(fnVolatile), remainLen);
-        flinfo->fn_volatile = fnVolatile;
+        flinfo->fn_ext->fn_volatile = fnVolatile;
 
         /* Get UDF name */
-        GetVarMsgValSafe(readPtr, flinfo->fnName, len, NAMEDATALEN, remainLen);
-        flinfo->fnName[len] = 0;
+        GetVarMsgValSafe(readPtr, flinfo->fn_ext->fn_name, len, NAMEDATALEN, remainLen);
+        flinfo->fn_ext->fn_name[len] = 0;
 
         /* Get Library path */
         GetFixedMsgValSafe(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
-        flinfo->fnLibPath = (char*)palloc(len + 1);
-        GetFixedMsgValSafe(readPtr, flinfo->fnLibPath, len, len + 1, remainLen);
-        flinfo->fnLibPath[len] = 0;
+        flinfo->fn_ext->fn_lib_path = (char*)palloc(len + 1);
+        GetFixedMsgValSafe(readPtr, flinfo->fn_ext->fn_lib_path, len, len + 1, remainLen);
+        flinfo->fn_ext->fn_lib_path[len] = 0;
 
         /* Get Argument number */
         GetFixedMsgValSafe(readPtr, (char*)&flinfo->fn_nargs, sizeof(flinfo->fn_nargs), sizeof(flinfo->fn_nargs), 
@@ -646,7 +646,8 @@ static char* GetBasicUDFInformation(FunctionCallInfoData* fcinfo)
 
         if (flinfo->fn_nargs > 0) {
             /* Get Argument type */
-            GetFixedMsgValSafe(readPtr, (char*)fcinfo->argTypes, sizeof(Oid) * flinfo->fn_nargs, 
+            fcinfo->extra->udfInfo.argTypes = (Oid*)palloc0(flinfo->fn_nargs * sizeof(Oid));
+            GetFixedMsgValSafe(readPtr, (char*)fcinfo->extra->udfInfo.argTypes, sizeof(Oid) * flinfo->fn_nargs,
                 sizeof(Oid) * flinfo->fn_nargs, remainLen);
         }
 
@@ -659,17 +660,17 @@ static char* GetBasicUDFInformation(FunctionCallInfoData* fcinfo)
 
 static void GetUDFArguments(FunctionCallInfoData* fcinfo)
 {
-    GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr,
-        (char*)&fcinfo->udfInfo.argBatchRows,
-        sizeof(fcinfo->udfInfo.argBatchRows),
-        sizeof(fcinfo->udfInfo.argBatchRows));
+    GetFixedMsgVal(fcinfo->extra->udfInfo.msgReadPtr,
+        (char*)&fcinfo->extra->udfInfo.argBatchRows,
+        sizeof(fcinfo->extra->udfInfo.argBatchRows),
+        sizeof(fcinfo->extra->udfInfo.argBatchRows));
 
     /* Argument Values Handler */
-    for (int row = 0; row < fcinfo->udfInfo.argBatchRows; row++) {
+    for (int row = 0; row < fcinfo->extra->udfInfo.argBatchRows; row++) {
         for (int idx = 0; idx < fcinfo->nargs; idx++) {
-            (*(fcinfo->udfInfo.UDFArgsHandlerPtr + idx))(fcinfo, idx, 0);
-            fcinfo->udfInfo.arg[row][idx] = fcinfo->arg[idx];
-            fcinfo->udfInfo.null[row][idx] = fcinfo->argnull[idx];
+            (*(fcinfo->extra->udfInfo.UDFArgsHandlerPtr + idx))(fcinfo, idx, 0);
+            fcinfo->extra->udfInfo.arg[row][idx] = fcinfo->args[idx].value;
+            fcinfo->extra->udfInfo.null[row][idx] = fcinfo->args[idx].isnull;
         }
     }
 }
@@ -684,9 +685,10 @@ static void RecvUDFInformation(int socket, FunctionCallInfoData* fcinfo)
      * Step 1: Initialize function call structure and recv message header and body
      */
     FmgrInfo* flinfo = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
+    flinfo->fn_ext = (FmgrInfoExt*)palloc0(sizeof(FmgrInfoExt));
     fcinfo->flinfo = flinfo;
 
-    flinfo->fn_fenced = true;
+    flinfo->fn_ext->fn_fenced = true;
     InitFunctionCallInfoData(*fcinfo, flinfo, 0, 0, NULL, NULL);
 
     /* Get message length */
@@ -702,8 +704,8 @@ static void RecvUDFInformation(int socket, FunctionCallInfoData* fcinfo)
     }
     /* Get message body */
     RecvMsg(socket, readPtr, len);
-    /* Copy readPtr data into fcinfo->udfInfo.udfMsgBuf */
-    AppendBufFixedMsgVal(fcinfo->udfInfo.udfMsgBuf, readPtr, len);
+    /* Copy readPtr data into fcinfo->extra->udfInfo.udfMsgBuf */
+    AppendBufFixedMsgVal(fcinfo->extra->udfInfo.udfMsgBuf, readPtr, len);
 
     /*
      * Step 2: Get basic UDF information (OID, NAME, LIBPATH and so on)
@@ -714,7 +716,7 @@ static void RecvUDFInformation(int socket, FunctionCallInfoData* fcinfo)
     FindOrInsertUDFHashTab(fcinfo);
 
     /* Attention, We must set the current read cursor */
-    fcinfo->udfInfo.msgReadPtr = readPtr;
+    fcinfo->extra->udfInfo.msgReadPtr = readPtr;
 
     /*
      * Step 3: Get arguments of UDF
@@ -787,10 +789,10 @@ static void UDFWorkerMain(int socket)
     UDFCreateHashTab();
 
     MemoryContextSwitchTo(UDFWorkMemContext);
-    FunctionCallInfoData fcinfo;
+    FunctionCallInfoData* fcinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(FUNC_MAX_ARGS));
     while (!UDFWorkerQuitFlag) {
         /* Step 2: Receive UDF information */
-        RecvUDFInformation(socket, &fcinfo);
+        RecvUDFInformation(socket, fcinfo);
 
         /* Step 3: Set memory limit */
         if (!hasSetMemLimit) {
@@ -802,54 +804,54 @@ static void UDFWorkerMain(int socket)
         PG_TRY();
         {
             /* Step 4: Run and Return result */
-            resetStringInfo(fcinfo.udfInfo.udfMsgBuf);
-            Reserve4BytesMsgHeader(fcinfo.udfInfo.udfMsgBuf);
+            resetStringInfo(fcinfo->extra->udfInfo.udfMsgBuf);
+            Reserve4BytesMsgHeader(fcinfo->extra->udfInfo.udfMsgBuf);
             short msgType = (short)UDF_RESULT;
-            AppendBufFixedMsgVal(fcinfo.udfInfo.udfMsgBuf, (char*)&msgType, sizeof(msgType));
+            AppendBufFixedMsgVal(fcinfo->extra->udfInfo.udfMsgBuf, (char*)&msgType, sizeof(msgType));
 
-            for (int row = 0; row < fcinfo.udfInfo.argBatchRows; ++row) {
-                for (int idx = 0; idx < fcinfo.nargs; idx++) {
-                    fcinfo.arg[idx] = fcinfo.udfInfo.arg[row][idx];
-                    fcinfo.argnull[idx] = fcinfo.udfInfo.null[row][idx];
+            for (int row = 0; row < fcinfo->extra->udfInfo.argBatchRows; ++row) {
+                for (int idx = 0; idx < fcinfo->nargs; idx++) {
+                    fcinfo->args[idx].value = fcinfo->extra->udfInfo.arg[row][idx];
+                    fcinfo->args[idx].isnull = fcinfo->extra->udfInfo.null[row][idx];
                 }
                 Datum result = 0;
-                switch (fcinfo.flinfo->fn_languageId) {
+                switch (fcinfo->flinfo->fn_ext->fn_language_id) {
                     case ClanguageId:
-                        result = RunUDF<C_UDF>(&fcinfo);
+                        result = RunUDF<C_UDF>(fcinfo);
                         break;
                     case JavalanguageId:
-                        result = RunUDF<JAVA_UDF>(&fcinfo);
+                        result = RunUDF<JAVA_UDF>(fcinfo);
                         break;
                     default:
-                        if(fcinfo.flinfo->fnLibPath != NULL) {
-                            changeDatabase(atoi(fcinfo.flinfo->fnLibPath));
+                        if (fcinfo->flinfo->fn_ext->fn_lib_path != NULL) {
+                            changeDatabase(atoi(fcinfo->flinfo->fn_ext->fn_lib_path));
                         }
-                        result = RunUDF<PYTHON_UDF>(&fcinfo);
+                        result = RunUDF<PYTHON_UDF>(fcinfo);
                         break;
                 }
-                (fcinfo.udfInfo.UDFResultHandlerPtr)(&fcinfo, 0, result);
+                (fcinfo->extra->udfInfo.UDFResultHandlerPtr)(fcinfo, 0, result);
             }
 
-            Fill4BytesMsgHeader(fcinfo.udfInfo.udfMsgBuf);
-            SendMsg(socket, fcinfo.udfInfo.udfMsgBuf->data, fcinfo.udfInfo.udfMsgBuf->len);
+            Fill4BytesMsgHeader(fcinfo->extra->udfInfo.udfMsgBuf);
+            SendMsg(socket, fcinfo->extra->udfInfo.udfMsgBuf->data, fcinfo->extra->udfInfo.udfMsgBuf->len);
         }
         PG_CATCH();
         {
             /* Meet error, we parse the error message and send back to client */
-            resetStringInfo(fcinfo.udfInfo.udfMsgBuf);
-            Reserve4BytesMsgHeader(fcinfo.udfInfo.udfMsgBuf);
+            resetStringInfo(fcinfo->extra->udfInfo.udfMsgBuf);
+            Reserve4BytesMsgHeader(fcinfo->extra->udfInfo.udfMsgBuf);
             short msgType = (short)UDF_ERROR;
-            AppendBufFixedMsgVal(fcinfo.udfInfo.udfMsgBuf, (char*)&msgType, sizeof(msgType));
+            AppendBufFixedMsgVal(fcinfo->extra->udfInfo.udfMsgBuf, (char*)&msgType, sizeof(msgType));
 
             MemoryContext ecxt = MemoryContextSwitchTo(current_context);
 
             ErrorData* edata = CopyErrorData();
 
             int len = strlen(edata->message);
-            AppendBufVarMsgVal(fcinfo.udfInfo.udfMsgBuf, (char*)edata->message, len);
+            AppendBufVarMsgVal(fcinfo->extra->udfInfo.udfMsgBuf, (char*)edata->message, len);
 
-            Fill4BytesMsgHeader(fcinfo.udfInfo.udfMsgBuf);
-            SendMsg(socket, fcinfo.udfInfo.udfMsgBuf->data, fcinfo.udfInfo.udfMsgBuf->len);
+            Fill4BytesMsgHeader(fcinfo->extra->udfInfo.udfMsgBuf);
+            SendMsg(socket, fcinfo->extra->udfInfo.udfMsgBuf->data, fcinfo->extra->udfInfo.udfMsgBuf->len);
 
             MemoryContextSwitchTo(ecxt);
             PG_RE_THROW();
@@ -879,11 +881,11 @@ static void UDFWorkerMain(int socket)
 template <Oid type, UDFArgHandlerType handlerType>
 Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
 {
-    StringInfo udfMsgBuf = fcinfo->udfInfo.udfMsgBuf;
+    StringInfo udfMsgBuf = fcinfo->extra->udfInfo.udfMsgBuf;
     Datum result = val;
     int valLen = 0;
     char isNull = 0;
-    char* readPtr = fcinfo->udfInfo.msgReadPtr;
+    char* readPtr = fcinfo->extra->udfInfo.msgReadPtr;
 
     switch (type) {
         case BOOLOID:
@@ -913,8 +915,8 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
         /* typlen: 4 */
         case RELTIMEOID: {
             if (handlerType == UDF_SEND_ARGS) {
-                Datum v = fcinfo->arg[idx];
-                isNull = fcinfo->argnull[idx] ? 1 : 0;
+                Datum v = fcinfo->args[idx].value;
+                isNull = fcinfo->args[idx].isnull ? 1 : 0;
                 AppendBufFixedMsgVal(udfMsgBuf, (char*)&isNull, sizeof(isNull));
                 if (!isNull) {
                     AppendBufFixedMsgVal(udfMsgBuf, (char*)&v, sizeof(v));
@@ -926,10 +928,10 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
                     /* Keep Always Send Datum, So Recv Datum */
                     Datum value = 0;
                     GetFixedMsgVal(readPtr, (char*)&value, sizeof(value), sizeof(value));
-                    fcinfo->arg[idx] = value;
-                    fcinfo->argnull[idx] = false;
+                    fcinfo->args[idx].value = value;
+                    fcinfo->args[idx].isnull = false;
                 } else {
-                    fcinfo->argnull[idx] = true;
+                    fcinfo->args[idx].isnull = true;
                 }
             } else if (handlerType == UDF_SEND_RESULT) {
                 valLen = 0;
@@ -977,8 +979,9 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
         case TIMESTAMPARRAYOID:
         case TIMESTAMPTZARRAYOID: {
             /* C UDF dose not support array and void type arguments */
-            if (fcinfo->flinfo->fn_languageId == ClanguageId)
+            if (fcinfo->flinfo->fn_ext->fn_language_id == ClanguageId) {
                 goto HANDLE_UNSOPPORTED_VAL;
+            }
         }
         /* fall through */
         case BPCHAROID:
@@ -995,8 +998,8 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
         case CIDROID:
         case VARBITOID: {
             if (handlerType == UDF_SEND_ARGS) {
-                Datum v = fcinfo->arg[idx];
-                isNull = fcinfo->argnull[idx] ? 1 : 0;
+                Datum v = fcinfo->args[idx].value;
+                isNull = fcinfo->args[idx].isnull ? 1 : 0;
                 AppendBufFixedMsgVal(udfMsgBuf, (char*)&isNull, sizeof(isNull));
 
                 if (!isNull) {
@@ -1019,10 +1022,10 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
                     GetFixedMsgVal(readPtr, buffer, valLen, valLen + 1);
 
                     /* memory should free */
-                    fcinfo->arg[idx] = PointerGetDatum(buffer);
-                    fcinfo->argnull[idx] = false;
+                    fcinfo->args[idx].value = PointerGetDatum(buffer);
+                    fcinfo->args[idx].isnull = false;
                 } else {
-                    fcinfo->argnull[idx] = true;
+                    fcinfo->args[idx].isnull = true;
                 }
             } else if (handlerType == UDF_SEND_RESULT) {
                 valLen = 0;
@@ -1127,8 +1130,8 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
 
         HANDLE_BIG_FIXED_VAL:
             if (handlerType == UDF_SEND_ARGS) {
-                Datum v = fcinfo->arg[idx];
-                isNull = fcinfo->argnull[idx] ? 1 : 0;
+                Datum v = fcinfo->args[idx].value;
+                isNull = fcinfo->args[idx].isnull ? 1 : 0;
                 AppendBufFixedMsgVal(udfMsgBuf, (char*)&isNull, sizeof(isNull));
                 if (!isNull) {
                     char* value = DatumGetPointer(v);
@@ -1146,11 +1149,11 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
                     }
                     char* buffer = (char*)palloc0(valLen + 1);
                     GetFixedMsgVal(readPtr, buffer, valLen, valLen + 1);
-                    fcinfo->argnull[idx] = false;
+                    fcinfo->args[idx].isnull = false;
                     /* memory should free */
-                    fcinfo->arg[idx] = PointerGetDatum(buffer);
+                    fcinfo->args[idx].value = PointerGetDatum(buffer);
                 } else {
-                    fcinfo->argnull[idx] = true;
+                    fcinfo->args[idx].isnull = true;
                 }
             } else if (handlerType == UDF_SEND_RESULT) {
                 char* resultVar = NULL;
@@ -1198,7 +1201,7 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
     }
     /* Attention: We must save the current read cursor */
     if (UDF_RECV_ARGS == handlerType || UDF_RECV_RESULT == handlerType)
-        fcinfo->udfInfo.msgReadPtr = readPtr;
+        fcinfo->extra->udfInfo.msgReadPtr = readPtr;
     return result;
 }
 
@@ -1214,14 +1217,14 @@ void InitUDFArgsHandler(FunctionCallInfo fcinfo)
         UDFArgsFuncType* funcPPtr = NULL;
         if (handlerType == UDF_SEND_RESULT || handlerType == UDF_RECV_RESULT) {
             type = fcinfo->flinfo->fn_rettype;
-            funcPPtr = &fcinfo->udfInfo.UDFResultHandlerPtr;
+            funcPPtr = &fcinfo->extra->udfInfo.UDFResultHandlerPtr;
         } else {
             AssertEreport(handlerType == UDF_SEND_ARGS || handlerType == UDF_RECV_ARGS,
                 MOD_UDF,
                 "Otherwise, handlerType can only be UDF_SEND_ARGS or UDF_RECV_ARGS");
 
-            type = fcinfo->argTypes[i];
-            funcPPtr = fcinfo->udfInfo.UDFArgsHandlerPtr + i;
+            type = fcinfo->extra->udfInfo.argTypes[i];
+            funcPPtr = fcinfo->extra->udfInfo.UDFArgsHandlerPtr + i;
         }
         switch (type) {
             case BOOLOID: {
@@ -1475,7 +1478,7 @@ void InitUDFArgsHandler(FunctionCallInfo fcinfo)
 
 static void FillBasicUDFInformation(FunctionCallInfo fcinfo)
 {
-    StringInfo udfMsgBuf = fcinfo->udfInfo.udfMsgBuf;
+    StringInfo udfMsgBuf = fcinfo->extra->udfInfo.udfMsgBuf;
     int len = 0;
     short msgType = (short)UDF_INFO;
     Oid resultType;
@@ -1504,26 +1507,30 @@ static void FillBasicUDFInformation(FunctionCallInfo fcinfo)
         AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->flinfo->fn_oid, sizeof(Oid));
 
         /* UDF language OID */
-        AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->flinfo->fn_languageId, sizeof(Oid));
+        AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->flinfo->fn_ext->fn_language_id, sizeof(Oid));
 
         /* UDF volatile property */
-        AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->flinfo->fn_volatile, sizeof(char));
+        AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->flinfo->fn_ext->fn_volatile, sizeof(char));
 
         /* UDF Name */
-        len = strlen(fcinfo->flinfo->fnName);
-        AppendBufVarMsgVal(udfMsgBuf, (char*)fcinfo->flinfo->fnName, len);
+        len = strlen(fcinfo->flinfo->fn_ext->fn_name);
+        AppendBufVarMsgVal(udfMsgBuf, (char*)fcinfo->flinfo->fn_ext->fn_name, len);
 
         /* UDF Library */
-        len = strlen(fcinfo->flinfo->fnLibPath);
-        AppendBufVarMsgVal(udfMsgBuf, (char*)fcinfo->flinfo->fnLibPath, len);
+        len = strlen(fcinfo->flinfo->fn_ext->fn_lib_path);
+        AppendBufVarMsgVal(udfMsgBuf, (char*)fcinfo->flinfo->fn_ext->fn_lib_path, len);
 
         /* UDF Number of Argument */
         AppendBufFixedMsgVal(udfMsgBuf, (char*)&fcinfo->nargs, sizeof(fcinfo->nargs));
 
         if (fcinfo->nargs > 0) {
-            /* the type of arguments */
-            Oid* argTypes = fcinfo->argTypes;
+            /* the type of arguments — compute from expression tree */
+            Oid* argTypes = (Oid*)palloc(fcinfo->nargs * sizeof(Oid));
+            for (int i = 0; i < fcinfo->nargs; i++) {
+                argTypes[i] = get_fn_expr_argtype(fcinfo->flinfo, i);
+            }
             AppendBufFixedMsgVal(udfMsgBuf, (char*)argTypes, sizeof(Oid) * fcinfo->nargs);
+            pfree(argTypes);
         }
 
         /* The type of result */
@@ -1535,23 +1542,23 @@ static void FillBasicUDFInformation(FunctionCallInfo fcinfo)
 template <bool batchMode>
 static void FillUDFArguments(FunctionCallInfo fcinfo)
 {
-    StringInfo udfMsgBuf = fcinfo->udfInfo.udfMsgBuf;
-    int batchRows = batchMode ? fcinfo->udfInfo.argBatchRows : 1;
+    StringInfo udfMsgBuf = fcinfo->extra->udfInfo.udfMsgBuf;
+    int batchRows = batchMode ? fcinfo->extra->udfInfo.argBatchRows : 1;
     AppendBufFixedMsgVal(udfMsgBuf, (char*)&batchRows, sizeof(batchRows));
 
-    if (unlikely(!fcinfo->udfInfo.valid_UDFArgsHandlerPtr)) {
+    if (unlikely(!fcinfo->extra->udfInfo.valid_UDFArgsHandlerPtr)) {
         InitUDFArgsHandler<UDF_SEND_ARGS>(fcinfo);
         InitUDFArgsHandler<UDF_RECV_RESULT>(fcinfo);
-        fcinfo->udfInfo.valid_UDFArgsHandlerPtr = true;
+        fcinfo->extra->udfInfo.valid_UDFArgsHandlerPtr = true;
     }
     /* Fill UDF Argument Values */
     for (int row = 0; row < batchRows; row++) {
         for (int idx = 0; idx < fcinfo->nargs; idx++) {
             if (batchMode) {
-                fcinfo->arg[idx] = fcinfo->udfInfo.arg[row][idx];
-                fcinfo->argnull[idx] = fcinfo->udfInfo.null[row][idx];
+                fcinfo->args[idx].value = fcinfo->extra->udfInfo.arg[row][idx];
+                fcinfo->args[idx].isnull = fcinfo->extra->udfInfo.null[row][idx];
             }
-            (*(fcinfo->udfInfo.UDFArgsHandlerPtr + idx))(fcinfo, idx, 0);
+            (*(fcinfo->extra->udfInfo.UDFArgsHandlerPtr + idx))(fcinfo, idx, 0);
         }
     }
 }
@@ -1559,10 +1566,10 @@ static void FillUDFArguments(FunctionCallInfo fcinfo)
 template <bool batchMode>
 static void SendUDFInformation(FunctionCallInfo fcinfo)
 {
-    StringInfo udfMsgBuf = fcinfo->udfInfo.udfMsgBuf;
+    StringInfo udfMsgBuf = fcinfo->extra->udfInfo.udfMsgBuf;
 
     /* Step 1: Initialize and Reset the udfMsgBuf */
-    resetStringInfo(fcinfo->udfInfo.udfMsgBuf);
+    resetStringInfo(fcinfo->extra->udfInfo.udfMsgBuf);
     Reserve4BytesMsgHeader(udfMsgBuf);
 
     /*
@@ -1593,7 +1600,7 @@ bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedure
     char* udfName = NULL;
     char* udfLibPath = NULL;
     bool isnull = false;
-    Oid languageId = finfo->fn_languageId;
+    Oid languageId = finfo->fn_ext->fn_language_id;
     bool fencedMode = false;
 
     Datum procFenced = SysCacheGetAttr(PROCOID, procedureTuple, Anum_pg_proc_fenced, &isnull);
@@ -1625,11 +1632,13 @@ bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedure
 
             udfLibPath = TextDatumGetCString(probinattr);
             char* udfLibFullPath = expand_dynamic_library_name(udfLibPath);
-            errno_t errorno = memcpy_s(finfo->fnName, sizeof(finfo->fnName), udfName, strlen(udfName) + 1);
+            errno_t errorno = memcpy_s(finfo->fn_ext->fn_name, sizeof(finfo->fn_ext->fn_name),
+                                       udfName, strlen(udfName) + 1);
             securec_check_c(errorno, "\0", "\0");
 
-            finfo->fnLibPath = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibFullPath) + 1);
-            errorno = memcpy_s(finfo->fnLibPath, strlen(udfLibFullPath) + 1, udfLibFullPath, strlen(udfLibFullPath));
+            finfo->fn_ext->fn_lib_path = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibFullPath) + 1);
+            errorno = memcpy_s(finfo->fn_ext->fn_lib_path, strlen(udfLibFullPath) + 1,
+                               udfLibFullPath, strlen(udfLibFullPath));
             securec_check_c(errorno, "\0", "\0");
             pfree_ext(udfLibFullPath);
         } else {
@@ -1651,15 +1660,16 @@ bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedure
                 udfLibPath = (char *)palloc0(dbinLen * sizeof(char));
                 pg_itoa(u_sess->proc_cxt.MyDatabaseId, udfLibPath);
             }
-            finfo->fnLibPath = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibPath) + 1);
-            errno_t errorno = memcpy_s(finfo->fnLibPath, strlen(udfLibPath) + 1, udfLibPath, strlen(udfLibPath));
+            finfo->fn_ext->fn_lib_path = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibPath) + 1);
+            errno_t errorno = memcpy_s(finfo->fn_ext->fn_lib_path, strlen(udfLibPath) + 1,
+                                       udfLibPath, strlen(udfLibPath));
             securec_check_c(errorno, "\0", "\0");
         }
 
         finfo->fn_addr = RPCFencedUDF<false>;
-        finfo->fn_fenced = true;
+        finfo->fn_ext->fn_fenced = true;
     }
-    finfo->fn_languageId = languageId;
+    finfo->fn_ext->fn_language_id = languageId;
     return fencedMode;
 }
 
@@ -1699,7 +1709,7 @@ Datum RPCFencedUDF(FunctionCallInfo fcinfo)
 
     /* Step 3: Get UDF result */
     int len = 0;
-    resetStringInfo(fcinfo->udfInfo.udfMsgBuf);
+    resetStringInfo(fcinfo->extra->udfInfo.udfMsgBuf);
     RecvMsg(UDFRPCSocket, (char*)&len, sizeof(len));    
     if (len < 0) {
         ereport(ERROR,
@@ -1709,26 +1719,26 @@ Datum RPCFencedUDF(FunctionCallInfo fcinfo)
     }
     char* ptr = (char*)palloc(len + 1);
     RecvMsg(UDFRPCSocket, ptr, len);
-    AppendBufFixedMsgVal(fcinfo->udfInfo.udfMsgBuf, ptr, len);
-    fcinfo->udfInfo.msgReadPtr = fcinfo->udfInfo.udfMsgBuf->data;
+    AppendBufFixedMsgVal(fcinfo->extra->udfInfo.udfMsgBuf, ptr, len);
+    fcinfo->extra->udfInfo.msgReadPtr = fcinfo->extra->udfInfo.udfMsgBuf->data;
     pfree_ext(ptr);
 
     /* Get Message type */
     short msgType;
-    GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)&msgType, sizeof(msgType), sizeof(msgType));
+    GetFixedMsgVal(fcinfo->extra->udfInfo.msgReadPtr, (char*)&msgType, sizeof(msgType), sizeof(msgType));
 
     if (msgType == UDF_RESULT) {
-        int batchRows = batchMode ? fcinfo->udfInfo.argBatchRows : 1;
+        int batchRows = batchMode ? fcinfo->extra->udfInfo.argBatchRows : 1;
         for (int row = 0; row < batchRows; ++row) {
-            result = (fcinfo->udfInfo.UDFResultHandlerPtr)(fcinfo, 0, 0);
+            result = (fcinfo->extra->udfInfo.UDFResultHandlerPtr)(fcinfo, 0, 0);
             if (batchMode) {
-                fcinfo->udfInfo.result[row] = result;
-                fcinfo->udfInfo.resultIsNull[row] = fcinfo->isnull;
+                fcinfo->extra->udfInfo.result[row] = result;
+                fcinfo->extra->udfInfo.resultIsNull[row] = fcinfo->isnull;
             }
         }
     } else if (msgType == UDF_ERROR) {
         int valLen = 0;
-        GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));        
+        GetFixedMsgVal(fcinfo->extra->udfInfo.msgReadPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));
         if (valLen < 0) {
             ereport(ERROR,
                 (errmodule(MOD_UDF), 
@@ -1736,7 +1746,7 @@ Datum RPCFencedUDF(FunctionCallInfo fcinfo)
                     errmsg("Variable length %d cannot be negative", valLen)));
         }
         char* errMsg = (char*)palloc0(valLen + 1);
-        GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)errMsg, valLen, valLen + 1);
+        GetFixedMsgVal(fcinfo->extra->udfInfo.msgReadPtr, (char*)errMsg, valLen, valLen + 1);
         ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_DATA_EXCEPTION), errmsg("UDF Error:%s", errMsg)));
     }
     return result;
@@ -1767,16 +1777,19 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
 
     if (NULL != entry) {
 
-        fcinfo->flinfo->fn_languageId = entry->fn_languageId;
+        fcinfo->flinfo->fn_ext->fn_language_id = entry->fn_languageId;
         fcinfo->flinfo->fn_addr = entry->user_fn;
         fcinfo->flinfo->fn_nargs = fcinfo->nargs = entry->argNum;
 
         /* Just make don't initilize udfInfo memory in order to get from entry */
-        fcinfo->flinfo->fn_fenced = false;
+        fcinfo->flinfo->fn_ext->fn_fenced = false;
         InitFunctionCallInfoData(*fcinfo, fcinfo->flinfo, fcinfo->flinfo->fn_nargs, 0, NULL, NULL);
-        fcinfo->flinfo->fn_fenced = true;
+        fcinfo->flinfo->fn_ext->fn_fenced = true;
 
-        fcinfo->udfInfo = entry->udfInfo;
+        if (fcinfo->extra == NULL) {
+            fcinfo->extra = (FunctionCallExtraData*)palloc0(sizeof(FunctionCallExtraData));
+        }
+        fcinfo->extra->udfInfo = entry->udfInfo;
     } else {
         AutoContextSwitch contextSwitcher(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
         entry = (UDFFuncHashTabEntry*)hash_search(UDFFuncHash, &oid, HASH_ENTER, NULL);
@@ -1784,17 +1797,18 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
             FmgrInfo* flinfo = fcinfo->flinfo;
 
             /* Load the shared library, unless we already did */
-            if (flinfo->fn_languageId == ClanguageId) {
-                void* libHandle = internal_load_library(flinfo->fnLibPath);
+            if (flinfo->fn_ext->fn_language_id == ClanguageId) {
+                void* libHandle = internal_load_library(flinfo->fn_ext->fn_lib_path);
                 if (NULL == libHandle)
                     ereport(ERROR,
                         (errmodule(MOD_UDF),
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                            errmsg("internal_load_library %s failed: %s", flinfo->fnLibPath, TRANSLATE_ERRNO)));
+                            errmsg("internal_load_library %s failed: %s",
+                                    flinfo->fn_ext->fn_lib_path, TRANSLATE_ERRNO)));
 
                 /* Look up the function within the library */
-                flinfo->fn_addr = (PGFunction)pg_dlsym(libHandle, flinfo->fnName);
-            } else if (flinfo->fn_languageId == JavalanguageId){
+                flinfo->fn_addr = (PGFunction)pg_dlsym(libHandle, flinfo->fn_ext->fn_name);
+            } else if (flinfo->fn_ext->fn_language_id == JavalanguageId) {
 #ifndef ENABLE_LITE_MODE
                 /* Load libpljava.so to support Java UDF */
                 char pathbuf[MAXPGPATH];
@@ -1854,13 +1868,13 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
 
             InitUDFInfo(&entry->udfInfo, fcinfo->nargs, BatchMaxSize);
             for (int i = 0; i < fcinfo->nargs; ++i) {
-                entry->udfInfo.UDFArgsHandlerPtr[i] = fcinfo->udfInfo.UDFArgsHandlerPtr[i];
+                entry->udfInfo.UDFArgsHandlerPtr[i] = fcinfo->extra->udfInfo.UDFArgsHandlerPtr[i];
             }
-            entry->udfInfo.UDFResultHandlerPtr = fcinfo->udfInfo.UDFResultHandlerPtr;
+            entry->udfInfo.UDFResultHandlerPtr = fcinfo->extra->udfInfo.UDFResultHandlerPtr;
             entry->udfInfo.valid_UDFArgsHandlerPtr = true;
             entry->argNum = fcinfo->nargs;
             entry->fn_oid = oid;
-            entry->fn_languageId = flinfo->fn_languageId;
+            entry->fn_languageId = flinfo->fn_ext->fn_language_id;
         }
     }
 }
@@ -1920,21 +1934,21 @@ void InitFunctionCallUDFArgs(FunctionCallInfoData* fcinfo, int argN, int batchRo
 {
     /* For UDF, FmgrInfo must be valid, if not invalid, don't need init the following */
     if (argN > 0) {
-        InitUDFInfo(&fcinfo->udfInfo, argN, batchRows);
+        InitUDFInfo(&fcinfo->extra->udfInfo, argN, batchRows);
     }
 }
 
 void InitFuncCallUDFInfo(FunctionCallInfoData* fcinfo, int argN, bool setFuncPtr = true)
 {
-    if (unlikely(fcinfo->flinfo && fcinfo->flinfo->fn_fenced)) {
+    if (unlikely(fcinfo->flinfo && fcinfo->flinfo->fn_ext != NULL && fcinfo->flinfo->fn_ext->fn_fenced)) {
         if (setFuncPtr)
             fcinfo->flinfo->fn_addr = RPCFencedUDF<true>;
         if (argN > 0) {
             int batchRows = setFuncPtr ? BatchMaxSize : 1;
             InitFunctionCallUDFArgs(fcinfo, argN, batchRows);
         } else {
-            fcinfo->udfInfo.udfMsgBuf = makeStringInfo();
-            fcinfo->udfInfo.msgReadPtr = NULL;
+            fcinfo->extra->udfInfo.udfMsgBuf = makeStringInfo();
+            fcinfo->extra->udfInfo.msgReadPtr = NULL;
         }
     }
 }

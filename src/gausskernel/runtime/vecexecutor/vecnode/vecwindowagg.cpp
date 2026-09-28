@@ -534,7 +534,10 @@ VecWinAggRuntime::VecWinAggRuntime(VecWindowAggState* runtime) : BaseAggRunner()
     }
 
     /* Initialize window function information according to m_winFuncs and WindowStatePerFunc */
-    m_windowFunc = (FunctionCallInfoData*)palloc0(sizeof(FunctionCallInfoData) * m_winFuns);
+    m_windowFunc = (FunctionCallInfoData**)palloc0(sizeof(FunctionCallInfoData*) * m_winFuns);
+    for (int k = 0; k < m_winFuns; k++) {
+        m_windowFunc[k] = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(2));
+    }
 
     m_funcIdx = (int*)palloc0(sizeof(int) * m_winFuns);
 
@@ -563,7 +566,7 @@ VecWinAggRuntime::VecWinAggRuntime(VecWindowAggState* runtime) : BaseAggRunner()
                 * but vec agg function only have transfn
                 */
                 if (OidIsValid(peraggstate->finalfn.fn_oid) && 
-                    runtime->windowAggInfo[i].vec_final_function.flinfo == NULL) {
+                    runtime->windowAggInfo[i].vec_final_function->flinfo == NULL) {
                     m_cellvar_encoded[i] = CheckAggEncoded(peraggstate->finalfn.fn_rettype);
                 }
                 /* 
@@ -672,19 +675,23 @@ void VecWinAggRuntime::DispatchWindowFunction(WindowStatePerFunc perfuncstate, i
 
     if (found) {
 #ifdef ENABLE_MULTIPLE_NODES
-        InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, NULL, NULL);
+        InitFunctionCallInfoData(*m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation,
+            NULL, NULL);
 #else
         if (m_winruntime->ss.ps.state->es_is_flt_frame) {
-            InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, (Node *)m_winruntime, NULL);
+            InitFunctionCallInfoData(*m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation,
+                (Node *)m_winruntime, NULL);
         } else {
-            InitFunctionCallInfoData(m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation, NULL, NULL);
+            InitFunctionCallInfoData(*m_windowFunc[i], &perfuncstate->flinfo, 2, perfuncstate->winCollation,
+                NULL, NULL);
         }
 #endif
 
+        FmgrInfoExt *win_fn_ext = FmgrInfoEnsureExt(m_windowFunc[i]->flinfo);
         if (m_aggNum == 0 || m_sortKey == 0)
-            m_windowFunc[i].flinfo->vec_fn_addr = entry->vec_fn_cache[0];
+            win_fn_ext->vec_fn_addr = entry->vec_fn_cache[0];
         else
-            m_windowFunc[i].flinfo->vec_fn_addr = entry->vec_fn_cache[1];
+            win_fn_ext->vec_fn_addr = entry->vec_fn_cache[1];
     } else {
         const FmgrBuiltin* fbp = NULL;
         fbp = fmgr_isbuiltin(funcoid);
@@ -713,41 +720,45 @@ void VecWinAggRuntime::DispatchAggFunction(
     Oid transfn_oid = perfuncstate->flinfo.fn_oid;
     bool found = false;
 
+    aggInfo->vec_agg_function = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(4));
+    aggInfo->vec_final_function = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(4));
+
     entry = (VecFuncCacheEntry*)hash_search(g_instance.vec_func_hash, &transfn_oid, HASH_FIND, &found);
 
     if (found) {
 #ifdef ENABLE_MULTIPLE_NODES
         InitFunctionCallInfoData(
-            aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, NULL, NULL);
+            *aggInfo->vec_agg_function, &peraggState->transfn, 4, perfuncstate->winCollation, NULL, NULL);
 #else
         if (m_winruntime->ss.ps.state->es_is_flt_frame) {
-            InitFunctionCallInfoData(aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation,
+            InitFunctionCallInfoData(*aggInfo->vec_agg_function, &peraggState->transfn, 4, perfuncstate->winCollation,
                 (Node*)m_winruntime, NULL);
         } else {
             InitFunctionCallInfoData(
-                aggInfo->vec_agg_function, &peraggState->transfn, 2, perfuncstate->winCollation, NULL, NULL);
+                *aggInfo->vec_agg_function, &peraggState->transfn, 4, perfuncstate->winCollation, NULL, NULL);
         }
 #endif
 
         aggInfo->vec_agg_cache = &entry->vec_agg_cache[0];
         aggInfo->vec_agg_final = &entry->vec_transform_function[0];
 
-        aggInfo->vec_agg_function.flinfo->vec_fn_addr = aggInfo->vec_agg_cache[0];
+        FmgrInfoExt *agg_fn_ext = FmgrInfoEnsureExt(aggInfo->vec_agg_function->flinfo);
+        agg_fn_ext->vec_fn_addr = aggInfo->vec_agg_cache[0];
 
         if (OidIsValid(peraggState->finalfn_oid)) {
 #ifdef ENABLE_MULTIPLE_NODES
             InitFunctionCallInfoData(
-                aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, NULL, NULL);
+                *aggInfo->vec_final_function, &peraggState->finalfn, 4, perfuncstate->winCollation, NULL, NULL);
 #else
             if (m_winruntime->ss.ps.state->es_is_flt_frame && aggInfo->vec_agg_final[0]) {
-                InitFunctionCallInfoData(aggInfo->vec_final_function, &peraggState->finalfn, 2,
+                InitFunctionCallInfoData(*aggInfo->vec_final_function, &peraggState->finalfn, 4,
                     perfuncstate->winCollation, (Node*)m_winruntime, NULL);
             } else {
                 InitFunctionCallInfoData(
-                    aggInfo->vec_final_function, &peraggState->finalfn, 2, perfuncstate->winCollation, NULL, NULL);
+                    *aggInfo->vec_final_function, &peraggState->finalfn, 4, perfuncstate->winCollation, NULL, NULL);
             }
 #endif
-            aggInfo->vec_final_function.flinfo->fn_addr = aggInfo->vec_agg_final[0];
+            aggInfo->vec_final_function->flinfo->fn_addr = aggInfo->vec_agg_final[0];
         }
     } else {
         ereport(ERROR,
@@ -781,10 +792,9 @@ bool VecWinAggRuntime::MatchPeer(
     uint8 flag2;
     ScalarVector* vector1 = batch1->m_arr;
     ScalarVector* vector2 = batch2->m_arr;
-    FunctionCallInfoData fcinfo;
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
     PGFunction eqfunc;
-    Datum args[2];
-    fcinfo.arg = &args[0];
 
     for (i = 0; i < nkeys; i++) {
         val1 = vector1[keyIdx[i]].m_vals[idx1];
@@ -798,16 +808,16 @@ bool VecWinAggRuntime::MatchPeer(
                 else
                     return false;
             } else {
-                fcinfo.arg[0] = ScalarVector::Decode(val1);
-                fcinfo.arg[1] = ScalarVector::Decode(val2);
+                fcinfo->args[0].value = ScalarVector::Decode(val1);
+                fcinfo->args[1].value = ScalarVector::Decode(val2);
                 if (is_ord) {
-                    fcinfo.flinfo = (m_ordeqfunctions + i);
+                    fcinfo->flinfo = (m_ordeqfunctions + i);
                     eqfunc = m_ordeqfunctions[i].fn_addr;
-                    match = eqfunc(&fcinfo);
+                    match = eqfunc(fcinfo);
                 } else {
-                    fcinfo.flinfo = (m_parteqfunctions + i);
+                    fcinfo->flinfo = (m_parteqfunctions + i);
                     eqfunc = m_parteqfunctions[i].fn_addr;
-                    match = eqfunc(&fcinfo);
+                    match = eqfunc(fcinfo);
                 }
 
                 if (match == false)
@@ -1407,9 +1417,8 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
     Datum key1, key2;
     uint8 flag1, flag2;
     int nrows = batch->m_rows;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
-    fcinfo.arg = &args[0];
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
     int idx = 0;
     PGFunction eqfunc;
     errno_t rc;
@@ -1436,17 +1445,17 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
                     if (simple || vector->m_desc.encoded == false) {
                         m_winSequence[idx] = (key1 == key2) ? 0 : 1;
                     } else {
-                        fcinfo.arg[0] = ScalarVector::Decode(key1);
-                        fcinfo.arg[1] = ScalarVector::Decode(key2);
+                        fcinfo->args[0].value = ScalarVector::Decode(key1);
+                        fcinfo->args[1].value = ScalarVector::Decode(key2);
 
                         if (is_ord) {
-                            fcinfo.flinfo = (m_ordeqfunctions + i);
+                            fcinfo->flinfo = (m_ordeqfunctions + i);
                             eqfunc = m_ordeqfunctions[i].fn_addr;
-                            m_winSequence[idx] = eqfunc(&fcinfo) ? 0 : 1;
+                            m_winSequence[idx] = eqfunc(fcinfo) ? 0 : 1;
                         } else {
-                            fcinfo.flinfo = (m_parteqfunctions + i);
+                            fcinfo->flinfo = (m_parteqfunctions + i);
                             eqfunc = m_parteqfunctions[i].fn_addr;
-                            m_winSequence[idx] = eqfunc(&fcinfo) ? 0 : 1;
+                            m_winSequence[idx] = eqfunc(fcinfo) ? 0 : 1;
                         }
                     }
                 } else if (IS_NULL(flag1) && IS_NULL(flag2)) {
@@ -1695,11 +1704,11 @@ void VecWinAggRuntime::BuildScanBatchFinal(hashCell* cell, ScalarVector* result_
 
     if (agg_idx == m_finalAggInfo[final_idx].idx) {
         /* to invoke function*/
-        FunctionCallInfo fcinfo = &m_finalAggInfo[final_idx].info->vec_final_function;
-        fcinfo->arg[0] = (Datum)cell;
-        fcinfo->arg[1] = (Datum)agg_idx;
-        fcinfo->arg[2] = (Datum)(&vector->m_vals[nrows]);
-        fcinfo->arg[3] = (Datum)(&vector->m_flag[nrows]);
+        FunctionCallInfo fcinfo = m_finalAggInfo[final_idx].info->vec_final_function;
+        fcinfo->args[0].value = (Datum)cell;
+        fcinfo->args[1].value = (Datum)agg_idx;
+        fcinfo->args[2].value = (Datum)(&vector->m_vals[nrows]);
+        fcinfo->args[3].value = (Datum)(&vector->m_flag[nrows]);
 
         /*
          * for var final function , we must make sure the return val
@@ -1755,10 +1764,10 @@ const VectorBatch* VecWinAggRuntime::EvalPerBatch()
 
 void VecWinAggRuntime::EvalWindowFunction(WindowStatePerFunc perfuncstate, int idx)
 {
-    m_windowFunc[idx].arg[0] = (Datum)idx;
-    m_windowFunc[idx].context = (Node*)perfuncstate->winobj;
+    m_windowFunc[idx]->args[0].value = (Datum)idx;
+    m_windowFunc[idx]->context = (Node*)perfuncstate->winobj;
 
-    VecFunctionCallInvoke(&m_windowFunc[idx]);
+    VecFunctionCallInvoke(m_windowFunc[idx]);
 }
 
 bool VecWinAggRuntime::MatchPeerByOrder(VectorBatch* batch1, int idx1, VectorBatch* batch2, int idx2)
@@ -1792,7 +1801,7 @@ void VecWinAggRuntime::InitAggIdxInfo(VecAggInfo* aggInfo)
     for (int i = 0; i < m_aggNum; i++) {
         m_windowagg_idxinfo[i].aggIdx = agg_idx;
 
-        if (aggInfo[i].vec_final_function.flinfo != NULL) {
+        if (aggInfo[i].vec_final_function->flinfo != NULL) {
             agg_idx += 2;
             m_windowagg_idxinfo[i].is_final = true;
         } else {

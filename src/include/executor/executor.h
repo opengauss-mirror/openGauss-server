@@ -595,6 +595,7 @@ extern int ExecCleanTargetListLength(List* targetlist);
 extern bool is_external_clob(Oid type_oid, bool is_null, Datum value);
 extern bool is_huge_clob(Oid type_oid, bool is_null, Datum value);
 extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
+extern void FunctionCallEnsureExtra(FunctionCallInfoData* fcinfo);
 extern void set_result_for_plpgsql_language_function_with_outparam(FuncExprState *fcache, Datum *result, bool *isNull);
 extern void set_result_for_plpgsql_language_function_with_outparam_by_flatten(Datum *result, bool *isNull);
 extern void ShutdownFuncExpr(Datum arg);

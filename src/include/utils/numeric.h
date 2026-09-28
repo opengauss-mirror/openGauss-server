@@ -47,6 +47,7 @@
 
 #if 1
 #define NBASE 10000
+#define NBASE_SQR (NBASE * NBASE)
 #define HALF_NBASE 5000
 #define DEC_DIGITS 4 /* decimal digits per NBASE digit */
 #define NUMERIC_SCALE_ADJUST(scale) ((int64)(scale + DEC_DIGITS - 1) / DEC_DIGITS)
@@ -189,6 +190,8 @@ typedef struct NumericData* Numeric;
 #define NumericGetDatum(X) PointerGetDatum(X)
 #define PG_GETARG_NUMERIC(n) DatumGetNumeric(PG_GETARG_DATUM(n))
 #define PG_GETARG_NUMERIC_COPY(n) DatumGetNumericCopy(PG_GETARG_DATUM(n))
+#define DatumGetNumericBuffered(X, buf, bufsz) ((Numeric)PG_DETOAST_DATUM_BUFFERED(X, buf, bufsz))
+#define PG_GETARG_NUMERIC_BUFFERED(n, buf, bufsz) DatumGetNumericBuffered(PG_GETARG_DATUM(n), buf, bufsz)
 #define PG_RETURN_NUMERIC(x) return NumericGetDatum(x)
 
 /*
@@ -210,6 +213,7 @@ extern Numeric numeric_sub_opt_error(Numeric num1, Numeric num2, bool *haveError
 extern Numeric numeric_mul_opt_error(Numeric num1, Numeric num2, bool *haveError);
 extern Numeric numeric_div_opt_error(Numeric num1, Numeric num2, bool *haveError);
 extern Numeric numeric_mod_opt_error(Numeric num1, Numeric num2, bool *haveError);
+extern Numeric numeric_round_internal(Numeric num, int32 scale);
 extern int32 numeric_int4_opt_error(Numeric num, bool can_ignore, bool *haveError);
 extern int64 numeric_int8_opt_error(Numeric num, bool can_ignore, bool *haveError);
 extern Numeric int64_to_numeric(int64 v);
@@ -320,6 +324,22 @@ typedef struct NumericVar {
     NumericDigit ndb[NUMERIC_LOCAL_NDIG]; /* local space for digits[] */
 } NumericVar;
 
+/*
+ * Register for the numeric arithmetic pipeline in the expression
+ * interpreter.  Holds either a packed big-integer numeric (bi != NULL,
+ * keeping the int64/int128 fast path) or an unpacked NumericVar.  The
+ * packed-result buffer lives in the PACK step, not here, since only the
+ * chain's final step needs one.
+ */
+typedef struct NumericReg {
+    NumericVar var;
+    Numeric bi;
+    bool isnull;
+} NumericReg;
+
+/* capacity of the PACK step's preallocated packed-result buffer */
+#define NUMERIC_PACKBUF_SIZE 128
+
 #define quick_init_var(v)    \
     do {                     \
         (v)->buf = (v)->ndb; \
@@ -369,8 +389,20 @@ extern void init_var_from_num(Numeric num, NumericVar* dest);
 extern bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_ignore = false);
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
+extern int cmp_var(NumericVar *var1, NumericVar *var2);
+extern void sub_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
+extern void mul_var(NumericVar *var1, NumericVar *var2, NumericVar *result, int rscale);
+extern void div_var(NumericVar *var1, NumericVar *var2, NumericVar *result, int rscale, bool round,
+    bool *haveError = NULL);
+extern void mod_var(NumericVar *var1, NumericVar *var2, NumericVar *result, bool *haveError = NULL);
+extern void ceil_var(NumericVar *var, NumericVar *result);
+extern void floor_var(NumericVar *var, NumericVar *result);
 extern char *numeric_normalize(Numeric num);
 extern double numeric_to_double_no_overflow(Numeric num);
+
+/* rounding kernels used by the numeric expression pipeline (numeric_pipeline.h) */
+extern void round_var(NumericVar *var, int rscale);
+extern void trunc_var(NumericVar *var, int rscale);
 
 bool numeric_agg_trans_initvalisnull(Oid transfn_oid, bool initvalisnull);
 void numeric_transfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype);

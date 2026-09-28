@@ -914,10 +914,8 @@ bool match_key(VectorBatch* batch, int batch_idx, hashCell* cell, int numkeys)
     int i;
     ScalarVector* p_vector = NULL;
     hashVal* hashval = NULL;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
+    LOCAL_FCINFO(fcinfo, 2);
 
-    fcinfo.arg = &args[0];
 
     for (i = 0; i < numkeys; i++) {
         p_vector = &batch->m_arr[i];
@@ -931,9 +929,9 @@ bool match_key(VectorBatch* batch, int batch_idx, hashCell* cell, int numkeys)
                     return false;
                 }     
             } else {
-                fcinfo.arg[0] = ScalarVector::Decode(p_vector->m_vals[batch_idx]);
-                fcinfo.arg[1] = ScalarVector::Decode(hashval->val);
-                match = (fcinfo.arg[0] == fcinfo.arg[1]);
+                fcinfo->args[0].value = ScalarVector::Decode(p_vector->m_vals[batch_idx]);
+                fcinfo->args[1].value = ScalarVector::Decode(hashval->val);
+                match = (fcinfo->args[0].value == fcinfo->args[1].value);
                 if (match == false) {
                     return false;
                 }

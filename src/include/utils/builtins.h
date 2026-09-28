@@ -18,6 +18,7 @@
 
 #ifndef FRONTEND_PARSER
 #include "fmgr.h"
+#include "catalog/gs_collation.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 #ifdef PGXC
@@ -623,6 +624,9 @@ extern Datum bttintervalcmp(PG_FUNCTION_ARGS);
 extern Datum btcharcmp(PG_FUNCTION_ARGS);
 extern Datum btnamecmp(PG_FUNCTION_ARGS);
 extern Datum bttextcmp(PG_FUNCTION_ARGS);
+extern Datum bttextcmp_c_locale(PG_FUNCTION_ARGS);
+extern Datum bttextcmp_b_format(PG_FUNCTION_ARGS);
+extern Datum bttextcmp_locale(PG_FUNCTION_ARGS);
 extern Datum bpchar_sortsupport(PG_FUNCTION_ARGS);
 extern Datum bttextsortsupport(PG_FUNCTION_ARGS);
 /*
@@ -1107,6 +1111,9 @@ extern Datum bpcharle(PG_FUNCTION_ARGS);
 extern Datum bpchargt(PG_FUNCTION_ARGS);
 extern Datum bpcharge(PG_FUNCTION_ARGS);
 extern Datum bpcharcmp(PG_FUNCTION_ARGS);
+extern Datum bpcharcmp_c_locale(PG_FUNCTION_ARGS);
+extern Datum bpcharcmp_b_format(PG_FUNCTION_ARGS);
+extern Datum bpcharcmp_locale(PG_FUNCTION_ARGS);
 extern Datum bpchar_larger(PG_FUNCTION_ARGS);
 extern Datum bpchar_smaller(PG_FUNCTION_ARGS);
 extern int bpchartruelen(const char* s, int len);
@@ -1217,6 +1224,18 @@ extern Datum textoverlay_no_len(PG_FUNCTION_ARGS);
 extern Datum name_text(PG_FUNCTION_ARGS);
 extern Datum text_name(PG_FUNCTION_ARGS);
 extern int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid);
+extern int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid);
+
+static inline int varstr_cmp_c(char* arg1, int len1, char* arg2, int len2)
+{
+    int result = memcmp(arg1, arg2, Min(len1, len2));
+    if ((result == 0) && (len1 != len2)) {
+        result = (len1 < len2) ? -1 : 1;
+    }
+    return result;
+}
+
+extern void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation);
 extern void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar);
 extern List* textToQualifiedNameList(text* textval);
 extern bool SplitIdentifierString(char* rawstring, char separator, List** namelist, bool downCase = true, bool truncateToolong = true);

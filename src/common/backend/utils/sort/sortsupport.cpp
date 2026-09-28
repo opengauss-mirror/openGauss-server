@@ -22,8 +22,8 @@
 
 /* Info needed to use an old-style comparison function as a sort comparator */
 typedef struct SortShimExtra {
-    FunctionCallInfoData fcinfo; /* reusable callinfo structure */
-    FmgrInfo flinfo;             /* lookup data for comparison function */
+    FunctionCallInfoData* fcinfo;    /* reusable callinfo structure */
+    FmgrInfo flinfo;                /* lookup data for comparison function */
 } SortShimExtra;
 
 /*
@@ -77,18 +77,19 @@ static int comparison_shim(Datum x, Datum y, SortSupport ssup)
     SortShimExtra* extra = (SortShimExtra*)ssup->ssup_extra;
     Datum result;
 
-    extra->fcinfo.arg[0] = x;
-    extra->fcinfo.arg[1] = y;
+    extra->fcinfo->args[0].value = x;
+    extra->fcinfo->args[1].value = y;
 
     /* just for paranoia's sake, we reset isnull each time */
-    extra->fcinfo.isnull = false;
+    extra->fcinfo->isnull = false;
 
-    result = FunctionCallInvoke(&extra->fcinfo);
+    result = FunctionCallInvoke(extra->fcinfo);
 
     /* Check for null result, since caller is clearly not expecting one */
-    if (extra->fcinfo.isnull)
+    if (extra->fcinfo->isnull) {
         ereport(
             ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("function %u returned NULL", extra->flinfo.fn_oid)));
+    }
 
     return result;
 }
@@ -107,9 +108,10 @@ void PrepareSortSupportComparisonShim(Oid cmpFunc, SortSupport ssup)
     fmgr_info_cxt(cmpFunc, &extra->flinfo, ssup->ssup_cxt);
 
     /* We can initialize the callinfo just once and re-use it */
-    InitFunctionCallInfoData(extra->fcinfo, &extra->flinfo, 2, ssup->ssup_collation, NULL, NULL);
-    extra->fcinfo.argnull[0] = false;
-    extra->fcinfo.argnull[1] = false;
+    extra->fcinfo = (FunctionCallInfoData*)palloc(SizeForFunctionCallInfo(2));
+    InitFunctionCallInfoData(*extra->fcinfo, &extra->flinfo, 2, ssup->ssup_collation, NULL, NULL);
+    extra->fcinfo->args[0].isnull = false;
+    extra->fcinfo->args[1].isnull = false;
 
     ssup->ssup_extra = extra;
     ssup->comparator = comparison_shim;

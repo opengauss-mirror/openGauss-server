@@ -396,7 +396,8 @@ extern IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber
 /*
  * prototypes for functions in ubtpcrinsert.cpp
  */
-extern bool UBTreePCRDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
+extern bool UBTreePCRDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    Datum *itup_values = NULL, const bool *itup_isnull = NULL);
 extern bool UBTreePCRDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 extern void UBTreePCRInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void UBTreePCRFinishSplit(Relation rel, Buffer lbuf, BTStack stack);

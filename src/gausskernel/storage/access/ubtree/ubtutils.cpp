@@ -68,7 +68,7 @@ static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *
  *      heapkeyspace index when caller passes a NULL tuple, allowing index
  *      build callers to avoid accessing the non-existent metapage.
  */
-BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup)
+BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup, Datum *itup_values, const bool *itup_isnull)
 {
     BTScanInsert key;
     ScanKey skey;
@@ -77,6 +77,8 @@ BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup)
     int16* indoption = NULL;
     int	tupnatts;
     int i;
+
+    Assert(itup_values == NULL || (itup_isnull != NULL && itup != NULL));
 
     itupdesc = RelationGetDescr(rel);
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
@@ -121,7 +123,10 @@ BTScanInsert UBTreeMakeScanKey(Relation rel, IndexTuple itup)
          * provides no tuple) are defensively represented as NULL values. They
          * should never be used.
          */
-        if (i < tupnatts) {
+        if (itup_values && i < tupnatts) {
+            arg = itup_values[i];
+            null = itup_isnull[i];
+        } else if (i < tupnatts) {
             arg = index_getattr(itup, i + 1, itupdesc, &null);
         } else {
             arg = (Datum)0;

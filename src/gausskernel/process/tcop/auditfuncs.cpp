@@ -2241,7 +2241,7 @@ char* audit_get_value_bytype(FunctionCallInfo fcinfo, int n_arg)
         securec_check(nRet, "\0", "\0");
         return value;
     }
-    Oid typeOid = fcinfo->argTypes[n_arg];
+    Oid typeOid = get_fn_expr_argtype(fcinfo->flinfo, n_arg);
     switch (typeOid) {
         case TEXTARRAYOID: {
             int option_nitems;

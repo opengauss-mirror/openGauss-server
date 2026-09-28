@@ -62,6 +62,8 @@
 #include "executor/node/nodeSubplan.h"
 #include "funcapi.h"
 #include "utils/memutils.h"
+#include "utils/numeric.h"
+#include "utils/numeric_pipeline.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parsetree.h"
@@ -165,6 +167,7 @@ static Datum ExecJustAssignOuterVar(ExprState *state, ExprContext *econtext, boo
 static Datum ExecJustAssignScanVar(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCond* isDone);
 
 extern bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
+extern void FunctionCallEnsureExtra(FunctionCallInfoData* fcinfo);
 extern void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob);
 extern Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null);
 
@@ -207,7 +210,7 @@ typedef struct ScalarArrayOpExprHashTable {
     saophash_hash *hashtab; /* underlying hash table */
     struct ExprEvalStep *op;
     FmgrInfo hash_finfo;                   /* function's lookup data */
-    FunctionCallInfoData hash_fcinfo_data; /* arguments etc */
+    FunctionCallInfoData* hash_fcinfo_data;     /* arguments etc */
 } ScalarArrayOpExprHashTable;
 
 /* Define parameters for ScalarArrayOpExpr hash table code generation. */
@@ -379,9 +382,10 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
      */
     if (fcinfo->flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID ||
         fcinfo->flinfo->fn_oid == SYS_CONNECT_BY_PATH_FUNCOID) {
-        fcinfo->swinfo.sw_econtext = (Node *)econtext;
-        fcinfo->swinfo.sw_exprstate = (Node *)linitial(op->d.func.args);
-        fcinfo->swinfo.sw_is_flt_frame = true;
+        FunctionCallEnsureExtra(fcinfo);
+        fcinfo->extra->swinfo.sw_econtext = (Node *)econtext;
+        fcinfo->extra->swinfo.sw_exprstate = (Node *)linitial(op->d.func.args);
+        fcinfo->extra->swinfo.sw_is_flt_frame = true;
     }
 
     if (DB_IS_CMPT_BD) {
@@ -395,13 +399,14 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
 
     foreach (lc, op->d.func.args) {
 		Expr *arg = (Expr *)lfirst(lc);
+        Oid argType = exprType((Node *)arg);
 
         if ((op->d.func.flag & FUNC_EXPR_FLAG_HAS_REFCURSOR) && 
-			fcinfo->argTypes[i] == REFCURSOROID) {
+                        argType == REFCURSOROID) {
             econtext->is_cursor = true;
 		}
 
-        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+        if (is_huge_clob(argType, fcinfo->args[i].isnull, fcinfo->args[i].value)) {
             is_have_huge_clob = true;
         }
 
@@ -431,7 +436,7 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
         if ((op->d.func.flag & FUNC_EXPR_FLAG_HAS_REFCURSOR) && 
 			econtext->is_cursor) {
             op->d.func.var_dno[i] = econtext->dno;
-            CopyCursorInfoData(&fcinfo->refcursor_data.argCursor[i], &econtext->cursor_data);
+            CopyCursorInfoData(&fcinfo->extra->refcursor_data.argCursor[i], &econtext->cursor_data);
         }
         econtext->is_cursor = false;
         i++;
@@ -443,7 +448,7 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
      */
     if (op->d.func.flag & FUNC_EXPR_FLAG_STRICT) {
         while (--i >= 0) {
-            if (fcinfo->argnull[i]) {
+            if (fcinfo->args[i].isnull) {
 				*op->resnull = true;
                 u_sess->SPI_cxt.is_stp = savedIsSTP;
                 u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
@@ -473,15 +478,17 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
         }
         u_sess->instr_cxt.global_instr = save_global_instr;
     } else {
-        if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
+        if (fcinfo->flinfo->fn_addr == textcat &&
+            get_fn_expr_argtype(fcinfo->flinfo, 0) == CLOBOID &&
+            get_fn_expr_argtype(fcinfo->flinfo, 1) == CLOBOID) {
             bool is_null = false;
-            if (fcinfo->arg[0] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[0])) {
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[0]));
-                fcinfo->arg[0] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            if (fcinfo->args[0].value != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->args[0].value)) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->args[0].value));
+                fcinfo->args[0].value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
             }
-            if (fcinfo->arg[1] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[1])) {
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[1]));
-                fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            if (fcinfo->args[1].value != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->args[1].value)) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->args[1].value));
+                fcinfo->args[1].value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
             }
         }
         if (func_encoding != db_encoding) {
@@ -501,7 +508,7 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
             /* copy in-args cursor option info */
             if (op->d.func.var_dno[i] >= 0) {
                 int dno = op->d.func.var_dno[i];
-                Cursor_Data* cursor_data = &fcinfo->refcursor_data.argCursor[i];
+                Cursor_Data* cursor_data = &fcinfo->extra->refcursor_data.argCursor[i];
 #ifdef USE_ASSERT_CHECKING
                 PLpgSQL_datum* datum = estate->datums[dno];
 #endif
@@ -523,7 +530,7 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
             }
             int rc = memcpy_s(estate->cursor_return_data,
                 sizeof(Cursor_Data),
-                fcinfo->refcursor_data.returnCursor,
+                fcinfo->extra->refcursor_data.returnCursor,
                 sizeof(Cursor_Data));
             securec_check(rc, "\0", "\0");
         }
@@ -533,8 +540,16 @@ ExecMakeFunctionResultNoSets(ExprState *state, ExprEvalStep *op,ExprContext *eco
     	pgstat_end_function_usage(&fcusage, true);
 
     if (op->d.func.flag & FUNC_EXPR_FLAG_HAS_REFCURSOR) {
-        if (fcinfo->refcursor_data.argCursor != NULL)
-            pfree_ext(fcinfo->refcursor_data.argCursor);
+        if (fcinfo->extra != NULL) {
+            if (fcinfo->extra->refcursor_data.argCursor != NULL) {
+                pfree_ext(fcinfo->extra->refcursor_data.argCursor);
+                fcinfo->extra->refcursor_data.argCursor = NULL;
+            }
+            if (fcinfo->extra->refcursor_data.returnCursor != NULL) {
+                pfree_ext(fcinfo->extra->refcursor_data.returnCursor);
+                fcinfo->extra->refcursor_data.returnCursor = NULL;
+            }
+        }
         if (op->d.func.var_dno != NULL)
             pfree_ext(op->d.func.var_dno);
     }
@@ -594,9 +609,33 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		&&CASE_EEOP_CONST,
 		&&CASE_EEOP_FUNCEXPR,
         &&CASE_EEOP_FUNCEXPR_STRICT,
+        &&CASE_EEOP_FUNCEXPR_STRICT_1,
+        &&CASE_EEOP_FUNCEXPR_STRICT_2,
         &&CASE_EEOP_FUNCEXPR_FUSAGE,
         &&CASE_EEOP_FUNCEXPR_STRICT_FUSAGE,
         &&CASE_EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT,
+        &&CASE_EEOP_NUMERIC_PACK,
+        &&CASE_EEOP_NUMERIC_ADD,
+        &&CASE_EEOP_NUMERIC_SUB,
+        &&CASE_EEOP_NUMERIC_MUL,
+        &&CASE_EEOP_NUMERIC_DIV,
+        &&CASE_EEOP_NUMERIC_MOD,
+        &&CASE_EEOP_NUMERIC_DIV_TRUNC,
+        &&CASE_EEOP_NUMERIC_ABS,
+        &&CASE_EEOP_NUMERIC_UMINUS,
+        &&CASE_EEOP_NUMERIC_UPLUS,
+        &&CASE_EEOP_NUMERIC_SIGN,
+        &&CASE_EEOP_NUMERIC_INC,
+        &&CASE_EEOP_NUMERIC_CEIL,
+        &&CASE_EEOP_NUMERIC_FLOOR,
+        &&CASE_EEOP_NUMERIC_ROUND,
+        &&CASE_EEOP_NUMERIC_TRUNC,
+        &&CASE_EEOP_NUMERIC_EQ,
+        &&CASE_EEOP_NUMERIC_NE,
+        &&CASE_EEOP_NUMERIC_LE,
+        &&CASE_EEOP_NUMERIC_LT,
+        &&CASE_EEOP_NUMERIC_GE,
+        &&CASE_EEOP_NUMERIC_GT,
 		&&CASE_EEOP_BOOL_AND_STEP_FIRST,
 		&&CASE_EEOP_BOOL_AND_STEP,
 		&&CASE_EEOP_BOOL_AND_STEP_LAST,
@@ -709,7 +748,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 	{
 		EEO_CASE(EEOP_DONE)
 		{
-			goto out;
+            *isnull = state->resnull;
+            return state->resvalue;
 		}
 
 		EEO_CASE(EEOP_INNER_FETCHSOME)
@@ -1012,7 +1052,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 
             /* strict function, so check for NULL args */
             for (int argno = 0; argno < nargs; argno++) {
-                if (fcinfo->argnull[argno]) {
+                if (fcinfo->args[argno].isnull) {
                     *op->resnull = true;
                     goto strictfail;
                 }
@@ -1029,6 +1069,40 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             *op->resnull = fcinfo->isnull;
 
         strictfail:
+            EEO_NEXT();
+        }
+
+        /* strict function call with one argument — no loop, no encoding check */
+        EEO_CASE(EEOP_FUNCEXPR_STRICT_1)
+        {
+            FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+            Datum d;
+
+            if (fcinfo->args[0].isnull) {
+                *op->resnull = true;
+            } else {
+                fcinfo->isnull = false;
+                d = op->d.func.fn_addr(fcinfo);
+                *op->resvalue = d;
+                *op->resnull = fcinfo->isnull;
+            }
+            EEO_NEXT();
+        }
+
+        /* strict function call with two arguments — no loop, no encoding check */
+        EEO_CASE(EEOP_FUNCEXPR_STRICT_2)
+        {
+            FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
+            Datum d;
+
+            if (fcinfo->args[0].isnull || fcinfo->args[1].isnull) {
+                *op->resnull = true;
+            } else {
+                fcinfo->isnull = false;
+                d = op->d.func.fn_addr(fcinfo);
+                *op->resvalue = d;
+                *op->resnull = fcinfo->isnull;
+            }
             EEO_NEXT();
         }
 
@@ -1053,6 +1127,129 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
             ExecMakeFunctionResultNoSets(state, op, econtext);
             EEO_NEXT();
         }
+
+        EEO_CASE(EEOP_NUMERIC_PACK)
+        {
+            NumericReg *reg = &op->d.num.regs[op->d.num.arg1reg];
+
+            if (reg->isnull) {
+                *op->d.num.isnull_ptr = true;
+            } else {
+                *op->d.num.value_ptr = numeric_reg_pack(reg, op->d.num.packbuf);
+                *op->d.num.isnull_ptr = false;
+            }
+            EEO_NEXT();
+        }
+
+        /* one dedicated opcode per numeric operation; see ExecBuildNumericChain */
+#define NUMERIC_GET_ARG(regs, argreg, valueptr, isnullptr, arg)     \
+            NumericReg arg;                                         \
+            NumericReg *arg##_p;                                    \
+            if ((argreg) >= 0) {                                    \
+                arg##_p = &(regs)[argreg];                          \
+            } else {                                                \
+                quick_init_var(&arg.var);                           \
+                arg.bi = NULL;                                      \
+                arg.isnull = *(isnullptr);                          \
+                if (!arg.isnull) {                                  \
+                    numeric_reg_extract(*(valueptr), &arg);         \
+                }                                                   \
+                arg##_p = &arg;                                     \
+            }
+
+#define NUMERIC_BINARY_STEP(OPCODE, FUNC)                          \
+            EEO_CASE(OPCODE)                                       \
+            {                                                      \
+                NumericReg *regs = op->d.num.regs;                 \
+                NUMERIC_GET_ARG(regs, op->d.num.arg1reg, op->d.num.value_ptr, \
+                                op->d.num.isnull_ptr, arg1)        \
+                NUMERIC_GET_ARG(regs, op->d.num.arg2reg, op->d.num.value2_ptr, \
+                                op->d.num.isnull2_ptr, arg2)       \
+                FUNC(arg1_p, arg2_p, &regs[op->d.num.resreg]);     \
+                EEO_NEXT();                                        \
+            }
+
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_ADD, numeric_reg_add)
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_SUB, numeric_reg_sub)
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_MUL, numeric_reg_mul)
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_DIV, numeric_reg_div)
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_MOD, numeric_reg_mod)
+        NUMERIC_BINARY_STEP(EEOP_NUMERIC_DIV_TRUNC, numeric_reg_div_trunc)
+#undef NUMERIC_BINARY_STEP
+
+#define NUMERIC_UNARY_STEP(OPCODE, FUNC)                           \
+            EEO_CASE(OPCODE)                                       \
+            {                                                      \
+                NumericReg *regs = op->d.num.regs;                 \
+                NUMERIC_GET_ARG(regs, op->d.num.arg1reg, op->d.num.value_ptr, \
+                                op->d.num.isnull_ptr, arg1)        \
+                FUNC(arg1_p, &regs[op->d.num.resreg]);             \
+                EEO_NEXT();                                        \
+            }
+
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_ABS, numeric_reg_abs)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_UMINUS, numeric_reg_uminus)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_UPLUS, numeric_reg_uplus)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_SIGN, numeric_reg_sign)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_INC, numeric_reg_inc)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_CEIL, numeric_reg_ceil)
+        NUMERIC_UNARY_STEP(EEOP_NUMERIC_FLOOR, numeric_reg_floor)
+#undef NUMERIC_UNARY_STEP
+
+#define NUMERIC_SCALE_STEP(OPCODE, FUNC)                           \
+            EEO_CASE(OPCODE)                                       \
+            {                                                      \
+                NumericReg *regs = op->d.num.regs;                 \
+                if (*op->d.num.isnull_ptr) {                       \
+                    /* NULL scale makes the result NULL regardless of the operand */ \
+                    NumericReg *r = &regs[op->d.num.resreg];       \
+                    r->bi = NULL;                                  \
+                    r->isnull = true;                              \
+                } else if (op->d.num.arg1reg >= 0) {               \
+                    FUNC(&regs[op->d.num.arg1reg], DatumGetInt32(*op->d.num.value_ptr), \
+                         &regs[op->d.num.resreg]);                 \
+                } else {                                           \
+                    /* inlined leaf operand */                     \
+                    NumericReg *r = &regs[op->d.num.resreg];       \
+                    if (*op->d.num.isnull2_ptr) {                  \
+                        r->bi = NULL;                              \
+                        r->isnull = true;                          \
+                    } else {                                       \
+                        NumericReg tmp;                            \
+                        quick_init_var(&tmp.var);                  \
+                        tmp.bi = NULL;                             \
+                        tmp.isnull = false;                        \
+                        numeric_reg_extract(*op->d.num.value2_ptr, &tmp); \
+                        FUNC(&tmp, DatumGetInt32(*op->d.num.value_ptr), r); \
+                    }                                              \
+                }                                                  \
+                EEO_NEXT();                                        \
+            }
+
+        NUMERIC_SCALE_STEP(EEOP_NUMERIC_ROUND, numeric_reg_round)
+        NUMERIC_SCALE_STEP(EEOP_NUMERIC_TRUNC, numeric_reg_trunc)
+#undef NUMERIC_SCALE_STEP
+
+#define NUMERIC_CMP_STEP(OPCODE, FUNC)                             \
+            EEO_CASE(OPCODE)                                       \
+            {                                                      \
+                NumericReg *regs = op->d.num.regs;                 \
+                NUMERIC_GET_ARG(regs, op->d.num.arg1reg, op->d.num.value_ptr, \
+                                op->d.num.isnull_ptr, arg1)        \
+                NUMERIC_GET_ARG(regs, op->d.num.arg2reg, op->d.num.value2_ptr, \
+                                op->d.num.isnull2_ptr, arg2)       \
+                FUNC(arg1_p, arg2_p, op->resvalue, op->resnull);   \
+                EEO_NEXT();                                        \
+            }
+
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_EQ, numeric_reg_eq)
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_NE, numeric_reg_ne)
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_LE, numeric_reg_le)
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_LT, numeric_reg_lt)
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_GE, numeric_reg_ge)
+        NUMERIC_CMP_STEP(EEOP_NUMERIC_GT, numeric_reg_gt)
+#undef NUMERIC_CMP_STEP
+#undef NUMERIC_GET_ARG
 
 		/*
 		 * If any of its clauses is FALSE, an AND's result is FALSE regardless
@@ -1426,8 +1623,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 				FunctionCallInfo fcinfo_out;
 
 				fcinfo_out = op->d.iocoerce.fcinfo_data_out;
-				fcinfo_out->arg[0] = *op->resvalue;
-				fcinfo_out->argnull[0] = false;
+                                fcinfo_out->args[0].value = *op->resvalue;
+                                fcinfo_out->args[0].isnull = false;
 
 				fcinfo_out->isnull = false;
 				str = DatumGetCString(FunctionCallInvoke(fcinfo_out));
@@ -1442,8 +1639,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 				FunctionCallInfo fcinfo_in;
 
 				fcinfo_in = op->d.iocoerce.fcinfo_data_in;
-				fcinfo_in->arg[0] = PointerGetDatum(str);
-				fcinfo_in->argnull[0] = *op->resnull;
+                                fcinfo_in->args[0].value = PointerGetDatum(str);
+                                fcinfo_in->args[0].isnull = *op->resnull;
 				/* second and third arguments are already set up */
 
 				fcinfo_in->isnull = false;
@@ -1479,13 +1676,13 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
 
 			/* check function arguments for NULLness */
-			if (fcinfo->argnull[0] && fcinfo->argnull[1])
+                        if (fcinfo->args[0].isnull && fcinfo->args[1].isnull)
 			{
 				/* Both NULL? Then is not distinct... */
 				*op->resvalue = BoolGetDatum(false);
 				*op->resnull = false;
 			}
-			else if (fcinfo->argnull[0] || fcinfo->argnull[1])
+                        else if (fcinfo->args[0].isnull || fcinfo->args[1].isnull)
 			{
 				/* Only one is NULL? Then is distinct... */
 				*op->resvalue = BoolGetDatum(true);
@@ -1514,7 +1711,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			FunctionCallInfo fcinfo = op->d.func.fcinfo_data;
 
 			/* if either argument is NULL they can't be equal */
-			if (!fcinfo->argnull[0] && !fcinfo->argnull[1])
+                        if (!fcinfo->args[0].isnull && !fcinfo->args[1].isnull)
 			{
 				Datum		result;
 
@@ -1532,8 +1729,8 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			}
 
 			/* Arguments aren't equal, so return the first one */
-			*op->resvalue = fcinfo->arg[0];
-			*op->resnull = fcinfo->argnull[0];
+                        *op->resvalue = fcinfo->args[0].value;
+                        *op->resnull = fcinfo->args[0].isnull;
 
 			EEO_NEXT();
 		}
@@ -1576,7 +1773,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 
 			/* force NULL result if strict fn and NULL input */
 			if (op->d.rowcompare_step.finfo->fn_strict &&
-				(fcinfo->argnull[0] || fcinfo->argnull[1]))
+                                (fcinfo->args[0].isnull || fcinfo->args[1].isnull))
 			{
 				*op->resnull = true;
 				EEO_JUMP(op->d.rowcompare_step.jumpnull);
@@ -1770,11 +1967,12 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
         /* evaluate a strict aggregate deserialization function */
         EEO_CASE(EEOP_AGG_STRICT_DESERIALIZE)
         {
-            bool *argnull = op->d.agg_deserialize.fcinfo_data->argnull;
+            bool argnull = op->d.agg_deserialize.fcinfo_data->args[0].isnull;
 
             /* Don't call a strict deserialization function with NULL input */
-            if (argnull[0])
+            if (argnull) {
                 EEO_JUMP(op->d.agg_deserialize.jumpnull);
+            }
 
             /* fallthrough */
         }
@@ -2642,7 +2840,7 @@ void ExecEvalFuncExprStrictFusage(ExprEvalStep *op, ExprContext *econtext)
 
     /* strict function, so check for NULL args */
     for (int argno = 0; argno < nargs; argno++) {
-        if (fcinfo->argnull[argno]) {
+        if (fcinfo->args[argno].isnull) {
             *op->resnull = true;
             return;
         }
@@ -3242,7 +3440,7 @@ ExecEvalArrayCoerce(ExprState *state, ExprEvalStep *op)
 	ArrayCoerceExpr *acoerce = op->d.arraycoerce.coerceexpr;
 	Datum result;
 	ArrayType* array = NULL;
-	FunctionCallInfoData locfcinfo;
+        LOCAL_FCINFO(locfcinfo, 3);
 
 	/* NULL array -> NULL result */
 	if (*op->resnull)
@@ -3274,16 +3472,16 @@ ExecEvalArrayCoerce(ExprState *state, ExprEvalStep *op)
 	 *
 	 * Note: coercion functions are assumed to not use collation.
 	 */
-	InitFunctionCallInfoData(locfcinfo, op->d.arraycoerce.elemfunc, 3,
+        InitFunctionCallInfoData(*locfcinfo, op->d.arraycoerce.elemfunc, 3,
 							 InvalidOid, NULL, NULL);
-	locfcinfo.arg[0] = PointerGetDatum(array);;
-	locfcinfo.arg[1] = Int32GetDatum(acoerce->resulttypmod);
-	locfcinfo.arg[2] = BoolGetDatum(acoerce->isExplicit);
-	locfcinfo.argnull[0] = false;
-	locfcinfo.argnull[1] = false;
-	locfcinfo.argnull[2] = false;
+        locfcinfo->args[0].value = PointerGetDatum(array);
+        locfcinfo->args[1].value = Int32GetDatum(acoerce->resulttypmod);
+        locfcinfo->args[2].value = BoolGetDatum(acoerce->isExplicit);
+        locfcinfo->args[0].isnull = false;
+        locfcinfo->args[1].isnull = false;
+        locfcinfo->args[2].isnull = false;
 
-	*op->resvalue = array_map(&locfcinfo, ARR_ELEMTYPE(array), op->d.arraycoerce.resultelemtype,
+        *op->resvalue = array_map(locfcinfo, ARR_ELEMTYPE(array), op->d.arraycoerce.resultelemtype,
 							  op->d.arraycoerce.amstate);
 }
 
@@ -3322,8 +3520,8 @@ void ExecEvalMinMax(ExprState *state, ExprEvalStep *op)
     int off;
 
     /* set at initialization */
-    Assert(fcinfo->argnull[0] == false);
-    Assert(fcinfo->argnull[1] == false);
+    Assert(fcinfo->args[0].isnull == false);
+    Assert(fcinfo->args[1].isnull == false);
 
     /* default to null result */
     *op->resnull = true;
@@ -3342,8 +3540,8 @@ void ExecEvalMinMax(ExprState *state, ExprEvalStep *op)
             int cmpresult;
 
             /* apply comparison function */
-            fcinfo->arg[0] = *op->resvalue;
-            fcinfo->arg[1] = values[off];
+            fcinfo->args[0].value = *op->resvalue;
+            fcinfo->args[1].value = values[off];
 
             fcinfo->isnull = false;
             cmpresult = DatumGetInt32(FunctionCallInvoke(fcinfo));
@@ -3862,7 +4060,7 @@ ExecEvalConvertRowtype(ExprState *state, ExprEvalStep *op, ExprContext *econtext
  * Evaluate "scalar op ANY/ALL (array)".
  *
  * Source array is in our result area, scalar arg is already evaluated into
- * fcinfo->arg[0]/argnull[0].
+ * fcinfo->args[0].value/argnull[0].
  *
  * The operator always yields boolean, and we combine the results across all
  * array elements using OR and AND (for ANY and ALL respectively).  Of course
@@ -3913,7 +4111,7 @@ ExecEvalScalarArrayOp(ExprState *state, ExprEvalStep *op)
 	 * If the scalar is NULL, and the function is strict, return NULL; no
 	 * point in iterating the loop.
 	 */
-	if (fcinfo->argnull[0] && strictfunc)
+        if (fcinfo->args[0].isnull && strictfunc)
 	{
 		*op->resnull = true;
 		return;
@@ -3953,20 +4151,20 @@ ExecEvalScalarArrayOp(ExprState *state, ExprEvalStep *op)
 		/* Get array element, checking for NULL */
 		if (bitmap && (*bitmap & bitmask) == 0)
 		{
-			fcinfo->arg[1] = (Datum) 0;
-			fcinfo->argnull[1] = true;
+                        fcinfo->args[1].value = (Datum) 0;
+                        fcinfo->args[1].isnull = true;
 		}
 		else
 		{
 			elt = fetch_att(s, typbyval, typlen);
 			s = att_addlength_pointer(s, typlen, s);
 			s = (char *) att_align_nominal(s, typalign);
-			fcinfo->arg[1] = elt;
-			fcinfo->argnull[1] = false;
+                        fcinfo->args[1].value = elt;
+                        fcinfo->args[1].isnull = false;
 		}
 
 		/* Call comparison function */
-		if (fcinfo->argnull[1] && strictfunc)
+                if (fcinfo->args[1].isnull && strictfunc)
 		{
 			fcinfo->isnull = true;
 			thisresult = (Datum) 0;
@@ -4024,11 +4222,11 @@ ExecEvalScalarArrayOp(ExprState *state, ExprEvalStep *op)
 static uint32 saop_element_hash(struct saophash_hash *tb, Datum key)
 {
     ScalarArrayOpExprHashTable *elements_tab = static_cast<ScalarArrayOpExprHashTable *>(tb->private_data);
-    FunctionCallInfo fcinfo = &elements_tab->hash_fcinfo_data;
+    FunctionCallInfo fcinfo = elements_tab->hash_fcinfo_data;
     Datum hash;
 
-    fcinfo->arg[0] = key;
-    fcinfo->argnull[0] = false;
+    fcinfo->args[0].value = key;
+    fcinfo->args[0].isnull = false;
 
     hash = elements_tab->hash_finfo.fn_addr(fcinfo);
 
@@ -4046,10 +4244,10 @@ static bool saop_hash_element_match(struct saophash_hash *tb, Datum key1, Datum 
     ScalarArrayOpExprHashTable *elements_tab = static_cast<ScalarArrayOpExprHashTable *>(tb->private_data);
     FunctionCallInfo fcinfo = elements_tab->op->d.hashedscalararrayop.fcinfo_data;
 
-    fcinfo->arg[0] = key1;
-    fcinfo->argnull[0] = false;
-    fcinfo->arg[1] = key2;
-    fcinfo->argnull[1] = false;
+    fcinfo->args[0].value = key1;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = key2;
+    fcinfo->args[1].isnull = false;
 
     result = elements_tab->op->d.hashedscalararrayop.finfo->fn_addr(fcinfo);
 
@@ -4065,7 +4263,7 @@ static bool saop_hash_element_match(struct saophash_hash *tb, Datum key1, Datum 
  * supports OR semantics.
  *
  * Source array is in our result area, scalar arg is already evaluated into
- * fcinfo->arg[0].
+ * fcinfo->args[0].value.
  *
  * The operator always yields boolean.
  */
@@ -4075,8 +4273,8 @@ void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op, ExprContext
     FunctionCallInfo fcinfo = op->d.hashedscalararrayop.fcinfo_data;
     bool inclause = op->d.hashedscalararrayop.inclause;
     bool strictfunc = op->d.hashedscalararrayop.finfo->fn_strict;
-    Datum scalar = fcinfo->arg[0];
-    bool scalar_isnull = fcinfo->argnull[0];
+    Datum scalar = fcinfo->args[0].value;
+    bool scalar_isnull = fcinfo->args[0].isnull;
     Datum result;
     bool resultnull;
     bool hashfound;
@@ -4088,7 +4286,7 @@ void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op, ExprContext
      * If the scalar is NULL, and the function is strict, return NULL; no
      * point in executing the search.
      */
-    if (fcinfo->argnull[0] && strictfunc) {
+    if (fcinfo->args[0].isnull && strictfunc) {
         *op->resnull = true;
         return;
     }
@@ -4123,7 +4321,8 @@ void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op, ExprContext
         fmgr_info(saop->hashfuncid, &elements_tab->hash_finfo);
         fmgr_info_set_expr((Node *)saop, &elements_tab->hash_finfo);
 
-        InitFunctionCallInfoData(elements_tab->hash_fcinfo_data, &elements_tab->hash_finfo, 1, saop->inputcollid, NULL,
+        elements_tab->hash_fcinfo_data = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(1));
+        InitFunctionCallInfoData(*elements_tab->hash_fcinfo_data, &elements_tab->hash_finfo, 1, saop->inputcollid, NULL,
                                  NULL);
 
         /*
@@ -4203,10 +4402,10 @@ void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op, ExprContext
              * we need to set it up also (even though we entered this function
              * with it already set).
              */
-            fcinfo->arg[0] = scalar;
-            fcinfo->argnull[0] = scalar_isnull;
-            fcinfo->arg[1] = (Datum)0;
-            fcinfo->argnull[1] = true;
+            fcinfo->args[0].value = scalar;
+            fcinfo->args[0].isnull = scalar_isnull;
+            fcinfo->args[1].value = (Datum)0;
+            fcinfo->args[1].isnull = true;
 
             result = op->d.hashedscalararrayop.finfo->fn_addr(fcinfo);
             resultnull = fcinfo->isnull;
@@ -4805,7 +5004,7 @@ ExecEvalWholeRowVar(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
                       MemoryContext aggcontext)
 {
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     MemoryContext oldContext;
 
     /*
@@ -4815,7 +5014,7 @@ void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePer
      * straight copy here is OK.)
      */
     oldContext = MemoryContextSwitchTo(aggcontext);
-    pergroup->transValue = datumCopy(fcinfo->arg[1], pertrans->transtypeByVal, pertrans->transtypeLen);
+    pergroup->transValue = datumCopy(fcinfo->args[1].value, pertrans->transtypeByVal, pertrans->transtypeLen);
     pergroup->transValueIsNull = false;
     pergroup->noTransValue = false;
     MemoryContextSwitchTo(oldContext);
@@ -4824,7 +5023,7 @@ void ExecAggInitGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePer
 void ExecAggInitCollectGroup(AggState *aggstate, AggStatePerTrans pertrans, AggStatePerGroup pergroup,
                              MemoryContext aggcontext)
 {
-    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->collectfn_fcinfo;
     MemoryContext oldContext;
 
     /*
@@ -4834,7 +5033,7 @@ void ExecAggInitCollectGroup(AggState *aggstate, AggStatePerTrans pertrans, AggS
      * straight copy here is OK.)
      */
     oldContext = MemoryContextSwitchTo(aggcontext);
-    pergroup->collectValue = datumCopy(fcinfo->arg[1], pertrans->transtypeByVal, pertrans->transtypeLen);
+    pergroup->collectValue = datumCopy(fcinfo->args[1].value, pertrans->transtypeByVal, pertrans->transtypeLen);
     pergroup->collectValueIsNull = false;
     pergroup->noCollectValue = false;
     MemoryContextSwitchTo(oldContext);
@@ -4898,7 +5097,7 @@ void ExecEvalAggOrderedTransTuple(ExprState *state, ExprEvalStep *op, ExprContex
 static FORCE_INLINE void ExecAggPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
     AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
 {
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     MemoryContext oldContext;
     Datum        newVal;
 
@@ -4908,8 +5107,8 @@ static FORCE_INLINE void ExecAggPlainTransByVal(AggState *aggstate, AggStatePerT
 
     oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
 
-    fcinfo->arg[0] = pergroup->transValue;
-    fcinfo->argnull[0] = pergroup->transValueIsNull;
+    fcinfo->args[0].value = pergroup->transValue;
+    fcinfo->args[0].isnull = pergroup->transValueIsNull;
     fcinfo->isnull = false;
 
     newVal = FunctionCallInvoke(fcinfo);
@@ -4923,7 +5122,7 @@ static FORCE_INLINE void ExecAggPlainTransByVal(AggState *aggstate, AggStatePerT
 static FORCE_INLINE void ExecAggCollectPlainTransByVal(AggState *aggstate, AggStatePerTrans pertrans,
     AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
 {
-    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->collectfn_fcinfo;
     MemoryContext oldContext;
     Datum        newVal;
 
@@ -4934,8 +5133,8 @@ static FORCE_INLINE void ExecAggCollectPlainTransByVal(AggState *aggstate, AggSt
 
     oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
 
-    fcinfo->arg[0] = pergroup->collectValue;
-    fcinfo->argnull[0] = pergroup->collectValueIsNull;
+    fcinfo->args[0].value = pergroup->collectValue;
+    fcinfo->args[0].isnull = pergroup->collectValueIsNull;
     fcinfo->isnull = false;
 
     newVal = FunctionCallInvoke(fcinfo);
@@ -4949,7 +5148,7 @@ static FORCE_INLINE void ExecAggCollectPlainTransByVal(AggState *aggstate, AggSt
 static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
     AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
 {
-    FunctionCallInfo fcinfo = &pertrans->transfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->transfn_fcinfo;
     MemoryContext oldContext;
     Datum        newVal;
 
@@ -4959,8 +5158,8 @@ static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerT
 
     oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
 
-    fcinfo->arg[0] = pergroup->transValue;
-    fcinfo->argnull[0] = pergroup->transValueIsNull;
+    fcinfo->args[0].value = pergroup->transValue;
+    fcinfo->args[0].isnull = pergroup->transValueIsNull;
     fcinfo->isnull = false;
 
     newVal = FunctionCallInvoke(fcinfo);
@@ -4979,7 +5178,7 @@ static FORCE_INLINE void ExecAggPlainTransByRef(AggState *aggstate, AggStatePerT
 static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggStatePerTrans pertrans,
     AggStatePerGroup pergroup, MemoryContext aggcontext, int setno)
 {
-    FunctionCallInfo fcinfo = &pertrans->collectfn_fcinfo;
+    FunctionCallInfo fcinfo = pertrans->collectfn_fcinfo;
     MemoryContext oldContext;
     Datum        newVal;
 
@@ -4989,8 +5188,8 @@ static FORCE_INLINE void ExecAggCollectPlainTransByRef(AggState *aggstate, AggSt
 
     oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
 
-    fcinfo->arg[0] = pergroup->collectValue;
-    fcinfo->argnull[0] = pergroup->collectValueIsNull;
+    fcinfo->args[0].value = pergroup->collectValue;
+    fcinfo->args[0].isnull = pergroup->collectValueIsNull;
     fcinfo->isnull = false;
 
     newVal = FunctionCallInvoke(fcinfo);

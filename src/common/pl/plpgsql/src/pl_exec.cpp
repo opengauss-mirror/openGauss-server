@@ -592,7 +592,7 @@ void CheckArgTypeMode(HeapTuple procTup, FunctionCallInfo fcinfo)
     if (onlyHasPram) {
         /* procedure only has in param, check them */
         for (int i = 0; i < fcinfo->nargs; i++) {
-            if (fcinfo->argTypes[i] == REFCURSOROID) {
+            if (get_fn_expr_argtype(fcinfo->flinfo, i) == REFCURSOROID) {
                 ReleaseSysCache(procTup);
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-support:ref_cursor parameter is not supported for autonomous transactions.")));
@@ -629,7 +629,7 @@ void SetInputParam(StringInfoData *buf, FunctionCallInfo fcinfo)
         if (i > 0)
             appendStringInfoChar(buf, ',');
 
-        TypeValueToString(buf, fcinfo->argTypes[i], fcinfo->arg[i], fcinfo->argnull[i]);
+        TypeValueToString(buf, get_fn_expr_argtype(fcinfo->flinfo, i), fcinfo->args[i].value, fcinfo->args[i].isnull);
     }
 }
 
@@ -673,8 +673,8 @@ void SetInOutParam(HeapTuple procTup, StringInfoData *buf, FunctionCallInfo fcin
                 appendStringInfoChar(buf, ',');
             if (argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_INOUT
                 || argmodes[i] == PROARGMODE_VARIADIC) {
-                argVaule = fcinfo->arg[count];
-                argIsNull = fcinfo->argnull[count];
+                argVaule = fcinfo->args[count].value;
+                argIsNull = fcinfo->args[count].isnull;
                 count++;
             }
             TypeValueToString(buf, argTypes[i], argVaule, argIsNull);
@@ -1910,14 +1910,15 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
                     while (argmodes[outArgCnt] == PROARGMODE_OUT) {
                         outArgCnt++;
                     }
-                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[outArgCnt],
-                        fcinfo->arg[outArgCnt], fcinfo->argnull[outArgCnt]);
-                    var->isnull = fcinfo->argnull[outArgCnt];
+                    var->value = CopyFcinfoArgValue(get_fn_expr_argtype(fcinfo->flinfo, outArgCnt),
+                        fcinfo->args[outArgCnt].value, fcinfo->args[outArgCnt].isnull);
+                    var->isnull = fcinfo->args[outArgCnt].isnull;
                     var->freeval = false;
                     outArgCnt++;
                 } else {
-                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[i], fcinfo->arg[i], fcinfo->argnull[i]);
-                    var->isnull = fcinfo->argnull[i];
+                    var->value = CopyFcinfoArgValue(get_fn_expr_argtype(fcinfo->flinfo, i),
+                        fcinfo->args[i].value, fcinfo->args[i].isnull);
+                    var->isnull = fcinfo->args[i].isnull;
                     var->freeval = false;
                 }
                 if (u_sess->plsql_cxt.func_tableof_index != NULL) {
@@ -1936,14 +1937,14 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
             case PLPGSQL_DTYPE_ROW: {
                 PLpgSQL_row* row = (PLpgSQL_row*)estate.datums[n];
 
-                if (!fcinfo->argnull[i]) {
+                if (!fcinfo->args[i].isnull) {
                     HeapTupleHeader td;
                     Oid tupType;
                     int32 tupTypmod;
                     TupleDesc tupdesc;
                     HeapTupleData tmptup;
 
-                    td = DatumGetHeapTupleHeader(fcinfo->arg[i]);
+                    td = DatumGetHeapTupleHeader(fcinfo->args[i].value);
                     /* Extract rowtype info and find a tupdesc */
                     tupType = HeapTupleHeaderGetTypeId(td);
                     tupTypmod = HeapTupleHeaderGetTypMod(td);
@@ -1984,8 +1985,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
     free_func_tableof_index();
     estate.err_text = gettext_noop("during function entry");
 
-    estate.cursor_return_data = fcinfo->refcursor_data.returnCursor;
-    estate.cursor_return_numbers = fcinfo->refcursor_data.return_number;
+    if (fcinfo->extra != NULL) {
+        estate.cursor_return_data = fcinfo->extra->refcursor_data.returnCursor;
+        estate.cursor_return_numbers = fcinfo->extra->refcursor_data.return_number;
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (plcallstack.prev != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && COMPAT_CURSOR) {
@@ -8760,7 +8763,7 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     }
 
     if (isblock == true) {
-        FunctionCallInfoData fake_fcinfo;
+        LOCAL_FCINFO(fake_fcinfo, 2);
         FmgrInfo flinfo;
         int ppdindex = 0;
         int datumindex = 0;
@@ -8808,17 +8811,17 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
          * plpgsql_exec_function().  In particular note that this sets things up
          * with no arguments passed.
          */
-        errno_t rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+        errno_t rc = memset_s(fake_fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
         securec_check(rc, "", "");
         rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
         securec_check(rc, "", "");
-        fake_fcinfo.flinfo = &flinfo;
+        fake_fcinfo->flinfo = &flinfo;
         flinfo.fn_oid = InvalidOid;
         flinfo.fn_mcxt = CurrentMemoryContext;
         FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
         PG_TRY();
         {
-            (void)plpgsql_exec_function(func, &fake_fcinfo, true);
+            (void)plpgsql_exec_function(func, fake_fcinfo, true);
         }
         PG_CATCH();
         {

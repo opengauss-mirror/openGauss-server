@@ -3692,18 +3692,19 @@ void estimate_func_retcache(FuncExpr *fexpr, PlannerInfo *root)
     }
 }
 
-void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, FunctionCallInfo fcinfo)
+void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, FuncExprState *fcache)
 {
     Oid fnid;
     Oid fncoll;
     EState *es_top;
     FmgrInfo *flinfo;
-    FuncCache fncache;
+    FuncCache cache;
+    FunctionCallInfo fcinfo;
 
     Assert(!(state && ectx));
     Assert(state != NULL || ectx != NULL);
 
-    if ((state == NULL && ectx == NULL) || fe == NULL || fcinfo == NULL) {
+    if ((state == NULL && ectx == NULL) || fe == NULL || fcache == NULL) {
         return;
     }
 
@@ -3743,6 +3744,7 @@ void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, Fu
         return;
     }
 
+    fcinfo = fcache->fcinfo_data;
     flinfo = fcinfo->flinfo;
 
     Assert(flinfo->fn_oid >= FirstNormalObjectId);
@@ -3755,36 +3757,32 @@ void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, Fu
     fnid = flinfo->fn_oid;
     fncoll = fcinfo->fncollation;
 
-    /*
-     * Save top EState to function.
-     */
-    fcinfo->top_estate = es_top;
-    Assert(fcinfo->fncache == NULL);
-    fncache = EStateFuncGetCache(es_top, fnid, fncoll);
+    Assert(fcache->fncache == NULL);
+    cache = EStateFuncGetCache(es_top, fnid, fncoll);
 
-    if (fncache) {
+    if (cache) {
         /* Just in case. Variable arguments and default arguments. */
-        if (FNCACHE_NUMARGS(fncache->fcflags) != fcinfo->nargs) {
+        if (FNCACHE_NUMARGS(cache->fcflags) != fcinfo->nargs) {
             return;
         }
 
-        if ((fncache->fcflags & FNCACHE_ENABLE_CACHE) == 0) {
+        if ((cache->fcflags & FNCACHE_ENABLE_CACHE) == 0) {
             /* Function has checked, not support result cache. */
             return;
         }
 
-        if (FNCACHE_REFCOUNT(fncache->fcflags) >= FNCACHE_REF_MAX) {
+        if (FNCACHE_REFCOUNT(cache->fcflags) >= FNCACHE_REF_MAX) {
             /* * Cache can only be used for the first 255 calls to the same function in same plan. */
             return;
         }
 
         if ((fe->funcflags & FNCACHE_ARG_UNIQUE) &&
-                (fncache->fcflags & FNCACHE_ARG_UNIQUE) == 0) {
-            fncache->fcflags |= FNCACHE_ARG_UNIQUE;
+                (cache->fcflags & FNCACHE_ARG_UNIQUE) == 0) {
+            cache->fcflags |= FNCACHE_ARG_UNIQUE;
         }
 
-        fncache->fcflags += FNCACHE_REF_ONE;
-        fcinfo->fncache = fncache;
+        cache->fcflags += FNCACHE_REF_ONE;
+        fcache->fncache = cache;
 
         return;
     }
@@ -3798,30 +3796,30 @@ void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, Fu
         estimate_func_retcache(fe, NULL);
     }
 
-    fncache = EStateFuncPutCache(es_top, fnid, fncoll);
-    if (fncache == NULL) {
+    cache = EStateFuncPutCache(es_top, fnid, fncoll);
+    if (cache == NULL) {
         return;
     }
 
-    Assert(fncache);
+    Assert(cache);
 
     /* Function result can not cached, return. */
     if ((fe->funcflags & FNCACHE_ENABLE_CACHE) == 0) {
-        fncache->fcflags = FNCACHE_CHECKED;
+        cache->fcflags = FNCACHE_CHECKED;
         return;
     }
 
-    fncache->fcflags = fe->funcflags;
-    Assert(FNCACHE_REFCOUNT(fncache->fcflags) == 0);
+    cache->fcflags = fe->funcflags;
+    Assert(FNCACHE_REFCOUNT(cache->fcflags) == 0);
 
-    fncache->prevhit = -1;
+    cache->prevhit = -1;
 
-    fncache->fcflags += FNCACHE_REF_ONE;
+    cache->fcflags += FNCACHE_REF_ONE;
 
-    Assert(fncache->argtypes == NULL);
-    Assert(!OidIsValid(fncache->rettype));
+    Assert(cache->argtypes == NULL);
+    Assert(!OidIsValid(cache->rettype));
 
-    fcinfo->fncache = fncache;
+    fcache->fncache = cache;
 
     /*
      * Save function args and return type, found their base types.
@@ -3842,20 +3840,20 @@ void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, Fu
         nargs = procform->pronargs;
         argtypes = procform->proargtypes.values;
 
-        fncache->security = procform->prosecdef;
-        fncache->argtypes = (Oid *)MemoryContextAllocZero(ActivePortal->func_retcache_cxt,
+        cache->security = procform->prosecdef;
+        cache->argtypes = (Oid *)MemoryContextAllocZero(ActivePortal->func_retcache_cxt,
                                                           sizeof(Oid) * nargs);
 
         /* transform to base types */
         for (i = 0; i < nargs; i++) {
             if (argtypes[i] < FirstBootstrapObjectId) {
-                fncache->argtypes[i] = argtypes[i];
+                cache->argtypes[i] = argtypes[i];
                 continue;
             }
 
-            fncache->argtypes[i] = getBaseType(argtypes[i]);
-            Assert(OidIsValid(fncache->argtypes[i]));
-            Assert(fncache->argtypes[i] < FirstBootstrapObjectId);
+            cache->argtypes[i] = getBaseType(argtypes[i]);
+            Assert(OidIsValid(cache->argtypes[i]));
+            Assert(cache->argtypes[i] < FirstBootstrapObjectId);
         }
 
         ReleaseSysCache(proctup);
@@ -3867,17 +3865,17 @@ void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, Fu
         Assert(HeapTupleIsValid(proctup));
 
         procform = (Form_pg_proc) GETSTRUCT(proctup);
-        fncache->security = procform->prosecdef;
+        cache->security = procform->prosecdef;
         ReleaseSysCache(proctup);
     }
 
-    fncache->rettype = fe->funcresulttype;
+    cache->rettype = fe->funcresulttype;
 
     /* transform to base types */
-    if (fncache->rettype >= FirstBootstrapObjectId) {
-        fncache->rettype = getBaseType(fncache->rettype);
-        Assert(OidIsValid(fncache->rettype));
-        Assert(fncache->rettype < FirstBootstrapObjectId);
+    if (cache->rettype >= FirstBootstrapObjectId) {
+        cache->rettype = getBaseType(cache->rettype);
+        Assert(OidIsValid(cache->rettype));
+        Assert(cache->rettype < FirstBootstrapObjectId);
     }
 }
 
@@ -4149,19 +4147,17 @@ static bool FunctionArgCannotCache(FuncCache fncache, FunctionCallInfo fcinfo)
 {
     short i;
     short nargs = fcinfo->nargs;
-    Datum *fargs = fcinfo->arg;
-    bool *argnull = fcinfo->argnull;
 
     if (nargs != fcinfo->flinfo->fn_nargs) {
         return true;
     }
 
     for (i = 0; i < nargs; i++) {
-        if (argnull[i]) {
+        if (fcinfo->args[i].isnull) {
             continue;
         }
 
-        if (FunctionDatumToolong(fargs[i], fncache->argtypes[i])) {
+        if (FunctionDatumToolong(fcinfo->args[i].value, fncache->argtypes[i])) {
             return true;
         }
     }
@@ -4208,7 +4204,7 @@ static inline Datum FunctionDatumCopy(Datum d, Oid dtype)
  *
  * Pay attention to this when adjusting or adding supported types in the future.
  */
-static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *isnull, short nargs)
+static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, NullableDatum *args, short nargs)
 {
     struct varlena *vl;
     pg_crc32c tmpcrc;
@@ -4219,7 +4215,7 @@ static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *is
     INIT_CRC32C(argcrc);
 
     for (i = 0; i < nargs; i++) {
-        if (isnull[i]) {
+        if (args[i].isnull) {
             continue;
         }
 
@@ -4228,7 +4224,7 @@ static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *is
         if (argtype == NUMERICOID) {
             Size len;
 
-            vl = (struct varlena*)DatumGetPointer(fargs[i]);
+            vl = (struct varlena*)DatumGetPointer(args[i].value);
 
             Assert(!VARATT_IS_EXTENDED(vl) || !VARATT_IS_HUGE_TOAST_POINTER(vl));
 
@@ -4242,13 +4238,13 @@ static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *is
         } else if (argtype == TEXTOID || argtype == VARCHAROID ||
                    argtype == NVARCHAR2OID || argtype == BPCHAROID) {
             INIT_CRC32C(tmpcrc);
-            vl = (struct varlena *) DatumGetPointer(fargs[i]);
+            vl = (struct varlena *) DatumGetPointer(args[i].value);
             COMP_CRC32C(tmpcrc, vl, VARSIZE_ANY(vl));
             FIN_CRC32C(tmpcrc);
 
             COMP_CRC32C(argcrc, &tmpcrc, sizeof(pg_crc32c));
         } else {
-            COMP_CRC32C(argcrc, fargs + i, sizeof(Datum));
+            COMP_CRC32C(argcrc, &args[i].value, sizeof(Datum));
         }
     }
 
@@ -4264,16 +4260,16 @@ static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *is
 /*
  * Compare the parameters Dautm one by one according to type for equality.
  */
-static inline bool EStateFuncCompareArgs(Oid *argtypes, FuncRetCache *retcache, Datum *fargs, bool *isnull, short nargs)
+static inline bool EStateFuncCompareArgs(Oid *argtypes, FuncRetCache *retcache, NullableDatum *args, short nargs)
 {
     short i;
     Oid argtype;
-    Datum *args = retcache->args;
+    Datum *cachedargs = retcache->args;
     uint32 argisnull = retcache->argisnull;
 
     for (i = 0; i < nargs; i++) {
         /* Function arg input is NULL */
-        if (isnull[i]) {
+        if (args[i].isnull) {
             if (argisnull & (1 << i)) {
                 continue;
             } else {
@@ -4288,15 +4284,15 @@ static inline bool EStateFuncCompareArgs(Oid *argtypes, FuncRetCache *retcache, 
         argtype = argtypes[i];
 
         if (argtype == NUMERICOID) {
-            if (!DatumGetBool(DirectFunctionCall2(numeric_eq, fargs[i], args[i]))) {
+            if (!DatumGetBool(DirectFunctionCall2(numeric_eq, args[i].value, cachedargs[i]))) {
                 break;
             }
         } else if (argtype == TEXTOID || argtype == VARCHAROID ||
                    argtype == NVARCHAR2OID || argtype == BPCHAROID) {
-            if (!datumIsEqual(fargs[i], args[i], false, -1)) {
+            if (!datumIsEqual(args[i].value, cachedargs[i], false, -1)) {
                 break;
             }
-        } else if (fargs[i] != args[i]) {
+        } else if (args[i].value != cachedargs[i]) {
             break;
         }
     }
@@ -4311,26 +4307,25 @@ static inline bool EStateFuncCompareArgs(Oid *argtypes, FuncRetCache *retcache, 
 /*
  * Get function's result cache.
  */
-bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnull)
+bool EStateFuncGetRetCache(FuncExprState *fcache, Datum *retvalue, bool *retnull)
 {
     short i;
     short nargs;
     short prevhit;
     short buck;
     short offs;
-    Datum *fargs;
-    bool *argnull;
     FuncCache fncache;
+    FunctionCallInfo fcinfo;
     FuncRetBucket *retbucket;
     FuncRetCache *retcache;
     FuncRetCache **retcachea;
     pg_crc32c argcrc;
     pg_crc32c *argcrcs;
 
-    Assert(fcinfo->fncache);
-    Assert(fcinfo->top_estate);
+    Assert(fcache->fncache);
 
-    fncache = fcinfo->fncache;
+    fncache = fcache->fncache;
+    fcinfo = fcache->fcinfo_data;
 
     /*
      * Contains only one parameter and is called only once, disabling caching.
@@ -4352,7 +4347,7 @@ bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnu
             pfree_ext(fncache->argtypes);
         }
 
-        fcinfo->fncache = NULL;
+        fcache->fncache = NULL;
 
         return false;
     }
@@ -4367,7 +4362,7 @@ bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnu
 
         EStateFuncReclaimCache(fncache);
 
-        fcinfo->fncache = NULL;
+        fcache->fncache = NULL;
 
         return false;
     }
@@ -4402,20 +4397,17 @@ bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnu
     /*
      * Calculate CRC of function parameters for bucket matching.
      */
-    fcinfo->arghash = INVALID_ARG_CRC32C;
+    fcache->arghash = INVALID_ARG_CRC32C;
 
     /* Check whether the function args used in this call cannot be cached. */
     if (FunctionArgCannotCache(fncache, fcinfo)) {
         return false;
     }
 
-    fargs = fcinfo->arg;
-    argnull = fcinfo->argnull;
-
-    argcrc = EStateFuncHashArgs(fncache->argtypes, fargs, argnull, nargs);
+    argcrc = EStateFuncHashArgs(fncache->argtypes, fcinfo->args, nargs);
     Assert(ARG_CRC32C_IS_VALID(argcrc));
 
-    fcinfo->arghash = argcrc;
+    fcache->arghash = argcrc;
 
     /* No cache yet */
     if (fncache->cacheptr.retbuckets == NULL) {
@@ -4445,7 +4437,7 @@ bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnu
         Assert(FR_STATE_IS_VALID(retcache->state));
 
         if (EQ_CRC32C(argcrc, retbucket->argcrcs[offs]) &&
-                EStateFuncCompareArgs(fncache->argtypes, retcache, fargs, argnull, nargs)) {
+                EStateFuncCompareArgs(fncache->argtypes, retcache, fcinfo->args, nargs)) {
             if (fncache->usagecount < INT32_MAX)
                 fncache->hitcount++;
 
@@ -4481,7 +4473,7 @@ bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnu
         }
 
         /* CRC is the same, check if the parameters are the same. */
-        if (!EStateFuncCompareArgs(fncache->argtypes, retcachea[i], fargs, argnull, nargs)) {
+        if (!EStateFuncCompareArgs(fncache->argtypes, retcachea[i], fcinfo->args, nargs)) {
             continue;
         }
 
@@ -4551,7 +4543,7 @@ extern PLpgSQL_function* get_security_function(FunctionCallInfo fcinfo);
  * 5. The parameters use the instruction set to calculate the CRC matching bucket, in order to be faster
  * Extreme scenarios, such as all input parameters are constants, only one bucket is used, 4 blocks.
  */
-bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
+bool EStateFuncPutRetCache(FuncExprState *fcache, Datum ret)
 {
     short i;
     short nargs;
@@ -4561,11 +4553,9 @@ bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
     pg_crc32c argcrc;
     pg_crc32c *argcrcs;
     int	usagecount;
-    Datum *fargs;
-    bool *argnull;
     Datum *args;
-    EState *es;
     FuncCache fncache;
+    FunctionCallInfo fcinfo;
     FuncRetBucket **retbuckets;
     FuncRetBucket *retbucket;
     FuncRetCache **retcache;
@@ -4574,28 +4564,29 @@ bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
     FuncRetCache *rret;
     MemoryContext oldctx;
 
-    Assert(fcinfo->fncache);
-    Assert(fcinfo->top_estate);
-    Assert(FNCACHE_NUMARGS(fcinfo->fncache->fcflags) == fcinfo->nargs);
+    Assert(fcache->fncache);
+
+    fncache = fcache->fncache;
+    fcinfo = fcache->fcinfo_data;
+
+    Assert(FNCACHE_NUMARGS(fncache->fcflags) == fcinfo->nargs);
 
     /* Autonomous transaction functions and subroutines do not support caching. */
     if (fcinfo->flinfo && fcinfo->flinfo->fn_extra) {
         PLpgSQL_function* func;
-        if (fcinfo->fncache->security) {
+        if (fncache->security) {
             func = get_security_function(fcinfo);
         } else {
             func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
         }
         if (func->action->isAutonomous || func->proc_list != NIL || OidIsValid(func->parent_oid)) {
-            EStateFuncReclaimCache(fcinfo->fncache);
+            EStateFuncReclaimCache(fncache);
 
-            fcinfo->fncache = NULL;
+            fcache->fncache = NULL;
             return false;
         }
     }
 
-    fncache = fcinfo->fncache;
-    es = fcinfo->top_estate;
     nargs = fcinfo->nargs;
 
     if (nargs == 0) {
@@ -4624,11 +4615,11 @@ bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
     }
 
     /* CRC is invalid, FunctionArgCannotCache check considers the arguments to be uncached */
-    if (!ARG_CRC32C_IS_VALID(fcinfo->arghash)) {
+    if (!ARG_CRC32C_IS_VALID(fcache->arghash)) {
         return false;
     }
 
-    argcrc = fcinfo->arghash;
+    argcrc = fcache->arghash;
 
     Assert(!FunctionArgCannotCache(fncache, fcinfo));
 
@@ -4742,21 +4733,18 @@ bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
         rret->retval = FunctionDatumCopy(ret, datumtype);
     }
 
-    fargs = fcinfo->arg;
-    argnull = fcinfo->argnull;
-
     rret->argisnull = 0;
 
     for (i = 0; i < nargs; i++) {
         datumtype = fncache->argtypes[i];
         FuncCacheFreeValue(datumtype, &rret->args[i]);
 
-        if (argnull[i]) {
+        if (fcinfo->args[i].isnull) {
             rret->argisnull |= (1 << i);
             continue;
         }
 
-        rret->args[i] = FunctionDatumCopy(fargs[i], datumtype);
+        rret->args[i] = FunctionDatumCopy(fcinfo->args[i].value, datumtype);
     }
 
     MemoryContextSwitchTo(oldctx);

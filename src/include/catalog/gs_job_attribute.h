@@ -179,11 +179,11 @@ inline Datum TextToTimeStamp(Datum value)
         return DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     }
     short nrgs = 1;
-    FunctionCallInfoData fcinfo;
-    InitFunctionCallInfoData(fcinfo, NULL, nrgs, InvalidOid, NULL, NULL);
-    fcinfo.argnull[0] = false;
-    fcinfo.arg[0] = value;
-    return text_timestamp(&fcinfo);
+    LOCAL_FCINFO(fcinfo, 2);
+    InitFunctionCallInfoData(*fcinfo, NULL, nrgs, InvalidOid, NULL, NULL);
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[0].value = value;
+    return text_timestamp(fcinfo);
 }
 
 inline Datum BoolToText(Datum value)

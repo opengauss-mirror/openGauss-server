@@ -289,6 +289,7 @@ static void initscan(HeapScanDesc scan, ScanKey key, bool is_rescan)
     scan->rs_base.rs_cblock = InvalidBlockNumber;
     scan->rs_base.rs_ss_accessor = NULL;
     scan->dop = 1;
+    scan->rs_prefetch_upto = InvalidBlockNumber;
 
     /* ndp args init */
     scan->rs_base.ndp_pushdown_optimized = false;
@@ -569,6 +570,89 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
 }
 
 /*
+ * @Description: Hint the OS kernel to read ahead the next chunk of pages for
+ *      sequential scan when ADIO is disabled. Uses PrefetchBuffer which calls
+ *      posix_fadvise(POSIX_FADV_WILLNEED) so the kernel starts reading pages
+ *      into the page cache while we process the current page. This overlaps
+ *      disk I/O with CPU work and avoids the synchronous kernel_init_pages
+ *      path (634 of 4717 SeqNext flamegraph samples).
+ *      Only blocks beyond rs_prefetch_upto are hinted, so each block triggers
+ *      at most one posix_fadvise syscall across the entire scan instead of
+ *      one per page transition.
+ * @Param[IN] scan: heap scan desc
+ * @Param[IN] dir: scan direction
+ * @See also: heap_prefetch(); PrefetchBuffer()
+ */
+static void heap_seqscan_prefetch_ahead(HeapScanDesc scan, ScanDirection dir)
+{
+    BlockNumber currentBlock;
+    BlockNumber targetBlock;
+    BlockNumber startBlock;
+    BlockNumber prefetchBlock;
+    int prefetchDistance;
+
+    /* Only meaningful for forward scans — backward reads defeat OS readahead */
+    if (!ScanDirectionIsForward(dir)) {
+        return;
+    }
+
+    /*
+     * Reuse the existing heap_bulk_read_size GUC to control prefetch distance.
+     * Default is 0 (disabled), max is 64 blocks (512 KB at 8 KB block size).
+     */
+    prefetchDistance = u_sess->attr.attr_storage.heap_bulk_read_size;
+    if (prefetchDistance <= 0) {
+        return;
+    }
+
+    /*
+     * Skip non-sequential access patterns where next pages are unpredictable:
+     * - parallel scans dispatch pages via shared iterator
+     * - dop > 1 strides by PARALLEL_SCAN_GAP
+     * - range scan in redis redistribution has different page numbering
+     */
+    if (scan->rs_parallel != NULL || scan->dop > 1 ||
+        scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis) {
+        return;
+    }
+
+    currentBlock = scan->rs_base.rs_cblock;
+    targetBlock = currentBlock + prefetchDistance;
+
+    /*
+     * Already hinted this far ahead on a previous call — nothing new to do.
+     * The guard turns the call frequency from once-per-page into
+     * once-per-prefetchDistance pages, cutting syscall + hash-lookup overhead
+     * by that factor.
+     */
+    if (scan->rs_prefetch_upto != InvalidBlockNumber &&
+        targetBlock <= scan->rs_prefetch_upto) {
+        return;
+    }
+
+    /*
+     * Hint only the blocks we have not hinted yet: from rs_prefetch_upto+1
+     * (or currentBlock+1 on first call) up to targetBlock.
+     */
+    startBlock = (scan->rs_prefetch_upto == InvalidBlockNumber)
+                     ? currentBlock + 1
+                     : scan->rs_prefetch_upto + 1;
+
+    for (prefetchBlock = startBlock; prefetchBlock <= targetBlock; prefetchBlock++) {
+        BlockNumber blk = prefetchBlock;
+        if (blk >= scan->rs_base.rs_nblocks) {
+            blk = 0;
+        }
+        if (blk == scan->rs_base.rs_startblock) {
+            break;
+        }
+        PrefetchBuffer(scan->rs_base.rs_rd, MAIN_FORKNUM, blk);
+    }
+
+    scan->rs_prefetch_upto = targetBlock;
+}
+
+/*
  * @Description: if many tuples of the relation are deleted, when load a one page which has normal tuples, so need
  * prefetch
  * @Param[IN] dir: scan direction
@@ -588,6 +672,10 @@ void heap_prefetch(HeapScanDesc scan, ScanDirection dir)
         if (scan->rs_base.rs_ss_accessor != NULL) {
             Start_Prefetch((TableScanDesc)scan, scan->rs_base.rs_ss_accessor, dir);
         }
+    }
+    ADIO_ELSE()
+    {
+        heap_seqscan_prefetch_ahead(scan, dir);
     }
     ADIO_END();
 }

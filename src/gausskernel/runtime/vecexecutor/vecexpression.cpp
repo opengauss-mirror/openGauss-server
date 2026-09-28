@@ -29,6 +29,7 @@
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
 #include "executor/exec/execdebug.h"
+#include "executor/executor.h"
 #include "executor/node/nodeSubplan.h"
 #include "executor/node/nodeAgg.h"
 #include "funcapi.h"
@@ -388,11 +389,11 @@ static ScalarVector* ExecEvalVecScalarArrayOp(ScalarArrayOpExprState* sstate, Ex
         DispatchVectorFunction(opexpr->opfuncid, opexpr->inputcollid, &sstate->fxprstate, econtext);
     }
 
-    fcinfo = &sstate->fxprstate.fcinfo_data;
+    fcinfo = sstate->fxprstate.fcinfo_data;
     argDone = ExecEvalVecFuncArgs(fcinfo, sstate->fxprstate.args, pSelection, econtext);
     Assert(argDone == ExprSingleResult);
-    arg0 = (ScalarVector*)fcinfo->arg[0];
-    arg1 = (ScalarVector*)fcinfo->arg[1];
+    arg0 = (ScalarVector*)fcinfo->args[0].value;
+    arg1 = (ScalarVector*)fcinfo->args[1].value;
 
     /* We expect that eval expr result could be empty vector, but could not be null */
     Assert(arg0 != NULL && arg1 != NULL);
@@ -463,7 +464,7 @@ static ScalarVector* ExecEvalVecScalarArrayOp(ScalarArrayOpExprState* sstate, Ex
         argLeft->m_flag[0] = arg0->m_flag[i];
         argLeft->m_vals[0] = arg0->m_vals[i];
         argLeft->m_rows = 1;
-        fcinfo->arg[0] = (Datum)argLeft;
+        fcinfo->args[0].value = (Datum)argLeft;
 
         /* Loop over the array elements */
         s = (char*)ARR_DATA_PTR(arr);
@@ -486,7 +487,7 @@ static ScalarVector* ExecEvalVecScalarArrayOp(ScalarArrayOpExprState* sstate, Ex
             }
 
             /* right argument build from array element */
-            fcinfo->arg[1] = (Datum)argRight;
+            fcinfo->args[1].value = (Datum)argRight;
 
             /* Call comparison function */
             if (elemNull && sstate->fxprstate.func.fn_strict) {
@@ -499,9 +500,9 @@ static ScalarVector* ExecEvalVecScalarArrayOp(ScalarArrayOpExprState* sstate, Ex
                     }
                 }
                 pgstat_init_function_usage(fcinfo, &fcusage);
-                fcinfo->arg[fcinfo->nargs] = 1;
-                fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(sstate->tmpVec);
-                fcinfo->arg[fcinfo->nargs + 2] = (Datum)0;
+                fcinfo->args[fcinfo->nargs].value = 1;
+                fcinfo->args[fcinfo->nargs + 1].value = PointerGetDatum(sstate->tmpVec);
+                fcinfo->args[fcinfo->nargs + 2].value = (Datum)0;
                 fcinfo->nargs += EXTRA_NARGS;
 
                 thisResult = VecFunctionCallInvoke(fcinfo);
@@ -915,10 +916,9 @@ static ExprDoneCond ExecEvalVecFuncArgs(FunctionCallInfo fcinfo, List* argList, 
     i = 0;
     foreach (arg, argList) {
         ExprState* argstate = (ExprState*)lfirst(arg);
-        colVector = &fcinfo->argVector[i];
+        colVector = argstate->vecresult;
         colVector->m_rows = econtext->align_rows;
-        fcinfo->arg[i] = (Datum)VectorExprEngine(argstate, econtext, pSelection, colVector, NULL);
-        fcinfo->argTypes[i] = argstate->resultType;
+        fcinfo->args[i].value = (Datum)VectorExprEngine(argstate, econtext, pSelection, colVector, NULL);
         i++;
     }
 
@@ -941,13 +941,12 @@ static ExprDoneCond ExecEvalVecSetFuncArgs(
     i = 0;
     foreach (arg, argList) {
         ExprState* argstate = (ExprState*)lfirst(arg);
-        colVector = &fcinfo->argVector[i];
+        colVector = argstate->vecresult;
         colVector->m_rows = econtext->align_rows;
 
         ExprDoneCond thisArgIsDone = ExprSingleResult;
 
-        fcinfo->arg[i] = (Datum)VectorExprEngine(argstate, econtext, pSelection, colVector, &thisArgIsDone);
-        fcinfo->argTypes[i] = argstate->resultType;
+        fcinfo->args[i].value = (Datum)VectorExprEngine(argstate, econtext, pSelection, colVector, &thisArgIsDone);
         i++;
 
         if (thisArgIsDone != ExprSingleResult) {
@@ -982,15 +981,15 @@ static ScalarVector* ExecEvalVecMinMax(
     Assert(pSelection != NULL);
 
     MinMaxExpr* minmax = (MinMaxExpr*)minmaxExpr->xprstate.expr;
-    FunctionCallInfoData* locfcinfo = &minmaxExpr->cinfo;
+    FunctionCallInfoData* locfcinfo = minmaxExpr->cinfo[0];
     MinMaxOp op = minmax->op;
     ScalarVector* vec = NULL;
     ScalarVector* result = NULL;
     ListCell* arg = NULL;
     int cmpresult, i;
 
-    locfcinfo->argnull[0] = false;
-    locfcinfo->argnull[1] = false;
+    locfcinfo->args[0].isnull = false;
+    locfcinfo->args[1].isnull = false;
 
     Assert(econtext->align_rows != 0);
 
@@ -1040,12 +1039,12 @@ static ScalarVector* ExecEvalVecMinMax(
         }
 
         /* Call the cmp function to get the result */
-        locfcinfo->arg[0] = (Datum)pVector;
-        locfcinfo->arg[1] = (Datum)vec;
+        locfcinfo->args[0].value = (Datum)pVector;
+        locfcinfo->args[1].value = (Datum)vec;
         locfcinfo->isnull = false;
-        locfcinfo->arg[locfcinfo->nargs] = econtext->align_rows;
-        locfcinfo->arg[locfcinfo->nargs + 1] = (Datum)minmaxExpr->cmpresult;
-        locfcinfo->arg[locfcinfo->nargs + 2] = PointerGetDatum(pSelection);
+        locfcinfo->args[locfcinfo->nargs].value = econtext->align_rows;
+        locfcinfo->args[locfcinfo->nargs + 1].value = (Datum)minmaxExpr->cmpresult;
+        locfcinfo->args[locfcinfo->nargs + 2].value = PointerGetDatum(pSelection);
         locfcinfo->nargs += EXTRA_NARGS;
         result = VecFunctionCallInvoke(locfcinfo);
         locfcinfo->nargs -= EXTRA_NARGS;
@@ -1111,17 +1110,17 @@ static ScalarVector* ExecEvalVecRowCompare(RowCompareExprState* rstate, ExprCont
     {
         ExprState* le = (ExprState*)lfirst(l);
         ExprState* re = (ExprState*)lfirst(r);
-        FunctionCallInfoData* locfcinfo = &rstate->cinfo[i];
+        FunctionCallInfoData* locfcinfo = rstate->cinfo[i];
 
         left_vec = VectorExprEngine(le, econtext, pSel, rstate->left_argvec, isDone);
         right_vec = VectorExprEngine(re, econtext, pSel, rstate->right_argvec, isDone);
-        locfcinfo->arg[0] = (Datum)left_vec;
-        locfcinfo->arg[1] = (Datum)right_vec;
+        locfcinfo->args[0].value = (Datum)left_vec;
+        locfcinfo->args[1].value = (Datum)right_vec;
         locfcinfo->isnull = false;
 
-        locfcinfo->arg[locfcinfo->nargs] = Min(left_vec->m_rows, right_vec->m_rows);
-        locfcinfo->arg[locfcinfo->nargs + 1] = (Datum)rstate->cmpresult;
-        locfcinfo->arg[locfcinfo->nargs + 2] = PointerGetDatum(pSel);
+        locfcinfo->args[locfcinfo->nargs].value = Min(left_vec->m_rows, right_vec->m_rows);
+        locfcinfo->args[locfcinfo->nargs + 1].value = (Datum)rstate->cmpresult;
+        locfcinfo->args[locfcinfo->nargs + 2].value = PointerGetDatum(pSel);
         locfcinfo->nargs += EXTRA_NARGS;
         result = VecFunctionCallInvoke(locfcinfo);
         locfcinfo->nargs -= EXTRA_NARGS;
@@ -1280,20 +1279,20 @@ static ScalarVector* ExecEvalVecDistinct(
         Assert(!fcache->func.fn_retset);
     }
 
-    fcinfo = &fcache->fcinfo_data;
+    fcinfo = fcache->fcinfo_data;
     arguments = fcache->args;
     Assert(fcinfo->nargs == 2);
     (void)ExecEvalVecFuncArgs(fcinfo, arguments, pSelection, econtext);
-    v1 = (ScalarVector*)fcinfo->arg[0];
-    v2 = (ScalarVector*)fcinfo->arg[1];
+    v1 = (ScalarVector*)fcinfo->args[0].value;
+    v2 = (ScalarVector*)fcinfo->args[1].value;
     actualSize = econtext->align_rows;
 
     Assert(actualSize == Min(v1->m_rows, v2->m_rows));
 
     pgstat_init_function_usage(fcinfo, &fcusage);
-    fcinfo->arg[fcinfo->nargs] = actualSize;
-    fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(pVector);
-    fcinfo->arg[fcinfo->nargs + 2] = (Datum)(econtext->m_fUseSelection ? PointerGetDatum(pSelection) : 0);
+    fcinfo->args[fcinfo->nargs].value = actualSize;
+    fcinfo->args[fcinfo->nargs + 1].value = PointerGetDatum(pVector);
+    fcinfo->args[fcinfo->nargs + 2].value = (Datum)(econtext->m_fUseSelection ? PointerGetDatum(pSelection) : 0);
     fcinfo->nargs += EXTRA_NARGS;
     fcinfo->isnull = false;
 
@@ -1335,19 +1334,19 @@ static ScalarVector* ExecEvalVecNullIf(
         Assert(!fcache->func.fn_retset);
     }
 
-    fcinfo = &fcache->fcinfo_data;
+    fcinfo = fcache->fcinfo_data;
     arguments = fcache->args;
     Assert(fcinfo->nargs == 2);
     (void)ExecEvalVecFuncArgs(fcinfo, arguments, pSelection, econtext);
-    v1 = (ScalarVector*)fcinfo->arg[0];
+    v1 = (ScalarVector*)fcinfo->args[0].value;
     actualSize = econtext->align_rows;
 
     Assert(actualSize >= 0);
 
     pgstat_init_function_usage(fcinfo, &fcusage);
-    fcinfo->arg[fcinfo->nargs] = actualSize;
-    fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(tmpVec);
-    fcinfo->arg[fcinfo->nargs + 2] = (Datum)(econtext->m_fUseSelection ? PointerGetDatum(pSelection) : 0);
+    fcinfo->args[fcinfo->nargs].value = actualSize;
+    fcinfo->args[fcinfo->nargs + 1].value = PointerGetDatum(tmpVec);
+    fcinfo->args[fcinfo->nargs + 2].value = (Datum)(econtext->m_fUseSelection ? PointerGetDatum(pSelection) : 0);
     fcinfo->nargs += EXTRA_NARGS;
     fcinfo->isnull = false;
 
@@ -1676,7 +1675,7 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
     uint8* presultFlag = presultVector->m_flag;
     Datum result;
     PGFunction RowFunction;
-    GenericFunRuntime* genericRuntime = fcinfo->flinfo->genericRuntime;
+    GenericFunRuntime* genericRuntime = fcinfo->flinfo->fn_ext->generic_runtime;
     GenericFunRuntimeArg* genericRuntimeArgs = genericRuntime->args;
     FunctionCallInfoData* rowcinfo = genericRuntime->internalFinfo;
     ScalarVector* pArgVector = NULL;
@@ -1684,7 +1683,8 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
     Oid returnType;
     int matchedRows = 0;
 
-    rowcinfo->udfInfo.argBatchRows = 0;
+    FunctionCallEnsureExtra(rowcinfo);
+    rowcinfo->extra->udfInfo.argBatchRows = 0;
     RowFunction = fcinfo->flinfo->fn_addr;
     returnType = fcinfo->flinfo->fn_rettype;
 
@@ -1718,23 +1718,25 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
                     for (j = 0; j < cArgs; j++) {
                         pArgVector = *(genericRuntimeArgs[j].arg);
                         if (NOT_NULL(pArgVector->m_flag[i])) {
-                            rowcinfo->arg[j] = genericRuntimeArgs[j].getArgFun(&pArgVector->m_vals[i]);
-                            rowcinfo->argnull[j] = false;
+                            rowcinfo->args[j].value = genericRuntimeArgs[j].getArgFun(&pArgVector->m_vals[i]);
+                            rowcinfo->args[j].isnull = false;
                         } else {
                             // keep the same with row function for non strict function.
                             if (fnStrict == false)
-                                rowcinfo->arg[j] = 0;
+                                rowcinfo->args[j].value = 0;
 
-                            rowcinfo->argnull[j] = true;
+                            rowcinfo->args[j].isnull = true;
                         }
                         if (fenced) {
-                            if (matchedRows >= rowcinfo->udfInfo.allocRows)
+                            if (matchedRows >= rowcinfo->extra->udfInfo.allocRows) {
                                 ereport(ERROR,
                                     (errmodule(MOD_UDF),
                                         errcode(ERRCODE_INTERVAL_FIELD_OVERFLOW),
-                                        errmsg("udfInfo->allocRows: %d is not enough", rowcinfo->udfInfo.allocRows)));
-                            rowcinfo->udfInfo.arg[matchedRows][j] = rowcinfo->arg[j];
-                            rowcinfo->udfInfo.null[matchedRows][j] = rowcinfo->argnull[j];
+                                        errmsg("udfInfo->allocRows: %d is not enough",
+                                            rowcinfo->extra->udfInfo.allocRows)));
+                            }
+                            rowcinfo->extra->udfInfo.arg[matchedRows][j] = rowcinfo->args[j].value;
+                            rowcinfo->extra->udfInfo.null[matchedRows][j] = rowcinfo->args[j].isnull;
                         }
                     }
                     /* Just cache argument value for Fenced mode, So skip it */
@@ -1755,10 +1757,10 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
 
         /* Batch run and get result */
         if (fenced) {
-            rowcinfo->udfInfo.argBatchRows = matchedRows;
+            rowcinfo->extra->udfInfo.argBatchRows = matchedRows;
             RowFunction(rowcinfo);
-            Datum* resultPtr = rowcinfo->udfInfo.result;
-            bool* resultIsNull = rowcinfo->udfInfo.resultIsNull;
+            Datum* resultPtr = rowcinfo->extra->udfInfo.result;
+            bool* resultIsNull = rowcinfo->extra->udfInfo.resultIsNull;
             int pos = 0;
             for (i = 0; i < nvalues; i++) {
                 if (pselection[i]) {
@@ -1782,18 +1784,18 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
                 for (j = 0; j < cArgs; j++) {
                     pArgVector = *(genericRuntimeArgs[j].arg);
                     if (NOT_NULL(pArgVector->m_flag[i])) {
-                        rowcinfo->arg[j] = genericRuntimeArgs[j].getArgFun(&pArgVector->m_vals[i]);
-                        rowcinfo->argnull[j] = false;
+                        rowcinfo->args[j].value = genericRuntimeArgs[j].getArgFun(&pArgVector->m_vals[i]);
+                        rowcinfo->args[j].isnull = false;
                     } else {
                         // keep the same with row function for non strict function.
                         if (fnStrict == false)
-                            rowcinfo->arg[j] = 0;
+                            rowcinfo->args[j].value = 0;
 
-                        rowcinfo->argnull[j] = true;
+                        rowcinfo->args[j].isnull = true;
                     }
                     if (fenced) {
-                        rowcinfo->udfInfo.arg[matchedRows][j] = rowcinfo->arg[j];
-                        rowcinfo->udfInfo.null[matchedRows][j] = rowcinfo->argnull[j];
+                        rowcinfo->extra->udfInfo.arg[matchedRows][j] = rowcinfo->args[j].value;
+                        rowcinfo->extra->udfInfo.null[matchedRows][j] = rowcinfo->args[j].isnull;
                     }
                 }
 
@@ -1801,7 +1803,7 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
                     rowcinfo->isnull = false;
                     result = RowFunction(rowcinfo);
 
-                    if (fcinfo->is_plpgsql_language_function_with_outparam) {
+                    if (genericRuntime->is_plpgsql_func_with_outparam) {
                         bool is_null = false;
                         set_result_for_plpgsql_language_function_with_outparam(&result, &is_null);
                         if (is_null == true) {
@@ -1820,10 +1822,10 @@ static ScalarVector* GenericFunctionT(PG_FUNCTION_ARGS)
         }
         /* Batch run and get result */
         if (fenced) {
-            rowcinfo->udfInfo.argBatchRows = matchedRows;
+            rowcinfo->extra->udfInfo.argBatchRows = matchedRows;
             RowFunction(rowcinfo);
-            Datum* resultPtr = rowcinfo->udfInfo.result;
-            bool* resultIsNull = rowcinfo->udfInfo.resultIsNull;
+            Datum* resultPtr = rowcinfo->extra->udfInfo.result;
+            bool* resultIsNull = rowcinfo->extra->udfInfo.resultIsNull;
             int pos = 0;
             for (i = 0; i < nvalues; i++) {
                 if (!(fnStrict && restricFlag[i] == false)) {
@@ -1886,16 +1888,19 @@ GenericArgExtract ChooseExtractFun(Oid Dtype, Oid fn_oid)
 template <Oid retType>
 void DispatchGenericFunction(FunctionCallInfo finfo, int nargs, bool strict)
 {
+    FmgrInfoExt *ext = FmgrInfoEnsureExt(finfo->flinfo);
     if (strict) {
-        if (!finfo->flinfo->fn_fenced)
-            finfo->flinfo->vec_fn_addr = GenericFunctionT<true, retType, false>;
-        else
-            finfo->flinfo->vec_fn_addr = GenericFunctionT<true, retType, true>;
+        if (!ext->fn_fenced) {
+            ext->vec_fn_addr = GenericFunctionT<true, retType, false>;
+        } else {
+            ext->vec_fn_addr = GenericFunctionT<true, retType, true>;
+        }
     } else {
-        if (!finfo->flinfo->fn_fenced)
-            finfo->flinfo->vec_fn_addr = GenericFunctionT<false, retType, false>;
-        else
-            finfo->flinfo->vec_fn_addr = GenericFunctionT<false, retType, true>;
+        if (!ext->fn_fenced) {
+            ext->vec_fn_addr = GenericFunctionT<false, retType, false>;
+        } else {
+            ext->vec_fn_addr = GenericFunctionT<false, retType, true>;
+        }
     }
 }
 
@@ -1912,21 +1917,26 @@ static void BindingGenericFunction(FunctionCallInfo finfo, MemoryContext fcacheC
 
     strict = finfo->flinfo->fn_strict;
 
-    GenericFunRuntime* funcRuntime = finfo->flinfo->genericRuntime;
+    FmgrInfoExt *ext = FmgrInfoEnsureExt(finfo->flinfo);
+    if (ext->generic_runtime == NULL) {
+        ext->generic_runtime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
+        InitGenericFunRuntimeInfo(*ext->generic_runtime, nargs);
+    }
+    GenericFunRuntime* funcRuntime = ext->generic_runtime;
 
     Assert(funcRuntime != NULL);
 
-    funcRuntime->internalFinfo = (FunctionCallInfoData*)palloc0(sizeof(FunctionCallInfoData));
+    funcRuntime->internalFinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(nargs));
 
     errno_t rc =
         memcpy_s(funcRuntime->internalFinfo, sizeof(FunctionCallInfoData), finfo, sizeof(FunctionCallInfoData));
     securec_check(rc, "", "");
 
-    funcRuntime->internalFinfo->arg = &funcRuntime->inputargs[0];
-    funcRuntime->internalFinfo->argnull = &funcRuntime->nulls[0];
+    /* Don't share extra data between outer and inner fcinfo */
+    funcRuntime->internalFinfo->extra = NULL;
 
     for (int i = 0; i < nargs; i++) {
-        funcRuntime->args[i].arg = (ScalarVector**)&finfo->arg[i];
+        funcRuntime->args[i].arg = (ScalarVector**)&finfo->args[i].value;
         Assert(funcRuntime->args[i].argType != InvalidOid);
         funcRuntime->args[i].getArgFun = ChooseExtractFun(funcRuntime->args[i].argType, finfo->flinfo->fn_oid);
     }
@@ -2014,8 +2024,9 @@ void InitVectorFunction(FunctionCallInfo finfo, MemoryContext fcacheCxt)
     entry = (VecFuncCacheEntry*)hash_search(vec_func_hash, &foid, HASH_FIND, &found);
 
     if (found && entry->vec_fn_cache[0] != NULL) {
-        finfo->flinfo->vec_fn_cache = &entry->vec_fn_cache[0];
-        finfo->flinfo->vec_fn_addr = entry->vec_fn_cache[0];
+        FmgrInfoExt *ext = FmgrInfoEnsureExt(finfo->flinfo);
+        ext->vec_fn_cache = &entry->vec_fn_cache[0];
+        ext->vec_fn_addr = entry->vec_fn_cache[0];
     } else {
         const FmgrBuiltin* fbp = NULL;
         fbp = fmgr_isbuiltin(foid);
@@ -2047,9 +2058,9 @@ void DispatchVectorFunction(Oid foid, Oid input_collation, FuncExprState* fcache
     FunctionCallInfo finfo;
     initVectorFcache(foid, input_collation, fcache, econtext->ecxt_per_query_memory);
 
-    finfo = &fcache->fcinfo_data;
+    finfo = fcache->fcinfo_data;
 
-    Assert(finfo->flinfo->vec_fn_addr == NULL);
+    Assert(finfo->flinfo->fn_ext == NULL || finfo->flinfo->fn_ext->vec_fn_addr == NULL);
 
     InitVectorFunction(finfo, econtext->ecxt_per_query_memory);
 }
@@ -2082,7 +2093,7 @@ static ScalarVector* ExecMakeVecFunctionResult(
     if (isDone != NULL)
         *isDone = ExprSingleResult;
 
-    fcinfo = &fcache->fcinfo_data;
+    fcinfo = fcache->fcinfo_data;
     arguments = fcache->args;
     argDone = ExecEvalVecFuncArgs(fcinfo, arguments, pSelection, econtext);
     Assert(argDone == ExprSingleResult);
@@ -2092,14 +2103,14 @@ static ScalarVector* ExecMakeVecFunctionResult(
     Assert(actualSize >= 0);
 
     pgstat_init_function_usage(fcinfo, &fcusage);
-    fcinfo->arg[fcinfo->nargs] = actualSize;
-    fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(pVector);
-    fcinfo->arg[fcinfo->nargs + 2] = econtext->m_fUseSelection ? PointerGetDatum(pSelection) : (Datum)0;
+    fcinfo->args[fcinfo->nargs].value = actualSize;
+    fcinfo->args[fcinfo->nargs + 1].value = PointerGetDatum(pVector);
+    fcinfo->args[fcinfo->nargs + 2].value = econtext->m_fUseSelection ? PointerGetDatum(pSelection) : (Datum)0;
     fcinfo->nargs += EXTRA_NARGS;
     fcinfo->isnull = false;
 
     if (IsA(fcache->xprstate.expr, FuncExpr) && is_function_with_plpgsql_language_and_outparam(fcache->func.fn_oid)) {
-        fcinfo->is_plpgsql_language_function_with_outparam = true;
+        fcinfo->flinfo->fn_ext->generic_runtime->is_plpgsql_func_with_outparam = true;
     }
 
     result = VecFunctionCallInvoke(fcinfo);
@@ -2133,7 +2144,7 @@ static ScalarVector* ExecMakeVecFunctionResultWithSets(
     /* Guard against stack overflow due to overly complex expressions */
     check_stack_depth();
 
-    fcinfo = &fcache->fcinfo_data;
+    fcinfo = fcache->fcinfo_data;
     arguments = fcache->args;
     bool hasSetArg = false;
     if (!fcache->setArgsValid) {
@@ -2161,9 +2172,9 @@ static ScalarVector* ExecMakeVecFunctionResultWithSets(
     actualSize = econtext->align_rows;
     Assert(actualSize >= 0);
 
-    fcinfo->arg[fcinfo->nargs] = actualSize;
-    fcinfo->arg[fcinfo->nargs + 1] = PointerGetDatum(pVector);
-    fcinfo->arg[fcinfo->nargs + 2] = econtext->m_fUseSelection ? PointerGetDatum(pSelection) : (Datum)0;
+    fcinfo->args[fcinfo->nargs].value = actualSize;
+    fcinfo->args[fcinfo->nargs + 1].value = PointerGetDatum(pVector);
+    fcinfo->args[fcinfo->nargs + 2].value = econtext->m_fUseSelection ? PointerGetDatum(pSelection) : (Datum)0;
     fcinfo->isnull = false;
 
     if (fcache->func.fn_retset || hasSetArg) {
@@ -2179,7 +2190,7 @@ static ScalarVector* ExecMakeVecFunctionResultWithSets(
         /*
          * for functions returning sets
          */
-        GenericFunRuntime* genericRuntime = fcinfo->flinfo->genericRuntime;
+        GenericFunRuntime* genericRuntime = fcinfo->flinfo->fn_ext->generic_runtime;
         FunctionCallInfoData* rowcinfo = genericRuntime->internalFinfo;
         ReturnSetInfo rsinfo;
         if (fcache->func.fn_retset)
@@ -2898,6 +2909,10 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 outlist = lappend(outlist, estate);
             }
             mstate->args = outlist;
+
+            mstate->cinfo = (FunctionCallInfoData**)palloc(sizeof(FunctionCallInfoData*));
+            mstate->cinfo[0] = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(2 + EXTRA_NARGS));
+
             /* Look up the btree comparison function for the datatype */
             typentry = lookup_type_cache(minmaxexpr->minmaxtype, TYPECACHE_CMP_PROC);
             if (!OidIsValid(typentry->cmp_proc))
@@ -2905,6 +2920,14 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                     (errcode(ERRCODE_UNDEFINED_FUNCTION),
                         errmsg("could not identify a comparison function for type %s",
                             format_type_be(minmaxexpr->minmaxtype))));
+
+            /*
+             * If we enforced permissions checks on index support
+             * functions, we'd need to make a check here.  But the index
+             * support machinery doesn't do that, and neither does this
+             * code.
+             */
+            fmgr_info(typentry->cmp_proc, &(mstate->cfunc));
 
             {
                 HeapTuple tp;
@@ -2915,27 +2938,20 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                     int nargs;
                     oidvector* proargs = ProcedureGetArgTypes(tp);
                     nargs = functup->pronargs;
-                    mstate->cfunc.genericRuntime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
-                    InitGenericFunRuntimeInfo(*(mstate->cfunc.genericRuntime), nargs);
+                    FmgrInfoExt *ext = FmgrInfoEnsureExt(&mstate->cfunc);
+                    ext->generic_runtime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
+                    InitGenericFunRuntimeInfo(*ext->generic_runtime, nargs);
                     for (int j = 0; j < nargs; j++) {
-                        mstate->cfunc.genericRuntime->args[j].argType = proargs->values[j];
+                        ext->generic_runtime->args[j].argType = proargs->values[j];
                     }
 
                     ReleaseSysCache(tp);
                 }
             }
 
-            /*
-             * If we enforced permissions checks on index support
-             * functions, we'd need to make a check here.  But the index
-             * support machinery doesn't do that, and neither does this
-             * code.
-             */
-            fmgr_info(typentry->cmp_proc, &(mstate->cfunc));
+            InitFunctionCallInfoData(*mstate->cinfo[0], &mstate->cfunc, 2, minmaxexpr->inputcollid, NULL, NULL);
 
-            InitFunctionCallInfoData(mstate->cinfo, &mstate->cfunc, 2, minmaxexpr->inputcollid, NULL, NULL);
-
-            InitVectorFunction(&mstate->cinfo, CurrentMemoryContext);
+            InitVectorFunction(mstate->cinfo[0], CurrentMemoryContext);
             state = (ExprState*)mstate;
         } break;
         case T_XmlExpr:
@@ -3155,7 +3171,7 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             rstate->rargs = outlist;
             Assert(list_length(rcexpr->opfamilies) == nopers);
             rstate->funcs = (FmgrInfo*)palloc(nopers * sizeof(FmgrInfo));
-            rstate->cinfo = (FunctionCallInfoData*)palloc(nopers * sizeof(FunctionCallInfoData));
+            rstate->cinfo = (FunctionCallInfoData**)palloc(nopers * sizeof(FunctionCallInfoData*));
             rstate->collations = (Oid*)palloc(nopers * sizeof(Oid));
             i = 0;
             forthree(l, rcexpr->opnos, l2, rcexpr->opfamilies, l3, rcexpr->inputcollids)
@@ -3170,6 +3186,14 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
 
                 get_op_opfamily_properties(opno, opfamily, false, &strategy, &lefttype, &righttype);
                 proc = get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
+                /*
+                 * If we enforced permissions checks on index support
+                 * functions, we'd need to make a check here.  But the
+                 * index support machinery doesn't do that, and neither
+                 * does this code.
+                 */
+                fmgr_info(proc, &(rstate->funcs[i]));
+
                 {
                     HeapTuple tp;
 
@@ -3179,26 +3203,21 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                         int nargs;
                         oidvector* proargs = ProcedureGetArgTypes(tp);
                         nargs = functup->pronargs;
-                        rstate->funcs[i].genericRuntime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
-                        InitGenericFunRuntimeInfo(*(rstate->funcs[i].genericRuntime), nargs);
+                        FmgrInfoExt *ext = FmgrInfoEnsureExt(&rstate->funcs[i]);
+                        ext->generic_runtime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
+                        InitGenericFunRuntimeInfo(*ext->generic_runtime, nargs);
                         for (int j = 0; j < nargs; j++) {
-                            rstate->funcs[i].genericRuntime->args[j].argType = proargs->values[j];
+                            ext->generic_runtime->args[j].argType = proargs->values[j];
                         }
 
                         ReleaseSysCache(tp);
                     }
                 }
+                /* vectorized comparison functions write nargs + EXTRA_NARGS slots */
+                rstate->cinfo[i] = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(2 + EXTRA_NARGS));
+                InitFunctionCallInfoData(*rstate->cinfo[i], &rstate->funcs[i], 2, inputcollid, NULL, NULL);
 
-                /*
-                 * If we enforced permissions checks on index support
-                 * functions, we'd need to make a check here.  But the
-                 * index support machinery doesn't do that, and neither
-                 * does this code.
-                 */
-                fmgr_info(proc, &(rstate->funcs[i]));
-                InitFunctionCallInfoData(rstate->cinfo[i], &rstate->funcs[i], 2, inputcollid, NULL, NULL);
-
-                InitVectorFunction(&rstate->cinfo[i], CurrentMemoryContext);
+                InitVectorFunction(rstate->cinfo[i], CurrentMemoryContext);
                 rstate->collations[i] = inputcollid;
                 i++;
             }

@@ -365,7 +365,7 @@ bool btinsert_internal(Relation rel, Datum *values, const bool *isnull, ItemPoin
     itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
     itup->t_tid = *ht_ctid;
 
-    result = _bt_doinsert(rel, itup, checkUnique, heapRel);
+    result = _bt_doinsert(rel, itup, checkUnique, heapRel, values, isnull);
 
     pfree(itup);
 

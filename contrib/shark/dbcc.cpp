@@ -90,11 +90,11 @@ Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS)
     bool withmsg = true;
     bool reseed_to_max = false;
 
-    if (!fcinfo->argnull[1]) {
+    if (!fcinfo->args[1].isnull) {
         withmsg = !PG_GETARG_BOOL(1);
     }
 
-    if (!fcinfo->argnull[2]) {
+    if (!fcinfo->args[2].isnull) {
         reseed_to_max = PG_GETARG_BOOL(2);
     }
 
@@ -140,17 +140,17 @@ Datum dbcc_check_ident_reseed(PG_FUNCTION_ARGS)
     char result[DBCC_RESULT_MAX_LENGTH];
     bool withmsg = true;
 
-    if (fcinfo->argnull[0]) {
+    if (fcinfo->args[0].isnull) {
         ereport(ERROR, (errmsg("table name cannot be null.")));
     }
 
     text* txt = PG_GETARG_TEXT_P(0);
-    bool need_reseed = !fcinfo->argnull[1];
+    bool need_reseed = !fcinfo->args[1].isnull;
     if (need_reseed) {
         new_seed = PG_GETARG_INT128(1);
     }
 
-    if(!fcinfo->argnull[2]) {
+    if (!fcinfo->args[2].isnull) {
         withmsg = !PG_GETARG_BOOL(2);
     }
 

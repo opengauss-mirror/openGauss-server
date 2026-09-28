@@ -20,6 +20,8 @@
 
 /* forward references to avoid circularity */
 struct ArrayRefState;
+struct NumericReg;
+struct NumericData;
 
 /* Bits in ExprState->flags (see also execnodes.h for public flag bits): */
 /* expression's interpreter has been initialized */
@@ -92,9 +94,35 @@ typedef enum ExprEvalOp
 	EEOP_FUNCEXPR,
 
 	EEOP_FUNCEXPR_STRICT,
+        EEOP_FUNCEXPR_STRICT_1,
+        EEOP_FUNCEXPR_STRICT_2,
 	EEOP_FUNCEXPR_FUSAGE,
 	EEOP_FUNCEXPR_STRICT_FUSAGE,
 	EEOP_FUNCEXPR_MAKE_FUNCTION_RESULT,	/* evaluate results by ExecMakeFunctionResultNosets() */
+
+        /* numeric register pipeline, passing unpacked NumericVar between steps */
+        EEOP_NUMERIC_PACK,
+        EEOP_NUMERIC_ADD,
+        EEOP_NUMERIC_SUB,
+        EEOP_NUMERIC_MUL,
+        EEOP_NUMERIC_DIV,
+        EEOP_NUMERIC_MOD,
+        EEOP_NUMERIC_DIV_TRUNC,
+        EEOP_NUMERIC_ABS,
+        EEOP_NUMERIC_UMINUS,
+        EEOP_NUMERIC_UPLUS,
+        EEOP_NUMERIC_SIGN,
+        EEOP_NUMERIC_INC,
+        EEOP_NUMERIC_CEIL,
+        EEOP_NUMERIC_FLOOR,
+        EEOP_NUMERIC_ROUND,
+        EEOP_NUMERIC_TRUNC,
+        EEOP_NUMERIC_EQ,
+        EEOP_NUMERIC_NE,
+        EEOP_NUMERIC_LE,
+        EEOP_NUMERIC_LT,
+        EEOP_NUMERIC_GE,
+        EEOP_NUMERIC_GT,
 
 	/*
 	 * Evaluate boolean AND expression, one step per subexpression. FIRST/LAST
@@ -357,6 +385,20 @@ typedef struct ExprEvalStep
 			int* var_dno;
 			bool is_plpgsql_func_with_outparam;
 		}			func;
+
+                /* for EEOP_NUMERIC_* register steps */
+                struct
+                {
+                        struct NumericReg *regs; /* chain-local register array (plan-time) */
+                        int16 resreg;   /* output register index */
+                        int16 arg1reg;  /* first input register index, or -1 for inline slot */
+                        int16 arg2reg;  /* second input register index, or -1 for inline slot */
+                        Datum *value_ptr;  /* EXTRACT input / scale arg / PACK & CMP output / inline arg1 */
+                        bool *isnull_ptr;
+                        Datum *value2_ptr;  /* inline arg2 of a binary op */
+                        bool *isnull2_ptr;
+                        struct NumericData *packbuf; /* PACK only: preallocated result buffer (query-lifetime) */
+                }                       num;
 
 		/* for EEOP_BOOL_*_STEP */
 		struct

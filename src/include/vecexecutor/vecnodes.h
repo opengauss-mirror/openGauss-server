@@ -117,8 +117,8 @@ typedef enum VecAggType {
 } VecAggType;
 
 typedef struct VecAggInfo {
-    FunctionCallInfoData vec_agg_function;
-    FunctionCallInfoData vec_final_function;
+    FunctionCallInfoData* vec_agg_function;
+    FunctionCallInfoData* vec_final_function;
     VectorFunction* vec_agg_cache;
     VectorFunction* vec_sonic_agg_cache;
     PGFunction* vec_agg_final;

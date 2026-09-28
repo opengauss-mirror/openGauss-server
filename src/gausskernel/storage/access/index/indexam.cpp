@@ -250,7 +250,7 @@ void index_delete(Relation index_relation, Datum* values, const bool* isnull, It
         char* accessMethodName;
         Form_pg_am accessMethodForm;
         FmgrInfo flinfo;
-        FunctionCallInfoData fcinfo;
+        LOCAL_FCINFO(fcinfo, 5);
         Datum result;
 
         switch (index_relation->rd_rel->relam) {
@@ -267,19 +267,19 @@ void index_delete(Relation index_relation, Datum* values, const bool* isnull, It
         accessMethodForm = (Form_pg_am)GETSTRUCT(tuple);
 
         fmgr_info(accessMethodForm->amdelete, &flinfo);
-        InitFunctionCallInfoData(fcinfo, &flinfo, 5, InvalidOid, NULL, NULL);
-        fcinfo.arg[0] = PointerGetDatum(index_relation);
-        fcinfo.arg[1] = PointerGetDatum(values);
-        fcinfo.arg[2] = PointerGetDatum(isnull);
-        fcinfo.arg[3] = PointerGetDatum(heap_t_ctid);
-        fcinfo.arg[4] = BoolGetDatum(isRollbackIndex);
-        fcinfo.argnull[0] = false;
-        fcinfo.argnull[1] = false;
-        fcinfo.argnull[2] = false;
-        fcinfo.argnull[3] = false;
-        fcinfo.argnull[4] = false;
+        InitFunctionCallInfoData(*fcinfo, &flinfo, 5, InvalidOid, NULL, NULL);
+        fcinfo->args[0].value = PointerGetDatum(index_relation);
+        fcinfo->args[1].value = PointerGetDatum(values);
+        fcinfo->args[2].value = PointerGetDatum(isnull);
+        fcinfo->args[3].value = PointerGetDatum(heap_t_ctid);
+        fcinfo->args[4].value = BoolGetDatum(isRollbackIndex);
+        fcinfo->args[0].isnull = false;
+        fcinfo->args[1].isnull = false;
+        fcinfo->args[2].isnull = false;
+        fcinfo->args[3].isnull = false;
+        fcinfo->args[4].isnull = false;
 
-        result = FunctionCallInvoke(&fcinfo);
+        result = FunctionCallInvoke(fcinfo);
 
         ReleaseSysCache(tuple);
     }

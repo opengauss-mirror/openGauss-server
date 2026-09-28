@@ -15,7 +15,9 @@
 #include "pgstat.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/numeric.h"
 #include "utils/typcache.h"
 #include "utils/acl.h"
 #include "knl/knl_session.h"
@@ -522,6 +524,459 @@ ExecReadyExpr(ExprState *state)
 }
 
 /*
+ * Numeric register pipeline compiler.
+ *
+ * Pure-numeric expression chains (numeric add/sub/mul/round and numeric
+ * comparisons) are compiled into EEOP_NUMERIC_* register steps that pass
+ * unpacked NumericVar registers between steps, avoiding the pack/unpack
+ * round trip of the generic fmgr path.
+ */
+
+/* operand slot holding a leaf value evaluated by generic steps */
+typedef struct NumericOperand
+{
+    Datum value;
+    bool isnull;
+} NumericOperand;
+
+/*
+ * numeric_abs/mod/div_trunc and ceiling duplicate the prosrc of
+ * abs/mod/div/ceil, so fmgroids.h defines no F_ macro for them; spell
+ * out the extra OIDs here.
+ */
+#define NUMERIC_ABS_FUNCOID 1704
+#define NUMERIC_MOD_FUNCOID 1729
+#define NUMERIC_DIV_TRUNC_FUNCOID 1980
+#define CEILING_FUNCOID 2167
+
+static ExprEvalOp
+GetNumericVarOpKind(Oid funcid)
+{
+    switch (funcid) {
+        case F_NUMERIC_ADD:
+            return EEOP_NUMERIC_ADD;
+        case F_NUMERIC_SUB:
+            return EEOP_NUMERIC_SUB;
+        case F_NUMERIC_MUL:
+            return EEOP_NUMERIC_MUL;
+        case F_NUMERIC_DIV:
+            return EEOP_NUMERIC_DIV;
+        case F_NUMERIC_MOD:
+        case NUMERIC_MOD_FUNCOID:
+            return EEOP_NUMERIC_MOD;
+        case F_NUMERIC_DIV_TRUNC:
+        case NUMERIC_DIV_TRUNC_FUNCOID:
+            return EEOP_NUMERIC_DIV_TRUNC;
+        case NUMERIC_ABS_FUNCOID:
+        case F_NUMERIC_ABS:
+            return EEOP_NUMERIC_ABS;
+        case F_NUMERIC_UMINUS:
+            return EEOP_NUMERIC_UMINUS;
+        case F_NUMERIC_UPLUS:
+            return EEOP_NUMERIC_UPLUS;
+        case F_NUMERIC_SIGN:
+            return EEOP_NUMERIC_SIGN;
+        case F_NUMERIC_INC:
+            return EEOP_NUMERIC_INC;
+        case F_NUMERIC_CEIL:
+        case CEILING_FUNCOID:
+            return EEOP_NUMERIC_CEIL;
+        case F_NUMERIC_FLOOR:
+            return EEOP_NUMERIC_FLOOR;
+        case F_NUMERIC_ROUND:
+            return EEOP_NUMERIC_ROUND;
+        case F_NUMERIC_TRUNC:
+            return EEOP_NUMERIC_TRUNC;
+        default:
+            return (ExprEvalOp)0;
+    }
+}
+
+/* Is 'kind' an opcode that takes a numeric and an integer scale? */
+static bool
+IsScaleNumericVarOp(ExprEvalOp kind)
+{
+    return kind == EEOP_NUMERIC_ROUND || kind == EEOP_NUMERIC_TRUNC;
+}
+
+/* Is 'kind' an opcode that takes a single numeric argument? */
+static bool
+IsUnaryNumericVarOp(ExprEvalOp kind)
+{
+    switch (kind) {
+        case EEOP_NUMERIC_ABS:
+        case EEOP_NUMERIC_UMINUS:
+        case EEOP_NUMERIC_UPLUS:
+        case EEOP_NUMERIC_SIGN:
+        case EEOP_NUMERIC_INC:
+        case EEOP_NUMERIC_CEIL:
+        case EEOP_NUMERIC_FLOOR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Is 'kind' an opcode that takes two numeric arguments? */
+static bool
+IsBinaryNumericVarOp(ExprEvalOp kind)
+{
+    switch (kind) {
+        case EEOP_NUMERIC_ADD:
+        case EEOP_NUMERIC_SUB:
+        case EEOP_NUMERIC_MUL:
+        case EEOP_NUMERIC_DIV:
+        case EEOP_NUMERIC_MOD:
+        case EEOP_NUMERIC_DIV_TRUNC:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/*
+ * Map a numeric comparison proc to its EEOP_NUMERIC_* comparison opcode,
+ * or -1 when funcid is not a numeric comparison.
+ */
+static int
+GetNumericCmpOpKind(Oid funcid)
+{
+    switch (funcid) {
+        case F_NUMERIC_EQ:
+            return EEOP_NUMERIC_EQ;
+        case F_NUMERIC_NE:
+            return EEOP_NUMERIC_NE;
+        case F_NUMERIC_GE:
+            return EEOP_NUMERIC_GE;
+        case F_NUMERIC_GT:
+            return EEOP_NUMERIC_GT;
+        case F_NUMERIC_LE:
+            return EEOP_NUMERIC_LE;
+        case F_NUMERIC_LT:
+            return EEOP_NUMERIC_LT;
+        default:
+            return -1;
+    }
+}
+
+/* Is 'node' a supported numeric var-op? */
+static bool
+IsNumericVarOp(Node *node)
+{
+    Oid funcid = InvalidOid;
+
+    if (IsA(node, OpExpr)) {
+        funcid = ((OpExpr *)node)->opfuncid;
+    } else if (IsA(node, FuncExpr)) {
+        funcid = ((FuncExpr *)node)->funcid;
+    }
+    return GetNumericVarOpKind(funcid) != 0;
+}
+
+/*
+ * Count the numeric registers needed to compile 'node' as a pipeline, or -1
+ * if the subtree is not buildable.  Numeric leaves need one register each;
+ * a round aliases an owned input register and adds none; a numeric
+ * comparison adds no register of its own.
+ */
+static int
+NumericChainRegCount(Node *node)
+{
+    Oid funcid = InvalidOid;
+    List *args = NIL;
+
+    if (IsA(node, OpExpr)) {
+        funcid = ((OpExpr *)node)->opfuncid;
+        args = ((OpExpr *)node)->args;
+    } else if (IsA(node, FuncExpr)) {
+        funcid = ((FuncExpr *)node)->funcid;
+        args = ((FuncExpr *)node)->args;
+    } else {
+        if (exprType(node) == NUMERICOID) {
+            return 1;
+        }
+        return -1;
+    }
+
+    ExprEvalOp kind = GetNumericVarOpKind(funcid);
+    if (IsScaleNumericVarOp(kind)) {
+        if (list_length(args) != 2 || exprType((Node *)linitial(args)) != NUMERICOID) {
+            return -1;
+        }
+        /* leaf operands are inlined: only the result register counts */
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            return NumericChainRegCount((Node *)linitial(args));
+        }
+        return 1;
+    }
+    if (IsUnaryNumericVarOp(kind)) {
+        if (list_length(args) != 1) {
+            return -1;
+        }
+        /* a leaf operand is inlined: only the result register counts */
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            int count = NumericChainRegCount((Node *)linitial(args));
+            if (count < 0) {
+                return -1;
+            }
+            return count + 1;
+        }
+        return 1;
+    }
+    if (IsBinaryNumericVarOp(kind)) {
+        if (list_length(args) != 2) {
+            return -1;
+        }
+        /* leaf operands are inlined and need no register of their own */
+        int count1 = IsNumericVarOp((Node *)linitial(args)) ? NumericChainRegCount((Node *)linitial(args)) : 0;
+        int count2 = IsNumericVarOp((Node *)lsecond(args)) ? NumericChainRegCount((Node *)lsecond(args)) : 0;
+        if (count1 < 0 || count2 < 0) {
+            return -1;
+        }
+        return count1 + count2 + 1;
+    }
+
+    if (GetNumericCmpOpKind(funcid) >= 0) {
+        if (list_length(args) != 2) {
+            return -1;
+        }
+        /* leaf operands are inlined and need no register of their own */
+        int count1 = 0;
+        int count2 = 0;
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            count1 = NumericChainRegCount((Node *)linitial(args));
+        } else if (exprType((Node *)linitial(args)) != NUMERICOID) {
+            return -1;
+        }
+        if (IsNumericVarOp((Node *)lsecond(args))) {
+            count2 = NumericChainRegCount((Node *)lsecond(args));
+        } else if (exprType((Node *)lsecond(args)) != NUMERICOID) {
+            return -1;
+        }
+        if (count1 < 0 || count2 < 0) {
+            return -1;
+        }
+        return count1 + count2;
+    }
+
+    /* unsupported op: a numeric result counts as a leaf */
+    if (exprType(node) == NUMERICOID) {
+        return 1;
+    }
+    return -1;
+}
+
+static void
+PushNumericRegStep(ExprState *state, ExprEvalOp opcode, NumericReg *regs, int resreg, int arg1reg,
+                    int arg2reg, Datum *value1, bool *isnull1, Datum *value2, bool *isnull2)
+{
+    ExprEvalStep scratch;
+
+    scratch.opcode = opcode;
+    scratch.d.num.regs = regs;
+    scratch.d.num.resreg = resreg;
+    scratch.d.num.arg1reg = arg1reg;
+    scratch.d.num.arg2reg = arg2reg;
+    scratch.d.num.value_ptr = value1;
+    scratch.d.num.isnull_ptr = isnull1;
+    scratch.d.num.value2_ptr = value2;
+    scratch.d.num.isnull2_ptr = isnull2;
+    scratch.d.num.packbuf = NULL;
+    ExprEvalPushStep(state, &scratch);
+}
+
+/*
+ * Recursively build the pipeline for 'node', returning the index of the
+ * register holding the result in *outreg and whether that register is
+ * "owned" (written by a var-op, hence safe to modify in place) in
+ * *outowned.  Must only be called on subtrees accepted by
+ * NumericChainRegCount.
+ */
+static void
+ExecBuildNumericChain(ExprState *state, Expr *node, NumericReg *regs, int *nextreg, int *outreg, bool *outowned)
+{
+    Oid funcid;
+    List *args;
+    ExprEvalOp kind;
+    int arg1reg;
+    int arg2reg;
+    int resreg;
+
+    if (IsA(node, OpExpr)) {
+        funcid = ((OpExpr *)node)->opfuncid;
+        args = ((OpExpr *)node)->args;
+    } else {
+        Assert(IsA(node, FuncExpr));
+        funcid = ((FuncExpr *)node)->funcid;
+        args = ((FuncExpr *)node)->args;
+    }
+
+    kind = GetNumericVarOpKind(funcid);
+    Assert(kind != 0); /* leaves are inlined by the caller, never reached here */
+    if (IsScaleNumericVarOp(kind)) {
+        NumericOperand *scale = (NumericOperand *)palloc0(sizeof(NumericOperand));
+        NumericOperand *operand = NULL;
+        ExecInitExprRec((Expr *)lsecond(args), state, &scale->value, &scale->isnull, node);
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            bool arg1owned;
+            ExecBuildNumericChain(state, (Expr *)linitial(args), regs, nextreg, &arg1reg, &arg1owned);
+            if (arg1owned) {
+                resreg = arg1reg; /* owned input: scale op in place */
+            } else {
+                resreg = (*nextreg)++;
+            }
+        } else {
+            /* inlined leaf operand */
+            operand = (NumericOperand *)palloc0(sizeof(NumericOperand));
+            ExecInitExprRec((Expr *)linitial(args), state, &operand->value, &operand->isnull, node);
+            arg1reg = -1;
+            resreg = (*nextreg)++;
+        }
+        PushNumericRegStep(state, kind, regs, resreg, arg1reg, -1, &scale->value,
+                           &scale->isnull, operand ? &operand->value : NULL, operand ? &operand->isnull : NULL);
+        *outreg = resreg;
+        *outowned = true;
+        return;
+    }
+
+    if (IsUnaryNumericVarOp(kind)) {
+        NumericOperand *operand = NULL;
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            bool arg1owned;
+            ExecBuildNumericChain(state, (Expr *)linitial(args), regs, nextreg, &arg1reg, &arg1owned);
+        } else {
+            /* inlined leaf operand */
+            operand = (NumericOperand *)palloc0(sizeof(NumericOperand));
+            ExecInitExprRec((Expr *)linitial(args), state, &operand->value, &operand->isnull, node);
+            arg1reg = -1;
+        }
+        resreg = (*nextreg)++;
+        PushNumericRegStep(state, kind, regs, resreg, arg1reg, -1,
+                           operand ? &operand->value : NULL, operand ? &operand->isnull : NULL, NULL, NULL);
+        *outreg = resreg;
+        *outowned = true;
+        return;
+    }
+
+    Assert(IsBinaryNumericVarOp(kind));
+    bool arg1owned;
+    bool arg2owned;
+    NumericOperand *operand1 = NULL;
+    NumericOperand *operand2 = NULL;
+    if (IsNumericVarOp((Node *)linitial(args))) {
+        ExecBuildNumericChain(state, (Expr *)linitial(args), regs, nextreg, &arg1reg, &arg1owned);
+    } else {
+        operand1 = (NumericOperand *)palloc0(sizeof(NumericOperand));
+        ExecInitExprRec((Expr *)linitial(args), state, &operand1->value, &operand1->isnull, node);
+        arg1reg = -1; /* inline operand: the var-op extracts it directly */
+    }
+    if (IsNumericVarOp((Node *)lsecond(args))) {
+        ExecBuildNumericChain(state, (Expr *)lsecond(args), regs, nextreg, &arg2reg, &arg2owned);
+    } else {
+        operand2 = (NumericOperand *)palloc0(sizeof(NumericOperand));
+        ExecInitExprRec((Expr *)lsecond(args), state, &operand2->value, &operand2->isnull, node);
+        arg2reg = -1;
+    }
+    resreg = (*nextreg)++;
+    PushNumericRegStep(state, kind, regs, resreg, arg1reg, arg2reg,
+                       operand1 ? &operand1->value : NULL, operand1 ? &operand1->isnull : NULL,
+                       operand2 ? &operand2->value : NULL, operand2 ? &operand2->isnull : NULL);
+    *outreg = resreg;
+    *outowned = true;
+}
+
+/*
+ * Try to compile 'node' as a numeric register pipeline, emitting the full
+ * chain ending in a PACK step (numeric result) or a CMP_VAR step (boolean
+ * comparison) writing into *resvalue and *resnull.  Returns true if the
+ * pipeline was built.
+ */
+static bool
+ExecTryNumericChain(ExprState *state, Expr *node, Datum *resvalue, bool *resnull)
+{
+    int nregs = NumericChainRegCount((Node *)node);
+    if (nregs < 0) {
+        return false;
+    }
+
+    NumericReg *regs = (NumericReg *)palloc0(sizeof(NumericReg) * nregs);
+    for (int i = 0; i < nregs; i++) {
+        quick_init_var(&regs[i].var);
+    }
+
+    int nextreg = 0;
+    bool owned;
+    ExprEvalStep scratch;
+
+    Oid funcid;
+    List *args;
+    if (IsA(node, OpExpr)) {
+        funcid = ((OpExpr *)node)->opfuncid;
+        args = ((OpExpr *)node)->args;
+    } else {
+        funcid = ((FuncExpr *)node)->funcid;
+        args = ((FuncExpr *)node)->args;
+    }
+
+    int cmpkind = GetNumericCmpOpKind(funcid);
+    if (cmpkind >= 0) {
+        /* numeric comparison: leaf operands are inlined into the comparison step */
+        int reg1 = -1;
+        int reg2 = -1;
+        NumericOperand *operand1 = NULL;
+        NumericOperand *operand2 = NULL;
+        if (IsNumericVarOp((Node *)linitial(args))) {
+            ExecBuildNumericChain(state, (Expr *)linitial(args), regs, &nextreg, &reg1, &owned);
+        } else {
+            operand1 = (NumericOperand *)palloc0(sizeof(NumericOperand));
+            ExecInitExprRec((Expr *)linitial(args), state, &operand1->value, &operand1->isnull, node);
+        }
+        if (IsNumericVarOp((Node *)lsecond(args))) {
+            ExecBuildNumericChain(state, (Expr *)lsecond(args), regs, &nextreg, &reg2, &owned);
+        } else {
+            operand2 = (NumericOperand *)palloc0(sizeof(NumericOperand));
+            ExecInitExprRec((Expr *)lsecond(args), state, &operand2->value, &operand2->isnull, node);
+        }
+        Assert(nextreg == nregs);
+
+        /* result goes through the step's resvalue, freeing value_ptr for inlined operands */
+        scratch.opcode = (ExprEvalOp)cmpkind;
+        scratch.resvalue = resvalue;
+        scratch.resnull = resnull;
+        scratch.d.num.regs = regs;
+        scratch.d.num.resreg = -1;
+        scratch.d.num.arg1reg = reg1;
+        scratch.d.num.arg2reg = reg2;
+        scratch.d.num.value_ptr = operand1 ? &operand1->value : NULL;
+        scratch.d.num.isnull_ptr = operand1 ? &operand1->isnull : NULL;
+        scratch.d.num.value2_ptr = operand2 ? &operand2->value : NULL;
+        scratch.d.num.isnull2_ptr = operand2 ? &operand2->isnull : NULL;
+        scratch.d.num.packbuf = NULL;
+        ExprEvalPushStep(state, &scratch);
+        return true;
+    }
+
+    /* numeric chain ending in a Datum */
+    int outreg;
+    ExecBuildNumericChain(state, node, regs, &nextreg, &outreg, &owned);
+    Assert(nextreg == nregs);
+
+    scratch.opcode = EEOP_NUMERIC_PACK;
+    scratch.d.num.regs = regs;
+    scratch.d.num.resreg = -1;
+    scratch.d.num.arg1reg = outreg;
+    scratch.d.num.arg2reg = -1;
+    scratch.d.num.value_ptr = resvalue;
+    scratch.d.num.isnull_ptr = resnull;
+    scratch.d.num.value2_ptr = NULL;
+    scratch.d.num.isnull2_ptr = NULL;
+    /* query-lifetime buffer reused by every row's PACK step */
+    scratch.d.num.packbuf = (Numeric)palloc(NUMERIC_PACKBUF_SIZE);
+    ExprEvalPushStep(state, &scratch);
+    return true;
+}
+
+/*
  * Append the steps necessary for the evaluation of node to ExprState->steps,
  * possibly recursing into sub-expressions of node.
  *
@@ -810,6 +1265,12 @@ ExecInitExprRec(Expr *node, ExprState *state,
 		case T_FuncExpr:
 			{
 				FuncExpr *func = (FuncExpr *) node;
+
+                                if ((GetNumericVarOpKind(func->funcid) != 0 ||
+                                    GetNumericCmpOpKind(func->funcid) >= 0) &&
+                                    ExecTryNumericChain(state, node, resv, resnull)) {
+                                        break;
+                                }
 				ExecInitFunc(&scratch, node,
 							 func->args, func->funcid, func->inputcollid,
 							 state);
@@ -820,6 +1281,11 @@ ExecInitExprRec(Expr *node, ExprState *state,
 			{
 				OpExpr *op = (OpExpr *) node;
 
+                                if ((GetNumericVarOpKind(op->opfuncid) != 0 ||
+                                    GetNumericCmpOpKind(op->opfuncid) >= 0) &&
+                                    ExecTryNumericChain(state, node, resv, resnull)) {
+                                        break;
+                                }
 				ExecInitFunc(&scratch, node,
 							 op->args, op->opfuncid, op->inputcollid,
 							 state);
@@ -912,7 +1378,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				/* Set up the primary fmgr lookup information */
 				finfo = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
-				fcinfo = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
+                                fcinfo = (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(2));
                 fmgr_info(cmpfuncid, finfo);
 				fmgr_info_set_expr((Node *) node, finfo);
 				InitFunctionCallInfoData(*fcinfo, finfo, 2,
@@ -927,7 +1393,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
                  */
                 if (OidIsValid(opexpr->hashfuncid)) {
                     /* Evaluate scalar directly into left function argument */
-                    ExecInitExprRec(scalararg, state, &fcinfo->arg[0], &fcinfo->argnull[0], node);
+                    ExecInitExprRec(scalararg, state, &fcinfo->args[0].value, &fcinfo->args[0].isnull, node);
 
                     /*
                      * Evaluate array argument into our return value.  There's
@@ -949,7 +1415,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
                     ExprEvalPushStep(state, &scratch);
                 } else {
                     /* Evaluate scalar directly into left function argument */
-                    ExecInitExprRec(scalararg, state, &fcinfo->arg[0], &fcinfo->argnull[0], node);
+                    ExecInitExprRec(scalararg, state, &fcinfo->args[0].value, &fcinfo->args[0].isnull, node);
 
                     /*
                      * Evaluate array argument into our return value.  There's no
@@ -1232,7 +1698,8 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				/* lookup the source type's output function */
 				scratch.d.iocoerce.finfo_out = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
-				scratch.d.iocoerce.fcinfo_data_out = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
+                                scratch.d.iocoerce.fcinfo_data_out =
+                                    (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(1));
 
 				getTypeOutputInfo(exprType((Node *) iocoerce->arg),
 								  &iofunc, &typisvarlena);
@@ -1244,7 +1711,8 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				/* lookup the result type's input function */
 				scratch.d.iocoerce.finfo_in = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
-				scratch.d.iocoerce.fcinfo_data_in = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
+                                scratch.d.iocoerce.fcinfo_data_in =
+                                    (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(3));
 
 				getTypeInputInfo(iocoerce->resulttype,
 								 &iofunc, &typioparam);
@@ -1259,10 +1727,10 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				 * function, since they're constants.
 				 */
 				fcinfo_in = scratch.d.iocoerce.fcinfo_data_in;
-				fcinfo_in->arg[1] = ObjectIdGetDatum(typioparam);
-				fcinfo_in->argnull[1] = false;
-				fcinfo_in->arg[2] = Int32GetDatum(-1);
-				fcinfo_in->argnull[2] = false;
+                                fcinfo_in->args[1].value = ObjectIdGetDatum(typioparam);
+                                fcinfo_in->args[1].isnull = false;
+                                fcinfo_in->args[2].value = Int32GetDatum(-1);
+                                fcinfo_in->args[2].isnull = false;
 
 				ExprEvalPushStep(state, &scratch);
 				break;
@@ -1695,7 +2163,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 					/* Set up the primary fmgr lookup information */
 					finfo = (FmgrInfo *)palloc0(sizeof(FmgrInfo));
-					fcinfo = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
+                                        fcinfo = (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(2));
 					fmgr_info(proc, finfo);
 					fmgr_info_set_expr((Node *) node, finfo);
 					InitFunctionCallInfoData(*fcinfo, finfo, 2,
@@ -1710,9 +2178,11 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 					/* evaluate left and right args directly into fcinfo */
 					ExecInitExprRec(left_expr, state,
-									&fcinfo->arg[0], &fcinfo->argnull[0], node);
+                                                                        &fcinfo->args[0].value,
+                                                                        &fcinfo->args[0].isnull, node);
 					ExecInitExprRec(right_expr, state,
-									&fcinfo->arg[1], &fcinfo->argnull[1], node);
+                                                                        &fcinfo->args[1].value,
+                                                                        &fcinfo->args[1].isnull, node);
 
 					scratch.opcode = EEOP_ROWCOMPARE_STEP;
 					scratch.d.rowcompare_step.finfo = finfo;
@@ -1838,7 +2308,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 
 				/* Perform function lookup */
 				finfo = (FmgrInfo *)palloc0(sizeof(FmgrInfo));
-				fcinfo = (FunctionCallInfo)palloc0(sizeof(FunctionCallInfoData));
+                                fcinfo = (FunctionCallInfo)palloc0(SizeForFunctionCallInfo(2));
 				fmgr_info(typentry->cmp_proc, finfo);
 				fmgr_info_set_expr((Node *) node, finfo);
 				InitFunctionCallInfoData(*fcinfo, finfo, 2,
@@ -2315,7 +2785,7 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
 
 	/* Allocate function lookup data and parameter workspace for this call */
 	scratch->d.func.finfo = (FmgrInfo*)palloc0(sizeof(FmgrInfo));
-	scratch->d.func.fcinfo_data =(FunctionCallInfo) palloc0(sizeof(FunctionCallInfoData));
+        scratch->d.func.fcinfo_data =(FunctionCallInfo) palloc0(SizeForFunctionCallInfo(nargs));
 	scratch->d.func.flag = 0;
 	flinfo = scratch->d.func.finfo;
 	fcinfo = scratch->d.func.fcinfo_data;
@@ -2348,25 +2818,32 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
     if (func_has_refcursor_args(funcid, fcinfo))
         func_flags |= (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY);
 
-    if (fcinfo->refcursor_data.return_number)
+    if (fcinfo->extra != NULL && fcinfo->extra->refcursor_data.return_number) {
         func_flags |= (FUNC_EXPR_FLAG_HAS_CURSOR_RETURN | FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY);
+    }
 
     if (supportTranaction) {
         fcinfo->context = (Node *)fssnode;
     }
 
+    /* CONNECT BY functions carry start-with info in extra at runtime */
+    if (fcinfo->extra == NULL &&
+        (flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID || flinfo->fn_oid == SYS_CONNECT_BY_PATH_FUNCOID)) {
+        FunctionCallEnsureExtra(fcinfo);
+    }
+
 	if (func_flags & FUNC_EXPR_FLAG_HAS_CURSOR_RETURN) {
         /* init returnCursor to store out-args cursor info on ExprContext*/
-        fcinfo->refcursor_data.returnCursor =
-            (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
-    } else {
-        fcinfo->refcursor_data.returnCursor = NULL;
+        fcinfo->extra->refcursor_data.returnCursor =
+            (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->extra->refcursor_data.return_number);
+    } else if (fcinfo->extra != NULL) {
+        fcinfo->extra->refcursor_data.returnCursor = NULL;
     }
 
 	scratch->d.func.var_dno = NULL;
 	if (func_flags & FUNC_EXPR_FLAG_HAS_REFCURSOR) {
         /* init argCursor to store in-args cursor info on ExprContext */
-        fcinfo->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
+        fcinfo->extra->refcursor_data.argCursor = (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->nargs);
         scratch->d.func.var_dno = (int*)palloc0(sizeof(int) * fcinfo->nargs);
         for (i = 0; i < fcinfo->nargs; i++) {
             scratch->d.func.var_dno[i] = -1;
@@ -2379,13 +2856,12 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
         Expr *arg = (Expr *) lfirst(lc);
         if (IsA(arg, Const) && !(func_flags & (FUNC_EXPR_FLAG_HAS_REFCURSOR | FUNC_EXPR_FLAG_HAS_CURSOR_RETURN))) {
             Const *con = (Const *) arg;
-            fcinfo->arg[argno] = con->constvalue;
-            fcinfo->argnull[argno] = con->constisnull;
+            fcinfo->args[argno].value = con->constvalue;
+            fcinfo->args[argno].isnull = con->constisnull;
         } else {
-            ExecInitExprRec(arg, state, &fcinfo->arg[argno], &fcinfo->argnull[argno], node);
+            ExecInitExprRec(arg, state, &fcinfo->args[argno].value, &fcinfo->args[argno].isnull, node);
         }
-		fcinfo->argTypes[argno] = exprType((Node*)arg);
-        if (fcinfo->argTypes[argno] == CLOBOID && !fcinfo->argnull[argno]) {
+        if (exprType((Node*)arg) == CLOBOID && !fcinfo->args[argno].isnull) {
             /*maybe huge clob */
             func_flags |= FUNC_EXPR_FLAG_ORACLE_COMPATIBILITY;
         }
@@ -2413,7 +2889,13 @@ ExecInitFunc(ExprEvalStep *scratch, Expr *node, List *args, Oid funcid,
     if (func_flags == 0) {
         scratch->opcode = EEOP_FUNCEXPR;
     } else if (func_flags == FUNC_EXPR_FLAG_STRICT) {
-        scratch->opcode = EEOP_FUNCEXPR_STRICT;
+        if (nargs == 1) {
+            scratch->opcode = EEOP_FUNCEXPR_STRICT_1;
+        } else if (nargs == 2) {
+            scratch->opcode = EEOP_FUNCEXPR_STRICT_2;
+        } else {
+            scratch->opcode = EEOP_FUNCEXPR_STRICT;
+        }
     } else if (func_flags == FUNC_EXPR_FLAG_FUSAGE) {
         scratch->opcode = EEOP_FUNCEXPR_FUSAGE;
     }  else if (func_flags == FUNC_EXPR_FLAG_STRICT_FUSAGE) {
@@ -3002,8 +3484,8 @@ ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool do
         int setno;
         bool isCollect = ((pertrans->aggref->aggstage > 0 || aggstate->is_final) &&
                           need_adjust_agg_inner_func_type(pertrans->aggref) && pertrans->numSortCols == 0);
-        FunctionCallInfo trans_fcinfo = &pertrans->transfn_fcinfo;
-        FunctionCallInfo collect_fcinfo = &pertrans->collectfn_fcinfo;
+        FunctionCallInfo trans_fcinfo = pertrans->transfn_fcinfo;
+        FunctionCallInfo collect_fcinfo = pertrans->collectfn_fcinfo;
         ListCell *arg;
         ListCell *bail;
         List *adjust_bailout = NIL;
@@ -3018,7 +3500,10 @@ ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool do
             /*
              * like Normal transition function below
              */
-            strictnulls = collect_fcinfo->argnull + 1;
+            strictnulls = (bool*)palloc0(list_length(pertrans->aggref->args) * sizeof(bool));
+            for (int si = 0; si < list_length(pertrans->aggref->args); si++) {
+                strictnulls[si] = collect_fcinfo->args[si + 1].isnull;
+            }
 
             foreach (arg, pertrans->aggref->args) {
                 TargetEntry *source_tle = (TargetEntry *)lfirst(arg);
@@ -3027,15 +3512,18 @@ ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool do
                  * Start from 1, since the 0th arg will be the transition
                  * value
                  */
-                ExecInitExprRec(source_tle->expr, state, &collect_fcinfo->arg[argno + 1],
-                                &collect_fcinfo->argnull[argno + 1], NULL);
+                ExecInitExprRec(source_tle->expr, state, &collect_fcinfo->args[argno + 1].value,
+                                &collect_fcinfo->args[argno + 1].isnull, NULL);
                 argno++;
             }
         } else if (pertrans->numSortCols == 0) {
             /*
              * Normal transition function without ORDER BY / DISTINCT.
              */
-            strictnulls = trans_fcinfo->argnull + 1;
+            strictnulls = (bool*)palloc0(list_length(pertrans->aggref->args) * sizeof(bool));
+            for (int si = 0; si < list_length(pertrans->aggref->args); si++) {
+                strictnulls[si] = trans_fcinfo->args[si + 1].isnull;
+            }
 
             foreach (arg, pertrans->aggref->args) {
                 TargetEntry *source_tle = (TargetEntry *)lfirst(arg);
@@ -3044,8 +3532,8 @@ ExprState *ExecBuildAggTrans(AggState *aggstate, AggStatePerPhase phase, bool do
                  * Start from 1, since the 0th arg will be the transition
                  * value
                  */
-                ExecInitExprRec(source_tle->expr, state, &trans_fcinfo->arg[argno + 1],
-                                &trans_fcinfo->argnull[argno + 1], NULL);
+                ExecInitExprRec(source_tle->expr, state, &trans_fcinfo->args[argno + 1].value,
+                                &trans_fcinfo->args[argno + 1].isnull, NULL);
                 argno++;
             }
         } else if (pertrans->numInputs == 1) {

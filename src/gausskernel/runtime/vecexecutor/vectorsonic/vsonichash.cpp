@@ -440,21 +440,20 @@ void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, F
     uint32 hash_val;
     containerType* arrval = (containerType*)val;
     uint32* res1 = res;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
-    fcinfo.arg = &args[0];
-    fcinfo.flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
+    fcinfo->flinfo = hashFmgr;
     PGFunction func = hashFmgr->fn_addr;
 
     for (int i = 0; i < nval; i++) {
         if (likely(NOT_NULL(*flag))) {
-            fcinfo.arg[0] = *arrval;
+            fcinfo->args[0].value = *arrval;
             if (rehash) {
                 hash_val = *res1;
                 hash_val = (hash_val << 1) | ((hash_val & 0x80000000) ? 1 : 0);
-                *res1 = hash_val ^ func(&fcinfo);
+                *res1 = hash_val ^ func(fcinfo);
             } else
-                *res1 = func(&fcinfo);
+                *res1 = func(fcinfo);
         } else {
             if (!rehash)
                 *res1 = 0;

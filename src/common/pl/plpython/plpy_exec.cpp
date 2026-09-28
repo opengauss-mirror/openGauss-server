@@ -322,7 +322,7 @@ static PyObject* PLy_function_build_args(FunctionCallInfo fcinfo, PLyProcedure* 
         args = PyList_New(proc->nargs);
         for (i = 0; i < proc->nargs; i++) {
             if (proc->args[i].is_rowtype > 0) {
-                if (fcinfo->argnull[i]) {
+                if (fcinfo->args[i].isnull) {
                     arg = NULL;
                 } else {
                     HeapTupleHeader td;
@@ -331,7 +331,7 @@ static PyObject* PLy_function_build_args(FunctionCallInfo fcinfo, PLyProcedure* 
                     TupleDesc tupdesc;
                     HeapTupleData tmptup;
 
-                    td = DatumGetHeapTupleHeader(fcinfo->arg[i]);
+                    td = DatumGetHeapTupleHeader(fcinfo->args[i].value);
                     /* Extract rowtype info and find a tupdesc */
                     tupType = HeapTupleHeaderGetTypeId(td);
                     tupTypmod = HeapTupleHeaderGetTypMod(td);
@@ -350,10 +350,10 @@ static PyObject* PLy_function_build_args(FunctionCallInfo fcinfo, PLyProcedure* 
                     ReleaseTupleDesc(tupdesc);
                 }
             } else {
-                if (fcinfo->argnull[i]) {
+                if (fcinfo->args[i].isnull) {
                     arg = NULL;
                 } else {
-                    arg = (proc->args[i].in.d.func)(&(proc->args[i].in.d), fcinfo->arg[i]);
+                    arg = (proc->args[i].in.d.func)(&(proc->args[i].in.d), fcinfo->args[i].value);
                 }
             }
 

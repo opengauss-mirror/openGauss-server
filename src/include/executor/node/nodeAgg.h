@@ -188,7 +188,7 @@ typedef struct AggStatePerAggData {
      * re-initializing the unchanging fields; which isn't much, but it seems
      * worth the extra space consumption. cached for transhfn and collectfn now.
      */
-    FunctionCallInfoData transfn_fcinfo;
+    FunctionCallInfoData* transfn_fcinfo;
 
     /* XXX: use for vector engine now, better remove later*/
     TupleDesc	evaldesc;		/* descriptor of input tuples */
@@ -328,9 +328,9 @@ typedef struct AggStatePerTransData {
      * re-initializing the unchanging fields; which isn't much, but it seems
      * worth the extra space consumption.
      */
-    FunctionCallInfoData transfn_fcinfo;
+    FunctionCallInfoData* transfn_fcinfo;
 
-    FunctionCallInfoData collectfn_fcinfo;
+    FunctionCallInfoData* collectfn_fcinfo;
 
     /* XXX: use for vector engine now, better remove later*/
     TupleDesc evaldesc;       /* descriptor of input tuples */

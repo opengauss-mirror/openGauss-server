@@ -43,6 +43,16 @@ extern void FreeFuncCallUDFInfo(FunctionCallInfoData* Fcinfo);
 #define VECTOR_GENERIC_FUNCTION_PREALLOCED_ARGS 32
 #define VECTOR_GENERIC_FUNCTION_INCREMENTAL_ARGS 10
 
+/*
+ * A NullableDatum holds both a Datum and its null flag. Using a single
+ * interleaved array (instead of separate Datum[] and bool[] arrays) gives
+ * better spatial locality when both value and nullness are accessed together.
+ */
+typedef struct NullableDatum {
+    Datum value;
+    bool isnull;
+} NullableDatum;
+
 struct GenericFunRuntimeArg {
     ScalarVector** arg;
     Oid argType;
@@ -55,11 +65,11 @@ struct GenericFunRuntime {
 
     /* pointer to the address of the real arg */
     GenericFunRuntimeArg* args;
-    Datum* inputargs;
-    bool* nulls;
+    NullableDatum* nargs;
 
     bool restrictFlag[BatchMaxSize];
     FunctionCallInfoData* internalFinfo;
+    bool is_plpgsql_func_with_outparam; /* plpgsql function has OUT params */
 };
 /*
  * This struct holds the system-catalog information that must be looked up
@@ -72,36 +82,72 @@ struct GenericFunRuntime {
  * to store it here rather than in FunctionCallInfoData, where it might more
  * logically belong.
  */
+/*
+ * Extended FmgrInfo fields — cold-path metadata that is only needed for
+ * fenced UDFs, vectorized execution, or diagnostics.  Allocated lazily
+ * alongside a FmgrInfo by fmgr_info_cxt_security() for non-builtin
+ * functions; stays NULL for builtins.
+ */
+typedef struct FmgrInfoExt {
+    char fn_name[NAMEDATALEN];          /* function name (error/IPC only) */
+    char *fn_lib_path;                  /* library path for fenced UDFs */
+    bool fn_fenced;                     /* fenced UDF flag */
+    Oid fn_language_id;                 /* function language id */
+    char fn_volatile;                   /* procvolatile */
+    VectorFunction vec_fn_addr;         /* vectorized function pointer */
+    VectorFunction *vec_fn_cache;       /* vectorized function cache */
+    GenericFunRuntime *generic_runtime; /* generic vectorized runtime */
+    Oid fn_rettypemod;                  /* return type mod (ClientLogic only) */
+} FmgrInfoExt;
+
+/*
+ * Access the lazily-allocated extension struct.  Returns NULL for builtins.
+ */
+#define FmgrInfoGetExt(finfo) ((finfo)->fn_ext)
+
+/*
+ * This struct holds the system-catalog information that must be looked up
+ * before a function can be called through fmgr.  If the same function is
+ * to be called multiple times, the lookup need be done only once and the
+ * info struct saved for re-use.
+ *
+ * Note that fn_expr really is parse-time-determined information about the
+ * arguments, rather than about the function itself.  But it's convenient
+ * to store it here rather than in FunctionCallInfoData, where it might more
+ * logically belong.
+ *
+ * Fields are ordered to minimize padding: all pointer-sized fields first,
+ * then 4-byte, then smaller types.  This keeps the struct at 56 bytes —
+ * one cache line on x86-64 — so that ScanKeyData (which embeds FmgrInfo
+ * inline) stays compact in btree comparison loops.
+ */
 typedef struct FmgrInfo {
     PGFunction fn_addr;       /* pointer to function or handler to be called */
-    Oid fn_oid;               /* OID of function (NOT of handler, if any) */
-    short fn_nargs;           /* 0..FUNC_MAX_ARGS, or -1 if variable arg
-                               * count */
-    bool fn_strict;           /* function is "strict" (NULL in => NULL out) */
-    bool fn_retset;           /* function returns a set */
-    unsigned char fn_stats;   /* collect stats if track_functions > this */
     void* fn_extra;           /* extra space for use by handler */
     MemoryContext fn_mcxt;    /* memory context to store fn_extra in */
     fmNodePtr fn_expr;        /* expression parse tree for call, or NULL */
-    Oid fn_rettype;           // Oid of function return type
-    Oid fn_rettypemod;        /* Oid of the function returnt typmod */
-    char fnName[NAMEDATALEN]; /* function name */
-    char* fnLibPath;          /* library path for c-udf
-                               * package.class.method(args) for java-udf */
-    bool fn_fenced;
-    Oid fn_languageId; /* function language id*/
-    char fn_volatile;  /* procvolatile */
-    // Vector Function
-    VectorFunction vec_fn_addr;
-    VectorFunction* vec_fn_cache;
-    GenericFunRuntime* genericRuntime;
+    FmgrInfoExt* fn_ext;      /* lazily-allocated extension (NULL for builtins) */
+    Oid fn_oid;               /* OID of function (NOT of handler, if any) */
+    Oid fn_rettype;           /* Oid of function return type */
+    short fn_nargs;           /* 0..FUNC_MAX_ARGS, or -1 if variable arg count */
+    bool fn_strict;           /* function is "strict" (NULL in => NULL out) */
+    bool fn_retset;           /* function returns a set */
+    unsigned char fn_stats;   /* collect stats if track_functions > this */
 } FmgrInfo;
 
 /*
- * number of prealloced arguments to a function.
- * In deepsql (SVM and elastic_net), we cannot explicitly set all elements to false.
+ * Ensure the lazily-allocated extension struct exists, allocating it in
+ * fn_mcxt if needed.  Builtins keep fn_ext NULL unless the caller needs the
+ * extension fields (e.g. the vectorized executor storing vec_fn_addr); this
+ * is the only way to obtain a non-NULL fn_ext for a builtin.
  */
-#define FUNC_PREALLOCED_ARGS 10
+extern FmgrInfoExt *FmgrInfoEnsureExt(FmgrInfo *flinfo);
+
+/*
+ * number of prealloced arguments to a function.
+ * Kept for backward compatibility with code that references it.
+ */
+#define FUNC_PREALLOCED_ARGS 0
 
 typedef struct UDFInfoType {
     UDFArgsFuncType* UDFArgsHandlerPtr; /* UDF send/recv argument function */
@@ -114,6 +160,7 @@ typedef struct UDFInfoType {
     bool** null;
     Datum* result;
     bool* resultIsNull;
+    Oid* argTypes;                     /* Argument types for fenced UDF IPC */
     bool valid_UDFArgsHandlerPtr; /* True if funcUDFArgs are filled ok */
 
     UDFInfoType()
@@ -126,6 +173,7 @@ typedef struct UDFInfoType {
         resultIsNull = NULL;
         UDFArgsHandlerPtr = NULL;
         UDFResultHandlerPtr = NULL;
+        argTypes = NULL;
         valid_UDFArgsHandlerPtr = false;
         allocRows = 0;
         argBatchRows = 0;
@@ -140,8 +188,6 @@ typedef struct RefcusorInfoData {
 
 /*
  * start-with support
- *
- * Note, need revisit. Basically, we don't want feature oriented stuffs put here
  */
 typedef struct StartWithFuncEvalInfo
 {
@@ -151,49 +197,50 @@ typedef struct StartWithFuncEvalInfo
 } StartWithFuncEvalInfo;
 
 /*
+ * Optional per-call data, allocated only for functions that need it
+ * (e.g., PL/pgSQL functions with REFCURSOR arguments, fenced UDFs,
+ * or START WITH / CONNECT BY queries).
+ * Keeps FunctionCallInfoData lean for the common case.
+ */
+typedef struct FunctionCallExtraData {
+    RefcusorInfoData refcursor_data;
+    UDFInfoType udfInfo;
+    StartWithFuncEvalInfo swinfo;
+} FunctionCallExtraData;
+
+/*
  * This struct is the data actually passed to an fmgr-called function.
+ * Uses a flexible array member for arguments — allocate with
+ * SizeForFunctionCallInfo(nargs) or declare on the stack with LOCAL_FCINFO.
  */
 typedef struct FunctionCallInfoData {
     FmgrInfo* flinfo;                            /* ptr to lookup info used for this call */
     fmNodePtr context;                           /* pass info about context of call */
     fmNodePtr resultinfo;                        /* pass or return extra info about result */
+    FunctionCallExtraData* extra;                /* optional per-call data (cursor, etc.) */
     Oid fncollation;                             /* collation for function to use */
+    short nargs;                                 /* # arguments actually passed */
     bool isnull;                                 /* function must set true if result is NULL */
     bool can_ignore;                             /* function can ignore overflow or underflow conditions for type transform function */
-    short nargs;                                 /* # arguments actually passed */
-    Datum* arg;                                  /* Arguments passed to function */
-    bool* argnull;                               /* T if arg[i] is actually NULL */
-    Oid* argTypes;                               /* Argument type */
-    uint32 arghash;                              /* Argument hash */
-    struct EState *top_estate;
-    FuncCache fncache;
-    Datum prealloc_arg[FUNC_PREALLOCED_ARGS];    /* prealloced arguments.*/
-    bool prealloc_argnull[FUNC_PREALLOCED_ARGS]; /* prealloced argument null flags.*/
-    Oid prealloc_argTypes[FUNC_PREALLOCED_ARGS] = {InvalidOid}; /* prealloced argument type */
-    ScalarVector* argVector;                     /* Scalar Vector */
-    RefcusorInfoData refcursor_data;
-    UDFInfoType udfInfo;
-    StartWithFuncEvalInfo  swinfo;
-    CoercionContext ccontext;
-    bool is_plpgsql_language_function_with_outparam;
-
-    FunctionCallInfoData()
-    {
-        flinfo = NULL;
-        arg = NULL;
-        argnull = NULL;
-        argTypes = NULL;
-        argVector = NULL;
-        fncollation = 0;
-        context = NULL;
-        resultinfo = NULL;
-        nargs = 0;
-        isnull = false;
-        can_ignore = false;
-        ccontext = COERCION_UNKNOWN;
-        is_plpgsql_language_function_with_outparam = false;
-    }
+    NullableDatum args[FLEXIBLE_ARRAY_MEMBER];   /* arguments passed to function (value + null flag) */
 } FunctionCallInfoData;
+
+/*
+ * Compute the total size needed for a FunctionCallInfoData with nargs arguments.
+ */
+#define SizeForFunctionCallInfo(nargs) \
+    (offsetof(FunctionCallInfoData, args) + (nargs) * sizeof(NullableDatum))
+
+/*
+ * Declare a FunctionCallInfoData on the stack with room for nargs arguments.
+ * The pointer `name` is aligned and points into the stack buffer.
+ */
+#define LOCAL_FCINFO(name, nargs)                                               \
+    union {                                                                     \
+        FunctionCallInfoData fcinfo;                                            \
+        char data[SizeForFunctionCallInfo(nargs)];                              \
+    } name##_storage;                                                           \
+    FunctionCallInfoData *name = &name##_storage.fcinfo
 
 /*
  * List of dynamically loaded files (kept in malloc'd memory).
@@ -271,15 +318,13 @@ extern void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext d
         }                                                                                                           \
         (GenericRuntime).args =                                                                                     \
             (GenericFunRuntimeArg*)palloc0(sizeof(GenericFunRuntimeArg) * (GenericRuntime).compacity);              \
-        (GenericRuntime).inputargs = (Datum*)palloc0(sizeof(Datum) * (GenericRuntime).compacity);                   \
-        (GenericRuntime).nulls = (bool*)palloc0(sizeof(bool) * (GenericRuntime).compacity);                         \
+        (GenericRuntime).nargs = (NullableDatum*)palloc0(sizeof(NullableDatum) * (GenericRuntime).compacity);       \
     } while (0)
 
 #define FreeGenericFunRuntimeInfo(GenericRuntime)                        \
     do {                                                                 \
         pfree_ext((GenericRuntime).args);                                \
-        pfree_ext((GenericRuntime).inputargs);                           \
-        pfree_ext((GenericRuntime).nulls);                               \
+        pfree_ext((GenericRuntime).nargs);                               \
         if (unlikely((GenericRuntime).internalFinfo != NULL))            \
             FreeFunctionCallInfoData(*((GenericRuntime).internalFinfo)); \
         (GenericRuntime).compacity = 0;                                  \
@@ -287,25 +332,21 @@ extern void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext d
 
 /*
  * This macro initializes all the fields of a FunctionCallInfoData except
- * for the arg[] and argnull[] arrays.	Performance testing has shown that
- * the fastest way to set up argnull[] for small numbers of arguments is to
- * explicitly set each required element to false, so we don't try to zero
- * out the argnull[] array in the macro.
+ * for the args[] array.        Performance testing has shown that the fastest
+ * way to set up args[] for small numbers of arguments is to explicitly
+ * set each required element to false, so we don't try to zero out the
+ * args[] array in the macro.
  */
-#define InitFunctionCallInfoArgs(Fcinfo, Nargs, batchRow)             \
-    do {                                                              \
-        (Fcinfo).nargs = (Nargs);                                     \
-        if ((Nargs) > FUNC_PREALLOCED_ARGS) {                         \
-            (Fcinfo).arg = (Datum*)palloc0((Nargs) * sizeof(Datum));  \
-            (Fcinfo).argnull = (bool*)palloc0(Nargs * sizeof(bool));  \
-            (Fcinfo).argTypes = (Oid*)palloc0((Nargs) * sizeof(Oid)); \
-        } else {                                                      \
-            (Fcinfo).arg = (Fcinfo).prealloc_arg;                     \
-            (Fcinfo).argnull = (Fcinfo).prealloc_argnull;             \
-            (Fcinfo).argTypes = (Fcinfo).prealloc_argTypes;           \
-        }                                                             \
-        if (unlikely((Fcinfo).flinfo && (Fcinfo).flinfo->fn_fenced))  \
-            InitFunctionCallUDFArgs(&(Fcinfo), (Nargs), (batchRow));  \
+#define InitFunctionCallInfoArgs(Fcinfo, Nargs, batchRow)                    \
+    do {                                                                     \
+        (Fcinfo).nargs = (Nargs);                                            \
+        if (unlikely((Fcinfo).flinfo && (Fcinfo).flinfo->fn_ext != NULL &&   \
+                     (Fcinfo).flinfo->fn_ext->fn_fenced)) {                  \
+            if ((Fcinfo).extra == NULL) {                                 \
+                (Fcinfo).extra = (FunctionCallExtraData*)palloc0(sizeof(FunctionCallExtraData)); \
+            }                                                             \
+            InitFunctionCallUDFArgs(&(Fcinfo), (Nargs), (batchRow));      \
+        }                                                                \
     } while (0)
 
 #define InitFunctionCallInfoData(Fcinfo, Flinfo, Nargs, Collation, Context, Resultinfo) \
@@ -315,34 +356,30 @@ extern void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext d
         (Fcinfo).resultinfo = (Resultinfo);                                             \
         (Fcinfo).fncollation = (Collation);                                             \
         (Fcinfo).isnull = false;                                                        \
+        (Fcinfo).can_ignore = false;                                                    \
+        (Fcinfo).extra = NULL;                                                          \
         (Fcinfo).nargs = (Nargs);                                                       \
-        if (unlikely((Nargs) > FUNC_PREALLOCED_ARGS)) {                                 \
-            (Fcinfo).arg = (Datum*)palloc0((Nargs) * sizeof(Datum));                    \
-            (Fcinfo).argnull = (bool*)palloc0((Nargs) * sizeof(bool));                  \
-            (Fcinfo).argTypes = (Oid*)palloc0((Nargs) * sizeof(Oid));                   \
-        } else {                                                                        \
-            (Fcinfo).arg = (Fcinfo).prealloc_arg;                                       \
-            (Fcinfo).argnull = (Fcinfo).prealloc_argnull;                               \
-            (Fcinfo).argTypes = (Fcinfo).prealloc_argTypes;                             \
-        }                                                                               \
-        if (unlikely((Flinfo) != NULL && (Fcinfo).flinfo->fn_fenced))                   \
-            InitFuncCallUDFInfo(&(Fcinfo), (Nargs), false);                             \
-        (Fcinfo).refcursor_data.argCursor = NULL;                                       \
-        (Fcinfo).refcursor_data.returnCursor = NULL;                                    \
-        (Fcinfo).refcursor_data.return_number = 0;                                      \
+        if (unlikely((Fcinfo).flinfo != NULL && (Fcinfo).flinfo->fn_ext != NULL &&      \
+                     (Fcinfo).flinfo->fn_ext->fn_fenced)) {                             \
+            if ((Fcinfo).extra == NULL) {                                                \
+                (Fcinfo).extra = (FunctionCallExtraData*)palloc0(sizeof(FunctionCallExtraData)); \
+            }                                                                            \
+            InitFuncCallUDFInfo(&(Fcinfo), (Nargs), false);                              \
+        }                                                                                \
     } while (0)
 
-#define FreeFunctionCallInfoData(Fcinfo)             \
-    do {                                             \
-        if ((Fcinfo).nargs > FUNC_PREALLOCED_ARGS) { \
-            pfree((Fcinfo).arg);                     \
-            pfree((Fcinfo).argnull);                 \
-            pfree((Fcinfo).argTypes);                \
-            (Fcinfo).argTypes = NULL;                \
-            (Fcinfo).arg = NULL;                     \
-            (Fcinfo).argnull = NULL;                 \
-        }                                            \
-        FreeFuncCallUDFInfo(&(Fcinfo));              \
+#define FreeFunctionCallInfoData(Fcinfo)                          \
+    do {                                                          \
+        FreeFuncCallUDFInfo(&(Fcinfo));                           \
+        if ((Fcinfo).extra != NULL) {                             \
+            if ((Fcinfo).extra->refcursor_data.argCursor != NULL) { \
+                pfree_ext((Fcinfo).extra->refcursor_data.argCursor); \
+            }                                                     \
+            if ((Fcinfo).extra->refcursor_data.returnCursor != NULL) { \
+                pfree_ext((Fcinfo).extra->refcursor_data.returnCursor); \
+            }                                                        \
+            pfree_ext((Fcinfo).extra);                            \
+        }                                                         \
     } while (0)
 /*
  * This macro invokes a function given a filled-in FunctionCallInfoData
@@ -353,7 +390,7 @@ extern void fmgr_info_copy(FmgrInfo* dstinfo, FmgrInfo* srcinfo, MemoryContext d
  */
 #define FunctionCallInvoke(fcinfo) ((*(fcinfo)->flinfo->fn_addr)(fcinfo))
 
-#define VecFunctionCallInvoke(fcinfo) ((*(fcinfo)->flinfo->vec_fn_addr)(fcinfo))
+#define VecFunctionCallInvoke(fcinfo) ((*(fcinfo)->flinfo->fn_ext->vec_fn_addr)(fcinfo))
 
 /* -------------------------------------------------------------------------
  *		Support for detecting call convention of dynamically-loaded functions

@@ -43,6 +43,7 @@
 #include "utils/int8.h"
 #include "utils/int16.h"
 #include "utils/numeric.h"
+#include "utils/numeric_pipeline.h"
 #include "utils/sortsupport.h"
 #include "vecexecutor/vechashtable.h"
 #include "vecexecutor/vechashagg.h"
@@ -136,12 +137,6 @@ typedef struct NumericAggState
  * Some preinitialized constants
  * ----------
  */
-static NumericDigit const_zero_data[1] = {0};
-static NumericVar const_zero = {0, 0, NUMERIC_POS, 0, NULL, const_zero_data};
-
-static NumericDigit const_one_data[1] = {1};
-static NumericVar const_one = {1, 0, NUMERIC_POS, 0, NULL, const_one_data};
-
 static NumericDigit const_two_data[1] = {2};
 static NumericVar const_two = {1, 0, NUMERIC_POS, 0, NULL, const_two_data};
 
@@ -199,20 +194,12 @@ static void dump_var(const char* str, NumericVar* var);
 #define dump_var(s, v)
 #endif
 
-#define NUMERIC_CAN_BE_SHORT(scale, weight)                                         \
-    ((scale) <= NUMERIC_SHORT_DSCALE_MAX && (weight) <= NUMERIC_SHORT_WEIGHT_MAX && \
-        (weight) >= NUMERIC_SHORT_WEIGHT_MIN)
-
-static void alloc_var(NumericVar* var, int ndigits);
-static void zero_var(NumericVar* var);
-
 static void init_ro_var_from_var(const NumericVar* value, NumericVar* dest);
 
 static const char* set_var_from_str(const char* str, const char* cp, NumericVar* dest);
 static const char* set_var_from_str_with_sign(const char* str, const char* cp, int sign, NumericVar* dest);
 static const char* set_var_from_non_decimal_integer_str(const char *str, const char *cp, int sign,
     int base, NumericVar *dest);
-static void set_var_from_num(Numeric value, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
 static void init_var_from_var(const NumericVar *value, NumericVar *dest);
 static char* get_str_from_var(NumericVar* var);
@@ -233,19 +220,19 @@ static int numeric_cmp_abbrev(Datum x, Datum y, SortSupport ssup);
 
 static Datum numeric_abbrev_convert_var(NumericVar* var, NumericSortSupport* nss);
 
-static int cmp_var(NumericVar* var1, NumericVar* var2);
+int cmp_var(NumericVar* var1, NumericVar* var2);
 static int cmp_var_common(const NumericDigit* var1digits, int var1ndigits, int var1weight, int var1sign,
     const NumericDigit* var2digits, int var2ndigits, int var2weight, int var2sign);
-static void sub_var(NumericVar* var1, NumericVar* var2, NumericVar* result);
-static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int rscale);
-static void div_var(NumericVar* var1, NumericVar* var2, NumericVar* result,
-    int rscale, bool round, bool* haveError = NULL);
+void sub_var(NumericVar* var1, NumericVar* var2, NumericVar* result);
+void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int rscale);
+static void mul_var_short(NumericVar* var1, NumericVar* var2, NumericVar* result);
+void div_var(NumericVar* var1, NumericVar* var2, NumericVar* result,
+    int rscale, bool round, bool* haveError);
 static void div_var_fast(NumericVar* var1, NumericVar* var2, NumericVar* result, int rscale, bool round);
 static void div_var_int(const NumericVar *var, int ival, int ival_weight, NumericVar *result, int rscale, bool round);
-static int select_div_scale(NumericVar* var1, NumericVar* var2);
-static void mod_var(NumericVar* var1, NumericVar* var2, NumericVar* result, bool* haveError = NULL);
-static void ceil_var(NumericVar* var, NumericVar* result);
-static void floor_var(NumericVar* var, NumericVar* result);
+void mod_var(NumericVar* var1, NumericVar* var2, NumericVar* result, bool* haveError);
+void ceil_var(NumericVar* var, NumericVar* result);
+void floor_var(NumericVar* var, NumericVar* result);
 static Numeric make_result_opt_error(NumericVar *var, bool *haveError);
 
 static void sqrt_var(NumericVar* arg, NumericVar* result, int rscale);
@@ -261,8 +248,6 @@ static int cmp_abs_common(const NumericDigit* var1digits, int var1ndigits, int v
     const NumericDigit* var2digits, int var2ndigits, int var2weight);
 static void add_abs(NumericVar* var1, NumericVar* var2, NumericVar* result);
 static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result);
-static void round_var(NumericVar* var, int rscale);
-static void trunc_var(NumericVar* var, int rscale);
 static void strip_var(NumericVar* var);
 static void compute_bucket(
     Numeric operand, Numeric bound1, Numeric bound2, NumericVar* count_var, NumericVar* result_var);
@@ -279,38 +264,12 @@ static void accum_sum_carry(NumericSumAccum *accum);
 static void accum_sum_final(NumericSumAccum *accum, NumericVar *result);
 static bool numericvar_to_uint64(const NumericVar* var, uint64* result);
 
-static bool numericvar_to_uint64(const NumericVar* var, uint64* result);
-
-/*
- * @Description: call corresponding big integer operator functions.
- *
- * @IN op: template parameter, assign the operation name, e.g. add, sub, etc.
- * @IN larg: left-hand operand of operator.
- * @IN rarg: right-hand operand of operator.
- * @return: Datum - the datum data points to result of letfc op rightc.
- */
-template <biop op>
-inline Datum bipickfun(Numeric leftc, Numeric rightc)
-{
-    Assert(NUMERIC_IS_BI(leftc));
-    Assert(NUMERIC_IS_BI(rightc));
-
-    int left_type = NUMERIC_IS_BI128(leftc);
-    int right_type = NUMERIC_IS_BI128(rightc);
-    biopfun func = BiFunMatrix[op][left_type][right_type];
-
-    Assert(func != NULL);
-    /* call big integer fast calculate function */
-    return func(leftc, rightc, NULL);
-}
-
 /* ----------------------------------------------------------------------
  *
  * Input-, output- and rounding-functions
  *
  * ----------------------------------------------------------------------
  */
-
 /*
  * numeric_in() -
  *
@@ -1104,12 +1063,10 @@ Datum numeric_sign(PG_FUNCTION_ARGS)
  *	We allow negative 'scale', implying rounding before the decimal
  *	point --- A db interprets rounding that way.
  */
-Datum numeric_round(PG_FUNCTION_ARGS)
+Numeric numeric_round_internal(Numeric num, int32 scale)
 {
-    Numeric num = PG_GETARG_NUMERIC(0);
-    int32 scale = PG_GETARG_INT32(1);
-    Numeric res;
     NumericVar arg;
+    Numeric res;
 
     if (NUMERIC_IS_NANORBI(num)) {
         /*
@@ -1121,7 +1078,7 @@ Datum numeric_round(PG_FUNCTION_ARGS)
          * Handle NaN
          */
         else
-            PG_RETURN_NUMERIC(make_result(&const_nan));
+            return make_result(&const_nan);
     }
 
     /*
@@ -1148,7 +1105,16 @@ Datum numeric_round(PG_FUNCTION_ARGS)
     res = make_result(&arg);
 
     free_var(&arg);
-    PG_RETURN_NUMERIC(res);
+    return res;
+}
+
+Datum numeric_round(PG_FUNCTION_ARGS)
+{
+    char buf[128];
+    Numeric num = PG_GETARG_NUMERIC_BUFFERED(0, buf, sizeof(buf));
+    int32 scale = PG_GETARG_INT32(1);
+
+    PG_RETURN_NUMERIC(numeric_round_internal(num, scale));
 }
 
 /*
@@ -2308,8 +2274,10 @@ Datum hash_numeric(PG_FUNCTION_ARGS)
  */
 Datum numeric_add(PG_FUNCTION_ARGS)
 {
-    Numeric num1 = PG_GETARG_NUMERIC(0);
-    Numeric num2 = PG_GETARG_NUMERIC(1);
+    char buf1[128];
+    char buf2[128];
+    Numeric num1 = PG_GETARG_NUMERIC_BUFFERED(0, buf1, sizeof(buf1));
+    Numeric num2 = PG_GETARG_NUMERIC_BUFFERED(1, buf2, sizeof(buf2));
     Numeric res;
 
     res = numeric_add_opt_error(num1, num2, NULL);
@@ -2366,8 +2334,10 @@ Numeric numeric_add_opt_error(Numeric num1, Numeric num2, bool *haveError)
  */
 Datum numeric_sub(PG_FUNCTION_ARGS)
 {
-    Numeric num1 = PG_GETARG_NUMERIC(0);
-    Numeric num2 = PG_GETARG_NUMERIC(1);
+    char buf1[128];
+    char buf2[128];
+    Numeric num1 = PG_GETARG_NUMERIC_BUFFERED(0, buf1, sizeof(buf1));
+    Numeric num2 = PG_GETARG_NUMERIC_BUFFERED(1, buf2, sizeof(buf2));
     Numeric res;
 
     res = numeric_sub_opt_error(num1, num2, NULL);
@@ -2424,8 +2394,10 @@ Numeric numeric_sub_opt_error(Numeric num1, Numeric num2, bool *haveError)
  */
 Datum numeric_mul(PG_FUNCTION_ARGS)
 {
-    Numeric num1 = PG_GETARG_NUMERIC(0);
-    Numeric num2 = PG_GETARG_NUMERIC(1);
+    char buf1[128];
+    char buf2[128];
+    Numeric num1 = PG_GETARG_NUMERIC_BUFFERED(0, buf1, sizeof(buf1));
+    Numeric num2 = PG_GETARG_NUMERIC_BUFFERED(1, buf2, sizeof(buf2));
     Numeric res;
 
     res = numeric_mul_opt_error(num1, num2, NULL);
@@ -4182,7 +4154,7 @@ void stddev_create_state_4_vector(PG_FUNCTION_ARGS)
     accum_sum_add(&(state->sumX), sumX);
     accum_sum_add(&(state->sumX2), sumX2);
 
-    fcinfo->arg[0] = PointerGetDatum(state);
+    fcinfo->args[0].value = PointerGetDatum(state);
     return ;
 }
 
@@ -4626,32 +4598,6 @@ static void dump_var(const char* str, NumericVar* var)
  */
 
 /*
- * alloc_var() -
- *
- *	Allocate a digit buffer of ndigits digits (plus a spare digit for rounding)
- */
-static void alloc_var(NumericVar* var, int ndigits)
-{
-    digitbuf_free(var);
-    init_alloc_var(var, ndigits);
-}
-
-/*
- * zero_var() -
- *
- *	Set a variable to ZERO.
- *	Note: its dscale is not touched.
- */
-static void zero_var(NumericVar* var)
-{
-    digitbuf_free(var);
-    quick_init_var(var);
-    var->ndigits = 0;
-    var->weight = 0;         /* by convention; doesn't really matter */
-    var->sign = NUMERIC_POS; /* anything but NAN... */
-}
-
-/*
  * set_var_from_str()
  *
  *	Parse a string and put the number into a variable
@@ -4984,28 +4930,6 @@ invalid_syntax:
     return cp;
 }
 
-
-/*
- * set_var_from_num() -
- *
- *	Convert the packed db format into a variable
- */
-static void set_var_from_num(Numeric num, NumericVar* dest)
-{
-    Assert(!NUMERIC_IS_BI(num));
-    int ndigits = NUMERIC_NDIGITS(num);
-
-    alloc_var(dest, ndigits);
-
-    dest->weight = NUMERIC_WEIGHT(num);
-    dest->sign = NUMERIC_SIGN(num);
-    dest->dscale = NUMERIC_DSCALE(num);
-    if (ndigits > 0) {
-        errno_t rc =
-            memcpy_s(dest->digits, ndigits * sizeof(NumericDigit), NUMERIC_DIGITS(num), ndigits * sizeof(NumericDigit));
-        securec_check(rc, "\0", "\0");
-    }
-}
 
 /*
  * init_var_from_num() -
@@ -5987,7 +5911,7 @@ static double numericvar_to_double_no_overflow(NumericVar* var)
  *	Compare two values on variable level.  We assume zeroes have been
  *	truncated to no digits.
  */
-static int cmp_var(NumericVar* var1, NumericVar* var2)
+int cmp_var(NumericVar* var1, NumericVar* var2)
 {
     return cmp_var_common(
         var1->digits, var1->ndigits, var1->weight, var1->sign, var2->digits, var2->ndigits, var2->weight, var2->sign);
@@ -6141,7 +6065,7 @@ void add_var(NumericVar* var1, NumericVar* var2, NumericVar* result)
  *	Full version of sub functionality on variable level (handling signs).
  *	result might point to one of the operands too without danger.
  */
-static void sub_var(NumericVar* var1, NumericVar* var2, NumericVar* result)
+void sub_var(NumericVar* var1, NumericVar* var2, NumericVar* result)
 {
     /*
      * Decide on the signs of the two variables what to do
@@ -6253,23 +6177,32 @@ static void sub_var(NumericVar* var1, NumericVar* var2, NumericVar* result)
  *	Multiplication on variable level. Product of var1 * var2 is stored
  *	in result.	Result is rounded to no more than rscale fractional digits.
  */
-static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int rscale)
+void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int rscale)
 {
     int res_ndigits;
+    int res_ndigitpairs;
     int res_sign;
     int res_weight;
+    int pair_offset;
     int maxdigits;
-    int* dig = NULL;
-    int carry;
-    int maxdig;
-    int newdig;
+    int maxdigitpairs;
+    uint64* dig;
+    uint64* dig_i1_off;
+    uint64 maxdig;
+    uint64 carry;
+    uint64 newdig;
     int var1ndigits;
     int var2ndigits;
-    NumericDigit* var1digits = NULL;
-    NumericDigit* var2digits = NULL;
-    NumericDigit* res_digits = NULL;
-    int i, i1, i2;
-    int tdig[NUMERIC_LOCAL_NDIG];
+    int var1ndigitpairs;
+    int var2ndigitpairs;
+    NumericDigit* var1digits;
+    NumericDigit* var2digits;
+    NumericDigit* res_digits;
+    uint32 var1digitpair;
+    uint32* var2digitpairs;
+    int i, i1, i2, i2limit;
+    uint64 tdig[NUMERIC_LOCAL_NMAX];
+    uint32 tvar2pairs[NUMERIC_LOCAL_NMAX];
 
     /*
      * Arrange for var1 to be the shorter of the two numbers.  This improves
@@ -6291,141 +6224,223 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
     var1digits = var1->digits;
     var2digits = var2->digits;
 
-    if (var1ndigits == 0 || var2ndigits == 0) {
+    if (var1ndigits == 0) {
         /* one or both inputs is zero; so is result */
         zero_var(result);
         result->dscale = rscale;
         return;
     }
 
-    /* Determine result sign and (maximum possible) weight */
+    /*
+     * If var1 has 1-6 digits and the exact result was requested, delegate to
+     * mul_var_short() which uses a faster direct multiplication algorithm.
+     */
+    if (var1ndigits <= 6 && rscale == var1->dscale + var2->dscale) {
+        mul_var_short(var1, var2, result);
+        return;
+    }
+
+    /* Determine result sign */
     if (var1->sign == var2->sign)
         res_sign = NUMERIC_POS;
     else
         res_sign = NUMERIC_NEG;
-    res_weight = var1->weight + var2->weight + 2;
 
     /*
-     * Determine the number of result digits to compute.  If the exact result
-     * would have more than rscale fractional digits, truncate the computation
-     * with MUL_GUARD_DIGITS guard digits, i.e., ignore input digits that
-     * would only contribute to the right of that.  (This will give the exact
+     * Determine the number of result digits to compute and the (maximum
+     * possible) result weight.  If the exact result would have more than
+     * rscale fractional digits, truncate the computation with
+     * MUL_GUARD_DIGITS guard digits, i.e., ignore input digits that would
+     * only contribute to the right of that.  (This will give the exact
      * rounded-to-rscale answer unless carries out of the ignored positions
      * would have propagated through more than MUL_GUARD_DIGITS digits.)
      *
      * Note: an exact computation could not produce more than var1ndigits +
-     * var2ndigits digits, but we allocate one extra output digit in case
-     * rscale-driven rounding produces a carry out of the highest exact digit.
+     * var2ndigits digits, but we allocate at least one extra output digit in
+     * case rscale-driven rounding produces a carry out of the highest exact
+     * digit.
+     *
+     * The computation itself is done using base-NBASE^2 arithmetic, so we
+     * actually process the input digits in pairs, producing a base-NBASE^2
+     * intermediate result.  This significantly improves performance, since
+     * schoolbook multiplication is O(N^2) in the number of input digits, and
+     * working in base NBASE^2 effectively halves "N".
+     *
+     * Note: in a truncated computation, we must compute at least one extra
+     * output digit to ensure that all the guard digits are fully computed.
      */
-    res_ndigits = var1ndigits + var2ndigits + 1;
-    maxdigits = res_weight + 1 + (rscale + DEC_DIGITS - 1) / DEC_DIGITS + MUL_GUARD_DIGITS;
-    res_ndigits = Min(res_ndigits, maxdigits);
+    /* digit pairs in each input */
+    var1ndigitpairs = (var1ndigits + 1) / 2;
+    var2ndigitpairs = (var2ndigits + 1) / 2;
 
-    if (res_ndigits < 3) {
+    /* digits in exact result */
+    res_ndigits = var1ndigits + var2ndigits;
+
+    /* digit pairs in exact result with at least one extra output digit */
+    res_ndigitpairs = res_ndigits / 2 + 1;
+
+    /* pair offset to align result to end of dig[] */
+    pair_offset = res_ndigitpairs - var1ndigitpairs - var2ndigitpairs + 1;
+
+    /* maximum possible result weight (odd-length inputs shifted up below) */
+    res_weight = var1->weight + var2->weight + 1 + 2 * res_ndigitpairs - res_ndigits - (var1ndigits & 1) -
+        (var2ndigits & 1);
+
+    /* rscale-based truncation with at least one extra output digit */
+    maxdigits = res_weight + 1 + (rscale + DEC_DIGITS - 1) / DEC_DIGITS + MUL_GUARD_DIGITS;
+    maxdigitpairs = maxdigits / 2 + 1;
+
+    res_ndigitpairs = Min(res_ndigitpairs, maxdigitpairs);
+    res_ndigits = 2 * res_ndigitpairs;
+
+    /*
+     * In the computation below, digit pair i1 of var1 and digit pair i2 of
+     * var2 are multiplied and added to digit i1+i2+pair_offset of dig[]. Thus
+     * input digit pairs with index >= res_ndigitpairs - pair_offset don't
+     * contribute to the result, and can be ignored.
+     */
+    if (res_ndigitpairs <= pair_offset) {
         /* All input digits will be ignored; so result is zero */
         zero_var(result);
         result->dscale = rscale;
         return;
     }
+    var1ndigitpairs = Min(var1ndigitpairs, res_ndigitpairs - pair_offset);
+    var2ndigitpairs = Min(var2ndigitpairs, res_ndigitpairs - pair_offset);
 
     /*
-     * We do the arithmetic in an array "dig[]" of signed int's.  Since
-     * INT_MAX is noticeably larger than NBASE*NBASE, this gives us headroom
-     * to avoid normalizing carries immediately.
+     * We do the arithmetic in an array "dig[]" of unsigned 64-bit integers.
+     * Since PG_UINT64_MAX is much larger than NBASE^4, this gives us a lot of
+     * headroom to avoid normalizing carries immediately.
      *
      * maxdig tracks the maximum possible value of any dig[] entry; when this
-     * threatens to exceed INT_MAX, we take the time to propagate carries.
-     * Furthermore, we need to ensure that overflow doesn't occur during the
-     * carry propagation passes either.  The carry values could be as much as
-     * INT_MAX/NBASE, so really we must normalize when digits threaten to
-     * exceed INT_MAX - INT_MAX/NBASE.
+     * threatens to exceed PG_UINT64_MAX, we take the time to propagate
+     * carries.  Furthermore, we need to ensure that overflow doesn't occur
+     * during the carry propagation passes either.  The carry values could be
+     * as much as PG_UINT64_MAX / NBASE^2, so really we must normalize when
+     * digits threaten to exceed PG_UINT64_MAX - PG_UINT64_MAX / NBASE^2.
      *
-     * To avoid overflow in maxdig itself, it actually represents the max
-     * possible value divided by NBASE-1, ie, at the top of the loop it is
-     * known that no dig[] entry exceeds maxdig * (NBASE-1).
+     * To avoid overflow in maxdig itself, it actually represents the maximum
+     * possible value divided by NBASE^2-1, i.e., at the top of the loop it is
+     * known that no dig[] entry exceeds maxdig * (NBASE^2-1).
+     *
+     * The conversion of var1 to base NBASE^2 is done on the fly, as each new
+     * digit is required.  The digits of var2 are converted upfront, and
+     * stored at the end of dig[].  To avoid loss of precision, the input
+     * digits are aligned with the start of digit pair array, effectively
+     * shifting them up (multiplying by NBASE) if the inputs have an odd
+     * number of NBASE digits.
      */
-    uint32 dig_size = (uint32)(res_ndigits * sizeof(int));
-    if (res_ndigits > NUMERIC_LOCAL_NMAX) {
-        dig = (int *)palloc0(dig_size);
+    if (res_ndigitpairs > NUMERIC_LOCAL_NMAX) {
+        dig = (uint64*)palloc(res_ndigitpairs * sizeof(uint64) + var2ndigitpairs * sizeof(uint32));
+        var2digitpairs = (uint32*)(dig + res_ndigitpairs);
     } else {
-        errno_t rc = memset_s(tdig, sizeof(tdig), 0, dig_size);
-        securec_check(rc, "\0", "\0");
         dig = tdig;
+        var2digitpairs = tvar2pairs;
     }
-    maxdig = 0;
+
+    /* convert var2 to base NBASE^2, shifting up if its length is odd */
+    for (i2 = 0; i2 < var2ndigitpairs - 1; i2++) {
+        var2digitpairs[i2] = var2digits[2 * i2] * NBASE + var2digits[2 * i2 + 1];
+    }
+
+    if (2 * i2 + 1 < var2ndigits) {
+        var2digitpairs[i2] = var2digits[2 * i2] * NBASE + var2digits[2 * i2 + 1];
+    } else {
+        var2digitpairs[i2] = var2digits[2 * i2] * NBASE;
+    }
 
     /*
-     * The least significant digits of var1 should be ignored if they don't
-     * contribute directly to the first res_ndigits digits of the result that
-     * we are computing.
+     * Start by multiplying var2 by the least significant contributing digit
+     * pair from var1, storing the results at the end of dig[], and filling
+     * the leading digits with zeros.
      *
-     * Digit i1 of var1 and digit i2 of var2 are multiplied and added to digit
-     * i1+i2+2 of the accumulator array, so we need only consider digits of
-     * var1 for which i1 <= res_ndigits - 3.
+     * The loop here is the same as the inner loop below, except that we set
+     * the results in dig[], rather than adding to them.  This is the
+     * performance bottleneck for multiplication, so we want to keep it simple
+     * enough so that it can be auto-vectorized.  Accordingly, process the
+     * digits left-to-right even though schoolbook multiplication would
+     * suggest right-to-left.  Since we aren't propagating carries in this
+     * loop, the order does not matter.
      */
-    for (i1 = Min(var1ndigits - 1, res_ndigits - 3); i1 >= 0; i1--) {
-        int var1digit = var1digits[i1];
+    i1 = var1ndigitpairs - 1;
+    if (2 * i1 + 1 < var1ndigits) {
+        var1digitpair = var1digits[2 * i1] * NBASE + var1digits[2 * i1 + 1];
+    } else {
+        var1digitpair = var1digits[2 * i1] * NBASE;
+    }
+    maxdig = var1digitpair;
 
-        if (var1digit == 0)
+    i2limit = Min(var2ndigitpairs, res_ndigitpairs - i1 - pair_offset);
+    dig_i1_off = &dig[i1 + pair_offset];
+
+    if (dig == tdig) {
+        errno_t rc = memset_s(tdig, sizeof(tdig), 0, (i1 + pair_offset) * sizeof(uint64));
+        securec_check(rc, "\0", "\0");
+    } else {
+        errno_t rc = memset_s(dig, res_ndigitpairs * sizeof(uint64), 0, (i1 + pair_offset) * sizeof(uint64));
+        securec_check(rc, "\0", "\0");
+    }
+    for (i2 = 0; i2 < i2limit; i2++) {
+        dig_i1_off[i2] = (uint64)var1digitpair * var2digitpairs[i2];
+    }
+
+    /*
+     * Next, multiply var2 by the remaining digit pairs from var1, adding the
+     * results to dig[] at the appropriate offsets, and normalizing whenever
+     * there is a risk of any dig[] entry overflowing.
+     */
+    for (i1 = i1 - 1; i1 >= 0; i1--) {
+        var1digitpair = var1digits[2 * i1] * NBASE + var1digits[2 * i1 + 1];
+        if (var1digitpair == 0) {
             continue;
+        }
 
         /* Time to normalize? */
-        maxdig += var1digit;
-        if (maxdig > (INT_MAX - INT_MAX / NBASE) / (NBASE - 1)) {
-            /* Yes, do it */
+        maxdig += var1digitpair;
+        if (maxdig > (PG_UINT64_MAX - PG_UINT64_MAX / NBASE_SQR) / (NBASE_SQR - 1)) {
+            /* Yes, do it (to base NBASE^2) */
             carry = 0;
-            for (i = res_ndigits - 1; i >= 0; i--) {
+            for (i = res_ndigitpairs - 1; i >= 0; i--) {
                 newdig = dig[i] + carry;
-                if (newdig >= NBASE) {
-                    carry = newdig / NBASE;
-                    newdig -= carry * NBASE;
+                if (newdig >= NBASE_SQR) {
+                    carry = newdig / NBASE_SQR;
+                    newdig -= carry * NBASE_SQR;
                 } else
                     carry = 0;
                 dig[i] = newdig;
             }
             Assert(carry == 0);
             /* Reset maxdig to indicate new worst-case */
-            maxdig = 1 + var1digit;
+            maxdig = 1 + var1digitpair;
         }
 
-        /*
-         * Add the appropriate multiple of var2 into the accumulator.
-         *
-         * As above, digits of var2 can be ignored if they don't contribute,
-         * so we only include digits for which i1+i2+2 < res_ndigits.
-         *
-         * This inner loop is the performance bottleneck for multiplication,
-         * so we want to keep it simple enough so that it can be
-         * auto-vectorized.  Accordingly, process the digits left-to-right
-         * even though schoolbook multiplication would suggest right-to-left.
-         * Since we aren't propagating carries in this loop, the order does
-         * not matter.
-         */
-        {
-            int i2limit = Min(var2ndigits, res_ndigits - i1 - 2);
-            int *dig_i1_2 = &dig[i1 + 2];
+        /* Multiply and add */
+        i2limit = Min(var2ndigitpairs, res_ndigitpairs - i1 - pair_offset);
+        dig_i1_off = &dig[i1 + pair_offset];
 
-            for (i2 = 0; i2 < i2limit; i2++)
-                dig_i1_2[i2] += var1digit * var2digits[i2];
+        for (i2 = 0; i2 < i2limit; i2++) {
+            dig_i1_off[i2] += (uint64)var1digitpair * var2digitpairs[i2];
         }
     }
 
     /*
-     * Now we do a final carry propagation pass to normalize the result, which
-     * we combine with storing the result digits into the output. Note that
-     * this is still done at full precision w/guard digits.
+     * Now we do a final carry propagation pass to normalize back to base
+     * NBASE^2, and construct the base-NBASE result digits.  Note that this is
+     * still done at full precision w/guard digits.
      */
     alloc_var(result, res_ndigits);
     res_digits = result->digits;
     carry = 0;
-    for (i = res_ndigits - 1; i >= 0; i--) {
+    for (i = res_ndigitpairs - 1; i >= 0; i--) {
         newdig = dig[i] + carry;
-        if (newdig >= NBASE) {
-            carry = newdig / NBASE;
-            newdig -= carry * NBASE;
+        if (newdig >= NBASE_SQR) {
+            carry = newdig / NBASE_SQR;
+            newdig -= carry * NBASE_SQR;
         } else
             carry = 0;
-        res_digits[i] = newdig;
+        res_digits[2 * i + 1] = (NumericDigit)((uint32)newdig % NBASE);
+        res_digits[2 * i] = (NumericDigit)((uint32)newdig / NBASE);
     }
     Assert(carry == 0);
 
@@ -6447,6 +6462,281 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
 }
 
 /*
+ * mul_var_short() -
+ *
+ *      Special-case multiplication function used when var1 has 1-6 digits, var2
+ *      has at least as many digits as var1, and the exact product var1 * var2 is
+ *      requested.
+ */
+static void mul_var_short(NumericVar* var1, NumericVar* var2, NumericVar* result)
+{
+    int var1ndigits = var1->ndigits;
+    int var2ndigits = var2->ndigits;
+    NumericDigit* var1digits = var1->digits;
+    NumericDigit* var2digits = var2->digits;
+    int res_sign;
+    int res_weight;
+    int res_ndigits;
+    NumericDigit* res_buf;
+    NumericDigit* res_digits;
+    uint32 carry = 0;
+    uint32 term;
+
+    /* Check preconditions */
+    Assert(var1ndigits >= 1);
+    Assert(var1ndigits <= 6);
+    Assert(var2ndigits >= var1ndigits);
+
+    /*
+     * Determine the result sign, weight, and number of digits to calculate.
+     * The weight figured here is correct if the product has no leading zero
+     * digits; otherwise strip_var() will fix things up.  Note that, unlike
+     * mul_var(), we do not need to allocate an extra output digit, because we
+     * are not rounding here.
+     */
+    if (var1->sign == var2->sign) {
+        res_sign = NUMERIC_POS;
+    } else {
+        res_sign = NUMERIC_NEG;
+    }
+    res_weight = var1->weight + var2->weight + 1;
+    res_ndigits = var1ndigits + var2ndigits;
+
+    /*
+     * Allocate the result digit array into a fresh buffer.  We must not free
+     * result's old buffer here, because the caller may pass the same
+     * NumericVar as one of the inputs; freeing it early would make var1 or
+     * var2 dangle.  The old buffer is released when the result is stored.
+     */
+    res_buf = digitbuf_alloc(res_ndigits + 1);
+    res_buf[0] = 0; /* spare digit for later rounding */
+    res_digits = res_buf + 1;
+
+    /*
+     * Compute the result digits in reverse, in one pass, propagating the
+     * carry up as we go.  The i'th result digit consists of the sum of the
+     * products var1digits[i1] * var2digits[i2] for which i = i1 + i2 + 1.
+     */
+#define PRODSUM1(v1, i1, v2, i2) ((v1)[(i1)] * (v2)[(i2)])
+#define PRODSUM2(v1, i1, v2, i2) (PRODSUM1(v1, i1, v2, i2) + (v1)[(i1)+1] * (v2)[(i2)-1])
+#define PRODSUM3(v1, i1, v2, i2) (PRODSUM2(v1, i1, v2, i2) + (v1)[(i1)+2] * (v2)[(i2)-2])
+#define PRODSUM4(v1, i1, v2, i2) (PRODSUM3(v1, i1, v2, i2) + (v1)[(i1)+3] * (v2)[(i2)-3])
+#define PRODSUM5(v1, i1, v2, i2) (PRODSUM4(v1, i1, v2, i2) + (v1)[(i1)+4] * (v2)[(i2)-4])
+#define PRODSUM6(v1, i1, v2, i2) (PRODSUM5(v1, i1, v2, i2) + (v1)[(i1)+5] * (v2)[(i2)-5])
+
+    switch (var1ndigits) {
+        case 1:
+            /* ---------
+             * 1-digit case:
+             *          var1ndigits = 1
+             *          var2ndigits >= 1
+             *          res_ndigits = var2ndigits + 1
+             * ----------
+             */
+            for (int i = var2ndigits - 1; i >= 0; i--) {
+                term = PRODSUM1(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            res_digits[0] = (NumericDigit)carry;
+            break;
+
+        case 2:
+            /* ---------
+             * 2-digit case:
+             *          var1ndigits = 2
+             *          var2ndigits >= 2
+             *          res_ndigits = var2ndigits + 2
+             * ----------
+             */
+            /* last result digit and carry */
+            term = PRODSUM1(var1digits, 1, var2digits, var2ndigits - 1);
+            res_digits[res_ndigits - 1] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            /* remaining digits, except for the first two */
+            for (int i = var2ndigits - 1; i >= 1; i--) {
+                term = PRODSUM2(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            break;
+
+        case 3:
+            /* ---------
+             * 3-digit case:
+             *          var1ndigits = 3
+             *          var2ndigits >= 3
+             *          res_ndigits = var2ndigits + 3
+             * ----------
+             */
+            /* last two result digits */
+            term = PRODSUM1(var1digits, 2, var2digits, var2ndigits - 1);
+            res_digits[res_ndigits - 1] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM2(var1digits, 1, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 2] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            /* remaining digits, except for the first three */
+            for (int i = var2ndigits - 1; i >= 2; i--) {
+                term = PRODSUM3(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            break;
+
+        case 4:
+            /* ---------
+             * 4-digit case:
+             *          var1ndigits = 4
+             *          var2ndigits >= 4
+             *          res_ndigits = var2ndigits + 4
+             * ----------
+             */
+            /* last three result digits */
+            term = PRODSUM1(var1digits, 3, var2digits, var2ndigits - 1);
+            res_digits[res_ndigits - 1] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM2(var1digits, 2, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 2] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM3(var1digits, 1, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 3] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            /* remaining digits, except for the first four */
+            for (int i = var2ndigits - 1; i >= 3; i--) {
+                term = PRODSUM4(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            break;
+
+        case 5:
+            /* ---------
+             * 5-digit case:
+             *          var1ndigits = 5
+             *          var2ndigits >= 5
+             *          res_ndigits = var2ndigits + 5
+             * ----------
+             */
+            /* last four result digits */
+            term = PRODSUM1(var1digits, 4, var2digits, var2ndigits - 1);
+            res_digits[res_ndigits - 1] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM2(var1digits, 3, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 2] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM3(var1digits, 2, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 3] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM4(var1digits, 1, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 4] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            /* remaining digits, except for the first five */
+            for (int i = var2ndigits - 1; i >= 4; i--) {
+                term = PRODSUM5(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            break;
+
+        case 6:
+            /* ---------
+             * 6-digit case:
+             *          var1ndigits = 6
+             *          var2ndigits >= 6
+             *          res_ndigits = var2ndigits + 6
+             * ----------
+             */
+            /* last five result digits */
+            term = PRODSUM1(var1digits, 5, var2digits, var2ndigits - 1);
+            res_digits[res_ndigits - 1] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM2(var1digits, 4, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 2] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM3(var1digits, 3, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 3] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM4(var1digits, 2, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 4] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            term = PRODSUM5(var1digits, 1, var2digits, var2ndigits - 1) + carry;
+            res_digits[res_ndigits - 5] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+
+            /* remaining digits, except for the first six */
+            for (int i = var2ndigits - 1; i >= 5; i--) {
+                term = PRODSUM6(var1digits, 0, var2digits, i) + carry;
+                res_digits[i + 1] = (NumericDigit)(term % NBASE);
+                carry = term / NBASE;
+            }
+            break;
+        default:
+            break;
+    }
+
+    /*
+     * Finally, for var1ndigits > 1, compute the remaining var1ndigits most
+     * significant result digits.
+     */
+    switch (var1ndigits) {
+        case 6:
+            term = PRODSUM5(var1digits, 0, var2digits, 4) + carry;
+            res_digits[5] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+            /* FALLTHROUGH */
+        case 5:
+            term = PRODSUM4(var1digits, 0, var2digits, 3) + carry;
+            res_digits[4] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+            /* FALLTHROUGH */
+        case 4:
+            term = PRODSUM3(var1digits, 0, var2digits, 2) + carry;
+            res_digits[3] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+            /* FALLTHROUGH */
+        case 3:
+            term = PRODSUM2(var1digits, 0, var2digits, 1) + carry;
+            res_digits[2] = (NumericDigit)(term % NBASE);
+            carry = term / NBASE;
+            /* FALLTHROUGH */
+        case 2:
+            term = PRODSUM1(var1digits, 0, var2digits, 0) + carry;
+            res_digits[1] = (NumericDigit)(term % NBASE);
+            res_digits[0] = (NumericDigit)(term / NBASE);
+            break;
+        default:
+            break;
+    }
+
+    /* Store the product in result */
+    digitbuf_free(result);
+    result->ndigits = res_ndigits;
+    result->buf = res_buf;
+    result->digits = res_digits;
+    result->weight = res_weight;
+    result->sign = res_sign;
+    result->dscale = var1->dscale + var2->dscale;
+
+    /* Strip leading and trailing zeroes */
+    strip_var(result);
+}
+
+/*
  * div_var() -
  *
  *	Division on variable level. Quotient of var1 / var2 is stored in result.
@@ -6454,7 +6744,7 @@ static void mul_var(NumericVar* var1, NumericVar* var2, NumericVar* result, int 
  *	If round is true, it is rounded at the rscale'th digit; if false, it
  *	is truncated (towards zero) at that digit.
  */
-static void div_var(NumericVar* var1, NumericVar* var2, NumericVar* result,
+void div_var(NumericVar* var1, NumericVar* var2, NumericVar* result,
     int rscale, bool round, bool* haveError)
 {
     int div_ndigits;
@@ -7085,72 +7375,12 @@ div_var_int(const NumericVar *var, int ival, int ival_weight, NumericVar *result
     strip_var(result);
 }
 
-
-/*
- * Default scale selection for division
- *
- * Returns the appropriate result scale for the division result.
- */
-static int select_div_scale(NumericVar* var1, NumericVar* var2)
-{
-    int weight1, weight2, qweight, i;
-    NumericDigit firstdigit1, firstdigit2;
-    int rscale;
-
-    /*
-     * The result scale of a division isn't specified in any SQL standard. For
-     * openGauss we select a result scale that will give at least
-     * NUMERIC_MIN_SIG_DIGITS significant digits, so that numeric gives a
-     * result no less accurate than float8; but use a scale not less than
-     * either input's display scale.
-     */
-
-    /* Get the actual (normalized) weight and first digit of each input */
-
-    weight1 = 0; /* values to use if var1 is zero */
-    firstdigit1 = 0;
-    for (i = 0; i < var1->ndigits; i++) {
-        firstdigit1 = var1->digits[i];
-        if (firstdigit1 != 0) {
-            weight1 = var1->weight - i;
-            break;
-        }
-    }
-
-    weight2 = 0; /* values to use if var2 is zero */
-    firstdigit2 = 0;
-    for (i = 0; i < var2->ndigits; i++) {
-        firstdigit2 = var2->digits[i];
-        if (firstdigit2 != 0) {
-            weight2 = var2->weight - i;
-            break;
-        }
-    }
-
-    /*
-     * Estimate weight of quotient.  If the two first digits are equal, we
-     * can't be sure, but assume that var1 is less than var2.
-     */
-    qweight = weight1 - weight2;
-    if (firstdigit1 <= firstdigit2)
-        qweight--;
-
-    /* Select result scale */
-    rscale = NUMERIC_MIN_SIG_DIGITS - qweight * DEC_DIGITS;
-    rscale = Max(rscale, var1->dscale);
-    rscale = Max(rscale, var2->dscale);
-    rscale = Max(rscale, NUMERIC_MIN_DISPLAY_SCALE);
-    rscale = Min(rscale, NUMERIC_MAX_DISPLAY_SCALE);
-
-    return rscale;
-}
-
 /*
  * mod_var() -
  *
  *	Calculate the modulo of two numerics at variable level
  */
-static void mod_var(NumericVar* var1, NumericVar* var2, NumericVar* result, bool* haveError)
+void mod_var(NumericVar* var1, NumericVar* var2, NumericVar* result, bool* haveError)
 {
     NumericVar tmp;
 
@@ -7177,7 +7407,7 @@ static void mod_var(NumericVar* var1, NumericVar* var2, NumericVar* result, bool
  *	Return the smallest integer greater than or equal to the argument
  *	on variable level
  */
-static void ceil_var(NumericVar* var, NumericVar* result)
+void ceil_var(NumericVar* var, NumericVar* result)
 {
     NumericVar tmp;
 
@@ -7198,7 +7428,7 @@ static void ceil_var(NumericVar* var, NumericVar* result)
  *	Return the largest integer equal to or less than the argument
  *	on variable level
  */
-static void floor_var(NumericVar* var, NumericVar* result)
+void floor_var(NumericVar* var, NumericVar* result)
 {
     NumericVar tmp;
 
@@ -8169,7 +8399,7 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
  * after the decimal point.  NOTE: we allow rscale < 0 here, implying
  * rounding before the decimal point.
  */
-static void round_var(NumericVar* var, int rscale)
+void round_var(NumericVar* var, int rscale)
 {
     NumericDigit* digits = var->digits;
     int di;
@@ -8260,7 +8490,7 @@ static void round_var(NumericVar* var, int rscale)
  * after the decimal point.  NOTE: we allow rscale < 0 here, implying
  * truncation before the decimal point.
  */
-static void trunc_var(NumericVar* var, int rscale)
+void trunc_var(NumericVar* var, int rscale)
 {
     int di;
     int ndigits;
@@ -8622,15 +8852,14 @@ ScalarVector* vnumeric_sum(PG_FUNCTION_ARGS)
     ScalarValue* pVal = pVector->m_vals;
     uint8* flag = pVector->m_flag;
     int nrows = pVector->m_rows;
-    Datum args[2];
     Datum result;
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
     bictl ctl;
     Numeric leftarg, rightarg;    // left-hand and right-hand operand of addition
     uint16 num1Flags, num2Flags;  // numeric flags of num1 and num2
     int arg1, arg2, i;
 
-    finfo.arg = &args[0];
     ctl.context = context;
 
     for (i = 0; i < nrows; i++) {
@@ -8652,9 +8881,9 @@ ScalarVector* vnumeric_sum(PG_FUNCTION_ARGS)
                     // ctl.store_pos may be pointed to new address.
                     cell->m_val[idx].val = ctl.store_pos;
                 } else { // call numeric_add
-                    args[0] = NumericGetDatum(leftarg);
-                    args[1] = NumericGetDatum(rightarg);
-                    result = numeric_add(&finfo);
+                    finfo->args[0].value = NumericGetDatum(leftarg);
+                    finfo->args[1].value = NumericGetDatum(rightarg);
+                    result = numeric_add(finfo);
                     cell->m_val[idx].val = replaceVariable(context, cell->m_val[idx].val, result);
                 }
                 SET_NOTNULL(cell->m_val[idx].flag);
@@ -8688,9 +8917,9 @@ ScalarVector* vsnumeric_sum(PG_FUNCTION_ARGS)
     ScalarValue* pVal = pVector->m_vals;
     uint8* flag = pVector->m_flag;
     int nrows = pVector->m_rows;
-    Datum args[2];
     Datum result;
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
     Datum* leftdata = NULL;
     uint8 leftflag;
@@ -8702,7 +8931,6 @@ ScalarVector* vsnumeric_sum(PG_FUNCTION_ARGS)
     int arg1, arg2, i;
     int arrIndx, atomIndx;
 
-    finfo.arg = &args[0];
     ctl.context = data->m_cxt;
 
     for (i = 0; i < nrows; i++) {
@@ -8735,9 +8963,9 @@ ScalarVector* vsnumeric_sum(PG_FUNCTION_ARGS)
                     leftdata[0] = ctl.store_pos;
                 } else {
                     /* call numeric_add */
-                    args[0] = NumericGetDatum(leftarg);
-                    args[1] = NumericGetDatum(rightarg);
-                    result = numeric_add(&finfo);
+                    finfo->args[0].value = NumericGetDatum(leftarg);
+                    finfo->args[1].value = NumericGetDatum(rightarg);
+                    result = numeric_add(finfo);
                     /* update sum result */
                     leftdata[0] = data->replaceVariable(leftdata[0], result);
                 }
@@ -8760,12 +8988,11 @@ ScalarVector* vnumeric_abs(PG_FUNCTION_ARGS)
     ScalarVector* presultVector = PG_GETARG_VECTOR(2);
     uint8* pflagsRes = (uint8*)(presultVector->m_flag);
     bool* pselection = PG_GETARG_SELECTION(3);
-    Datum args;
     int i;
 
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
-    finfo.arg = &args;
 
     if (pselection != NULL) {
         for (i = 0; i < nvalues; i++) {
@@ -8775,8 +9002,9 @@ ScalarVector* vnumeric_abs(PG_FUNCTION_ARGS)
             }
 
             if (pselection[i]) {
-                args = ScalarVector::Decode(parg1[i]);
-                presult[i] = numeric_abs(&finfo);
+                finfo->args[0].value = ScalarVector::Decode(parg1[i]);
+                finfo->args[0].isnull = false;
+                presult[i] = numeric_abs(finfo);
                 SET_NOTNULL(pflagsRes[i]);
             }
         }
@@ -8787,8 +9015,9 @@ ScalarVector* vnumeric_abs(PG_FUNCTION_ARGS)
                 continue;
             }
 
-            args = ScalarVector::Decode(parg1[i]);
-            presult[i] = numeric_abs(&finfo);
+            finfo->args[0].value = ScalarVector::Decode(parg1[i]);
+            finfo->args[0].isnull = false;
+            presult[i] = numeric_abs(finfo);
             SET_NOTNULL(pflagsRes[i]);
         }
     }
@@ -8806,12 +9035,11 @@ ScalarVector* vnumeric_fac(PG_FUNCTION_ARGS)
     ScalarVector* presultVector = PG_GETARG_VECTOR(2);
     uint8* pflagsRes = (uint8*)(presultVector->m_flag);
     bool* pselection = PG_GETARG_SELECTION(3);
-    Datum args;
     int i;
 
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
-    finfo.arg = &args;
 
     if (pselection != NULL) {
         for (i = 0; i < nvalues; i++) {
@@ -8821,8 +9049,9 @@ ScalarVector* vnumeric_fac(PG_FUNCTION_ARGS)
             }
 
             if (pselection[i]) {
-                args = pVal[i];
-                presult[i] = numeric_fac(&finfo);
+                finfo->args[0].value = pVal[i];
+                finfo->args[0].isnull = false;
+                presult[i] = numeric_fac(finfo);
                 SET_NOTNULL(pflagsRes[i]);
             }
         }
@@ -8833,8 +9062,9 @@ ScalarVector* vnumeric_fac(PG_FUNCTION_ARGS)
                 continue;
             }
 
-            args = pVal[i];
-            presult[i] = numeric_fac(&finfo);
+            finfo->args[0].value = pVal[i];
+            finfo->args[0].isnull = false;
+            presult[i] = numeric_fac(finfo);
             SET_NOTNULL(pflagsRes[i]);
         }
     }
@@ -9033,11 +9263,10 @@ ScalarVector* vinterval_sum(PG_FUNCTION_ARGS)
     ScalarValue* pVal = pVector->m_vals;
     uint8* flag = pVector->m_flag;
     int nrows = pVector->m_rows;
-    Datum args[2];
     Datum result;
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
 
-    finfo.arg = &args[0];
 
     for (i = 0; i < nrows; i++) {
         cell = loc[i];
@@ -9047,9 +9276,9 @@ ScalarVector* vinterval_sum(PG_FUNCTION_ARGS)
                 cell->m_val[idx].val = addVariable(context, pVal[i]);
                 SET_NOTNULL(cell->m_val[idx].flag);
             } else {
-                args[0] = PointerGetDatum((char*)cell->m_val[idx].val + VARHDRSZ_SHORT);
-                args[1] = PointerGetDatum((char*)pVal[i] + VARHDRSZ_SHORT);
-                result = interval_pl(&finfo);
+                finfo->args[0].value = PointerGetDatum((char*)cell->m_val[idx].val + VARHDRSZ_SHORT);
+                finfo->args[1].value = PointerGetDatum((char*)pVal[i] + VARHDRSZ_SHORT);
+                result = interval_pl(finfo);
                 cell->m_val[idx].val = replaceVariable(
                     context, cell->m_val[idx].val, ScalarVector::DatumToScalar(result, INTERVALOID, false));
             }
@@ -9069,7 +9298,7 @@ ScalarVector* vcash_sum(PG_FUNCTION_ARGS)
     ScalarValue* pVal = pVector->m_vals;
     uint8* flag = pVector->m_flag;
     int nrows = pVector->m_rows;
-    Datum args[2];
+    NullableDatum args[2];
     Datum result;
 
     for (i = 0; i < nrows; i++) {
@@ -9081,9 +9310,9 @@ ScalarVector* vcash_sum(PG_FUNCTION_ARGS)
 
                 SET_NOTNULL(cell->m_val[idx].flag);
             } else {
-                args[0] = cell->m_val[idx].val;
-                args[1] = pVal[i];
-                result = args[0] + args[1];
+                args[0].value = cell->m_val[idx].val;
+                args[1].value = pVal[i];
+                result = args[0].value + args[1].value;
 
                 cell->m_val[idx].val = result;
             }
@@ -9103,18 +9332,17 @@ ScalarVector* vintervalpl(PG_FUNCTION_ARGS)
     uint8* pflags2 = (uint8*)(PG_GETARG_VECTOR(1)->m_flag);
     uint8* pflagsRes = (uint8*)(PG_GETARG_VECTOR(3)->m_flag);
     int i;
-    Datum args[2];
-    FunctionCallInfoData finfo;
+    LOCAL_FCINFO(finfo, 2);
+    finfo->extra = NULL;
     Datum result;
-    finfo.arg = &args[0];
 
     if (likely(pselection == NULL)) {
         for (i = 0; i < nvalues; i++) {
             if (BOTH_NOT_NULL(pflags1[i], pflags2[i])) {
-                args[0] = PointerGetDatum((char*)parg1[i] + VARHDRSZ_SHORT);
-                args[1] = PointerGetDatum((char*)parg2[i] + VARHDRSZ_SHORT);
+                finfo->args[0].value = PointerGetDatum((char*)parg1[i] + VARHDRSZ_SHORT);
+                finfo->args[1].value = PointerGetDatum((char*)parg2[i] + VARHDRSZ_SHORT);
 
-                result = interval_pl(&finfo);
+                result = interval_pl(finfo);
 
                 presult[i] = ScalarVector::DatumToScalar(result, INTERVALOID, false);
                 SET_NOTNULL(pflagsRes[i]);
@@ -9125,10 +9353,10 @@ ScalarVector* vintervalpl(PG_FUNCTION_ARGS)
         for (i = 0; i < nvalues; i++) {
             if (pselection[i]) {
                 if (BOTH_NOT_NULL(pflags1[i], pflags2[i])) {
-                    args[0] = PointerGetDatum((char*)parg1[i] + VARHDRSZ_SHORT);
-                    args[1] = PointerGetDatum((char*)parg2[i] + VARHDRSZ_SHORT);
+                    finfo->args[0].value = PointerGetDatum((char*)parg1[i] + VARHDRSZ_SHORT);
+                    finfo->args[1].value = PointerGetDatum((char*)parg2[i] + VARHDRSZ_SHORT);
 
-                    result = interval_pl(&finfo);
+                    result = interval_pl(finfo);
                     presult[i] = ScalarVector::DatumToScalar(result, INTERVALOID, false);
                     SET_NOTNULL(pflagsRes[i]);
                 } else

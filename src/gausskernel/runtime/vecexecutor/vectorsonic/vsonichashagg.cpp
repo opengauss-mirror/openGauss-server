@@ -557,12 +557,12 @@ void SonicHashAgg::initAggInfo()
         m_aggIdx[j] = aggIdx;
 
         /* mark count(col), count(*) */
-        Oid aggFuncOid = m_runtime->aggInfo[j].vec_agg_function.flinfo->fn_oid;
+        Oid aggFuncOid = m_runtime->aggInfo[j].vec_agg_function->flinfo->fn_oid;
         if (aggFuncOid == F_INT8INC || aggFuncOid == F_INT8INC_ANY) {
             m_aggCount[j] = true;
         }
 
-        if (m_runtime->aggInfo[j].vec_final_function.flinfo != NULL) {
+        if (m_runtime->aggInfo[j].vec_final_function->flinfo != NULL) {
             m_finalAggInfo[m_finalAggNum].idx = aggIdx;
             m_finalAggInfo[m_finalAggNum].info = &m_runtime->aggInfo[j];
             m_finalAggNum++;
@@ -1346,13 +1346,12 @@ bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVecto
     if (simpleType) {
         notnull_check = notnull_check && ((cmpType)pVector->m_vals[pVectorIdx] == val);
     } else {
-        FunctionCallInfoData fcinfo;
-        Datum args[2];
-        fcinfo.arg = &args[0];
-        fcinfo.arg[0] = pVector->m_vals[pVectorIdx];
-        fcinfo.arg[1] = val;
-        fcinfo.flinfo = (m_equalFuncs + keyIdx);
-        notnull_check = notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(&fcinfo);
+        LOCAL_FCINFO(fcinfo, 2);
+        fcinfo->extra = NULL;
+        fcinfo->args[0].value = pVector->m_vals[pVectorIdx];
+        fcinfo->args[1].value = val;
+        fcinfo->flinfo = (m_equalFuncs + keyIdx);
+        notnull_check = notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(fcinfo);
     }
 
     return (notnull_check || null_check);
@@ -1371,10 +1370,9 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
     uint8 flag;
     bool notnull_check = false;
     bool null_check = false;
-    Datum args[2];
 
-    FunctionCallInfoData fcinfo;
-    fcinfo.arg = &args[0];
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
 
     for (int i = 0; i < cmpRows; i++) {
         /* only doing compare when match is true */
@@ -1387,10 +1385,10 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
                 notnull_check = notnull_check && ((cmpType)pVector->m_vals[m_suspectIdx[i]] == val);
                 m_match[i] = notnull_check || null_check;
             } else {
-                fcinfo.arg[0] = pVector->m_vals[m_suspectIdx[i]];
-                fcinfo.arg[1] = val;
-                fcinfo.flinfo = (m_equalFuncs + keyIdx);
-                m_match[i] = null_check || (notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(&fcinfo));
+                fcinfo->args[0].value = pVector->m_vals[m_suspectIdx[i]];
+                fcinfo->args[1].value = val;
+                fcinfo->flinfo = (m_equalFuncs + keyIdx);
+                m_match[i] = null_check || (notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(fcinfo));
             }
         }
     }
@@ -1591,7 +1589,7 @@ int64 SonicHashAgg::insertHashTbl(VectorBatch* batch, int idx, uint32 hashval, u
         uint8 init_flag = V_NULL_MASK;
         m_data[m_aggIdx[i]]->putArray(&init_val, &init_flag, 1);
 
-        if (m_runtime->aggInfo[i].vec_final_function.flinfo != NULL) {
+        if (m_runtime->aggInfo[i].vec_final_function->flinfo != NULL) {
             m_data[m_aggIdx[i] + 1]->putArray(&init_val, &init_flag, 1);
         }
     }
@@ -2276,12 +2274,12 @@ SonicHashPartition** SonicHashAgg::createPartition(uint16 num_partitions)
 void SonicHashAgg::AggregationOnScalar(VecAggInfo* aggInfo, ScalarVector* pVector, int idx)
 {
     AutoContextSwitch memGuard(m_econtext->ecxt_per_tuple_memory);
-    FunctionCallInfo fcinfo = &aggInfo->vec_agg_function;
+    FunctionCallInfo fcinfo = aggInfo->vec_agg_function;
 
-    fcinfo->arg[0] = (Datum)pVector;
-    fcinfo->arg[1] = (Datum)idx;
-    fcinfo->arg[2] = (Datum)m_loc;
-    fcinfo->arg[3] = (Datum)m_data;
+    fcinfo->args[0].value = (Datum)pVector;
+    fcinfo->args[1].value = (Datum)idx;
+    fcinfo->args[2].value = (Datum)m_loc;
+    fcinfo->args[3].value = (Datum)m_data;
 
     VecFunctionCallInvoke(fcinfo);
     ResetExprContext(m_econtext);
@@ -2362,11 +2360,11 @@ void SonicHashAgg::BuildScanBatchFinal(int idx)
         scalar_vector = &m_scanBatch->m_arr[col_idx];
         if (i == m_finalAggInfo[j].idx) {
             /* get agg and count columns */
-            FunctionCallInfo fcinfo = &m_finalAggInfo[j].info->vec_final_function;
-            fcinfo->arg[0] = (Datum)m_data;
-            fcinfo->arg[1] = (Datum)i;
-            fcinfo->arg[2] = (Datum)scalar_vector;
-            fcinfo->arg[3] = (Datum)idx;
+            FunctionCallInfo fcinfo = m_finalAggInfo[j].info->vec_final_function;
+            fcinfo->args[0].value = (Datum)m_data;
+            fcinfo->args[1].value = (Datum)i;
+            fcinfo->args[2].value = (Datum)scalar_vector;
+            fcinfo->args[3].value = (Datum)idx;
 
             FunctionCallInvoke(fcinfo);
 

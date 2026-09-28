@@ -1869,12 +1869,12 @@ static void pglog_begin_fs(ForeignScanState* node, int eflags)
 static void set_func_args(FunctionCallInfoData& fcinfo, pglogPlanState* pg_log, int attidx, Datum val)
 {
     InitFunctionCallInfoData(fcinfo, &pg_log->allattr_fmgrinfo[attidx], 3, InvalidOid, NULL, NULL);
-    fcinfo.argnull[0] = false;
-    fcinfo.argnull[1] = false;
-    fcinfo.argnull[2] = false;
-    fcinfo.arg[0] = CStringGetDatum(text_to_cstring((const text*)val));
-    fcinfo.arg[1] = ObjectIdGetDatum(pg_log->allattr_typioparam[attidx]);
-    fcinfo.arg[2] = Int32GetDatum(pg_log->allattr_typmod[attidx]);
+    fcinfo.args[0].isnull = false;
+    fcinfo.args[1].isnull = false;
+    fcinfo.args[2].isnull = false;
+    fcinfo.args[0].value = CStringGetDatum(text_to_cstring((const text*)val));
+    fcinfo.args[1].value = ObjectIdGetDatum(pg_log->allattr_typioparam[attidx]);
+    fcinfo.args[2].value = Int32GetDatum(pg_log->allattr_typmod[attidx]);
 }
 
 static void fill_target_tuple_values(ForeignScanState* node)

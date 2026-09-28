@@ -3719,30 +3719,30 @@ static bool pgxc_is_trigger_shippable(int trig_idx, Relation rel)
 
     /* Compile trigger function for body query and new old values. */
     if (trigger_need_compile(trig_idx, rel)) {
-        FunctionCallInfoData fake_fcinfo;
+        LOCAL_FCINFO(fake_fcinfo, 2);
         FmgrInfo flinfo;
         TriggerData trigdata;
         PLpgSQL_function* function = NULL;
         errno_t rc = EOK;
 
         /* Set up a fake fcinfo with just enough info to satisfy function compile. */
-        rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+        rc = memset_s(fake_fcinfo, SizeForFunctionCallInfo(2), 0, SizeForFunctionCallInfo(2));
         securec_check(rc, "\0", "\0");
 
         rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
         securec_check(rc, "\0", "\0");
 
-        fake_fcinfo.flinfo = &flinfo;
+        fake_fcinfo->flinfo = &flinfo;
         flinfo.fn_oid = REL_GET_ITH_TRIG(rel, trig_idx).tgfoid;
         flinfo.fn_mcxt = CurrentMemoryContext;
 
         rc = memset_s(&trigdata, sizeof(trigdata), 0, sizeof(trigdata));
         securec_check(rc, "\0", "\0");
         trigdata.type = T_TriggerData;
-        fake_fcinfo.context = (Node*)&trigdata;
+        fake_fcinfo->context = (Node*)&trigdata;
 
         /* Compile the trigger function to get info need by check shippable. */
-        function = plpgsql_compile_nohashkey(&fake_fcinfo);
+        function = plpgsql_compile_nohashkey(fake_fcinfo);
 
         /*
          * We need table attribute info to set NEW and OLD rec in the downstream,

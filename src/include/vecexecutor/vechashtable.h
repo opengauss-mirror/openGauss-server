@@ -585,24 +585,23 @@ inline void hashBasedOperator::hashCellT(hashCell* cell, int keyIdx, FmgrInfo* h
 {
     hashVal val;
     ScalarValue hashV;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
-    fcinfo.arg = &args[0];
-    fcinfo.flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
+    fcinfo->flinfo = hashFmgr;
     PGFunction func = hashFmgr->fn_addr;
 
     for (int j = 0; j < nval; j++) {
         val = cell->m_val[keyIdx];
         if (likely(NOT_NULL(val.flag))) {
-            fcinfo.arg[0] = val.val;
+            fcinfo->args[0].value = val.val;
             if (reHash) {
                 /* rotate hashkey left 1 bit at each rehash step */
                 hashV = hashRes[j];
                 hashV = (hashV << 1) | ((hashV & 0x80000000) ? 1 : 0);
-                hashV ^= func(&fcinfo);
+                hashV ^= func(fcinfo);
                 hashRes[j] = hashV;
             } else
-                hashRes[j] = func(&fcinfo);
+                hashRes[j] = func(fcinfo);
         } else {
             if (!reHash)
                 hashRes[j] = 0;  // give the init value;
@@ -618,24 +617,23 @@ inline void hashBasedOperator::hashColT(ScalarVector* val, FmgrInfo* hashFmgr, i
 {
     ScalarValue* value = val->m_vals;
     uint8* flag = val->m_flag;
-    FunctionCallInfoData fcinfo;
-    Datum args[2];
-    fcinfo.arg = &args[0];
-    fcinfo.flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 2);
+    fcinfo->extra = NULL;
+    fcinfo->flinfo = hashFmgr;
     PGFunction func = hashFmgr->fn_addr;
     ScalarValue hashV;
 
     for (int j = 0; j < nval; j++) {
         if (likely(NOT_NULL(flag[j]))) {
-            fcinfo.arg[0] = value[j];
+            fcinfo->args[0].value = value[j];
             if (reHash) {
                 /* rotate hashkey left 1 bit at each rehash step */
                 hashV = hashRes[j];
                 hashV = (hashV << 1) | ((hashV & 0x80000000) ? 1 : 0);
-                hashV ^= func(&fcinfo);
+                hashV ^= func(fcinfo);
                 hashRes[j] = hashV;
             } else
-                hashRes[j] = func(&fcinfo);
+                hashRes[j] = func(fcinfo);
         } else {
             if (!reHash)
                 hashRes[j] = 0;  // give the init value;

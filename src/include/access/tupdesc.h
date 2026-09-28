@@ -162,6 +162,12 @@ typedef struct tupleDesc {
     bool tdhasuids;             /* tuple has uid attribute in its header */
     TupleConstr* constr;        /* constraints, or NULL if none */
     TupInitDefVal* initdefvals; /* init default value due to ADD COLUMN */
+
+    /* Cache for nocache_index_getattr: last visited tuple/offset */
+    struct IndexTupleData* td_last_itup;
+    int td_last_attnum; /* -1 = no cached value */
+    int td_last_off;
+
     /* attrs[N] is the description of Attribute Number N+1 */
     FormData_pg_attribute attrs[FLEXIBLE_ARRAY_MEMBER];
 } * TupleDesc;

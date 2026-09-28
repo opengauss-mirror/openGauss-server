@@ -1477,7 +1477,7 @@ static DetectCountStarResult DetectCountStarInAggregations(uint32 aggNum, VecAgg
     ereport(DEBUG1, (errmsg("DPA: Phase 1 - Detecting COUNT(*), m_aggNum=%u", aggNum)));
     
     for (uint32 i = 0; i < aggNum; i++) {
-        const Oid aggFuncOid = runtime->aggInfo[i].vec_agg_function.flinfo->fn_oid;
+        const Oid aggFuncOid = runtime->aggInfo[i].vec_agg_function->flinfo->fn_oid;
         int pervecagg_idx = aggNum - 1 - i;
         
         if (IsCountStar(aggFuncOid, &runtime->pervecagg[pervecagg_idx])) {
@@ -2648,7 +2648,7 @@ void HashAggRunner::DaeParallelProbe()
         /*
          * Get the actual output type from aggInfo (which is in SELECT order)
          */
-        const Oid colType = m_runtime->aggInfo[aggInfo_idx].vec_agg_function.flinfo->fn_rettype;
+        const Oid colType = m_runtime->aggInfo[aggInfo_idx].vec_agg_function->flinfo->fn_rettype;
         
         /* Update type descriptor to match actual data type */
         p_vector->m_desc.typeId = colType;
@@ -2997,7 +2997,7 @@ bool HashAggRunner::DaeSessionInit(VectorBatch* batch)
 
     uint32 regular_idx = 0;  // Contiguous index for regular aggregations (0, 1, 2, ...)
     for (uint32 i = 0; i < m_aggNum; i++) {
-        const Oid aggFuncOid = m_runtime->aggInfo[i].vec_agg_function.flinfo->fn_oid;
+        const Oid aggFuncOid = m_runtime->aggInfo[i].vec_agg_function->flinfo->fn_oid;
         int pervecagg_idx = m_aggNum - 1 - i;
         
         if (IsCountStar(aggFuncOid, &m_runtime->pervecagg[pervecagg_idx])) {
@@ -3030,7 +3030,7 @@ bool HashAggRunner::DaeSessionInit(VectorBatch* batch)
         
         const Oid inputColType = m_runtime->pervecagg[pervecagg_idx].evalproj->pi_batch->m_arr->m_desc.typeId;
         const int4 inputTypeMod = m_runtime->pervecagg[pervecagg_idx].evalproj->pi_batch->m_arr->m_desc.typeMod;
-        const Oid outputColType = m_runtime->aggInfo[i].vec_agg_function.flinfo->fn_rettype;
+        const Oid outputColType = m_runtime->aggInfo[i].vec_agg_function->flinfo->fn_rettype;
         
         // CRITICAL FIX: Use regular_idx for setup.agg_cols_info (UADK expects contiguous 0,1,2...)
         // But use pervecagg_idx for daeAggColTypeMods_ (Probe uses pervecagg order)

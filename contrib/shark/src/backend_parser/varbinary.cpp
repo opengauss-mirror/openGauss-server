@@ -1004,7 +1004,8 @@ Datum varbinary_numeric(PG_FUNCTION_ARGS)
     initStringInfo(&buf);
     pq_sendbytes(&buf, VARDATA_ANY(vlena), VARSIZE_ANY_EXHDR(vlena));
 
-    return DirectFunctionCall3(numeric_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid), PG_GETARG_DATUM(1));
+    return DirectFunctionCall3(numeric_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid),
+                               (fcinfo->nargs > 1) ? PG_GETARG_DATUM(1) : Int32GetDatum(0));
 }
 
 Datum date_varbinary(PG_FUNCTION_ARGS)
@@ -1020,7 +1021,8 @@ Datum varbinary_date(PG_FUNCTION_ARGS)
     initStringInfo(&buf);
     pq_sendbytes(&buf, VARDATA_ANY(vlena), VARSIZE_ANY_EXHDR(vlena));
 
-    return DirectFunctionCall3(date_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid), PG_GETARG_DATUM(1));
+    return DirectFunctionCall3(date_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid),
+                               (fcinfo->nargs > 1) ? PG_GETARG_DATUM(1) : Int32GetDatum(0));
 }
 
 Datum time_varbinary(PG_FUNCTION_ARGS)
@@ -1036,7 +1038,8 @@ Datum varbinary_time(PG_FUNCTION_ARGS)
     initStringInfo(&buf);
     pq_sendbytes(&buf, VARDATA_ANY(vlena), VARSIZE_ANY_EXHDR(vlena));
 
-    return DirectFunctionCall3(time_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid), PG_GETARG_DATUM(1));
+    return DirectFunctionCall3(time_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid),
+                               (fcinfo->nargs > 1) ? PG_GETARG_DATUM(1) : Int32GetDatum(0));
 }
 
 Datum smalldatetime_varbinary(PG_FUNCTION_ARGS)
@@ -1053,5 +1056,5 @@ Datum varbinary_smalldatetime(PG_FUNCTION_ARGS)
     pq_sendbytes(&buf, VARDATA_ANY(vlena), VARSIZE_ANY_EXHDR(vlena));
 
     return DirectFunctionCall3(smalldatetime_recv, PointerGetDatum(&buf), ObjectIdGetDatum(InvalidOid),
-                               PG_GETARG_DATUM(1));
+                               (fcinfo->nargs > 1) ? PG_GETARG_DATUM(1) : Int32GetDatum(0));
 }

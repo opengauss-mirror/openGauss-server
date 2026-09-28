@@ -554,9 +554,8 @@ static void NdpAggSlotAppend(AggState* state, AggStatePerGroup pergroup, TupleTa
         InitFunctionCallInfoArgs(fcinfo, 2, 1);
 
         // add slot value to fcinfo
-        fcinfo.arg[1] = slot->tts_values[counter];
-        fcinfo.argnull[1] = slot->tts_isnull[counter];
-        fcinfo.argTypes[1] = InvalidOid;
+        fcinfo.args[1].value = slot->tts_values[counter];
+        fcinfo.args[1].isnull = slot->tts_isnull[counter];
         counter++;
 
         // normally numGroupingSets = 1
@@ -584,8 +583,9 @@ void TransitionFunction(AggState* aggstate,
          * just keep the prior transValue.
          */
         for (int i = 1; i <= peraggstate->numTransInputs; i++) {
-            if (fcinfo->argnull[i])
+            if (fcinfo->args[i].isnull) {
                 return;
+            }
         }
         if (pergroupstate->noTransValue) {
             /*
@@ -598,7 +598,7 @@ void TransitionFunction(AggState* aggstate,
              * do not need to pfree the old transValue, since it's NULL.
              */
             pergroupstate->transValue =
-                    datumCopy(fcinfo->arg[1], peraggstate->transtypeByVal, peraggstate->transtypeLen);
+                    datumCopy(fcinfo->args[1].value, peraggstate->transtypeByVal, peraggstate->transtypeLen);
             pergroupstate->transValueIsNull = false;
             pergroupstate->noTransValue = false;
             return;
@@ -623,9 +623,8 @@ void TransitionFunction(AggState* aggstate,
      */
     InitFunctionCallInfoData(
             *fcinfo, &(peraggstate->collectfn), 2, peraggstate->aggCollation, (Node*)aggstate, NULL);
-    fcinfo->arg[0] = pergroupstate->transValue;
-    fcinfo->argnull[0] = pergroupstate->transValueIsNull;
-    fcinfo->argTypes[0] = InvalidOid;
+    fcinfo->args[0].value = pergroupstate->transValue;
+    fcinfo->args[0].isnull = pergroupstate->transValueIsNull;
     fcinfo->isnull = false; /* just in case transfn doesn't set it */
 
     Node* origin_fcxt = fcinfo->context;

@@ -489,8 +489,8 @@ MakeTupleTableSlotCompat(TupleDesc tupdesc, void *tts_ops)
 #define HEAP_FCINFO(nargs) palloc(sizeof(FunctionCallInfoData))
 
 /* getting arguments has a different API, so these macros unify the versions */
-#define FC_ARG(fcinfo, n) ((fcinfo)->arg[(n)])
-#define FC_NULL(fcinfo, n) ((fcinfo)->argnull[(n)])
+#define FC_ARG(fcinfo, n) ((fcinfo)->args[(n)].value)
+#define FC_NULL(fcinfo, n) ((fcinfo)->args[(n)].isnull)
 
 #else
 

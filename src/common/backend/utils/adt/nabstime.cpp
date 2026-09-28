@@ -929,11 +929,11 @@ Datum tintervalrel(PG_FUNCTION_ARGS)
  */
 Datum timenow(PG_FUNCTION_ARGS)
 {
-    FunctionCallInfoData fc;
-    fc.arg = (Datum*)palloc0(sizeof(Datum));
-    fc.arg[0] = TimestampTzGetDatum(GetCurrentStmtsysTimestamp());
+    LOCAL_FCINFO(fc, 2);
+    fc->extra = NULL;
+    fc->args[0].value = TimestampTzGetDatum(GetCurrentStmtsysTimestamp());
 
-    return timestamptz_abstime(&fc);
+    return timestamptz_abstime(fc);
 }
 
 /*

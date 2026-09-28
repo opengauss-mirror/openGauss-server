@@ -438,6 +438,11 @@ function(CHECK_FOR_MPPDB)
 
     check_headers_func_c(CHECK_INC_FILES CHECK_FUNCTIONS CHECK_DECLARATION CHECK_VARIABLE CHECK_STRUCT_OR_MEMBER CHECK_PROTOTYPE_DEF CHECK_CC_STR)
 
+    CHECK_C_SOURCE_COMPILES("int main(void){void *labeladdrs[] = {&&my_label}; goto *labeladdrs[0]; my_label: return 1;}" HAVE_COMPUTED_GOTO_RESULT)
+    if(HAVE_COMPUTED_GOTO_RESULT)
+        set(HAVE_COMPUTED_GOTO 1 CACHE INTERNAL "compiler supports computed gotos")
+    endif()
+
     if(${HAVE_STRUCT_SOCKADDR_IN6})
         set(HAVE_IPV6 1 PARENT_SCOPE)
     endif()
