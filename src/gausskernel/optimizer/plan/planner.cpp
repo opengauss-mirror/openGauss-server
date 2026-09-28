@@ -8362,26 +8362,41 @@ static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* ac
     foreach (lc, tlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(lc);
 
-        /*
-         * Don't want to deconstruct window clauses or GROUP BY items.  (Note
-         * that such items can't contain window functions, so it's okay to
-         * compute them below the WindowAgg nodes.)
-         */
         if (tle->ressortgroupref != 0 && bms_is_member(tle->ressortgroupref, sgrefs)) {
-            /* Don't want to deconstruct this value, so add to new_tlist */
+            /* Protected (PARTITION/ORDER BY/GROUP BY): keep as-is */
             TargetEntry* newtle = NULL;
 
             newtle = makeTargetEntry(tle->expr, list_length(new_tlist) + 1, NULL, false);
             /* Preserve its sortgroupref marking, in case it's volatile */
             newtle->ressortgroupref = tle->ressortgroupref;
             new_tlist = lappend(new_tlist, newtle);
-        } else {
+        } else if (!ENABLE_SQL_BETA_FEATURE(WINDOWAGG_PUSHDOWN)) {
+            /* If we're not allowed to push down target list, just flat the expressions */
+            flattenable_cols = lappend(flattenable_cols, tle->expr);
+        } else if (contain_window_function((Node*)tle->expr)) {
             /*
-             * Column is to be flattened, so just remember the expression for
-             * later call to pull_var_clause.  There's no need for
-             * pull_var_clause to examine the TargetEntry node itself.
+             * Window function expressions are computed at the WindowAgg level,
+             * so we only need to extract Vars from their argument
+             */
+            List* win_vars = pull_var_clause((Node*)tle->expr, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+            new_tlist = add_to_flat_tlist(new_tlist, win_vars);
+            list_free_deep(win_vars);
+        } else if (contain_volatile_functions((Node*)tle->expr) || !contain_var_clause((Node*)tle->expr) ||
+            checkExprHasSetReturningFuncs((Node*)tle->expr)) {
+            /*
+             * Volatile expressions must not be pushed down, and if expression don't contains Var
+             * means no need to be pushed down. Flatten them to component Vars so they will
+             * be computed at the WindowAgg.
              */
             flattenable_cols = lappend(flattenable_cols, tle->expr);
+        } else {
+            /*
+             * Non-window and Non-volatile expressions can be pushed down,
+             * Keep them as-is; setrefs will replace matching expressions
+             * in the WindowAgg tlist with var refrence.
+             */
+            TargetEntry* newtle = makeTargetEntry(tle->expr, list_length(new_tlist) + 1, NULL, false);
+            new_tlist = lappend(new_tlist, newtle);
         }
     }
 
@@ -16434,23 +16449,38 @@ make_window_input_target(PlannerInfo *root, PathTarget *final_target, List *acti
         Expr *expr = (Expr *)lfirst(lc);
         Index sgref = get_pathtarget_sortgroupref(final_target, i);
 
-        /*
-         * Don't want to deconstruct window clauses or GROUP BY items.  (Note
-         * that such items can't contain window functions, so it's okay to
-         * compute them below the WindowAgg nodes.)
-         */
         if (sgref != 0 && bms_is_member(sgref, sgrefs)) {
             /*
-             * Don't want to deconstruct this value, so add it to the input
-             * target as-is.
+             * Don't want to deconstruct window PARTITION/ORDER BY or GROUP BY
+             * items. Add them to the input target as-is.
              */
             add_column_to_pathtarget(input_target, expr, sgref);
-        } else {
+        } else if (!ENABLE_SQL_BETA_FEATURE(WINDOWAGG_PUSHDOWN)) {
+            /* If we're not allowed to push down target list, just flat the expressions */
+            flattenable_cols = lappend(flattenable_cols, expr);
+        } else if (contain_window_function((Node*)expr)) {
             /*
-             * Column is to be flattened, so just remember the expression for
-             * later call to pull_var_clause.
+             * Window function expressions are computed at the WindowAgg level,
+             * so we only need to extract Vars from their argument
+             */
+            List* win_vars = pull_var_clause((Node*)expr, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
+            add_new_columns_to_pathtarget(input_target, win_vars);
+            list_free_deep(win_vars);
+        } else if (contain_volatile_functions((Node*)expr) || !contain_var_clause((Node*)expr) ||
+            checkExprHasSetReturningFuncs((Node*)expr)) {
+            /*
+             * Volatile expressions must not be pushed down, and if expression don't contains Var
+             * means no need to be pushed down. Flatten them to component Vars so they will
+             * be computed at the WindowAgg.
              */
             flattenable_cols = lappend(flattenable_cols, expr);
+        } else {
+            /*
+             * Non-window and Non-volatile expressions can be pushed down,
+             * Keep them as-is; setrefs will replace matching expressions
+             * in the WindowAgg tlist with var refrence.
+             */
+            add_column_to_pathtarget(input_target, expr, sgref);
         }
 
         i++;

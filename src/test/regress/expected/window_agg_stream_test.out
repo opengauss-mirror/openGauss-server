@@ -39,4 +39,15 @@ order by 1;
          16
 (16 rows)
 
+set sql_beta_feature='windowagg_pushdown';
+select abs(i_id), sum(i_im_id) over(), now() from bmsql_item;
+--? abs | sum |.*
+--?.*
+--?   1 |  10 |.*
+--?   2 |  10 |.*
+--?   3 |  10 |.*
+--?   4 |  10 |.*
+--?   5 |  10 |.*
+(5 rows)
+
 drop table bmsql_item;
