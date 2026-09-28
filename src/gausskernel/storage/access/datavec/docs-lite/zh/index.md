@@ -13,6 +13,7 @@ openGauss的向量数据库组件DataVec，为高效管理与查询高维向量�
 [DiskANN](./vector_index.md)| 基于磁盘的图索引 | vector  |
 [PQ](./pq.md)| 基于乘积量化的索引算法，支持结合IVFFLAT、HNSW、DiskANN使用 | vector  |
 [RabitQ](./Rabitq.md)| 基于1bit量化的索引算法，支持结合IVFFLAT、HNSW使用 | vector、halfvec  |
+[超低内存磁盘检索](./low_memory_disk_retrieval.md)| 超低内存磁盘检索，索引不保存原始向量 | vector  |
 
 ## 向量索引详解
 
@@ -274,6 +275,8 @@ openGauss=# SELECT id, embedding <-> '[1,2,3,4,5]'::vector AS distance FROM item
 openGauss=# CREATE INDEX ON items USING diskann (embedding vector_l2_ops) WITH (index_size = 50);
 --构建带pq的diskann索引
 openGauss=# CREATE INDEX ON items USING diskann (embedding  vector_l2_ops) WITH (index_size = 16,enable_pq = on, pq_m = 2);
+--构建超低内存磁盘检索索引
+openGauss=# CREATE INDEX ON items USING diskann (embedding vector_cosine_ops) WITH (enable_rabitq = on, pca_dim = 448, rabitq_bits = 2);
 
 --l2距离向量查询
 openGauss=# SET diskann_probes = 10;
