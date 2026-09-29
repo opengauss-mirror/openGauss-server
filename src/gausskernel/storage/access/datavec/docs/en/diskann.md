@@ -5,7 +5,7 @@
 With the widespread adoption of AI applications such as recommendation systems, image recognition, and natural language processing, traditional databases struggle to meet the real-time similarity search challenges of massive high-dimensional vectors. As a disk-based approximate nearest neighbor search technology, DiskANN can effectively reduce memory consumption while maintaining high query performance, meeting enterprises' demands for efficient management of large-scale vector data.
 
 >![]() **Support and limitations:<br>**
->DiskANN currently supports only the vector data type; using other vector data types will cause execution failure, and the maximum supported dimension is 1536.<br>
+>DiskANN currently supports only the vector data type; using other vector data types will cause execution failure. The default and PQ formats support up to 1536 dimensions; enabling `enable_rabitq` supports up to the vector type limit of 16000 dimensions.<br>
 >DiskANN is currently compatible only with A\B\C\PG databases.<br>
 >DiskANN supports vector data storage in ordinary row-store tables, temporary tables, Toast tables, unlogged tables, and segment-page tables.<br>
 >DiskANN supports PQ quantization compression and parallel index building.<br>

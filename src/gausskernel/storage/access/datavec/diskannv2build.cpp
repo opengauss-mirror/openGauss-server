@@ -76,6 +76,7 @@
 #include "storage/spin.h"
 #include "utils/atomic.h"
 #include "utils/memutils.h"
+#include "utils/snapmgr.h"
 #include "access/datavec/utils.h"
 #include "access/datavec/vector.h"
 #include "access/datavec/diskannv2.h"
@@ -321,7 +322,7 @@ static void FetchNodeVector(const DiskAnnV2BuildState* state, uint32 id, float* 
     hv.normalize = state->normalize;
     hv.dim = state->dimIn;
     hv.out = out;
-    if (!DiskAnnV2HeapVector(&hv)) {
+    if (!DiskAnnV2HeapVector(&hv, SnapshotAny)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("diskann: heap row (%u,%u) of node %u vanished during the index build",
                                ItemPointerGetBlockNumber(tid), ItemPointerGetOffsetNumber(tid), id)));
@@ -1314,16 +1315,15 @@ static void InitBuildState(DiskAnnV2BuildState* state, Relation heap, Relation i
     state->indexInfo = indexInfo;
     state->frozen = DISKANN_V2_INVALID_NODE;
 
-    const DiskAnnTypeInfo* typeInfo = DiskAnnGetTypeInfo(index);
-    if (TupleDescAttr(index->rd_att, 0)->atttypid == VARBITOID) {
+    if (TupleDescAttr(index->rd_att, 0)->atttypid != VECTOROID) {
         elog(ERROR, "type not supported for diskann index");
     }
     state->dimIn = TupleDescAttr(index->rd_att, 0)->atttypmod;
     if (state->dimIn < 0) {
         elog(ERROR, "column does not have dimensions");
     }
-    if (state->dimIn > typeInfo->maxDimensions) {
-        elog(ERROR, "column cannot have more than %d dimensions for diskann index", typeInfo->maxDimensions);
+    if (state->dimIn > DISKANN_V2_MAX_DIM) {
+        elog(ERROR, "column cannot have more than %d dimensions for diskann rabitq index", DISKANN_V2_MAX_DIM);
     }
     if (state->dimIn < 1) {
         elog(ERROR, "column does not have dimensions");

@@ -372,7 +372,7 @@ uint32 DiskAnnV2AllocateNodeId(Relation index, uint32* tailChunkCount);
 uint32 DiskAnnV2PublishFirstNode(Relation index, uint32 nodeId);
 void DiskAnnV2EnsureNodeCapacity(Relation index, uint64 requiredSlots);
 uint32 DiskAnnV2GraphSlotsOnPage(const DiskAnnV2Meta* meta, uint32 nodeId);
-bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args);
+bool DiskAnnV2HeapVector(const DiskAnnV2HeapVecArgs* args, Snapshot snapshot);
 bool DiskAnnV2NormalizeVector(const float* src, int dim, float* out);
 
 /* build (diskannv2build.cpp) */

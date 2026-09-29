@@ -53,6 +53,7 @@
 #define DISKANN_TYPE_INFO_PROC 3
 #define DISKANN_KMEANS_NORMAL_PROC 4
 
+/* Legacy limit from storing the original vector in a single index page. */
 #define DISKANN_MAX_DIM 1536
 #define DISKANN_MIN_INDEX_SIZE 16
 #define DISKANN_MAX_INDEX_SIZE 1000
@@ -62,9 +63,11 @@
 
 /* RaBitQ format (version 2) options */
 #define DISKANN_VERSION_V2 2
+/* RaBitQ stores compact codes; input dimensions follow the vector type limit. */
+#define DISKANN_V2_MAX_DIM VECTOR_MAX_DIM
 #define DISKANN_DEFAULT_PCA_DIM 0
 #define DISKANN_MIN_PCA_DIM 0
-#define DISKANN_MAX_PCA_DIM (DISKANN_MAX_DIM - 1)
+#define DISKANN_MAX_PCA_DIM (DISKANN_V2_MAX_DIM - 1)
 #define DISKANN_PCA_MIN_OUT_DIM 8
 #define DISKANN_PCA_MIN_TRAIN_ROWS 16384
 #define DISKANN_DEFAULT_RABITQ_BITS 1

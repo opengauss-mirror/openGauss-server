@@ -39,6 +39,7 @@
 #include "storage/buf/bufmgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/snapmgr.h"
 #include "access/datavec/utils.h"
 #include "access/datavec/vector.h"
 #include "access/datavec/diskannv2.h"
@@ -380,7 +381,7 @@ static bool InsHeapVectorPreprocessed(const DiskAnnV2InsertCtx* ctx, ItemPointer
     hv.normalize = ctx->normalize;
     hv.dim = ctx->meta.dimIn;
     hv.out = scratch->x;
-    if (!DiskAnnV2HeapVector(&hv)) {
+    if (!DiskAnnV2HeapVector(&hv, SnapshotSelf)) {
         return false;
     }
     *outVec = scratch->x;

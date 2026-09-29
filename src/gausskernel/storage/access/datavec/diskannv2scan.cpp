@@ -597,7 +597,7 @@ static bool FetchHitVector(IndexScanDesc scan, DiskAnnV2ScanOpaque so, const Dis
     hv.out = so->heapVec;
     for (int t = 0; t < (int)hit->ntids; t++) {
         hv.tid = const_cast<ItemPointer>(&hit->tids[t]);
-        if (DiskAnnV2HeapVector(&hv)) {
+        if (DiskAnnV2HeapVector(&hv, scan->xs_snapshot)) {
             return true;
         }
     }
