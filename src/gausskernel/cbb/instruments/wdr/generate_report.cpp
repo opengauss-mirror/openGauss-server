@@ -2111,6 +2111,9 @@ static void AllTablesStat(report_params* params)
     GenReport::add_data(dash, &params->Contents);
     pfree_ext(query.data);
 }
+static void UnusedIndexesNodeStat(report_params* params);
+static void UnusedIndexesClusterStat(report_params* params);
+
 static void GetObjectNodeStat(report_params* params)
 {
     dashboard* dash = CreateDash();
@@ -2149,6 +2152,8 @@ static void GetObjectNodeStat(report_params* params)
     desc = "The detail information of user index stats";
     dash->desc = lappend(dash->desc, desc);
     GenReport::add_data(dash, &params->Contents);
+
+    UnusedIndexesNodeStat(params);
 
     /* bad block stat */
     dashboard* dash1 = CreateDash();
@@ -2281,6 +2286,101 @@ static void GlobalTableIndex(report_params* params)
     pfree_ext(query.data);
 }
 
+/*
+ * Unused indexes on a single node: idx_scan delta between snapshots is zero.
+ * Reuses snap_global_stat_all_indexes; excludes system schemas like User index stats.
+ */
+static void UnusedIndexesNodeStat(report_params* params)
+{
+    dashboard* dash = CreateDash();
+    char* desc = NULL;
+    StringInfoData query;
+    initStringInfo(&query);
+
+    appendStringInfo(&query,
+        "SELECT snap_2.db_name as \"DB Name\", snap_2.snap_schemaname AS \"Schema\","
+        " snap_2.snap_relname AS \"Table Name\", snap_2.snap_indexrelname AS \"Index Name\","
+        " snap_2.snap_idx_scan AS \"Total Index Scans\" FROM"
+        " (SELECT * FROM snapshot.snap_global_stat_all_indexes "
+        " WHERE snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
+        " (%s) AND snap_schemaname !~ '^pg_toast') snap_2"
+        " LEFT JOIN (SELECT * FROM snapshot.snap_global_stat_all_indexes WHERE snapshot_id = %ld "
+        "and snap_node_name = '%s' and snap_schemaname NOT IN (%s)"
+        " AND snap_schemaname !~ '^pg_toast') snap_1 ON snap_2.snap_relid = snap_1.snap_relid AND "
+        "snap_2.snap_indexrelid = snap_1.snap_indexrelid AND snap_2.snap_schemaname = snap_1.snap_schemaname "
+        "AND snap_2.snap_relname = snap_1.snap_relname AND snap_2.snap_indexrelname = snap_1.snap_indexrelname "
+        "AND snap_2.db_name = snap_1.db_name "
+        "WHERE (snap_2.snap_idx_scan - coalesce(snap_1.snap_idx_scan, 0)) = 0 "
+        "order by snap_2.db_name, snap_2.snap_schemaname, snap_2.snap_relname limit 200;",
+        params->end_snap_id,
+        params->report_node,
+        cache_io_sys_schema,
+        params->begin_snap_id,
+        params->report_node,
+        cache_io_sys_schema);
+
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    dash->dashTitle = "Object stats";
+    dash->tableTitle = "Unused Indexes";
+    desc = "User indexes with zero index scans between begin and end snapshot";
+    dash->desc = lappend(dash->desc, desc);
+    GenReport::add_data(dash, &params->Contents);
+    pfree_ext(query.data);
+}
+
+/*
+ * Unused indexes in cluster report: same rule on snap_summary_stat_all_indexes.
+ */
+static void UnusedIndexesClusterStat(report_params* params)
+{
+    dashboard* dash = CreateDash();
+    char* desc = NULL;
+    StringInfoData query;
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT snap_2.db_name as  \"DB Name\", snap_2.snap_schemaname AS \"Schema\", "
+        "snap_2.snap_relname AS \"Table Name\","
+        " snap_2.snap_indexrelname AS \"Index Name\", snap_2.snap_idx_scan AS \"Total Index Scans\" FROM"
+        " (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
+        " (SELECT C.snap_relid, T.* FROM"
+        " ( select * from snapshot.snap_summary_stat_all_indexes where snap_schemaname NOT IN"
+        " (%s) AND snap_schemaname !~ '^pg_toast') as T"
+        " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
+        " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
+        "WHERE T.snapshot_id = %ld) AS Ti LEFT JOIN snapshot.snap_class_vital_info as I ON "
+        "(Ti.snap_indexrelname = I.snap_relname AND"
+        " Ti.snap_schemaname = I.snap_schemaname AND Ti.db_name = I.db_name AND Ti.snapshot_id = I.snapshot_id) "
+        "WHERE Ti.snapshot_id = %ld) AS snap_2"
+        " LEFT JOIN (SELECT Ti.*, I.snap_relid as snap_indexrelid FROM"
+        " (SELECT C.snap_relid, T.* FROM"
+        " (select * from snapshot.snap_summary_stat_all_indexes where snap_schemaname NOT IN"
+        " (%s) AND snap_schemaname !~ '^pg_toast') as T"
+        " LEFT JOIN snapshot.snap_class_vital_info AS C ON (T.snap_relname = C.snap_relname AND"
+        " T.snap_schemaname = C.snap_schemaname AND T.db_name = C.db_name AND T.snapshot_id = C.snapshot_id) "
+        "WHERE T.snapshot_id = %ld) AS Ti"
+        " LEFT JOIN snapshot.snap_class_vital_info as I ON (Ti.snap_indexrelname = I.snap_relname AND"
+        " Ti.snap_schemaname = I.snap_schemaname AND Ti.db_name = I.db_name AND Ti.snapshot_id = I.snapshot_id) "
+        "WHERE i.snapshot_id = %ld) AS snap_1"
+        " ON (snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_indexrelid = snap_1.snap_indexrelid AND "
+        " snap_2.db_name = snap_1.db_name AND snap_2.snap_schemaname = snap_1.snap_schemaname) "
+        "WHERE (snap_2.snap_idx_scan - coalesce(snap_1.snap_idx_scan, 0)) = 0 "
+        " order by snap_2.db_name, snap_2.snap_schemaname, snap_2.snap_relname limit 200;",
+        cache_io_sys_schema,
+        params->end_snap_id,
+        params->end_snap_id,
+        cache_io_sys_schema,
+        params->begin_snap_id,
+        params->begin_snap_id);
+
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    dash->dashTitle = "Object stats";
+    dash->tableTitle = "Unused Indexes";
+    desc = "User indexes with zero index scans between begin and end snapshot (cluster)";
+    dash->desc = lappend(dash->desc, desc);
+    GenReport::add_data(dash, &params->Contents);
+    pfree_ext(query.data);
+}
+
 static void GetObjectClusterStat(report_params* params)
 {
     dashboard* dash = CreateDash();
@@ -2293,6 +2393,8 @@ static void GetObjectClusterStat(report_params* params)
 
     /* global table index stat based on database */
     GlobalTableIndex(params);
+
+    UnusedIndexesClusterStat(params);
 
     /* bad block stat */
     appendStringInfo(&query,
