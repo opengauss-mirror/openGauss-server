@@ -1194,3 +1194,6 @@ test: remotetype_trust_security
 
 # test create force view
 test: create_force_view
+
+# test replication=standbywrite non-internal trust bypass security
+test: replication_standbywrite_security
