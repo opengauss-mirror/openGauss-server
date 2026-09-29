@@ -419,7 +419,8 @@ typedef IvfflatScanOpaqueData *IvfflatScanOpaque;
 typedef struct IvfpqPairingHeapNode {
     pairingheap_node ph_node;
     double distance;
-    ItemPointer heapTid;
+    /* Own the TID: candidate nodes outlive the scanned index page pin. */
+    ItemPointerData heapTid;
     BlockNumber indexBlk;
     OffsetNumber indexOff;
 } IvfpqPairingHeapNode;

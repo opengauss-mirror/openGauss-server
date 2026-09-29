@@ -163,6 +163,36 @@ float ComputeRbqDistance(int dim, int qb, RabitqVector *eVec, QueryRabitqVector 
     }
 }
 
+void ComputeRbqDistanceBatch4(const RabitqQueryParams *params, RabitqVector **eVec, float *out)
+{
+    int dim = params->dim;
+    int qb = params->rbqConfig->rbqQueryBits;
+    QueryRabitqVector *qVec = params->qrbqVec;
+    int funcType = params->funcType;
+    uint8 *codes[VECTOR_RBQ_BATCH_SIZE] = {eVec[0]->data, eVec[1]->data, eVec[2]->data, eVec[3]->data};
+    float dots[VECTOR_RBQ_BATCH_SIZE];
+    VectorRbqDpPopcntBatch4(dim, qb, qVec->data, codes, dots);
+    for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+        FactorData fac = eVec[j]->fac;
+        QueryFactorData qfac = qVec->fac;
+        float xbDotQu = dots[j];
+        float finalDot = qfac.cof1 * xbDotQu + qfac.cof2 * fac.xbSum - qfac.cof34;
+
+        /*
+         * L2: distance = ||or-c||^2 + ||qr-c||^2 - 2*||or-c||*||qr-c||*<q,o>
+         * IP: distance = ||or-c||^2 + ||qr-c||^2 - 2*||or-c||*||qr-c||*<q,o> - ||or||^2
+         */
+        float distance = fac.orMinusCL2Sqr + qfac.qrMinusCL2Sqr - 2 * fac.dpMultiplier * finalDot;
+
+        if (funcType != DIS_L2) {
+            /* -<or,q> = (||or-q||^2 - ||q||^2 - ||or||^2) / 2 */
+            out[j] = (distance - qfac.qrNormL2Sqr) * 0.5f;
+        } else {
+            out[j] = distance;
+        }
+    }
+}
+
 /* ------------------------------------------------------------------------
  * 1 / 2-bit codes over a transformed space (see rabitq.h)
  */
