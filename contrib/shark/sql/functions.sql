@@ -1,6 +1,5 @@
 create schema functions_test;
 set search_path = 'functions_test';
-set xact_abort off;
 
 -- test @@rowcount
 create table t1 (c1 int);
@@ -845,4 +844,3 @@ SELECT LEN(CAST('123' as char(25)));
 SELECT LEN('abc');
 SELECT LEN('12345678901234567890123456789012345'::varchar);
 select len('aa'::varbinary);
-reset xact_abort;

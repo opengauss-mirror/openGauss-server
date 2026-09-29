@@ -237,4 +237,3 @@ drop table if exists test;
 
 --dump
 drop schema d_dbproc cascade;
-alter user tester2 set xact_abort to on;

@@ -93,10 +93,14 @@ begin
     raise notice '@salary: %', @salary;
 end;
 /
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_proc1(integer,text,lowercase_alpha_domain,numeric) line 2 at SQL statement
 SQL statement "EXEC get_employee_details_proc1 @id, @department, @name, @salary"
 PL/pgSQL function inline_code_block line 6 at unknown
+NOTICE:  @id: 1001
+NOTICE:  @name: aaa
+NOTICE:  @department: cc
+NOTICE:  @salary: 5000.00
 declare
     @id integer := 1002;
     @name lowercase_alpha_domain := 'bbb';
@@ -146,8 +150,13 @@ begin
 end;
 /
 exec get_employee_details_proc 1001, 'aaa';
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_proc(integer,lowercase_alpha_domain) line 2 at SQL statement
+ employee_id | department | employee_name1 | salary 
+-------------+------------+----------------+--------
+             |            | aaa            |       
+(1 row)
+
 exec get_employee_details_proc 1002, 'bbb';
  employee_id | department | employee_name1 | salary 
 -------------+------------+----------------+--------
@@ -155,8 +164,13 @@ exec get_employee_details_proc 1002, 'bbb';
 (1 row)
 
 exec get_employee_details_proc emp_id = 1001, employee_name1 = 'aaa';
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_proc(integer,lowercase_alpha_domain) line 2 at SQL statement
+ employee_id | department | employee_name1 | salary 
+-------------+------------+----------------+--------
+             |            | aaa            |       
+(1 row)
+
 exec get_employee_details_proc emp_id = 1002, employee_name1 = 'bbb';
  employee_id | department | employee_name1 | salary 
 -------------+------------+----------------+--------
@@ -176,10 +190,14 @@ begin
     raise notice '@v_object_id2: %', @v_object_id2;
 end;
 /
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_proc(integer,lowercase_alpha_domain) line 2 at SQL statement
 SQL statement "EXEC get_employee_details_proc @v_object_id, employee_id_func(employee_id_func(1001)), @v_object_text2, @v_object_text1, @v_object_id2"
 PL/pgSQL function inline_code_block line 6 at unknown
+NOTICE:  @v_object_text1: aaa
+NOTICE:  @v_object_id: <NULL>
+NOTICE:  @v_object_text2: <NULL>
+NOTICE:  @v_object_id2: <NULL>
 declare
     @v_object_text1 text := 'bbb';
     @v_object_id text := '123';
@@ -256,10 +274,14 @@ begin
     raise notice '@v_object_id2: %', @v_object_id2;
 end;
 /
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_proc2(integer,numeric) line 2 at SQL statement
 SQL statement "EXEC get_employee_details_proc2 @v_object_id, employee_id_func(1001)::numeric, @v_object_text2, @v_object_text1, @v_object_id2"
 PL/pgSQL function inline_code_block line 6 at unknown
+NOTICE:  @v_object_text1: <NULL>
+NOTICE:  @v_object_id: <NULL>
+NOTICE:  @v_object_text2: <NULL>
+NOTICE:  @v_object_id2: 5000
 --test function that return type of 'record'
 create or replace function get_employee_details_func(
     OUT employee_id INTEGER,
@@ -277,11 +299,21 @@ begin
 end;
 $$ language plpgsql;
 exec get_employee_details_func 1001, 'aaa';
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_func(integer,character varying) line 3 at SQL statement
+ employee_id | department | employee_name1 | salary 
+-------------+------------+----------------+--------
+             |            | aaa            |       
+(1 row)
+
 exec get_employee_details_func emp_id = 1001, employee_name1 = 'aaa';
-ERROR:  query returned 2 rows more than one row
+WARNING:  query returned 2 rows more than one row
 CONTEXT:  PL/pgSQL function get_employee_details_func(integer,character varying) line 3 at SQL statement
+ employee_id | department | employee_name1 | salary 
+-------------+------------+----------------+--------
+             |            | aaa            |       
+(1 row)
+
 declare
     @v_object_text1 text := 'aaa';
     @v_object_id integer := 0;

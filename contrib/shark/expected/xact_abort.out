@@ -465,4 +465,3 @@ drop cascades to function proc2()
 drop cascades to function proc3()
 drop cascades to function proc4()
 drop cascades to function proc5()
-alter user tester2 set xact_abort to on;

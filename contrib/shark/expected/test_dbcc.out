@@ -878,7 +878,7 @@ BEGIN
 END;
 /
 call InsertIntoTempTable3();
-ERROR:  SELECT * with no tables specified is not valid
+WARNING:  SELECT * with no tables specified is not valid
 LINE 4:   SELECT * INTO new_table
                  ^
 QUERY:  WITH dd AS (
@@ -886,6 +886,11 @@ QUERY:  WITH dd AS (
   )
   SELECT * INTO new_table
 CONTEXT:  PL/pgSQL function insertintotemptable3() line 2 at SQL statement
+ insertintotemptable3 
+----------------------
+ 
+(1 row)
+
 drop PROCEDURE insertintotemptable;
 drop PROCEDURE InsertIntoTempTable2;
 drop PROCEDURE InsertIntoTempTable3;
