@@ -66,6 +66,7 @@
 #include "storage/latch.h"
 #include "storage/lmgr.h"
 #include "storage/pg_shmem.h"
+#include "storage/shmem.h"
 #include "storage/procsignal.h"
 #include "storage/procarray.h"
 #include "storage/smgr/relfilenode_hash.h"
@@ -8816,6 +8817,81 @@ static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const Memo
     }
 }
 
+static void putSharedMemoryDetailEntry(
+    Tuplestorestate* tupStore, TupleDesc tupDesc, const char* name, int64 totalSize)
+{
+    Datum values[NUM_SHARED_MEMORY_DETAIL_ELEM] = {0};
+    bool nulls[NUM_SHARED_MEMORY_DETAIL_ELEM] = {false};
+
+    values[0] = CStringGetTextDatum(name);
+    values[1] = Int16GetDatum(0);
+    nulls[2] = true;
+    values[3] = Int64GetDatum(totalSize);
+    values[4] = Int64GetDatum(0);
+    values[5] = Int64GetDatum(totalSize);
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+/*
+ * Append key ShmemInitStruct components used by WDR shared memory statistics.
+ * CLOG and CSNLOG partitions are aggregated into single rows.
+ */
+static void appendKeyShmemStructDetail(Tuplestorestate* tupStore, TupleDesc tupDesc)
+{
+    HTAB* shmemIndex = t_thrd.shemem_ptr_cxt.ShmemIndex;
+    static const char* directNames[] = {"Buffer Blocks",
+        "Buffer Descriptors",
+        "Buffer Descriptors Extra",
+        "Checkpoint BufferIds",
+        "XLOG Ctl",
+        NULL};
+    int64 directSizes[5] = {0};
+    int64 clogSize = 0;
+    int64 csnlogSize = 0;
+    HASH_SEQ_STATUS status;
+    ShmemIndexEnt* entry = NULL;
+
+    if (shmemIndex == NULL) {
+        return;
+    }
+
+    LWLockAcquire(ShmemIndexLock, LW_SHARED);
+    hash_seq_init(&status, shmemIndex);
+    while ((entry = (ShmemIndexEnt*)hash_seq_search(&status)) != NULL) {
+        if (strcmp(entry->key, "ShmemIndex") == 0) {
+            continue;
+        }
+        if (strncmp(entry->key, "CLOG Ctl", strlen("CLOG Ctl")) == 0) {
+            clogSize += (int64)entry->size;
+            continue;
+        }
+        if (strncmp(entry->key, "CSNLOG Ctl", strlen("CSNLOG Ctl")) == 0) {
+            csnlogSize += (int64)entry->size;
+            continue;
+        }
+        for (int i = 0; directNames[i] != NULL; i++) {
+            if (strcmp(entry->key, directNames[i]) == 0) {
+                directSizes[i] += (int64)entry->size;
+                break;
+            }
+        }
+    }
+    LWLockRelease(ShmemIndexLock);
+
+    for (int i = 0; directNames[i] != NULL; i++) {
+        if (directSizes[i] > 0) {
+            putSharedMemoryDetailEntry(tupStore, tupDesc, directNames[i], directSizes[i]);
+        }
+    }
+    if (clogSize > 0) {
+        putSharedMemoryDetailEntry(tupStore, tupDesc, "clog", clogSize);
+    }
+    if (csnlogSize > 0) {
+        putSharedMemoryDetailEntry(tupStore, tupDesc, "CSNLOG Ctl", csnlogSize);
+    }
+}
+
 /*
  * @@GaussDB@@
  * Target		: pv_shared_memory_detail view
@@ -8826,6 +8902,7 @@ static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const Memo
 void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
     recursiveThreadMemoryContext(NULL, g_instance.instance_context, true, tupStore, tupDesc);
+    appendKeyShmemStructDetail(tupStore, tupDesc);
 
     /* PgStat shmem is allocated via ShmemInitStruct, not under instance_context; report it explicitly. */
     if (pgstat_get_shared_state() != NULL) {
