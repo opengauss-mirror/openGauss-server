@@ -6584,7 +6584,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
     int c;
     int i;
     int option_index;
-    char buf[MAXPGPATH * 4];
+    char buf[MAXPGPATH * 12];
 
     int coordnode_num = 3;
     int datanode_num = 12;
@@ -7078,8 +7078,8 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
 #ifndef ENABLE_LLT
         if (myinfo.keep_data) {
 
-            /* "make install" */
-#ifndef WIN32_ONLY_COMPILER
+            /* Prepare the temporary installation. */
+#if defined(BUILD_BY_CMAKE) && !defined(WIN32_ONLY_COMPILER)
             (void)snprintf(buf,
                 sizeof(buf),
                 SYSTEMQUOTE
@@ -7088,6 +7088,12 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 top_builddir,
                 temp_install,
                 outputdir);
+#elif !defined(WIN32_ONLY_COMPILER)
+            (void)snprintf(buf, sizeof(buf),
+                "(rm -rf \"%s/install\" && mkdir -p \"%s/..\" && cp -a \"%s/../.\" \"%s/../\" && "
+                "for d in \"%s\" \"%s\"; do [ \"$d\" -ef \"%s/install/$d\" ] || "
+                "cp -a --parents \"$d\" \"%s/install\" || exit 1; done) > \"%s/log/install.log\" 2>&1",
+                temp_install, bindir, PGBINDIR, bindir, LIBDIR, PGSHAREDIR, temp_install, temp_install, outputdir);
 #else
             (void)snprintf(buf,
                 sizeof(buf),
@@ -7164,7 +7170,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
 #endif
             }
 #ifndef ENABLE_LLT
-            /* "make install" */
+            /* Prepare the temporary installation. */
 #ifdef BUILD_BY_CMAKE
     (void)snprintf_s(buf, sizeof(buf), sizeof(buf) - 1,
         SYSTEMQUOTE "cd %s && \"%s\" DESTDIR=\"%s/install\" install -j >> \"%s/log/install.log\" 2>&1" SYSTEMQUOTE,
@@ -7172,14 +7178,11 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
     printf("cd %s && \"%s\" DESTDIR=\"%s/install\" install -j >> \"%s/log/install.log\" 2>&1\n", \
            current_exe_dir, makeprog, temp_install, outputdir);
 #elif !defined(WIN32_ONLY_COMPILER)
-            (void)snprintf(buf,
-                sizeof(buf),
-                SYSTEMQUOTE
-                "\"%s\" -C \"%s\" DESTDIR=\"%s/install\" install -sj > \"%s/log/install.log\" 2>&1" SYSTEMQUOTE,
-                makeprog,
-                top_builddir,
-                temp_install,
-                outputdir);
+            (void)snprintf(buf, sizeof(buf),
+                "(rm -rf \"%s/install\" && mkdir -p \"%s/..\" && cp -a \"%s/../.\" \"%s/../\" && "
+                "for d in \"%s\" \"%s\"; do [ \"$d\" -ef \"%s/install/$d\" ] || "
+                "cp -a --parents \"$d\" \"%s/install\" || exit 1; done) > \"%s/log/install.log\" 2>&1",
+                temp_install, bindir, PGBINDIR, bindir, LIBDIR, PGSHAREDIR, temp_install, temp_install, outputdir);
 #else
             (void)snprintf(buf,
                 sizeof(buf),
@@ -7199,6 +7202,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
             } else if (only_install)
                 exit_nicely(2);
 
+#if defined(BUILD_BY_CMAKE) || defined(WIN32_ONLY_COMPILER)
             for (ssl = extra_install; ssl != NULL; ssl = ssl->next) {
 #ifndef WIN32_ONLY_COMPILER
                 (void)snprintf(buf,
@@ -7223,6 +7227,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                     exit_nicely(2);
                 }
             }
+#endif
 #endif
             if ((!inplace_upgrade && grayscale_upgrade == -1) || init_database) {
                 /* initdb */
