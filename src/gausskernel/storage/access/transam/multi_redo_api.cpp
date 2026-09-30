@@ -300,7 +300,8 @@ static bool RecoveryApplyDelay(const XLogReaderState* record, TimestampTz& xtime
 
     /* nothing to do if no delay configured or nothing to do if crash recovery is requested */
     if (!t_thrd.xlog_cxt.InRecovery || (u_sess->attr.attr_storage.recovery_min_apply_delay <= 0) ||
-        !t_thrd.xlog_cxt.ArchiveRecoveryRequested || XLogRecGetRmid(record) != RM_XACT_ID) {
+        !t_thrd.xlog_cxt.ArchiveRecoveryRequested || !t_thrd.xlog_cxt.reachedConsistency ||
+        XLogRecGetRmid(record) != RM_XACT_ID) {
         return false;
     }
 
