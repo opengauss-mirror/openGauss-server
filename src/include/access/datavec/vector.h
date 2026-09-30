@@ -24,6 +24,8 @@
 #define VECTOR_H
 
 #define VECTOR_MAX_DIM 16000
+/* Number of independent candidates sharing a RaBitQ query-code load. */
+#define VECTOR_RBQ_BATCH_SIZE 4
 #define MEM_INFO_NUM (1024 * 1024)
 
 #define VECTOR_SIZE(_dim) (offsetof(Vector, x) + sizeof(float) * (_dim))
@@ -54,6 +56,7 @@ void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
 void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis);
 void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis);
 float VectorRbqDpPopcnt(int dim, int qb, uint8 *qx, uint8 *ex);
+void VectorRbqDpPopcntBatch4(int dim, int qb, uint8 *qx, uint8 **ex, float *distance);
 void VectorEncodeSQ(int dim, float *vmin, float *vdiff, float *vec, uint8 *code);
 void VectorDecodeSQ(int dim, float *vmin, float *vdiff, float *decodeVec, uint8 *code);
 void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, BlockNumber endblk, bool page_std);

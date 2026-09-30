@@ -1748,14 +1748,16 @@ float VectorRbqDpPopcnt(int dim, int qb, uint8_t *qx, uint8_t *ex)
         int dim128b = (dim8b / 16) * 16;
         int dim64b = (dim8b / 8) * 8;
 
+        /* Each lane holds at most dim / 8 bits (VECTOR_MAX_DIM is 16000). */
+        uint16x8_t counts = vdupq_n_u16(0);
         for (int offset = 0; offset < dim128b; offset += 16) {
             uint8x16_t v_qx = vld1q_u8(qxi + offset);
             uint8x16_t v_ex = vld1q_u8(ex + offset);
             uint8x16_t v_and = vandq_u8(v_qx, v_ex);
             uint8x16_t cnt8 = vcntq_u8(v_and);
-            uint16x8_t cnt16 = vpaddlq_u8(cnt8);
-            count += vaddv_u16(vget_low_u16(cnt16)) + vaddv_u16(vget_high_u16(cnt16));
+            counts = vpadalq_u8(counts, cnt8);
         }
+        count = (int)vaddlvq_u16(counts);
 
         for (int offset = dim128b; offset < dim64b; offset += 8) {
 #else
@@ -1921,4 +1923,61 @@ int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo)
 double vector_square(float* x, int dim)
 {
     return (double)VectorInnerProduct(dim, x, x);
+}
+
+static inline uint64 LoadRbqWord(const uint8 *src)
+{
+    uint64 word;
+    errno_t rc = memcpy_s(&word, sizeof(word), src, sizeof(word));
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    return word;
+}
+
+/* Four independent candidates; retain per-candidate plane accumulation order. */
+void VectorRbqDpPopcntBatch4(int dim, int qb, uint8 *qx, uint8 **ex, float *distance)
+{
+    int bytes = (dim + 7) / 8;
+    for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+        distance[j] = 0;
+    }
+    for (int i = 0; i < qb; i++) {
+        uint8 *q = qx + i * bytes;
+        int count[VECTOR_RBQ_BATCH_SIZE] = {0, 0, 0, 0};
+        int off = 0;
+#ifdef __aarch64__
+        /* Widened lanes cannot overflow for VECTOR_MAX_DIM (16000). */
+        uint16x8_t a = vdupq_n_u16(0);
+        uint16x8_t b = a;
+        uint16x8_t c = a;
+        uint16x8_t d = a;
+        for (; off + 16 <= bytes; off += 16) {
+            uint8x16_t query = vld1q_u8(q + off);
+            a = vpadalq_u8(a, vcntq_u8(vandq_u8(query, vld1q_u8(ex[0] + off))));
+            b = vpadalq_u8(b, vcntq_u8(vandq_u8(query, vld1q_u8(ex[1] + off))));
+            c = vpadalq_u8(c, vcntq_u8(vandq_u8(query, vld1q_u8(ex[2] + off))));
+            d = vpadalq_u8(d, vcntq_u8(vandq_u8(query, vld1q_u8(ex[3] + off))));
+        }
+        count[0] = vaddlvq_u16(a);
+        count[1] = vaddlvq_u16(b);
+        count[2] = vaddlvq_u16(c);
+        count[3] = vaddlvq_u16(d);
+#endif
+        for (; off + 8 <= bytes; off += 8) {
+            uint64 qword = LoadRbqWord(q + off);
+            for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+                uint64 eword = LoadRbqWord(ex[j] + off);
+                count[j] += __builtin_popcountll(qword & eword);
+            }
+        }
+        for (; off < bytes; off++) {
+            for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+                count[j] += __builtin_popcount(q[off] & ex[j][off]);
+            }
+        }
+        for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+            distance[j] += (count[j] << i);
+        }
+    }
 }
