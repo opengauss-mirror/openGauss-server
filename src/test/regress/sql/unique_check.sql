@@ -110,6 +110,129 @@ SELECT * FROM warehouse_b ORDER BY w_id, w_code;
 SELECT * FROM warehouse_b_col ORDER BY w_id, w_code;
 SELECT * FROM warehouse_b_idx ORDER BY w_id, w_code;
 
+-- Promoting an existing unique index must validate data written with checks disabled.
+CREATE TABLE warehouse_b_promote (k int NOT NULL);
+CREATE UNIQUE INDEX warehouse_b_promote_idx ON warehouse_b_promote(k);
+SET unique_checks = off;
+INSERT INTO warehouse_b_promote VALUES (1), (1);
+RESET unique_checks;
+ALTER TABLE warehouse_b_promote ADD CONSTRAINT warehouse_b_promote_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_idx;
+-- Failed promotion must preserve the original name, data and index flags.
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_idx'::regclass;
+SELECT k, count(*) FROM warehouse_b_promote GROUP BY k ORDER BY k;
+SELECT count(*) FROM pg_constraint
+    WHERE conrelid = 'warehouse_b_promote'::regclass AND contype = 'p';
+-- Validation must also run while unique_checks is still disabled.
+SET unique_checks = off;
+ALTER TABLE warehouse_b_promote ADD CONSTRAINT warehouse_b_promote_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_idx;
+DELETE FROM warehouse_b_promote WHERE k = 1;
+INSERT INTO warehouse_b_promote VALUES (1), (2);
+-- A successful rebuild and promotion must remain transactional.
+BEGIN;
+ALTER TABLE warehouse_b_promote ADD CONSTRAINT warehouse_b_promote_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_idx;
+ROLLBACK;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_idx'::regclass;
+SELECT k, count(*) FROM warehouse_b_promote GROUP BY k ORDER BY k;
+ALTER TABLE warehouse_b_promote ADD CONSTRAINT warehouse_b_promote_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_idx;
+INSERT INTO warehouse_b_promote VALUES (1);
+RESET unique_checks;
+
+-- A successful rebuild must still roll back if the key contains NULL.
+CREATE TABLE warehouse_b_promote_null (k int);
+CREATE UNIQUE INDEX warehouse_b_promote_null_idx ON warehouse_b_promote_null(k);
+INSERT INTO warehouse_b_promote_null VALUES (NULL), (1);
+ALTER TABLE warehouse_b_promote_null ADD CONSTRAINT warehouse_b_promote_null_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_null_idx;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_null_idx'::regclass;
+SELECT k FROM warehouse_b_promote_null ORDER BY k NULLS FIRST;
+
+-- Ustore indexes must be checked before promotion as well.
+CREATE TABLE warehouse_b_promote_ustore (k int NOT NULL) WITH (storage_type = ustore);
+CREATE UNIQUE INDEX warehouse_b_promote_ustore_idx ON warehouse_b_promote_ustore(k);
+SET unique_checks = off;
+INSERT INTO warehouse_b_promote_ustore VALUES (1), (1);
+RESET unique_checks;
+ALTER TABLE warehouse_b_promote_ustore ADD CONSTRAINT warehouse_b_promote_ustore_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_ustore_idx;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_ustore_idx'::regclass;
+SELECT k, count(*) FROM warehouse_b_promote_ustore GROUP BY k ORDER BY k;
+DELETE FROM warehouse_b_promote_ustore WHERE k = 1;
+INSERT INTO warehouse_b_promote_ustore VALUES (1), (2);
+SET unique_checks = off;
+ALTER TABLE warehouse_b_promote_ustore ADD CONSTRAINT warehouse_b_promote_ustore_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_ustore_idx;
+INSERT INTO warehouse_b_promote_ustore VALUES (1);
+RESET unique_checks;
+
+-- A global index must validate duplicates across partitions before promotion.
+CREATE TABLE warehouse_b_promote_gpi (k int NOT NULL, p int)
+PARTITION BY RANGE (p) (
+    PARTITION p1 VALUES LESS THAN (10),
+    PARTITION p2 VALUES LESS THAN (MAXVALUE)
+);
+CREATE UNIQUE INDEX warehouse_b_promote_gpi_idx ON warehouse_b_promote_gpi(k) GLOBAL;
+SET unique_checks = off;
+INSERT INTO warehouse_b_promote_gpi VALUES (1, 1), (1, 11);
+RESET unique_checks;
+ALTER TABLE warehouse_b_promote_gpi ADD CONSTRAINT warehouse_b_promote_gpi_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_gpi_idx;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_gpi_idx'::regclass;
+SELECT k, count(*) FROM warehouse_b_promote_gpi GROUP BY k ORDER BY k;
+DELETE FROM warehouse_b_promote_gpi WHERE k = 1;
+INSERT INTO warehouse_b_promote_gpi VALUES (1, 1), (2, 11);
+SET unique_checks = off;
+ALTER TABLE warehouse_b_promote_gpi ADD CONSTRAINT warehouse_b_promote_gpi_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_gpi_idx;
+INSERT INTO warehouse_b_promote_gpi VALUES (1, 11);
+RESET unique_checks;
+
+-- A GTT without session-local storage must allow promotion after reconnecting.
+CREATE GLOBAL TEMPORARY TABLE warehouse_b_promote_gtt_empty (k int NOT NULL)
+    ON COMMIT PRESERVE ROWS;
+CREATE UNIQUE INDEX warehouse_b_promote_gtt_empty_idx
+    ON warehouse_b_promote_gtt_empty(k);
+\c unique_check_b
+SET current_schema TO 'unique_check';
+-- Keep this GTT unattached until the promotion.
+ALTER TABLE warehouse_b_promote_gtt_empty
+    ADD CONSTRAINT warehouse_b_promote_gtt_empty_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_gtt_empty_idx;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_gtt_empty_pkey'::regclass;
+SET unique_checks = off;
+INSERT INTO warehouse_b_promote_gtt_empty VALUES (1);
+INSERT INTO warehouse_b_promote_gtt_empty VALUES (1);
+SELECT k, count(*) FROM warehouse_b_promote_gtt_empty GROUP BY k ORDER BY k;
+RESET unique_checks;
+DROP TABLE warehouse_b_promote_gtt_empty;
+
+-- An attached GTT must still reject dirty keys even with unique_checks disabled.
+CREATE GLOBAL TEMPORARY TABLE warehouse_b_promote_gtt_attached (k int NOT NULL)
+    ON COMMIT PRESERVE ROWS;
+CREATE UNIQUE INDEX warehouse_b_promote_gtt_attached_idx
+    ON warehouse_b_promote_gtt_attached(k);
+SET unique_checks = off;
+INSERT INTO warehouse_b_promote_gtt_attached VALUES (1), (1);
+ALTER TABLE warehouse_b_promote_gtt_attached
+    ADD CONSTRAINT warehouse_b_promote_gtt_attached_pkey
+    PRIMARY KEY USING INDEX warehouse_b_promote_gtt_attached_idx;
+SELECT indisprimary, indisvalid FROM pg_index
+    WHERE indexrelid = 'warehouse_b_promote_gtt_attached_idx'::regclass;
+SELECT k, count(*) FROM warehouse_b_promote_gtt_attached GROUP BY k ORDER BY k;
+SELECT count(*) FROM pg_constraint
+    WHERE conrelid = 'warehouse_b_promote_gtt_attached'::regclass AND contype = 'p';
+RESET unique_checks;
+DROP TABLE warehouse_b_promote_gtt_attached;
+
 RESET unique_checks;
 DROP SCHEMA unique_check CASCADE;
 RESET current_schema;

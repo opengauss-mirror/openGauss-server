@@ -49,6 +49,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/planmem_walker.h"
 #include "optimizer/planner.h"
+#include "optimizer/predtest.h"
 #include "optimizer/prep.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
@@ -3104,14 +3105,14 @@ static Path* check_smp_dml_and_add_redis_ctid_if_necessary(PlannerInfo* root, Pa
 
 /*
  * check_distinct_redundant_by_unique:
- *   Check whether the DISTINCT clause on the query is redundant because
- *   the SELECT target list already includes all columns of a primary key
- *   or unique index of the base table.
+ *   Check whether the DISTINCT or DISTINCT ON keys prove that every
+ *   group contains at most one base-table row.
  *
- *   When a query like "SELECT DISTINCT pk_col, other_col FROM table"
- *   includes all key columns of a unique index in its target list, the
- *   result rows are guaranteed to be unique (since the PK/UK itself
- *   enforces row uniqueness), making the DISTINCT operation unnecessary.
+ *   DISTINCT and DISTINCT ON are redundant when their distinct keys
+ *   contain all key columns of an immediately enforced, non-null unique
+ *   index with matching equality semantics.  DISTINCT ON keys need not
+ *   appear in the output.  A partial unique index can also prove uniqueness
+ *   when the query restrictions imply its predicate.
  *
  *   Returns true if the DISTINCT clause can be safely removed.
  */
@@ -3126,11 +3127,6 @@ bool check_distinct_redundant_by_unique(PlannerInfo* root)
     Oid primaryIndexOid = InvalidOid;
     Node* jtnode = NULL;
     Index rti = 0;
-
-    /* Only applicable to SELECT DISTINCT, not DISTINCT ON */
-    if (parse->hasDistinctOn) {
-        return false;
-    }
 
     /* Not applicable when aggregates or GROUP BY are present */
     if (parse->hasAggs || parse->groupClause || parse->groupingSets) {
@@ -3187,11 +3183,6 @@ bool check_distinct_redundant_by_unique(PlannerInfo* root)
         return false;
     }
 
-    /* This optimization is only enabled for A-format and B-format databases. */
-    if (!DB_IS_CMPT(A_FORMAT) && !DB_IS_CMPT(B_FORMAT)) {
-        return false;
-    }
-
     /* Open the relation to verify NOT NULL constraints on key columns */
     relation = heap_open(rte->relid, NoLock);
     tupdesc = RelationGetDescr(relation);
@@ -3211,10 +3202,19 @@ bool check_distinct_redundant_by_unique(PlannerInfo* root)
         bool isPrimary = primaryIndexOid == indexInfo->indexoid;
 
         /*
-         * Only a unique, immediately enforced, non-partial index can prove
-         * whole-table uniqueness.  Global partition indexes are not used for
-         * this optimization.  A local primary-key index includes the
-         * partition key and can prove uniqueness across all partitions.
+         * Only a unique, immediately enforced index can prove uniqueness of
+         * the filtered rows.  Global partition indexes are included: their
+         * key columns exclude the internal tableoid attribute, which is kept
+         * as a non-key INCLUDE column, so uniqueness is enforced across all
+         * partitions by the index insert path (see nbtinsert.cpp /
+         * ubtpcrinsert.cpp).  A local primary-key index includes the
+         * partition key and proves uniqueness across all partitions as well.
+         *
+         * A global partition index cannot be partial (WHERE is rejected at
+         * creation) or use an expression column.  The immediate check below
+         * excludes deferred uniqueness.  An unusable index (for example after
+         * partition DDL without UPDATE GLOBAL INDEX) is filtered out of
+         * rel->indexlist by IndexIsValid in get_relation_info().
          */
         if (!indexInfo->unique || !indexInfo->immediate) {
             continue;
@@ -3224,10 +3224,18 @@ bool check_distinct_redundant_by_unique(PlannerInfo* root)
             continue;
         }
         if (indexInfo->indpred != NIL) {
-            continue;
-        }
-        if (indexInfo->isGlobal) {
-            continue;
+            /*
+             * predOK is computed before path selection, so this proof does
+             * not require an index scan.  However, the adaptive plan manager
+             * can set predOK using the current parameter values even for a
+             * reusable generic plan.  Recheck the base restrictions without
+             * additionally binding parameters: a sequential scan plan has no
+             * partial-index usage for the plan manager to revalidate later.
+             */
+            if (!indexInfo->predOK ||
+                !predicate_implied_by(indexInfo->indpred, rel->baserestrictinfo)) {
+                continue;
+            }
         }
 
         /*
@@ -3258,20 +3266,20 @@ bool check_distinct_redundant_by_unique(PlannerInfo* root)
                 SortGroupClause* sgc = (SortGroupClause*)lfirst(tlc);
                 TargetEntry* tle = get_sortgroupclause_tle(sgc, parse->targetList);
 
-                if (tle->resjunk) {
+                if (tle->resjunk && !parse->hasDistinctOn) {
                     continue;
                 }
 
-                if (IsA(tle->expr, Var)) {
-                    Var* var = (Var*)tle->expr;
-
-                    if (var->varno == rti && var->varlevelsup == 0 && var->varattno == keyAttno &&
-                        op_in_opfamily(sgc->eqop, indexInfo->opfamily[i]) &&
-                        (indexInfo->indexcollations[i] == InvalidOid ||
-                         indexInfo->indexcollations[i] == exprCollation((Node*)tle->expr))) {
-                        found = true;
-                        break;
-                    }
+                if (!IsA(tle->expr, Var)) {
+                    continue;
+                }
+                Var* var = (Var*)tle->expr;
+                if (var->varno == rti && var->varlevelsup == 0 && var->varattno == keyAttno &&
+                    op_in_opfamily(sgc->eqop, indexInfo->opfamily[i]) &&
+                    (indexInfo->indexcollations[i] == InvalidOid ||
+                     indexInfo->indexcollations[i] == exprCollation((Node*)tle->expr))) {
+                    found = true;
+                    break;
                 }
             }
 
@@ -5023,14 +5031,14 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
 
     if (parse->distinctClause) {
         /*
-         * If the SELECT target list already includes all columns of a
-         * primary key or unique index, the result is guaranteed to be
-         * unique and the DISTINCT operation can be skipped entirely.
+         * If the distinct keys prove uniqueness, each DISTINCT or
+         * DISTINCT ON group contains at most one row.  Skip deduplication
+         * while preserving the separate ORDER BY and LIMIT processing.
          */
-        if (!parse->hasDistinctOn &&
-            check_distinct_redundant_by_unique(root)) {
+        if (check_distinct_redundant_by_unique(root)) {
             list_free_deep(parse->distinctClause);
             parse->distinctClause = NIL;
+            parse->hasDistinctOn = false;
         }
     }
 
