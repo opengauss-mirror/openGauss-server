@@ -436,7 +436,7 @@ static void ReorderBufferChangeMemoryUpdate(ReorderBuffer *rb, ReorderBufferChan
         return;
     }
     if (sz == 0) {
-        return;     
+        return;
     }
     if (txn == NULL) {
         txn = change->txn;
@@ -1825,7 +1825,7 @@ static bool ReorderBufferCheckAndTruncateAbortedTXN(ReorderBuffer *rb, ReorderBu
     /* Otherwise, check the transaction status using CLOG lookup */
 
     if (TransactionIdIsInProgress(txn->xid)) {
-        return false; 
+        return false;
     }
 
     if (TransactionIdDidCommit(txn->xid)) {

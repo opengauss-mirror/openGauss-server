@@ -39,7 +39,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
-extern const uint32 STREAMABLE_DECODE_VERSION;
+extern const uint32 STREAMABLE_DECODE_VERSION_NUM;
 extern const uint32 WDR_ENHANCE_VERSION_NUM;
 extern const uint32 DISKANN_RABITQ_VERSION_NUM;
 extern const uint32 PG_IDENTITY_VERSION_NUM;

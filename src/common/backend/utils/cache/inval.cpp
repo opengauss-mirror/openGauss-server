@@ -1914,7 +1914,7 @@ void LogLogicalInvalidations()
     int nmsgs = 0;
     knl_u_inval_context *inval_cxt = GetInvalCxt();
 
-    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION_NUM) {
         return;
     }
 

@@ -9127,7 +9127,7 @@ bool IsSubTransactionAssignmentPending(void)
     if (NULL == s) {
         return false;
     }
-    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION_NUM) {
         return false;
     }
     /* wal_level has to be logical */
@@ -9159,8 +9159,9 @@ void MarkSubTransactionAssigned(void)
 {
     TransactionState s = CurrentTransactionState;
 
-    if (NULL == s)
+    if (NULL == s) {
         return;
+    }
 
     Assert(IsSubTransactionAssignmentPending());
 

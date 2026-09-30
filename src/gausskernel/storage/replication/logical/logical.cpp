@@ -206,7 +206,7 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     ctx->reorder->commit = commit_cb_wrapper;
     ctx->reorder->ddl = ddl_cb_wrapper;
 
-    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION) {
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION_NUM) {
         ctx->streaming = false;
     } else {
         ctx->streaming = (ctx->callbacks.stream_start_cb != NULL) ||

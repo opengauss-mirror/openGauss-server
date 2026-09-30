@@ -110,7 +110,8 @@ static XLogRecPtr GetMaxLSN()
 void XLogDumpDisplayRecord(XLogReaderState *record, char *strOutput)
 {
     errno_t rc = snprintf_s(strOutput + (int)strlen(strOutput), MAXOUTPUTLEN, MAXOUTPUTLEN - 1,
-        "start_lsn: %X/%X \nend_lsn: %X/%X \nxid: " XID_FMT " topxid " XID_FMT " \nterm: %u \ntotal length: %u \ndesc: %s - ",
+        "start_lsn: %X/%X \nend_lsn: %X/%X \nxid: " XID_FMT " topxid " XID_FMT
+        " \nterm: %u \ntotal length: %u \ndesc: %s - ",
         (uint32)(record->ReadRecPtr >> XIDTHIRTYTWO), (uint32)record->ReadRecPtr,
         (uint32)(record->EndRecPtr >> XIDTHIRTYTWO), (uint32)record->EndRecPtr,
         XLogRecGetXid(record), XLogRecGetTopXid(record), XLogRecGetTerm(record),

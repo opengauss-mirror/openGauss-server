@@ -179,8 +179,8 @@ typedef struct ReorderBufferChange {
 
         /* Invalidation. */
         struct {
-            uint32 ninvalidations; /* Number of messages */
-            SharedInvalidationMessage *invalidations;	/* invalidation message */
+            uint32 ninvalidations;    /* Number of messages */
+            SharedInvalidationMessage *invalidations;    /* invalidation message */
         } inval;
     } data;
 
