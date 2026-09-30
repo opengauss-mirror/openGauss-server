@@ -521,24 +521,36 @@ Datum rawout(PG_FUNCTION_ARGS)
     int ans_len = 0;
     char* out_string = NULL;
 
-    datalen = VARSIZE(data) - VARHDRSZ;
+    datalen = VARSIZE_ANY_EXHDR(data);
 
     resultlen = datalen << 1;
 
     if (resultlen < (int)(MaxAllocSize - VARHDRSZ) * 2) {
-        ans = (text*)palloc_huge(CurrentMemoryContext, VARHDRSZ + resultlen);
-        ans_len = hex_encode(VARDATA(data), datalen, VARDATA(ans));
-        /* Make this FATAL 'cause we've trodden on memory ... */
-        if (ans_len > resultlen)
-            ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("overflow - encode estimate too small")));
-
-        SET_VARSIZE(ans, VARHDRSZ + ans_len);
+        if (VARATT_IS_SHORT(data)) {
+            ans = (text*)palloc_huge(CurrentMemoryContext, VARHDRSZ_SHORT + resultlen);
+            ans_len = hex_encode(VARDATA_SHORT(data), datalen, VARDATA_SHORT(ans));
+            /* Make this FATAL 'cause we've trodden on memory ... */
+            if (ans_len > resultlen)
+                ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("overflow - encode estimate too small")));
+    
+            SET_VARSIZE_SHORT(ans, VARHDRSZ_SHORT + ans_len);
+        } else {
+            ans = (text*)palloc_huge(CurrentMemoryContext, VARHDRSZ + resultlen);
+            ans_len = hex_encode(VARDATA(data), datalen, VARDATA(ans));
+            /* Make this FATAL 'cause we've trodden on memory ... */
+            if (ans_len > resultlen)
+                ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("overflow - encode estimate too small")));
+    
+            SET_VARSIZE(ans, VARHDRSZ + ans_len);
+        }
         
         out_string = str_toupper_for_raw(VARDATA_ANY(ans), VARSIZE_ANY_EXHDR(ans), PG_GET_COLLATION());
     } else {
+        PG_FREE_IF_COPY(data, 0);
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("blob length: %d ,out of memory", resultlen)));
     }
     pfree_ext(ans);
+    PG_FREE_IF_COPY(data, 0);
     PG_RETURN_CSTRING(out_string);
 }
 
