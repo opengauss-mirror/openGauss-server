@@ -102,6 +102,7 @@ typedef struct RabitqQueryParams {
 void ComputeVectorRBQCode(int dim, float *vec, RabitqVector *rbqVec, float *centroid, int funcType);
 void SetRBQQuery(int dim, int qb, float *vec, QueryRabitqVector *qrbqVec, float *centroid, int funcType);
 float ComputeRbqDistance(int dim, int qb, RabitqVector *eVec, QueryRabitqVector *qVec, int funcType);
+void ComputeRbqDistanceBatch4(const RabitqQueryParams *params, RabitqVector **eVec, float *out);
 
 /*
  * ------------------------------------------------------------------------

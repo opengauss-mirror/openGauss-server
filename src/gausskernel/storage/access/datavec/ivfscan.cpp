@@ -706,7 +706,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
                     } else if (distance < maxDistance) {
                         IvfpqPairingHeapNode *e = (IvfpqPairingHeapNode *)pairingheap_remove_first(reOrderCandidate);
                         e->distance = distance;
-                        e->heapTid = &itup->t_tid;
+                        ItemPointerCopy(&itup->t_tid, &e->heapTid);
                         e->indexBlk = searchPage;
                         e->indexOff = offno;
                         pairingheap_add(reOrderCandidate, &e->ph_node);
@@ -728,8 +728,6 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
             }
         }
     }
-
-    FreeAccessStrategy(bas);
 
     if (tuples < 100)
         ereport(DEBUG1,
@@ -774,7 +772,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
             ExecClearTuple(slot);
             slot->tts_values[0] = so->distfunc(so->procinfo, so->collation, datum, value);
             slot->tts_isnull[0] = false;
-            slot->tts_values[1] = PointerGetDatum(node->heapTid);
+            slot->tts_values[1] = PointerGetDatum(&node->heapTid);
             slot->tts_isnull[1] = false;
             ExecStoreVirtualTuple(slot);
 
@@ -786,6 +784,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
         }
     }
 
+    FreeAccessStrategy(bas);
     tuplesort_performsort(so->sortstate);
 }
 
@@ -830,6 +829,54 @@ float *IvfflatGetVectorFromHeapRefine(Relation heap, ItemPointer tid, IndexInfo 
     return resData;
 }
 
+typedef struct RbqScanBatch {
+    RabitqVector *vectors[VECTOR_RBQ_BATCH_SIZE];
+    float distances[VECTOR_RBQ_BATCH_SIZE];
+    int count;
+    int next;
+} RbqScanBatch;
+
+/* Called with the index page locked; consume live candidates in their original order. */
+static float GetRbqBatchDistance(Page page, OffsetNumber offno, TupleDesc rbqTupdesc,
+    const RabitqQueryParams *params, RbqScanBatch *batch)
+{
+    if (batch->next < batch->count) {
+        return batch->distances[batch->next++];
+    }
+
+    batch->count = 0;
+    batch->next = 0;
+    OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
+    bool refineSQ8 = params->rbqConfig->reType == SQ8;
+    for (OffsetNumber look = offno; look <= maxoffno && batch->count < VECTOR_RBQ_BATCH_SIZE;
+         look = OffsetNumberNext(look)) {
+        ItemId candidate = PageGetItemId(page, look);
+        if (!IvfflatItemIdIsLive(candidate)) {
+            continue;
+        }
+        IndexTuple tup = (IndexTuple)PageGetItem(page, candidate);
+        bool isnull;
+        Datum code = index_getattr(tup, 1, rbqTupdesc, &isnull);
+        errno_t rc = memcpy_s(batch->vectors[batch->count]->data, rbqDataSize(params->dim, refineSQ8),
+            VARDATA((bytea *)DatumGetPointer(code)), rbqDataSize(params->dim, refineSQ8));
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+        batch->vectors[batch->count]->fac = *LoadRbqData(tup);
+        batch->count++;
+    }
+
+    if (batch->count == VECTOR_RBQ_BATCH_SIZE) {
+        ComputeRbqDistanceBatch4(params, batch->vectors, batch->distances);
+    } else {
+        for (int j = 0; j < batch->count; j++) {
+            batch->distances[j] = ComputeRbqDistance(params->dim, params->rbqConfig->rbqQueryBits,
+                batch->vectors[j], params->qrbqVec, params->funcType);
+        }
+    }
+    return batch->distances[batch->next++];
+}
+
 /*
  * Get items by RabitQ
  */
@@ -864,6 +911,14 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
     int qb = so->rbqParams->rbqConfig->rbqQueryBits;
     Vector *transVec = (Vector *)DatumGetPointer(value);
     so->rbqParams->qrbqVec = (QueryRabitqVector *)palloc0(rbqQuerySize(so->rbqParams->dim, qb));
+    /* Distance computation consumes the code synchronously; reuse scan-local storage. */
+    bool refineSQ8 = so->rbqParams->rbqConfig->reType == SQ8;
+    RabitqVector *rbqVec = (RabitqVector *)palloc0(rbqCodeSize(so->rbqParams->dim, refineSQ8));
+
+    RbqScanBatch batch;
+    for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+        batch.vectors[j] = (RabitqVector *)palloc0(rbqCodeSize(so->rbqParams->dim, refineSQ8));
+    }
 
     while (!pairingheap_is_empty(so->listQueue)) {
         IvfflatScanList *scanList = (IvfflatScanList *)pairingheap_remove_first(so->listQueue);
@@ -893,35 +948,18 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
                 break;
             }
 
+            batch.count = 0;
+            batch.next = 0;
             for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
                 IndexTuple itup;
-                Datum datum;
-                bool isnull;
                 ItemId itemid = PageGetItemId(page, offno);
                 double maxDistance = DBL_MAX;
-                errno_t rc = EOK;
 
                 if (!IvfflatItemIdIsLive(itemid)) {
                     continue;
                 }
                 itup = (IndexTuple)PageGetItem(page, itemid);
-                datum = index_getattr(itup, 1, rbqTupdesc, &isnull);
-
-                bool refineSQ8 = so->rbqParams->rbqConfig->reType == SQ8;
-                RabitqVector *rbqVec = (RabitqVector *)palloc0(rbqCodeSize(so->rbqParams->dim, refineSQ8));
-                bytea *rbqdata = (bytea *)DatumGetPointer(datum);
-                rc = memcpy_s(rbqVec->data, rbqDataSize(so->rbqParams->dim, refineSQ8),
-                    VARDATA(rbqdata), rbqDataSize(so->rbqParams->dim, refineSQ8));
-                securec_check(rc, "\0", "\0");
-
-                FactorData *rfac = LoadRbqData(itup);
-                rbqVec->fac = *rfac;
-
-                RabitQConfig *rbqConfig = so->rbqParams->rbqConfig;
-                QueryRabitqVector *qrbqVec = so->rbqParams->qrbqVec;
-
-                double distance = (double)ComputeRbqDistance(so->rbqParams->dim, rbqConfig->rbqQueryBits,
-                    rbqVec, qrbqVec, so->rbqParams->funcType);
+                double distance = (double)GetRbqBatchDistance(page, offno, rbqTupdesc, so->rbqParams, &batch);
 
                 if (kreorder == 0) {
                     /*
@@ -950,7 +988,7 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
                     } else if (distance < maxDistance) {
                         IvfpqPairingHeapNode *e = (IvfpqPairingHeapNode *)pairingheap_remove_first(reOrderCandidate);
                         e->distance = distance;
-                        e->heapTid = &itup->t_tid;
+                        ItemPointerCopy(&itup->t_tid, &e->heapTid);
                         e->indexBlk = searchPage;
                         e->indexOff = offno;
                         pairingheap_add(reOrderCandidate, &e->ph_node);
@@ -973,8 +1011,6 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
             }
         }
     }
-
-    FreeAccessStrategy(bas);
 
     if (tuples < TUPLE_NUM)
         ereport(DEBUG1,
@@ -1025,8 +1061,6 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
             itup = (IndexTuple)PageGetItem(page, itemid);
             datum = index_getattr(itup, 1, rbqTupdesc, &isnull);
 
-            bool refineSQ8 = so->rbqParams->rbqConfig->reType == SQ8;
-            RabitqVector *rbqVec = (RabitqVector *)palloc0(rbqCodeSize(so->rbqParams->dim, refineSQ8));
             bytea *rbqdata = (bytea *)DatumGetPointer(datum);
             rc = memcpy_s(rbqVec->data, rbqDataSize(so->rbqParams->dim, refineSQ8),
                 VARDATA(rbqdata), rbqDataSize(so->rbqParams->dim, refineSQ8));
@@ -1042,7 +1076,7 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
                             PointerGetDatum(sq->decodeVec)));
             } else if (rbqConfig->reType == FP32) {
                 float *eRbqDiskData = IvfflatGetVectorFromHeapRefine(scan->heapRelation,
-                    node->heapTid, indexInfo, NULL, heapTuple);
+                    &node->heapTid, indexInfo, NULL, heapTuple);
                 Vector *qVec = (Vector *)DatumGetPointer(so->rbqParams->originQueryVec);
                 if (so->rbqParams->funcType == DIS_L2) {
                     refineDis = VectorL2SquaredDistance(qVec->dim, qVec->x, eRbqDiskData);
@@ -1064,7 +1098,7 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
             ExecClearTuple(slot);
             slot->tts_values[0] = Float8GetDatum(refineDis);
             slot->tts_isnull[0] = false;
-            slot->tts_values[1] = PointerGetDatum(node->heapTid);
+            slot->tts_values[1] = PointerGetDatum(&node->heapTid);
             slot->tts_isnull[1] = false;
             ExecStoreVirtualTuple(slot);
 
@@ -1080,6 +1114,11 @@ static void GetScanItemsRabitQ(IndexScanDesc scan, Datum value)
             pfree(heapTuple);
         }
     }
+    for (int j = 0; j < VECTOR_RBQ_BATCH_SIZE; j++) {
+        pfree(batch.vectors[j]);
+    }
+    pfree(rbqVec);
+    FreeAccessStrategy(bas);
     tuplesort_performsort(so->sortstate);
 }
 

@@ -582,7 +582,7 @@ IvfpqPairingHeapNode * IvfpqCreatePairingHeapNode(float distance, ItemPointer he
 {
     IvfpqPairingHeapNode *n = (IvfpqPairingHeapNode *)palloc(sizeof(IvfpqPairingHeapNode));
     n->distance = distance;
-    n->heapTid = heapTid;
+    ItemPointerCopy(heapTid, &n->heapTid);
     n->indexBlk = indexBlk;
     n->indexOff = indexOff;
     return n;
