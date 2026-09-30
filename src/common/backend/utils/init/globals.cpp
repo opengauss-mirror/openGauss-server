@@ -78,12 +78,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93156;
+const uint32 GRAND_VERSION_NUM = 93157;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 WDR_ENHANCE_VERSION_NUM = 93157;
 const uint32 DISKANN_RABITQ_VERSION_NUM = 93155;
 const uint32 PREFIX_SORT_VERSION_NUM = 93154;
 const uint32 PG_IDENTITY_VERSION_NUM = 93101;

@@ -128,7 +128,7 @@ static const char* sharedViews[] = {"global_os_runtime", "global_os_threads", "g
     "global_transactions_running_xacts", "summary_transactions_running_xacts",
     "global_transactions_prepared_xacts", "summary_transactions_prepared_xacts", "summary_statement",
     "global_statement_count", "summary_statement_count", "global_config_settings", "global_wait_events",
-    "summary_user_login", "global_ckpt_status", "global_double_write_status",
+    "summary_user_login", "summary_database_sql_stat", "global_ckpt_status", "global_double_write_status",
     "global_pagewriter_status", "global_redo_status",
     "global_rto_status", "global_recovery_status", "global_threadpool_status",
     "statement_responsetime_percentile"};

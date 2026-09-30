@@ -97,6 +97,7 @@
 #include "ddes/dms/ss_dms.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_user.h"
+#include "instruments/instr_database_sql.h"
 #include "instruments/percentile.h"
 #include "instruments/ash.h"
 #include "instruments/capture_view.h"
@@ -3084,6 +3085,8 @@ int PostmasterMain(int argc, char* argv[])
     InitAsp();
     /* init instr user */
     InitInstrUser();
+    /* init per-database SQL stat */
+    InitDatabaseSQLStat();
     /* init Opfusion function id */
     InitOpfusionFunctionId();
     /* init capture view */

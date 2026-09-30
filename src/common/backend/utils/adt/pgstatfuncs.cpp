@@ -9383,11 +9383,12 @@ Datum pv_instance_time(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(3, false);
+        tupdesc = CreateTemplateTupleDesc(4, false);
 
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "stat_id", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "stat_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "value", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "n_calls", INT8OID, -1, 0);
 
         /* complete descriptor of the tupledesc */
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
@@ -9403,8 +9404,8 @@ Datum pv_instance_time(PG_FUNCTION_ARGS)
     instanceEntry = (SessionTimeEntry*)funcctx->user_fctx;
 
     if (funcctx->call_cntr < funcctx->max_calls) { /* do when there is more left to send */
-        Datum values[3];
-        bool nulls[3] = {false};
+        Datum values[4];
+        bool nulls[4] = {false};
         HeapTuple tuple = NULL;
 
         values[0] = Int32GetDatum(funcctx->call_cntr);
@@ -9413,6 +9414,8 @@ Datum pv_instance_time(PG_FUNCTION_ARGS)
         nulls[1] = false;
         values[2] = Int64GetDatum(instanceEntry->array[funcctx->call_cntr]);
         nulls[2] = false;
+        values[3] = Int64GetDatum(instanceEntry->count[funcctx->call_cntr]);
+        nulls[3] = false;
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));

@@ -2639,6 +2639,8 @@ typedef struct SessionTimeEntry {
     pg_time_t myStartTime;
 
     int64 array[TOTAL_TIME_INFO_TYPES];
+    /* number of times each TimeInfoType stage was recorded */
+    int64 count[TOTAL_TIME_INFO_TYPES];
 } SessionTimeEntry;
 
 /*

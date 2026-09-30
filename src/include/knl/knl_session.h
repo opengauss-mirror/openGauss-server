@@ -1912,6 +1912,8 @@ typedef struct knl_u_stat_context {
     HTAB* pgStatPendingDataChangedHash;
     bool isTopLevelPlSql;
     int64* localTimeInfoArray;
+    /* parallel to localTimeInfoArray: stage record counts */
+    int64* localTimeCountArray;
     uint64* localNetInfo;
     // use to record all use time in multi thread.
     void* og_record_stat;

@@ -371,6 +371,11 @@ typedef struct knl_g_stat_context {
     MemoryContext InstrUserContext;
     HTAB* InstrUserHTAB;
 
+    /* per-database SQL calls / elapse (for WDR) */
+    MemoryContext DatabaseSQLStatContext;
+    HTAB* DatabaseSQLStatHTAB;
+    slock_t DatabaseSQLStatLock;
+
     /* workload trx stat */
     HTAB* workload_info_hashtbl;
 
@@ -388,6 +393,8 @@ typedef struct knl_g_stat_context {
     */
     volatile TimestampTz NodeStatResetTime;
     int64* gInstanceTimeInfo;
+    /* parallel to gInstanceTimeInfo: stage record counts */
+    int64* gInstanceCountInfo;
 
     /* snapshot thread status counter, will +1 when "each" startup */
     volatile uint32 snapshot_thread_counter;

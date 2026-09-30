@@ -212,6 +212,8 @@ void GetSqlStatisticsData(report_params* params);
 void GetNodeSQLStatisticsData(report_params* params);
 void GetClusterSQLStatisticsData(report_params* params);
 void GetTimeModelData(report_params* params);
+void GetProtocolMessageStatData(report_params* params);
+void GetDatabaseSQLStatData(report_params* params);
 
 /* ------ Summary Report------- */
 void get_summary_database_stat(report_params* params);
@@ -229,6 +231,8 @@ static dashboard* CreateDash(void)
     dash->tableTitle = NULL;
     return dash;
 }
+
+static bool UpdataReportSnapGapParam(report_params* params, const char* table_name);
 /*
  * generate the type of html report
  */
@@ -2667,6 +2671,190 @@ void GenReport::GetTimeModelData(report_params* params)
     pfree_ext(query.data);
 }
 
+/*
+ * Detail - Protocol Message Statistics by message type
+ * (Simple Query / Parse / Bind / Execute / Describe / Sync / Close / Batch Bind-Execute)
+ */
+static void AppendProtocolMessageStatQuery(StringInfoData& query, report_params* params)
+{
+    /*
+     * Diff count/time for protocol stages, then compute avg and % of DB Time.
+     * Avoid coalesce/greatest type mismatches by using CASE WHEN.
+     * Covers frontend SQL messages that have OgRecordAutoController in postgres.cpp:
+     *   Q->SRT2_SIMPLE_QUERY, P->SRT6_P, B->SRT7_B, E->SRT8_E,
+     *   D->SRT9_D, S->SRT10_S, C->SRT11_C, U->SRT12_U.
+     */
+    appendStringInfo(&query,
+        "SELECT \"Message Type\", \"Exec Count\", \"Total Time(s)\", \"Avg Time(ms)\", \"%% of DB Time\" FROM ("
+        " SELECT CASE t2.snap_stat_name"
+        "   WHEN 'SRT2_SIMPLE_QUERY' THEN 'Simple Query'"
+        "   WHEN 'SRT6_P' THEN 'Parse'"
+        "   WHEN 'SRT7_B' THEN 'Bind'"
+        "   WHEN 'SRT8_E' THEN 'Execute'"
+        "   WHEN 'SRT9_D' THEN 'Describe'"
+        "   WHEN 'SRT10_S' THEN 'Sync'"
+        "   WHEN 'SRT11_C' THEN 'Close'"
+        "   WHEN 'SRT12_U' THEN 'Batch Bind-Execute'"
+        "   ELSE t2.snap_stat_name END AS \"Message Type\","
+        "  (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) AS \"Exec Count\","
+        "  pg_catalog.round((t2.snap_value - CASE WHEN t1.snap_value IS NULL THEN 0::int8 ELSE t1.snap_value END)"
+        "   / 1000000.0, 2) AS \"Total Time(s)\","
+        "  CASE WHEN (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) <= 0"
+        "   THEN 0::numeric"
+        "   ELSE pg_catalog.round((t2.snap_value - CASE WHEN t1.snap_value IS NULL THEN 0::int8"
+        " ELSE t1.snap_value END)"
+        "    / (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) / 1000.0, 3)"
+        "  END AS \"Avg Time(ms)\","
+        "  CASE WHEN db.db_time_diff <= 0 THEN 0::numeric"
+        "   ELSE pg_catalog.round((t2.snap_value - CASE WHEN t1.snap_value IS NULL THEN 0::int8"
+        " ELSE t1.snap_value END)"
+        "    * 100.0 / db.db_time_diff, 2) END AS \"%% of DB Time\","
+        "  (t2.snap_value - CASE WHEN t1.snap_value IS NULL THEN 0::int8 ELSE t1.snap_value END) AS sort_time"
+        " FROM (SELECT snap_stat_name, snap_value, snap_n_calls"
+        "   FROM snapshot.snap_global_instance_time"
+        "   WHERE snapshot_id = %ld AND snap_node_name = '%s'"
+        "   AND snap_stat_name IN ('SRT2_SIMPLE_QUERY','SRT6_P','SRT7_B','SRT8_E',"
+        " 'SRT9_D','SRT10_S','SRT11_C','SRT12_U')) t2"
+        " LEFT JOIN (SELECT snap_stat_name, snap_value, snap_n_calls"
+        "   FROM snapshot.snap_global_instance_time"
+        "   WHERE snapshot_id = %ld AND snap_node_name = '%s'"
+        "   AND snap_stat_name IN ('SRT2_SIMPLE_QUERY','SRT6_P','SRT7_B','SRT8_E',"
+        " 'SRT9_D','SRT10_S','SRT11_C','SRT12_U')) t1"
+        "  ON t1.snap_stat_name = t2.snap_stat_name,"
+        " (SELECT (e.snap_value - CASE WHEN b.snap_value IS NULL THEN 0::int8 ELSE b.snap_value END) AS db_time_diff"
+        "   FROM (SELECT snap_value FROM snapshot.snap_global_instance_time"
+        "     WHERE snapshot_id = %ld AND snap_node_name = '%s' AND snap_stat_name = 'DB_TIME') e"
+        "   LEFT JOIN (SELECT snap_value FROM snapshot.snap_global_instance_time"
+        "     WHERE snapshot_id = %ld AND snap_node_name = '%s' AND snap_stat_name = 'DB_TIME') b"
+        "    ON true) db"
+        " ) data ORDER BY sort_time DESC;",
+        params->end_snap_id,
+        params->report_node,
+        params->begin_snap_id,
+        params->report_node,
+        params->end_snap_id,
+        params->report_node,
+        params->begin_snap_id,
+        params->report_node);
+}
+
+void GenReport::GetProtocolMessageStatData(report_params* params)
+{
+    /* supported report type: detail/all */
+    /* supported report scope: node */
+    if (is_summary_report(params) || is_cluster_report(params)) {
+        return;
+    }
+    if (!UpdataReportSnapGapParam(params, "snap_global_instance_time")) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+    const char* desc1 = "SQL protocol message statistics between begin and end snapshot";
+    const char* desc2 = "ordered by total time";
+    /*
+     * Must NOT use dashTitle "SQL Statistics": GetUniqueIDStr() treats the first
+     * column of every SQL Statistics table as Unique SQL Id.
+     */
+    dash->dashTitle = "Protocol Statistics";
+    dash->tableTitle = "Protocol Message Statistics";
+    dash->desc = lappend(dash->desc, (void*)desc1);
+    dash->desc = lappend(dash->desc, (void*)desc2);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    AppendProtocolMessageStatQuery(query, params);
+
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    GenReport::add_data(dash, &params->Contents);
+    pfree_ext(query.data);
+}
+
+/*
+ * Detail - SQL Statistics by Database
+ * Exec Count / Total Time / Avg Time / % of DB Time, node scope only.
+ */
+static void AppendDatabaseSqlStatQuery(StringInfoData& query, report_params* params)
+{
+    appendStringInfo(&query,
+        "SELECT \"DB Name\", \"Exec Count\", \"Total Time(s)\", \"Avg Time(ms)\", \"%% of DB Time\" FROM ("
+        " SELECT t2.snap_datname AS \"DB Name\","
+        "  (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) AS \"Exec Count\","
+        "  pg_catalog.round((t2.snap_total_elapse_time - CASE WHEN t1.snap_total_elapse_time IS NULL THEN 0::int8"
+        "   ELSE t1.snap_total_elapse_time END) / 1000000.0, 2) AS \"Total Time(s)\","
+        "  CASE WHEN (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) <= 0"
+        "   THEN 0::numeric"
+        "   ELSE pg_catalog.round((t2.snap_total_elapse_time - CASE WHEN t1.snap_total_elapse_time IS NULL"
+        " THEN 0::int8"
+        "    ELSE t1.snap_total_elapse_time END)"
+        "    / (t2.snap_n_calls - CASE WHEN t1.snap_n_calls IS NULL THEN 0::int8"
+        " ELSE t1.snap_n_calls END) / 1000.0, 3)"
+        "  END AS \"Avg Time(ms)\","
+        "  CASE WHEN db.db_time_diff <= 0 THEN 0::numeric"
+        "   ELSE pg_catalog.round((t2.snap_total_elapse_time - CASE WHEN t1.snap_total_elapse_time IS NULL"
+        " THEN 0::int8"
+        "    ELSE t1.snap_total_elapse_time END) * 100.0 / db.db_time_diff, 2) END AS \"%% of DB Time\","
+        "  (t2.snap_total_elapse_time - CASE WHEN t1.snap_total_elapse_time IS NULL THEN 0::int8"
+        "   ELSE t1.snap_total_elapse_time END) AS sort_time"
+        " FROM (SELECT snap_datid, snap_datname, snap_n_calls, snap_total_elapse_time"
+        "   FROM snapshot.snap_summary_database_sql_stat"
+        "   WHERE snapshot_id = %ld AND snap_node_name = '%s') t2"
+        " LEFT JOIN (SELECT snap_datid, snap_n_calls, snap_total_elapse_time"
+        "   FROM snapshot.snap_summary_database_sql_stat"
+        "   WHERE snapshot_id = %ld AND snap_node_name = '%s') t1"
+        "  ON t1.snap_datid = t2.snap_datid,"
+        " (SELECT (e.snap_value - CASE WHEN b.snap_value IS NULL THEN 0::int8 ELSE b.snap_value END) AS db_time_diff"
+        "   FROM (SELECT snap_value FROM snapshot.snap_global_instance_time"
+        "     WHERE snapshot_id = %ld AND snap_node_name = '%s' AND snap_stat_name = 'DB_TIME') e"
+        "   LEFT JOIN (SELECT snap_value FROM snapshot.snap_global_instance_time"
+        "     WHERE snapshot_id = %ld AND snap_node_name = '%s' AND snap_stat_name = 'DB_TIME') b"
+        "    ON true) db"
+        " ) data WHERE \"Exec Count\" > 0 OR sort_time > 0 ORDER BY sort_time DESC;",
+        params->end_snap_id,
+        params->report_node,
+        params->begin_snap_id,
+        params->report_node,
+        params->end_snap_id,
+        params->report_node,
+        params->begin_snap_id,
+        params->report_node);
+}
+
+void GenReport::GetDatabaseSQLStatData(report_params* params)
+{
+    if (is_summary_report(params) || is_cluster_report(params)) {
+        return;
+    }
+    if (!UpdataReportSnapGapParam(params, "snap_summary_database_sql_stat")) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+    const char* desc1 = "SQL execution statistics aggregated by database between begin and end snapshot";
+    const char* desc2 = "based on Unique SQL completion path; ordered by total time";
+    /*
+     * Must NOT use dashTitle "SQL Statistics": GetUniqueIDStr() treats the first
+     * column of every SQL Statistics table as Unique SQL Id.
+     */
+    dash->dashTitle = "Database SQL Statistics";
+    dash->tableTitle = "SQL Stats by Database";
+    dash->desc = lappend(dash->desc, (void*)desc1);
+    dash->desc = lappend(dash->desc, (void*)desc2);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    AppendDatabaseSqlStatQuery(query, params);
+
+    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    GenReport::add_data(dash, &params->Contents);
+    pfree_ext(query.data);
+}
+
 static char* AdjustFieldOrder(const char* field[], char* sortkey, int length)
 {
     StringInfoData query;
@@ -3220,7 +3408,7 @@ uint64 get_snap_diff_sql_count(report_params* params)
  * return true if get snapshot gap successfully
  *
  */
-static bool update_report_snap_gap_param(report_params* params, const char* table_name)
+static bool UpdataReportSnapGapParam(report_params* params, const char* table_name)
 {
     if (params == NULL || table_name == NULL) {
         return false;
@@ -3667,7 +3855,7 @@ static void get_summary_load_profile_sql_resp_time(report_params* params, dashbo
 }
 static void get_summary_load_profile_part(report_params* params, dashboard* dash)
 {
-    if (update_report_snap_gap_param(params, "snap_global_instance_time")) {
+    if (UpdataReportSnapGapParam(params, "snap_global_instance_time")) {
         /* load profile - DB TIME */
         get_summary_load_profile_db_time(params, dash);
 
@@ -3676,12 +3864,12 @@ static void get_summary_load_profile_part(report_params* params, dashboard* dash
     }
 
     /* load profile - redo size */
-    if (update_report_snap_gap_param(params, "snap_summary_file_redo_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_file_redo_iostat")) {
         get_summary_load_profile_redo(params, dash);
     }
 
     /* load profile - logical read */
-    if (update_report_snap_gap_param(params, "snap_summary_stat_database")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_stat_database")) {
         get_summary_load_profile_logical_read(params, dash);
     }
 
@@ -3696,22 +3884,22 @@ static void get_summary_load_profile_part(report_params* params, dashboard* dash
      * Read IO (MB)
      * Write IO (MB)
      */
-    if (update_report_snap_gap_param(params, "snap_summary_rel_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_rel_iostat")) {
         get_summary_load_profile_file_io(params, dash);
     }
 
     /* load profile - logins */
-    if (update_report_snap_gap_param(params, "snap_summary_user_login")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_user_login")) {
         get_summary_load_profile_logins(params, dash);
     }
 
     /* load profile - Executes(SQL) */
-    if (update_report_snap_gap_param(params, "snap_summary_workload_transaction")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_workload_transaction")) {
         get_summary_load_profile_executes(params, dash);
     }
 
     /* load profile - Rollbacks/Transaction */
-    if (update_report_snap_gap_param(params, "snap_summary_workload_transaction")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_workload_transaction")) {
         get_summary_load_profile_trx(params, dash);
     }
 }
@@ -3720,7 +3908,7 @@ static void get_summary_load_profile_part(report_params* params, dashboard* dash
 static void get_summary_load_profile_part_single_value(report_params* params, dashboard* dash)
 {
     /* SQL response time P90/P85 */
-    if (update_report_snap_gap_param(params, "snap_statement_responsetime_percentile")) {
+    if (UpdataReportSnapGapParam(params, "snap_statement_responsetime_percentile")) {
         get_summary_load_profile_sql_resp_time(params, dash);
     }
 }
@@ -3951,7 +4139,7 @@ static void get_summary_top10event_waitevent(report_params* params)
     dash->desc = lappend(dash->desc, (void*)desc);
 
     /* wait event total time - Top 10 */
-    if (update_report_snap_gap_param(params, "snap_global_wait_events")) {
+    if (UpdataReportSnapGapParam(params, "snap_global_wait_events")) {
         List* query_result = NIL;
         StringInfoData query;
         initStringInfo(&query);
@@ -4288,11 +4476,11 @@ static void get_summary_node_io_profile(report_params* params)
     dash->tableTitle = "IO Profile";
     dash->desc = lappend(dash->desc, (void*)desc);
 
-    if (update_report_snap_gap_param(params, "snap_global_rel_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_global_rel_iostat")) {
         /* load io profile - node file iostat */
         get_summary_node_file_iostat(params, dash);
     }
-    if (update_report_snap_gap_param(params, "snap_global_file_redo_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_global_file_redo_iostat")) {
         /* load io profile - node file redo iostat */
         get_summary_node_redo_iostat(params, dash);
     }
@@ -4401,11 +4589,11 @@ static void get_summary_cluster_io_profile(report_params* params)
     dash->tableTitle = "IO Profile";
     dash->desc = lappend(dash->desc, (void*)desc);
 
-    if (update_report_snap_gap_param(params, "snap_summary_rel_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_rel_iostat")) {
         /* load io profile - file iostat */
         get_summary_cluster_file_iostat(params, dash);
     }
-    if (update_report_snap_gap_param(params, "snap_summary_file_redo_iostat")) {
+    if (UpdataReportSnapGapParam(params, "snap_summary_file_redo_iostat")) {
         /* load io profile - file redo iostat */
         get_summary_cluster_redo_iostat(params, dash);
     }
@@ -4759,6 +4947,12 @@ void GenReport::get_report_data(report_params* params)
     /* --------------- DETAIL REPORT AREA--------------------- */
     /* detail - Time Model */
     GenReport::GetTimeModelData(params);
+
+    /* detail - Protocol Message Statistics */
+    GenReport::GetProtocolMessageStatData(params);
+
+    /* detail - SQL Stats by Database */
+    GenReport::GetDatabaseSQLStatData(params);
 
     /* detail - sql statistics */
     GenReport::GetSqlStatisticsData(params);
