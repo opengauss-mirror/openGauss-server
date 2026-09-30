@@ -269,6 +269,7 @@ static const struct config_enum_entry rewrite_options[] = {
     {"enable_sublink_pullup_enhanced", SUBLINK_PULLUP_ENHANCED, false},
     {"remove_redundant_distinct_group_by", REMOVE_REDUNDANT_DISTINCT_GROUP_BY, false},
     {"enable_sublink_pullup_rownum", SUBLINK_PULLUP_ROWNUM, false},
+    {"union_all_faststart", UNION_ALL_FASTSTART, false},
     {NULL, 0, false}
 };
 
@@ -2247,6 +2248,22 @@ static void InitSqlConfigureNamesInt()
             &u_sess->attr.attr_sql.geqo_threshold,
             12,
             2,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"union_all_faststart_limit_threshold",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Sets the maximum LIMIT/OFFSET demand for reordering "
+                         "UNION ALL branches with more than four branches."),
+            gettext_noop("UNION ALL branches with more than four branches are "
+                         "not reordered when OFFSET plus LIMIT exceeds this value; "
+                         "zero disables this threshold-controlled reordering.")},
+            &u_sess->attr.attr_sql.union_all_faststart_limit_threshold,
+            100,
+            0,
             INT_MAX,
             NULL,
             NULL,

@@ -411,6 +411,7 @@ typedef enum {
     SUBLINK_PULLUP_ENHANCED = (1 << 10),
     REMOVE_REDUNDANT_DISTINCT_GROUP_BY = (1 << 11),
     SUBLINK_PULLUP_ROWNUM = (1 << 12),
+    UNION_ALL_FASTSTART = (1 << 13), /* reorder UNION ALL leaves by startup cost under LIMIT */
 } rewrite_param;
 
 typedef enum {
@@ -481,6 +482,9 @@ typedef enum {
 
 #define ENABLE_SUBLINK_PULLUP_ROWNUM() \
     ((SUBLINK_PULLUP_ROWNUM) & (uint)u_sess->attr.attr_sql.rewrite_rule)
+
+#define ENABLE_UNION_ALL_FASTSTART() \
+    ((UNION_ALL_FASTSTART) & (uint)u_sess->attr.attr_sql.rewrite_rule)
 
 #define ENABLE_SQL_BETA_FEATURE(feature) \
     ((bool)((uint)u_sess->attr.attr_sql.sql_beta_feature & feature))

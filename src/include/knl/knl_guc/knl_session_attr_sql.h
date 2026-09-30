@@ -166,6 +166,7 @@ typedef struct knl_session_attr_sql {
     int from_collapse_limit;
     int join_collapse_limit;
     int geqo_threshold;
+    int union_all_faststart_limit_threshold;
     int Geqo_effort;
     int Geqo_pool_size;
     int Geqo_generations;
