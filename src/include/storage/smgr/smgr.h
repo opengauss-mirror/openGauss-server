@@ -194,6 +194,7 @@ typedef struct f_smgr {
     bool (*smgr_exists)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum);
     void (*smgr_unlink)(const RelFileNodeBackend &rnode, ForkNumber forknum, bool isRedo, BlockNumber blockNum);
     void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer, bool skipFsync);
+    void (*smgr_zeroextend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, int nblocks, bool skipFsync);
     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
     SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
     void (*smgr_bulkread)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, int blockCount, char *buffer);
