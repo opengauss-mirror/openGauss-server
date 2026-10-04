@@ -9513,6 +9513,14 @@ static Plan* parallel_limit_sort(
     if (lefttree->dop <= 1)
         return lefttree;
 
+    if (root->parse->limitIsPercent && limitCount == root->parse->limitCount) {
+        /* Preserve the local Limit, but leave PERCENT and OFFSET to the global Limit. */
+        limitOffset = NULL;
+        limitCount = NULL;
+        offset_est = 0;
+        count_est = 0;
+    }
+
     /*
      * When sort + limit is parallelized, we need to add another sort
      * to make sure the data we send to CN is sorted.
@@ -9775,6 +9783,11 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Query *parse, int64 o
         }
 
         return result_plan;
+    }
+
+    if (parse->limitIsPercent) {
+        /* Build the SMP Limit tree with the original percentage and global OFFSET. */
+        return (Plan*)make_limit_with_ties(root, lefttree, parse, offset_est, count_est, true);
     }
 
     /* make the first limit node with limitoffset equal zero */
