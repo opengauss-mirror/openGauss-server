@@ -3371,8 +3371,11 @@ void PageCheckWhenChosedElimination(const BufferDesc *buf, uint64 oldFlags)
  *
  * Returns true if the buffer can be reused, in which case the buffer is only
  * pinned by this backend and marked as invalid, false otherwise.
+ *
+ * dms_release_failed is set when ENABLE_DMS and the DRC owner could not be
+ * released. The caller must not recycle the buffer in that case.
  */
-static bool InvalidateVictimBuffer(BufferDesc* buf_hdr)
+static bool InvalidateVictimBuffer(BufferDesc* buf_hdr, bool* dms_release_failed)
 {
     uint64 buf_state;
     uint32 hash;
@@ -3380,6 +3383,9 @@ static bool InvalidateVictimBuffer(BufferDesc* buf_hdr)
     BufferTag tag;
 
     Assert(GetPrivateRefCount(BufferDescriptorGetBuffer(buf_hdr)) == 1);
+    if (dms_release_failed != NULL) {
+        *dms_release_failed = false;
+    }
 
     /* have buffer pinned, so it's safe to read tag without lock */
     tag = buf_hdr->tag;
@@ -3410,6 +3416,28 @@ static bool InvalidateVictimBuffer(BufferDesc* buf_hdr)
         LWLockRelease(partition_lock);
 
         return false;
+    }
+
+    /*
+     * BufferAlloc releases the DRC owner before the old tag is dropped.  The
+     * extend path now bypasses BufferAlloc, so the same release has to happen
+     * here while the tag is still valid.  Failure leaves the buffer mapped;
+     * recycling it would keep DMS pointed at a slot that is about to be reused.
+     * The release runs under the buffer header lock, matching BufferAlloc.
+     */
+    if (ENABLE_DMS && (buf_state & BM_TAG_VALID)) {
+        if (!DmsReleaseOwner(tag, buf_hdr->buf_id)) {
+            if (dms_release_failed != NULL) {
+                *dms_release_failed = true;
+            }
+            UnlockBufHdr(buf_hdr, buf_state);
+            LWLockRelease(partition_lock);
+            return false;
+        }
+        ClearReadHint(buf_hdr->buf_id, true);
+        GetDmsBufCtrl(buf_hdr->buf_id)->lock_mode = DMS_LOCK_NULL;
+        GetDmsBufCtrl(buf_hdr->buf_id)->been_loaded = false;
+        GetDmsBufCtrl(buf_hdr->buf_id)->lsn_on_disk = InvalidXLogRecPtr;
     }
 
     /*
@@ -3470,6 +3498,11 @@ static Buffer GetVictimBuffer(BufferAccessStrategy strategy)
 
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf_hdr);
+
+        if (!SSPageCheckIfCanEliminate(buf_hdr, old_flags)) {
+            UnpinBuffer(buf_hdr, true);
+            continue;
+        }
 
         PageCheckIfCanEliminate(buf_hdr, &old_flags, &needGetLock);
         /*
@@ -3563,9 +3596,16 @@ static Buffer GetVictimBuffer(BufferAccessStrategy strategy)
          * can fail because another backend could have pinned or dirtied the
          * buffer.
          */
-        if ((buf_state & BM_TAG_VALID) && !InvalidateVictimBuffer(buf_hdr)) {
-            UnpinBuffer(buf_hdr, true);
-            continue;
+        if (buf_state & BM_TAG_VALID) {
+            bool dms_release_failed = false;
+            if (!InvalidateVictimBuffer(buf_hdr, &dms_release_failed)) {
+                UnpinBuffer(buf_hdr, true);
+                if (dms_release_failed && SSNeedExitPageReadInFailover()) {
+                    SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                        SS_PAGE_READ_CANCEL_POINT_EXTEND_VICTIM_DMS_RELEASE);
+                }
+                continue;
+            }
         }
 
         /*
@@ -4404,6 +4444,123 @@ static BlockNumber ExtendBufferedRelCommon(BufferManagerRelation bmr, ForkNumber
 }
 
 /*
+ * Mark the buffer as a relation extension before the DRC request.
+ * reset_ctrl is true for a fresh victim: its previous owner was released, so
+ * the old seg location, pblk and lock mode must not be reused. A pre-existing
+ * buffer keeps its DRC lock mode and only refreshes the extend hint.
+ */
+static void SSPrepareExtendBuffer(BufferDesc* buf_hdr, char relpersistence, bool reset_ctrl)
+{
+    dms_buf_ctrl_t* buf_ctrl;
+
+    if (!ENABLE_DMS) {
+        return;
+    }
+
+    buf_ctrl = GetDmsBufCtrl(buf_hdr->buf_id);
+    if (reset_ctrl) {
+        ClearReadHint(buf_hdr->buf_id, true);
+        buf_ctrl->lock_mode = DMS_LOCK_NULL;
+        buf_ctrl->been_loaded = false;
+        buf_ctrl->lsn_on_disk = InvalidXLogRecPtr;
+    } else {
+        buf_ctrl->seg_fileno = EXTENT_INVALID;
+        buf_ctrl->seg_blockno = InvalidBlockNumber;
+    }
+    /* BUF_IS_EXTEND tells DMS to load this page from disk rather than transfer it. */
+    MarkReadHint(buf_hdr->buf_id, relpersistence, true, NULL);
+}
+
+/*
+ * Register an extended page with DRC before it becomes visible on disk.
+ * The caller owns the buffer I/O. Temporary relations never enter DMS.
+ */
+static void SSRequestExtendPage(BufferDesc* buf_hdr, char relpersistence)
+{
+    dms_buf_ctrl_t* buf_ctrl;
+
+    if (!ENABLE_DMS || relpersistence == RELPERSISTENCE_TEMP) {
+        return;
+    }
+
+    buf_ctrl = GetDmsBufCtrl(buf_hdr->buf_id);
+    for (;;) {
+        if (!DmsCheckBufAccessible()) {
+            if (SSNeedExitPageReadInFailover()) {
+                SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                    SS_PAGE_READ_CANCEL_POINT_EXTEND_DMS_ACCESS);
+            }
+            if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
+                ereport(ERROR, (errmodule(MOD_DMS),
+                    errmsg("[SS] failed to request extended page during reform")));
+            }
+            pg_usleep(5000L);
+            continue;
+        }
+
+        if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(buf_hdr->tag)) {
+            if (SSNeedExitPageReadInFailover()) {
+                SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                    SS_PAGE_READ_CANCEL_POINT_EXTEND_ONDEMAND_REDO);
+            }
+            pg_usleep(5000L);
+            continue;
+        }
+
+        if (!LockModeCompatible(buf_ctrl, LW_EXCLUSIVE)) {
+            if (!StartReadPage(buf_hdr, LW_EXCLUSIVE)) {
+                if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
+                    ereport(ERROR, (errmodule(MOD_DMS),
+                        errmsg("[SS] failed to request extended page during reform")));
+                }
+                if (SSNeedExitPageReadInFailover()) {
+                    SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                        SS_PAGE_READ_CANCEL_POINT_EXTEND_START_READ_PAGE);
+                }
+                pg_usleep(5000L);
+                continue;
+            }
+        } else {
+            buf_ctrl->state |= BUF_NEED_LOAD;
+        }
+
+        /*
+         * An extend page is created locally. A transferred image must not be
+         * written out as the new block.
+         */
+        if (!(buf_ctrl->state & BUF_NEED_LOAD)) {
+#ifdef USE_ASSERT_CHECKING
+            ereport(PANIC, (errmsg("[SS] extend page should not be tranferred from DMS, "
+                                   "and needs to be loaded from disk!")));
+#else
+            MemSet((char*)BufHdrGetBlock(buf_hdr), 0, BLCKSZ);
+#endif
+        }
+        if (buf_ctrl->lock_mode == DMS_LOCK_NULL) {
+            buf_ctrl->lock_mode = (uint8)DMS_LOCK_EXCLUSIVE;
+        }
+        break;
+    }
+}
+
+/* Page is initialized locally. Publish it as loaded and drop the extend hint. */
+static void SSFinishExtendBuffer(BufferDesc* buf_hdr, char relpersistence)
+{
+    dms_buf_ctrl_t* buf_ctrl;
+
+    if (!ENABLE_DMS) {
+        return;
+    }
+
+    buf_ctrl = GetDmsBufCtrl(buf_hdr->buf_id);
+    if (relpersistence != RELPERSISTENCE_TEMP) {
+        buf_ctrl->been_loaded = true;
+    }
+    /* Keeps persistence bits and lock_mode. Clears BUF_IS_EXTEND and seg location. */
+    ClearReadHint(buf_hdr->buf_id);
+}
+
+/*
  * Implementation of ExtendBufferedRelBy() for shared buffers.
  */
 static BlockNumber ExtendBufferedRelShared(BufferManagerRelation bmr, ForkNumber fork, BufferAccessStrategy strategy,
@@ -4534,6 +4691,7 @@ static BlockNumber ExtendBufferedRelShared(BufferManagerRelation bmr, ForkNumber
                 buf_state &= ~BM_VALID;
                 UnlockBufHdr(existing_hdr, buf_state);
             } while (!StartBufferIO(existing_hdr, true));
+            SSPrepareExtendBuffer(existing_hdr, bmr.relpersistence, false);
         } else {
             uint64 buf_state;
 
@@ -4555,11 +4713,6 @@ static BlockNumber ExtendBufferedRelShared(BufferManagerRelation bmr, ForkNumber
 #ifdef USE_ASSERT_CHECKING
             victim_buf_hdr->lsn_dirty = InvalidXLogRecPtr;
 #endif
-            if (ENABLE_DMS) {
-                GetDmsBufCtrl(victim_buf_hdr->buf_id)->lock_mode = DMS_LOCK_NULL;
-                GetDmsBufCtrl(victim_buf_hdr->buf_id)->been_loaded = false;
-                GetDmsBufCtrl(victim_buf_hdr->buf_id)->lsn_on_disk = InvalidXLogRecPtr;
-            }
 
             buf_state |= BM_TAG_VALID | BUF_USAGECOUNT_ONE;
             if (bmr.relpersistence == RELPERSISTENCE_PERMANENT || fork == INIT_FORKNUM)
@@ -4580,7 +4733,14 @@ static BlockNumber ExtendBufferedRelShared(BufferManagerRelation bmr, ForkNumber
                 buf_state &= ~BM_VALID;
                 UnlockBufHdr(victim_buf_hdr, buf_state);
             } while (!StartBufferIO(victim_buf_hdr, true));
+            SSPrepareExtendBuffer(victim_buf_hdr, bmr.relpersistence, true);
         }
+        /*
+         * Own the new block in DRC before smgr extend makes it readable by
+         * other nodes. Both the fresh victim and a pre-existing buffer go
+         * through the same exclusive request as ReadBuffer_common's extend.
+         */
+        SSRequestExtendPage(GetBufferDescriptor(buffers[i] - 1), bmr.relpersistence);
     }
 
     /*
@@ -4623,6 +4783,13 @@ static BlockNumber ExtendBufferedRelShared(BufferManagerRelation bmr, ForkNumber
 
         if ((flags & EB_LOCK_FIRST && i == 0) || (flags & EB_LOCK_ALL))
             lock = true;
+
+        /*
+         * been_loaded and lock_mode must describe a locally created page before
+         * BM_VALID is set. Otherwise the next LockBuffer reloads the block and
+         * SSSegRead observes a stale dms_buf_ctrl physical location.
+         */
+        SSFinishExtendBuffer(buf_hdr, bmr.relpersistence);
 
         if (lock)
             LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);

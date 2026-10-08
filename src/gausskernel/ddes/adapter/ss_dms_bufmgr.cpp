@@ -1123,6 +1123,14 @@ const char *SSPageReadCancelPointName(SSPageReadCancelPoint point)
             return "ReadBufferFastNormal after SegStartBufferIO";
         case SS_PAGE_READ_CANCEL_POINT_SEG_BUFFER_ALLOC_DMS_RELEASE:
             return "SegBufferAlloc DmsReleaseOwner";
+        case SS_PAGE_READ_CANCEL_POINT_EXTEND_VICTIM_DMS_RELEASE:
+            return "ExtendBufferedRelShared victim DmsReleaseOwner";
+        case SS_PAGE_READ_CANCEL_POINT_EXTEND_DMS_ACCESS:
+            return "ExtendBufferedRelShared DmsCheckBufAccessible";
+        case SS_PAGE_READ_CANCEL_POINT_EXTEND_ONDEMAND_REDO:
+            return "ExtendBufferedRelShared ondemand redo request";
+        case SS_PAGE_READ_CANCEL_POINT_EXTEND_START_READ_PAGE:
+            return "ExtendBufferedRelShared StartReadPage";
         default:
             return "unknown";
     }
