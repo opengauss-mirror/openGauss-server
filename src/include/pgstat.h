@@ -1547,6 +1547,23 @@ typedef struct WaitStatisticsInfo {
     TimestampTz last_updated;
 } WaitStatisticsInfo;
 
+/*  LockStatisticsInfo          The lock statistics info used for performance monitor. */
+typedef struct LockStatisticsInfo {
+    /* ---- wait lock statistics（ extend WaitStatisticsInfo fields） ---- */
+    volatile int64 max_duration;     /* max wait time */
+    volatile int64 min_duration;     /* min wait time */
+    volatile int64 total_duration;   /* total wait time（microseconds） */
+    volatile int64 avg_duration;     /* average wait time */
+    volatile uint64 counter;          /* wait acquire lock times */
+    volatile uint64 failed_counter;   /* wait not acquire lock times（timeout/cancel） */
+
+    /* ---- not wait lock statistics ---- */
+    volatile uint64 nw_acquired;     /* non-wait acquire lock times */
+    volatile uint64 nw_not_acquired; /* non-wait not acquire lock times（condition get failed） */
+
+    volatile TimestampTz last_updated;
+} LockStatisticsInfo;
+
 typedef struct WaitStatusInfo {
     int64 start_time;  // current wait starttime
     WaitStatisticsInfo statistics_info[STATE_WAIT_NUM + 1];
@@ -1557,8 +1574,8 @@ typedef struct WaitEventInfo {
     int64 duration;    // current wait duration
     WaitStatisticsInfo io_info[IO_EVENT_NUM];
     WaitStatisticsInfo dms_info[DMS_EVENT_NUM];
-    WaitStatisticsInfo lock_info[LOCK_EVENT_NUM];
-    WaitStatisticsInfo lwlock_info[LWLOCK_EVENT_NUM];
+    LockStatisticsInfo lock_info[LOCK_EVENT_NUM];
+    LockStatisticsInfo lwlock_info[LWLOCK_EVENT_NUM];
 } WaitEventInfo;
 
 typedef struct WaitInfo {
@@ -1984,6 +2001,74 @@ static inline void pgstat_report_rowdesc_cache_store(RowDescriptionCacheProtocol
 static inline void pgstat_report_rowdesc_cache_hit(RowDescriptionCacheProtocol protocol)
 {
     pgstat_report_rowdesc_cache(protocol, false, true);
+}
+
+/*
+* pgstat_report_lock_nw_stat_internal
+*      Common core for non-wait lock acquisition statistics.
+*      Caller must have validated beentry and bounds-checked eventId.
+*/
+static inline void pgstat_report_lock_nw_stat_internal(
+    PgBackendStatus *beentry, LockStatisticsInfo *stat, bool acquired)
+{
+    TimestampTz now = GetCurrentTimestamp();
+
+    pgstat_increment_changecount_before(beentry);
+
+    if (acquired)
+        stat->nw_acquired++;
+    else
+        stat->nw_not_acquired++;
+    stat->last_updated = now;
+
+    pgstat_increment_changecount_after(beentry);
+}
+
+/*
+* pgstat_report_lwlock_nw_stat
+*      Report non-wait LWLock acquisition result.
+*      - acquired == true:  lock obtained without waiting (first try).
+*      - acquired == false: ConditionalAcquire failed.
+*/
+static inline void pgstat_report_lwlock_nw_stat(uint16 tranche_id, bool acquired)
+{
+    if (!u_sess->attr.attr_common.enable_instr_track_wait)
+        return;
+
+    if (tranche_id >= LWLOCK_EVENT_NUM)
+        return;
+
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (unlikely(!beentry))
+        return;
+
+    pgstat_report_lock_nw_stat_internal(
+        beentry, &beentry->waitInfo.event_info.lwlock_info[tranche_id], acquired);
+}
+
+/*
+* pgstat_report_lock_nw_stat
+*      Report non-wait regular lock acquisition result.
+*      - acquired == true:  lock obtained without waiting (dontWait path).
+*      - acquired == false: conditional lock failed.
+*      locktag_type is the LockTagType value (LOCKTAG_RELATION, LOCKTAG_PAGE,
+*      etc.) extracted from LOCKTAG.locktag_type, which is the same index space
+*      used by the read side (set_lock_event_tuple_value) to iterate lock_info[].
+*/
+static inline void pgstat_report_lock_nw_stat(uint16 locktag_type, bool acquired)
+{
+    if (!u_sess->attr.attr_common.enable_instr_track_wait)
+        return;
+
+    if (locktag_type >= LOCK_EVENT_NUM)
+        return;
+
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (unlikely(!beentry))
+        return;
+
+    pgstat_report_lock_nw_stat_internal(
+        beentry, &beentry->waitInfo.event_info.lock_info[locktag_type], acquired);
 }
 
 /*

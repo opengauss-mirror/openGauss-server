@@ -2709,21 +2709,21 @@ void instr_stmt_copy_wait_events()
             mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
-        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
+        LockStatisticsInfo *lock_wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
         start_idx = wait_event_dms_event_max_index;
         end_idx = wait_event_lock_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
             BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
-                wait_event_info[start_idx - wait_event_dms_event_max_index].total_duration;
+                lock_wait_event_info[start_idx - wait_event_dms_event_max_index].total_duration;
             mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
-        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lwlock_info;
+        lock_wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lwlock_info;
         start_idx = wait_event_lock_event_max_index;
         end_idx = wait_event_lwlock_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
             BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
-                wait_event_info[start_idx - wait_event_lock_event_max_index].total_duration;
+                lock_wait_event_info[start_idx - wait_event_lock_event_max_index].total_duration;
             mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 

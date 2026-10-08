@@ -852,6 +852,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
             locallock->lock = NULL;
             locallock->proclock = NULL;
             GrantLockLocal(locallock, owner);
+            pgstat_report_lock_nw_stat(locktag->locktag_type, true);
             instr_stmt_report_lock(LOCK_END, lockmode);
             return LOCKACQUIRE_OK;
         }
@@ -981,6 +982,8 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
         /* No conflict with held or previously requested locks */
         GrantLock(lock, proclock, lockmode);
         GrantLockLocal(locallock, owner);
+        if (dontWait)
+            pgstat_report_lock_nw_stat(locktag->locktag_type, true);
     } else {
         Assert(status == STATUS_FOUND || status == STATUS_FOUND_NEED_CANCEL);
 
@@ -1013,6 +1016,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
             if (locallock->nLocks == 0) {
                 RemoveLocalLock(locallock);
             }
+            pgstat_report_lock_nw_stat(locktag->locktag_type, false);
             instr_stmt_report_lock(LOCK_END, NoLock);
             return LOCKACQUIRE_NOT_AVAIL;
         }
