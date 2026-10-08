@@ -636,6 +636,11 @@ int main(int argc, char* argv[])
         }
 #endif
 
+        if (pset.db == NULL) {
+            printf("out of memory.\n");
+            exit(EXIT_FAILURE);
+        }
+
         if (pset.db->sock < 0) {
             fprintf(stderr,
                 "failed to connect %s:%s.\n",
