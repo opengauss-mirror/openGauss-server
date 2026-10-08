@@ -1,6 +1,6 @@
 DO $upgrade$
 BEGIN
-IF working_version_num() < 92987 then
+IF working_version_num() < 92985 then
 
 DROP FUNCTION IF EXISTS pg_catalog.diskannbuild(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8538;
