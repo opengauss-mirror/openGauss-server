@@ -45,6 +45,21 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.global_os_runtime AS
   SELECT DISTINCT * FROM dbe_perf.get_global_os_runtime();
 
+CREATE VIEW dbe_perf.os_disk_io_info AS SELECT * FROM pg_os_disk_io_info();
+
+CREATE VIEW dbe_perf.global_os_disk_io_info AS
+  SELECT node_name,os_disk_io_info.* FROM dbe_perf.node_name,dbe_perf.os_disk_io_info;
+
+CREATE VIEW dbe_perf.os_net_dev_info AS
+  SELECT info.interface_name,ext.ip_address,
+      info.rx_bytes, info.rx_packets, info.rx_errors, info.rx_dropped, info.rx_fifo, info.rx_frame, info.rx_multicast,
+      info.tx_bytes, info.tx_packets, info.tx_errors, info.tx_dropped, info.tx_fifo, info.tx_colls, info.tx_carrier,
+      ext.link_speed_mbps,ext.dev_type
+  FROM pg_os_net_dev_info() info LEFT JOIN pg_os_net_dev_ext() ext ON info.interface_name = ext.interface_name;
+
+CREATE VIEW dbe_perf.global_os_net_dev_info AS
+  SELECT node_name,net_dev.* FROM dbe_perf.node_name,dbe_perf.os_net_dev_info net_dev;
+
 CREATE VIEW dbe_perf.os_threads AS
   SELECT
     S.node_name,

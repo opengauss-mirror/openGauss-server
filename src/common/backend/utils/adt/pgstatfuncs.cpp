@@ -251,6 +251,9 @@ extern Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS);
 extern Datum pg_stat_reset_single_function_counters(PG_FUNCTION_ARGS);
 
 extern Datum pv_os_run_info(PG_FUNCTION_ARGS);
+extern Datum pg_os_disk_io_info(PG_FUNCTION_ARGS);
+extern Datum pg_os_net_dev_ext(PG_FUNCTION_ARGS);
+extern Datum pg_os_net_dev_info(PG_FUNCTION_ARGS);
 extern Datum pv_session_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_session_memory_detail(PG_FUNCTION_ARGS);
 extern Datum pg_shared_memory_detail(PG_FUNCTION_ARGS);
@@ -8375,6 +8378,205 @@ Datum pg_stat_reset_single_function_counters(PG_FUNCTION_ARGS)
 
     PG_RETURN_VOID();
 }
+
+Datum pg_os_disk_io_info(PG_FUNCTION_ARGS)
+{
+   FuncCallContext* funcctx = NULL;
+   OSDiskIOStats      *disk_item;
+    /* stuff done only on the first call of the function */
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldcontext;
+        TupleDesc tupdesc;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /* witch to memory context appropriate for multiple function calls */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* need a tuple descriptor representing 19 columns */
+        tupdesc = CreateTemplateTupleDesc(19, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "major_number", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "minor_number", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "device_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "total_reads", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "merge_read_num", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "sector_read", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "read_time_ms", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "total_writes", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "merge_write_num", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "sector_write", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "write_time_ms", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)12, "now_io_request", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)13, "time_inout_op_ms", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)14, "time_inout_opwei_ms", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)15, "discard_complete", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)16, "merge_discard_num", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)17, "sector_discard", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)18, "discard_time_ms", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)19, "sector_size", INT4OID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        int num_disks = GetOsDiskIoDetail(funcctx->multi_call_memory_ctx, &disk_item);
+        funcctx->max_calls = num_disks;
+        funcctx->user_fctx = disk_item;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    if (funcctx->call_cntr < funcctx->max_calls)
+    {
+        disk_item = ((OSDiskIOStats *)funcctx->user_fctx) + funcctx->call_cntr;
+        Datum values[19];
+        bool  nulls[19] = {false};
+
+        values[0] = Int32GetDatum(disk_item->major_number);
+        values[1] = Int32GetDatum(disk_item->minor_number);
+        values[2] = CStringGetTextDatum(disk_item->device_name);
+        values[3] = Int64GetDatum(disk_item->total_reads);
+        values[4] = Int64GetDatum(disk_item->merge_read_num);
+        values[5] = Int64GetDatum(disk_item->sector_read);
+        values[6] = Int64GetDatum(disk_item->read_time_ms);
+        values[7] = Int64GetDatum(disk_item->total_writes);
+        values[8] = Int64GetDatum(disk_item->merge_write_num);
+        values[9] = Int64GetDatum(disk_item->sector_write);
+        values[10] = Int64GetDatum(disk_item->write_time_ms);
+        values[11] = Int64GetDatum(disk_item->now_io_request);
+        values[12] = Int64GetDatum(disk_item->time_inout_op_ms);
+        values[13] = Int64GetDatum(disk_item->time_inout_opwei_ms);
+        values[14] = Int64GetDatum(disk_item->discard_complete);
+        values[15] = Int64GetDatum(disk_item->merge_discard_num);
+        values[16] = Int64GetDatum(disk_item->sector_discard);
+        values[17] = Int64GetDatum(disk_item->discard_time_ms);
+        values[18] = Int32GetDatum(disk_item->sector_size);
+
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
+Datum pg_os_net_dev_info(PG_FUNCTION_ARGS)
+{
+   FuncCallContext* funcctx = NULL;
+   OSNetDevInfo      *net_dev_info;
+    /* stuff done only on the first call of the function */
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldcontext;
+        TupleDesc tupdesc;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /* witch to memory context appropriate for multiple function calls */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* need a tuple descriptor representing 15 columns */
+        tupdesc = CreateTemplateTupleDesc(15, false);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "interface_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "rx_bytes", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "rx_packets", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "rx_errors", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "rx_dropped", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "rx_fifo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "rx_frame", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "rx_multicast", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "tx_bytes", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "tx_packets", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "tx_errors", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)12, "tx_dropped", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)13, "tx_fifo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)14, "tx_colls", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)15, "tx_carrier", INT8OID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        int num_devs = GetOsNetDevInfoDetail(funcctx->multi_call_memory_ctx, &net_dev_info);
+        funcctx->max_calls = num_devs;
+        funcctx->user_fctx = net_dev_info;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    if (funcctx->call_cntr < funcctx->max_calls)
+    {
+        net_dev_info = ((OSNetDevInfo *)funcctx->user_fctx) + funcctx->call_cntr;
+        Datum values[15];
+        bool  nulls[15] = {false};
+
+        values[0] = CStringGetTextDatum(net_dev_info->interface_name);
+        values[1] = Int64GetDatum(net_dev_info->rx_bytes);
+        values[2] = Int64GetDatum(net_dev_info->rx_packets);
+        values[3] = Int64GetDatum(net_dev_info->rx_errors);
+        values[4] = Int64GetDatum(net_dev_info->rx_dropped);
+        values[5] = Int64GetDatum(net_dev_info->rx_fifo);
+        values[6] = Int64GetDatum(net_dev_info->rx_frame);
+        values[7] = Int64GetDatum(net_dev_info->rx_multicast);
+        values[8] = Int64GetDatum(net_dev_info->tx_bytes);
+        values[9] = Int64GetDatum(net_dev_info->tx_packets);
+        values[10] = Int64GetDatum(net_dev_info->tx_errors);
+        values[11] = Int64GetDatum(net_dev_info->tx_dropped);
+        values[12] = Int64GetDatum(net_dev_info->tx_fifo);
+        values[13] = Int64GetDatum(net_dev_info->tx_colls);
+        values[14] = Int64GetDatum(net_dev_info->tx_carrier);
+
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
+Datum pg_os_net_dev_ext(PG_FUNCTION_ARGS)
+{
+   FuncCallContext* funcctx = NULL;
+   OSNetDevExt      *net_dev_ext;
+    /* stuff done only on the first call of the function */
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldcontext;
+        TupleDesc tupdesc;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /* witch to memory context appropriate for multiple function calls */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* need a tuple descriptor representing 4 columns */
+        tupdesc = CreateTemplateTupleDesc(4, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "interface_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "ip_address", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "link_speed_mbps", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "dev_type", TEXTOID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        int num_devs = GetOsNetDevExtDetail(funcctx->multi_call_memory_ctx, &net_dev_ext);
+        funcctx->max_calls = num_devs;
+        funcctx->user_fctx = net_dev_ext;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    if (funcctx->call_cntr < funcctx->max_calls)
+    {
+        net_dev_ext = ((OSNetDevExt *)funcctx->user_fctx) + funcctx->call_cntr;
+        Datum values[4];
+        bool  nulls[4] = {false};
+
+        values[0] = CStringGetTextDatum(net_dev_ext->interface_name);
+        values[1] = CStringGetTextDatum(net_dev_ext->ip_address);
+        values[2] = Int32GetDatum(net_dev_ext->link_speed_mbps);
+        values[3] = CStringGetTextDatum(net_dev_ext->dev_type);
+
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+
 
 Datum pv_os_run_info(PG_FUNCTION_ARGS)
 {
