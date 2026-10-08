@@ -40,7 +40,7 @@
 #include "nodes/memnodes.h"
 #include "utils/palloc.h"
 
-#include "adaptor/shared_allocator.h"
+#include "lite/utils/shared_allocator.h"
 #include "lite/index/light_env/allocator.h"
 
 namespace gs_vector {

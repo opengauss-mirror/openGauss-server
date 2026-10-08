@@ -3220,6 +3220,9 @@ typedef struct knl_u_ndp_context {
     char *crl_path;
 } knl_u_ndp_context;
 
+static const int DEFAULT_NPU_DEVICE_MASK = 0xFF;
+static const int DEFAULT_NPU_DEVICE_MAX_MEM_KB = 1024 * 1024;
+
 typedef struct knl_u_datavec_context {
     int hnsw_ef_search;
     int hnsw_earlystop_threshold;
@@ -3232,6 +3235,8 @@ typedef struct knl_u_datavec_context {
     int hnsw_distributed_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    int npuDeviceMask;
+    int npuDeviceMaxMem;
     bool diskann_build_in_memory;
     double rbq_refinek;
     bool enable_npu;

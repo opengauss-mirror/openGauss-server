@@ -22,9 +22,24 @@ SELECT /* +indexscan(test_graph test_graph_index) */ id FROM test_graph ORDER BY
 
 -- 4. 插入数据（观察回显：aminsert被调用）
 INSERT into test_graph values(9748000, (SELECT repr FROM test_graph WHERE id=0));
+INSERT into test_graph values(9748001, NULL);
 
 -- 5. 删除数据（观察回显：amdelete被调用）
 DELETE FROM test_graph WHERE id=9748000;
+DELETE FROM test_graph WHERE id=9748001;
 
 -- 6. vacuum数据（观察回显：amvacuum被调用）
 VACUUM test_graph;
+
+-- 7. ASTORE build, DML, vacuum, and scan
+DROP TABLE IF EXISTS test_graph_astore;
+CREATE TABLE test_graph_astore (id int, repr vector(128)) WITH (storage_type=astore);
+INSERT INTO test_graph_astore SELECT * FROM test_graph LIMIT 1000;
+CREATE INDEX test_graph_astore_index ON test_graph_astore USING gv_graph (repr vector_l2_ops)
+    WITH (storage_type=astore, graph_degree=48, quantization_type=lvq, subgraph_count=2, num_parallels=32);
+DELETE FROM test_graph_astore WHERE id IN (SELECT id FROM test_graph_astore LIMIT 10);
+VACUUM test_graph_astore;
+SELECT /* +indexscan(test_graph_astore test_graph_astore_index) */ id
+FROM test_graph_astore
+ORDER BY repr <-> (SELECT repr FROM test_graph_astore WHERE repr IS NOT NULL LIMIT 1)
+LIMIT 10;

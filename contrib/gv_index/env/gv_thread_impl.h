@@ -33,9 +33,12 @@
 #include <thread>
 
 #include "c.h"
+#include "catalog/index.h"
 #include "postmaster/bgworker.h"
 #include "utils/elog.h"
+#include "utils/rel.h"
 #include "gv_compute_thread.h"
+#include "gv_page_storage.h"
 #include "lite/index/light_env/compute_task_runner.h"
 
 namespace gs_vector {
@@ -45,10 +48,14 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
     using Args = GVWorkerArgs::Args;
     using Task = GVWorkerArgs::Task;
 
-    GVThreadPoolImpl() : m_max_threads(0), m_env(nullptr), m_init(false) {}
-    GVThreadPoolImpl(size_t threads, annlite::LightEnv *_env)
-        : m_max_threads(threads), m_env(_env), m_init(false)
+    GVThreadPoolImpl()
+        : m_max_threads(0), m_env(nullptr), m_init(false), m_index_oid(InvalidOid)
     {}
+    GVThreadPoolImpl(size_t threads, annlite::LightEnv *_env)
+        : m_max_threads(threads), m_env(_env), m_init(false), m_index_oid(InvalidOid)
+    {}
+
+    void set_index_oid(Oid oid) { m_index_oid = oid; }
 
     static void* worker(void *void_args)
     {
@@ -73,7 +80,18 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
     {
         GVWorkerArgs** args_ptr = static_cast<GVWorkerArgs**>(bwc->bgshared);
         if (args_ptr != nullptr && *args_ptr != nullptr) {
-            (void)worker(*args_ptr);
+            GVWorkerArgs* args = *args_ptr;
+            if (OidIsValid(args->index_oid)) {
+                Relation index_rel = index_open(args->index_oid, AccessShareLock);
+                GVPageStorage::set_worker_index(index_rel);
+            }
+            (void)worker(args);
+
+            Relation index_rel = GVPageStorage::get_worker_index();
+            if (index_rel != nullptr) {
+                index_close(index_rel, AccessShareLock);
+                GVPageStorage::set_worker_index(nullptr);
+            }
         }
     }
 
@@ -108,6 +126,7 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
 
         m_workers_arg = GVWorkerArgs(m_max_threads);
         m_workers_arg.set_terminated(false);
+        m_workers_arg.index_oid = m_index_oid;
 
         GVWorkerArgs **pointer = (GVWorkerArgs **)palloc(sizeof(GVWorkerArgs *));
         *pointer = &m_workers_arg;
@@ -183,6 +202,7 @@ private:
     annlite::LightEnv *m_env;
     GVWorkerArgs m_workers_arg;
     bool m_init;
+    Oid m_index_oid;
 };
 } /* namespace gs_vector */
 

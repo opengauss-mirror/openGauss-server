@@ -59,6 +59,10 @@ struct VacuumFilter : public annlite::Filter<Value> {
     bool operator()(const Value& value, const char* page, size_t offset) override
     {
         if (!m_is_ustore) {
+            Assert(m_callback != NULL);
+            if (m_callback == NULL) {
+                return false;
+            }
             return m_callback(
                 const_cast<ItemPointer>(&(*reinterpret_cast<const GraphValueTypeV3*>(&value)).index_tuple.t_tid),
                 (void *)m_callback_state, InvalidOid, InvalidBktId);

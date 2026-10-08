@@ -42,6 +42,8 @@ using BlockModification = annlite::light_env::BlockModification;
 using OpenOptions = annlite::light_env::OpenOptions;
 using Page = annlite::light_env::PageStorage::Page;
 
+thread_local RelationData* GVPageStorage::t_worker_index = nullptr;
+
 GVPageStorage::GVPageStorage(annlite::LightEnv* env, RelationData* index)
     : annlite::light_env::PageStorage(), m_env(env),
     m_index(index),
@@ -64,12 +66,12 @@ ReadBufferMode GVPageStorage::get_read_buffer_mode(annlite::PageInitStrategy pis
 
 void GVPageStorage::block_set_accessable(BlockId start_block, BlockId last_block)
 {
-    RelationData* index = m_index;
+    RelationData* index = current_index();
     char *zero_buf = NULL;
     if (last_block == InvalidBlockNumber) {
         return;
     }
-    RelationOpenSmgr(m_index);
+    RelationOpenSmgr(index);
     zero_buf = g_instance.attr.attr_storage.enable_adio_function ?
         (char *)adio_align_alloc(BLCKSZ) :
         (char *)MemoryContextAlloc(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
@@ -102,7 +104,7 @@ void GVPageStorage::block_set_accessable(BlockId start_block, BlockId last_block
 
 BlockPointer GVPageStorage::block_open(BlockId id, const OpenOptions& options, BlockModification*& modify)
 {
-    RelationData* index = m_index;
+    RelationData* index = current_index();
     BlockNumber blkno = id;
     ReadBufferMode rbm = get_read_buffer_mode(options.pis());
 
@@ -264,7 +266,7 @@ void GVPageStorage::atomic_mark_init(Atomic* atomic_context, BlockId block_id)
 
 annlite::light_env::Atomic* GVPageStorage::atomic_create()
 {
-    return ((gs_vector::GVAllocatorImpl*)m_alloc)->template construct<GVAtomicImpl>(m_index);
+    return ((gs_vector::GVAllocatorImpl*)m_alloc)->template construct<GVAtomicImpl>(current_index());
 }
 
 void GVPageStorage::atomic_destroy(Atomic* atomic)
