@@ -2494,9 +2494,33 @@ typedef enum OSRunInfoTypes {
 
     /*physical memory size*/
     PHYSICAL_MEMORY_BYTES,
+    MEM_FREE_BYTES,
+    MEM_AVAILABLE_BYTES,
+    MEM_BUFFERS_BYTES,
+    MEM_CACHED_BYTES,
+    MEM_SRECLAIMABLE_BYTES,
+    MEM_SUNRECLAIMABLE_BYTES,
+    MEM_MLOCKED_BYTES,
+    MEM_SHARED_BYTES,
+
+    HUGEPAGES_TOTAL_COUNT,
+    HUGEPAGES_FREE_COUNT,
+    HUGEPAGE_SINGLE_SIZE_BYTES,
+
+    SWAP_TOTAL_BYTES,
+    SWAP_FREE_BYTES,
+
+    MEM_USED_BYTES,
+    SWAP_USED_BYTES,
 
     TOTAL_OS_RUN_INFO_TYPES
 } OSRunInfoTypes;
+
+typedef struct MemField {
+    const char* name; /* /proc/meminfo field name */
+    int startIndex;   /* start index in OSRunInfoTypes */
+    int2 unit;          /* unit of the field : 0 byte, 1 sector count */
+} MemField;
 
 /*
  *this is used to represent the numbers of cpu time we should read from file.BUSY_TIME will be
@@ -2539,6 +2563,7 @@ extern void getCpuNums(void);
 extern void getCpuTimes(void);
 extern void getVmStat(void);
 extern void getTotalMem(void);
+extern void GetOsMemDetail(void);
 extern void getOSRunLoad(void);
 
 extern Datum Int64GetNumberDatum(NumericValue value);

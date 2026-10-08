@@ -8411,6 +8411,7 @@ Datum pv_os_run_info(PG_FUNCTION_ARGS)
         getCpuTimes();
         getVmStat();
         getTotalMem();
+        GetOsMemDetail();
         getOSRunLoad();
 
         (void)MemoryContextSwitchTo(oldcontext);
