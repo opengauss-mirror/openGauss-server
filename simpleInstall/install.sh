@@ -107,7 +107,7 @@ function check_install_env() {
     local delete_master_lock=""
     if [ X$slave_port != X"0" ]; then
         slave_occupied=$(netstat -ntul | grep $slave_port)
-        delete_slave_lock=$(rm -rf /tmp/.s.PGSQL.$slvae_port* 2>&1)
+        delete_slave_lock=$(rm -rf /tmp/.s.PGSQL.$slave_port* 2>&1)
         if [ X"$slave_occupied" != X"" ]; then
             error "Error: The slave port $slave_port has been occupied, please use -p to set a new port."
             exit 1
@@ -248,13 +248,39 @@ function config_db() {
     sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr} localport=$(($slave_port+1)) localheartbeatport=$(($slave_port+5)) localservice=$(($slave_port+4)) remotehost=${ip_arr} remoteport=$(($port+1)) remoteheartbeatport=$(($port+5)) remoteservice=$(($port+4))'"  $app/data/slave/postgresql.conf
     echo "remote_read_mode = non_authentication" | tee -a $app/data/master/postgresql.conf $app/data/slave/postgresql.conf
     echo "host    all             all             ${ip_arr}/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
+    echo "host    replication     all             ${ip_arr}/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
+    echo "host    replication     all             127.0.0.1/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
 }
 
 function start_db() {
     info "[start primary datanode.]"
     gs_ctl start -D $app/data/master -M primary
+    start_rc=$?
+    if [ $start_rc -ne 0 ]; then
+        error "ERROR: start primary datanode failed."
+        exit 1
+    fi
+    # wait until HA replication port is listening, otherwise gs_ctl build may hit EINPROGRESS
+    ha_port=$((port+1))
+    ha_ready=0
+    for _i in $(seq 1 30); do
+        if netstat -ntul 2>/dev/null | grep -E ":${ha_port}([[:space:]]|$)" >/dev/null; then
+            ha_ready=1
+            break
+        fi
+        sleep 1
+    done
+    if [ $ha_ready -ne 1 ]; then
+        error "ERROR: primary HA port $ha_port is not listening, cannot build standby."
+        exit 1
+    fi
     info "[build and start slave datanode.]"
     gs_ctl build -D $app/data/slave  -b full
+    build_rc=$?
+    if [ $build_rc -ne 0 ]; then
+        error "ERROR: build slave datanode failed."
+        exit 1
+    fi
 }
 
 function master_standby_install() {
@@ -350,6 +376,9 @@ function fn_check_demoDB()
     then
         return 1
     elif [ "`cat load.log | grep Unknown`" != "" ]
+    then
+        return 1
+    elif [ "`cat load.log | grep 'failed to connect'`" != "" ]
     then
         return 1
     fi

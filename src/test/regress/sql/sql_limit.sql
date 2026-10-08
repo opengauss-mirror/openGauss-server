@@ -222,6 +222,29 @@ select gs_delete_sql_limit(3);
 select gs_delete_sql_limit(4);
 select gs_delete_sql_limit(5);
 
+-- keyword whole-word matching: '{select,from}' must not match substring in identifiers
+reset role;
+create function tmp_create_kw_sql_limit() returns int8 language sql security definer as
+$$ select gs_create_sql_limit('rule_keyword_select_from','select',0,0,'now()','','{select,from}',null,null) $$;
+grant execute on function tmp_create_kw_sql_limit() to test_table_user;
+set role test_table_user password 'Gauss@123';
+select tmp_create_kw_sql_limit();
+-- expect: SELECT with real FROM keyword is limited
+select * from test_table;
+-- expect: alias containing 'from' substring is not limited
+select 1 as test_no_from;
+-- expect: SELECT without FROM is not limited
+select 1;
+-- expect: identifier prefix 'from_' does not prevent matching real FROM keyword
+select i as from_col from test_table;
+-- expect: INSERT is not limited by select-type keyword rule
+insert into test_table values (100003);
+
+reset role;
+select * from gs_select_sql_limit(6);
+select gs_delete_sql_limit(6);
+drop function tmp_create_kw_sql_limit();
+
 ALTER SYSTEM SET enable_sql_limit = 'off';
 SELECT pg_reload_conf();
 

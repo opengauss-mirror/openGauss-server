@@ -4832,6 +4832,56 @@ static bool IsShellCommandParam(const char* paraname)
 }
 
 /*************************************************************************************
+ Function: CheckKmsUrlValue
+ Desc    : validate transparent_encrypt_kms_url with the same RFC3986 charset
+           as transparent_encrypt_kms_url_region_check() in guc.cpp, so query
+           separators '&' and ';' are accepted.
+ Return  : true  - valid URL
+           false - contains illegal character or exceeds max length
+ *************************************************************************************/
+static bool CheckKmsUrlValue(const char* value)
+{
+    const char RFC3986_chars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~!*'();:@&=+$,/?#[]";
+    const int MAX_URL_LEN = 2048;
+    char rawstring[MAX_VALUE_LEN] = {0};
+    const char* url = NULL;
+    int len = 0;
+    int rc = 0;
+
+    if (value == NULL) {
+        return true;
+    }
+
+    rc = snprintf_s(rawstring, MAX_VALUE_LEN, MAX_VALUE_LEN - 1, "%s", value);
+    securec_check_ss_c(rc, "\0", "\0");
+    len = (int)strlen(rawstring);
+    if (len >= MIN_QUOTED_VALUE_LEN && (rawstring[0] == '\'' || rawstring[0] == '"') &&
+        rawstring[0] == rawstring[len - 1]) {
+        rawstring[len - 1] = '\0';
+        url = rawstring + 1;
+        len -= 2;
+    } else {
+        url = rawstring;
+    }
+
+    if (len > MAX_URL_LEN) {
+        write_stderr("ERROR: The value for parameter transparent_encrypt_kms_url exceeds the max length %d.\n",
+            MAX_URL_LEN);
+        return false;
+    }
+
+    for (const char* p = url; *p != '\0'; p++) {
+        if (strchr(RFC3986_chars, *p) == NULL) {
+            write_stderr("ERROR: Invalid character found in transparent_encrypt_kms_url. "
+                         "The value must be a valid RFC3986 URL.\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+/*************************************************************************************
  Function: CheckStringValueForSecurity
  Desc    : reject shell metacharacters that could lead to command injection
            when the value is later interpolated into a popen() command line.
@@ -4876,6 +4926,10 @@ static bool CheckStringValueForSecurity(const char* paraname, const char* value)
 int check_string_type_value(const char* paraname, const char* value)
 {
     bool result = ((int)strlen(value) > 0) ? true : false;
+    /* KMS URL is not interpolated into popen(); align with server RFC3986 check. */
+    if (result && paraname != NULL && pg_strcasecmp(paraname, "transparent_encrypt_kms_url") == 0) {
+        return CheckKmsUrlValue(value) ? SUCCESS : FAILURE;
+    }
     if (result && !IsShellCommandParam(paraname) && !CheckStringValueForSecurity(paraname, value)) {
         return FAILURE;
     }
