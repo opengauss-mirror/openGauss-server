@@ -551,6 +551,21 @@ static inline TableAmType GetTableAmType(const TableAmRoutine* ops)
     return ops == TableAmHeap ? TAM_HEAP : TAM_USTORE;
 }
 
+extern void HeapamReportConcurrentAbortOnLogicalDecoding(const char *where);
+static inline void CheckConcurrentAbortOnLogicalDecoding(const char *where)
+{
+    /*
+     * We don't expect direct calls with valid CheckXidAlive
+     * for catalog or regular tables.  See detailed comments in xact.c where
+     * these variables are declared.  Normally we have such a check at tableam
+     * level API but this is called from many places so we need to ensure it
+     * here.
+     */
+    if (unlikely(TransactionIdIsValid(u_sess->utils_cxt.CheckXidAlive) && !u_sess->utils_cxt.bsysscan)) {
+        HeapamReportConcurrentAbortOnLogicalDecoding(where);
+    }
+}
+
 /* ------------------------------------------------------------------------
  * HEAP TABLE SLOT AM APIs
  * ------------------------------------------------------------------------
@@ -849,6 +864,7 @@ static inline Size tableam_tops_page_get_freespace(Relation rel, Page page)
 static inline bool tableam_tops_tuple_fetch_row_version(TidScanState* node, Relation relation, ItemPointer tid,
         Snapshot snapshot, TupleTableSlot *slot)
 {
+    CheckConcurrentAbortOnLogicalDecoding("tableam_tops_tuple_fetch_row_version");
     return relation->rd_tam_ops->tops_tuple_fetch_row_version(node, relation, tid, snapshot, slot);
 }
 
@@ -864,6 +880,7 @@ static inline void tableam_tops_update_tuple_with_oid(Relation relation, Tuple t
 static inline bool tableam_tuple_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf,
     bool keep_buf, Relation stats_relation)
 {
+    CheckConcurrentAbortOnLogicalDecoding("tableam_tuple_fetch");
     return relation->rd_tam_ops->tuple_fetch(relation, snapshot, tuple, userbuf, keep_buf,
         stats_relation);
 }
@@ -876,6 +893,7 @@ static inline bool tableam_tuple_satisfies_snapshot(Relation relation, HeapTuple
 
 static inline void tableam_tuple_get_latest_tid(Relation relation, Snapshot snapshot, ItemPointer tid)
 {
+    CheckConcurrentAbortOnLogicalDecoding("tableam_tuple_get_latest_tid");
     return relation->rd_tam_ops->tuple_get_latest_tid(relation, snapshot, tid);
 }
 

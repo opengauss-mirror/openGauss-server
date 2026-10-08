@@ -216,6 +216,7 @@ Tuple heapam_opfusion_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum* rep
  */
 bool HeapamTupleFetch(Relation relation, Snapshot snapshot,
                                                   HeapTuple tuple, Buffer *userbuf, bool keep_buf, Relation stats_relation) {
+    CheckConcurrentAbortOnLogicalDecoding("HeapamTupleFetch");
     return heap_fetch(relation, snapshot, tuple, userbuf, keep_buf, stats_relation);
 }
 
@@ -226,6 +227,7 @@ bool HeapamTupleSatisfiesSnapshot(Relation relation, HeapTuple tuple,
 
 void HeapamTupleGetLatestTid(Relation relation, Snapshot snapshot,
                                                         ItemPointer tid) {
+    CheckConcurrentAbortOnLogicalDecoding("HeapamTupleGetLatestTid");
     return heap_get_latest_tid(relation, snapshot, tid);
 }
 
@@ -315,6 +317,7 @@ void HeapamScanIndexFetchEnd(IndexFetchTableData *scan)
 
 Tuple HeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL)
 {
+    CheckConcurrentAbortOnLogicalDecoding("HeapamScanIndexFetchTuple");
     return (Tuple)heapam_index_fetch_tuple(scan, all_dead, has_cur_xact_write);
 }
 
@@ -359,6 +362,7 @@ Tuple HeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction, bool*
 
 void HeapamScanGetpage(TableScanDesc sscan, BlockNumber page)
 {
+    CheckConcurrentAbortOnLogicalDecoding("HeapamScanGetpage");
     return heapgetpage(sscan, page);
 }
 
@@ -451,6 +455,12 @@ void HeapamTcapDeleteDelta(Relation relation, Snapshot snap)
 void HeapamTcapInsertLost(Relation relation, Snapshot snap)
 {
     TvInsertLost(RelationGetRelid(relation), snap);
+}
+
+void HeapamReportConcurrentAbortOnLogicalDecoding(const char *where)
+{
+    elog(ERROR, "unexpected %s call during logical decoding (%lu, %d, %d)",
+        where, u_sess->utils_cxt.CheckXidAlive, u_sess->utils_cxt.bsysscan, u_sess->utils_cxt.sysscanlevel);
 }
 
 static const TableAmRoutine g_heapam_methods = {
@@ -934,6 +944,7 @@ void UHeapamScanIndexFetchEnd(IndexFetchTableData *scan)
 
 Tuple UHeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL)
 {
+    CheckConcurrentAbortOnLogicalDecoding("UHeapamScanIndexFetchTuple");
     return (Tuple)UHeapamIndexFetchTuple(scan, all_dead, has_cur_xact_write);
 }
 
@@ -966,6 +977,7 @@ Tuple UHeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction, bool
 
 bool UHeapamGetNextBatchMode(TableScanDesc sscan, ScanDirection direction)
 {
+    CheckConcurrentAbortOnLogicalDecoding("UHeapamGetNextBatchMode");
     /* Note: no locking manipulations needed */
     bool finished = false;
     UHeapScanDesc scan = (UHeapScanDesc)sscan;
@@ -1028,6 +1040,7 @@ double UHeapamRelationCopyForCluster(Relation oldHeap, Relation oldIndex, Relati
 bool UHeapamTupleFetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf, bool keepBuf,
     Relation statsRelation)
 {
+    CheckConcurrentAbortOnLogicalDecoding("UHeapamTupleFetch");
     ItemPointer tid = &tuple->t_self;
 
     UHeapTupleData uheaptupdata;

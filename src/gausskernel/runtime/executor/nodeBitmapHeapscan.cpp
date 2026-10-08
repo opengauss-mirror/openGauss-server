@@ -169,6 +169,7 @@ bool HeapamScanBitmapNextTuple(TableScanDesc scan,
 
 bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmres, TupleTableSlot *slot)
 {
+    CheckConcurrentAbortOnLogicalDecoding("TableScanBitmapNextTuple");
     bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
     if (isUstore) {
         return UHeapScanBitmapNextTuple(scan, tbmres, slot);
@@ -179,6 +180,7 @@ bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmres, Tupl
 
 bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres, bool* has_cur_xact_write)
 {
+    CheckConcurrentAbortOnLogicalDecoding("TableScanBitmapNextBlock");
     bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
     if (isUstore) {
         return UHeapScanBitmapNextBlock(scan, tbmres, has_cur_xact_write);

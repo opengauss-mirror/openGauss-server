@@ -1388,6 +1388,7 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
             break;
         }
         case XLOG_XACT_PREPARE:
+        case XLOG_XACT_INVALIDATIONS:
             break;
         default:
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

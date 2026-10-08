@@ -84,6 +84,9 @@
  *	worth trying to avoid sending such inval traffic in the future, if those
  *	problems can be overcome cheaply.
  *
+ *	When wal_level=logical, write invalidations into WAL at each command end to
+ *	support the decoding of the in-progress transactions.  See
+ *	CommandEndInvalidationMessages.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -1270,6 +1273,12 @@ void CommandEndInvalidationMessages(void)
         &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, GlobalExecuteSharedInvalidMessages);
     ProcessInvalidationMessages(
         &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, LocalExecuteThreadAndSessionInvalidationMessage);
+    
+    /* WAL Log per-command invalidation messages for wal_level=logical */
+    if (XLogLogicalInfoActive()) {
+        LogLogicalInvalidations();
+    }
+
     AppendInvalidationMessages(&inval_cxt->transInvalInfo->PriorCmdInvalidMsgs,
         &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs);
     inval_cxt->executing_roll_back_msg = false;
@@ -1889,4 +1898,55 @@ void CacheInvalidateRelcacheAll(void)
     PrepareInvalidationState();
 
     RegisterRelcacheInvalidation(InvalidOid, InvalidOid);
+}
+
+/*
+ * LogLogicalInvalidations
+ *
+ * Emit WAL for invalidations.  This is currently only used for logging
+ * invalidations at the command end or at commit time if any invalidations
+ * are pending.
+ */
+void LogLogicalInvalidations()
+{
+    xl_xact_invals xlrec;
+    SharedInvalidationMessage *invalMessages;
+    int nmsgs = 0;
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
+
+    if (t_thrd.proc->workingVersionNum < STREAMABLE_DECODE_VERSION_NUM) {
+        return;
+    }
+
+    /* Quick exit if we haven't done anything with invalidation messages. */
+    if (inval_cxt->transInvalInfo == NULL) {
+        return;
+    }
+
+    ProcessInvalidationMessagesMulti(&inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs,
+                                     MakeSharedInvalidMessagesArray);
+
+    Assert(!(inval_cxt->numSharedInvalidMessagesArray > 0 &&
+             inval_cxt->SharedInvalidMessagesArray == NULL));
+
+    invalMessages = inval_cxt->SharedInvalidMessagesArray;
+    nmsgs = inval_cxt->numSharedInvalidMessagesArray;
+    inval_cxt->SharedInvalidMessagesArray = NULL;
+    inval_cxt->numSharedInvalidMessagesArray = 0;
+
+    if (nmsgs > 0) {
+        /* prepare record */
+        errno_t rc = memset_s(&xlrec, MinSizeOfXactInvals, 0, MinSizeOfXactInvals);
+        securec_check(rc, "\0", "\0");
+        xlrec.nmsgs = nmsgs;
+
+        /* perform insertion */
+        XLogBeginInsert();
+        XLogRegisterData((char *) (&xlrec), MinSizeOfXactInvals);
+        XLogRegisterData((char *) invalMessages,
+                         nmsgs * sizeof(SharedInvalidationMessage));
+        XLogInsert(RM_XACT_ID, XLOG_XACT_INVALIDATIONS);
+
+        pfree(invalMessages);
+    }
 }

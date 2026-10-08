@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "storage/standby.h"
+#include "storage/sinval.h"
 
 const char* standby_type_name(uint8 subtype)
 {
@@ -88,4 +89,44 @@ void standby_desc(StringInfo buf, XLogReaderState *record)
         appendStringInfo(buf, " XLOG_STANDBY_CSN_ABORTED, xid %lu", id[0]);
     } else
         appendStringInfo(buf, "UNKNOWN");
+}
+
+/*
+ * This routine is used by both standby_desc and xact_desc, because
+ * transaction commits and XLOG_INVALIDATIONS messages contain invalidations;
+ * it seems pointless to duplicate the code.
+ */
+void standby_desc_invalidations(StringInfo buf, int nmsgs, SharedInvalidationMessage *msgs,
+                                Oid dbId, Oid tsId, bool relcacheInitFileInval)
+{
+    int i;
+
+    /* Do nothing if there are no invalidation messages */
+    if (nmsgs <= 0) {
+        return;
+    }
+
+    if (relcacheInitFileInval)
+        appendStringInfo(buf, "; relcache init file inval dbid %u tsid %u",
+                         dbId, tsId);
+
+    appendStringInfoString(buf, "; inval msgs:");
+    for (i = 0; i < nmsgs; i++) {
+        SharedInvalidationMessage *msg = &msgs[i];
+
+        if (msg->id >= 0)
+            appendStringInfo(buf, " catcache %d", msg->id);
+        else if (msg->id == SHAREDINVALCATALOG_ID)
+            appendStringInfo(buf, " catalog %u", msg->cat.catId);
+        else if (msg->id == SHAREDINVALRELCACHE_ID)
+            appendStringInfo(buf, " relcache %u", msg->rc.relId);
+        /* not expected, but print something anyway */
+        else if (msg->id == SHAREDINVALSMGR_ID)
+            appendStringInfoString(buf, " smgr");
+        /* not expected, but print something anyway */
+        else if (msg->id == SHAREDINVALRELMAP_ID)
+            appendStringInfo(buf, " relmap db %u", msg->rm.dbId);
+        else
+            appendStringInfo(buf, " unrecognized id %d", msg->id);
+    }
 }

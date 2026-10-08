@@ -82,6 +82,7 @@ extern bool DecodeXLogRecord(XLogReaderState* state, XLogRecord* record, char** 
 #define XLogRecGetOrigin(decoder) ((decoder)->record_origin)
 #define XLogRecGetData(decoder) ((decoder)->main_data)
 #define XLogRecGetDataLen(decoder) ((decoder)->main_data_len)
+#define XLogRecGetTopXid(decoder) ((decoder)->toplevel_xid)
 #define XLogRecHasAnyBlockRefs(decoder) ((decoder)->max_block_id >= 0)
 #define XLogRecHasBlockRef(decoder, block_id) ((decoder)->blocks[block_id].in_use)
 #define XLogRecHasBlockImage(decoder, block_id) ((decoder)->blocks[block_id].has_image)

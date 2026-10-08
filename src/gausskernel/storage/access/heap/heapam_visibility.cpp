@@ -1630,9 +1630,26 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
          * actual values externally.
          */
         resolved = ResolveCminCmaxDuringDecoding(HistoricSnapshotGetTupleCids(), snapshot, htup, buffer, &cmin, &cmax);
-
-        if (!resolved)
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), errmsg("could not resolve cmin/cmax of catalog tuple")));
+        /*
+         * If we haven't resolved the combo CID to cmin/cmax, that means we
+         * have not decoded the combo CID yet. That means the cmin is
+         * definitely in the future, and we're not supposed to see the tuple
+         * yet.
+         *
+         * XXX This only applies to decoding of in-progress transactions. In
+         * regular logical decoding we only execute this code at commit time,
+         * at which point we should have seen all relevant combo CIDs. So
+         * ideally, we should error out in this case but in practice, this
+         * won't happen. If we are too worried about this then we can add an
+         * elog inside ResolveCminCmaxDuringDecoding.
+         *
+         * XXX For the streaming case, we can track the largest combo CID
+         * assigned, and error out based on this (when unable to resolve combo
+         * CID below that observed maximum value).
+         */
+        if (!resolved) {
+            return false;
+        }
 
         Assert(cmin != InvalidCommandId);
 
@@ -1685,11 +1702,26 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
 
         /* Lookup actual cmin/cmax values */
         resolved = ResolveCminCmaxDuringDecoding(HistoricSnapshotGetTupleCids(), snapshot, htup, buffer, &cmin, &cmax);
-
-        if (!resolved)
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), errmsg("could not resolve combocid to cmax")));
-
-        Assert(cmax != InvalidCommandId);
+        /*
+         * If we haven't resolved the combo CID to cmin/cmax, that means we
+         * have not decoded the combo CID yet. That means the cmax is
+         * definitely in the future, and we're still supposed to see the
+         * tuple.
+         *
+         * XXX This only applies to decoding of in-progress transactions. In
+         * regular logical decoding we only execute this code at commit time,
+         * at which point we should have seen all relevant combo CIDs. So
+         * ideally, we should error out in this case but in practice, this
+         * won't happen. If we are too worried about this then we can add an
+         * elog inside ResolveCminCmaxDuringDecoding.
+         *
+         * XXX For the streaming case, we can track the largest combo CID
+         * assigned, and error out based on this (when unable to resolve combo
+         * CID below that observed maximum value).
+         */
+        if (!resolved || cmax == InvalidCommandId) {
+            return true;
+        }
 
         if (cmax >= snapshot->curcid)
             return true; /* deleted after scan started */

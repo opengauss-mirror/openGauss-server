@@ -234,6 +234,19 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
     buf.endptr = ctx->reader->EndRecPtr;
     buf.record = record;
     buf.record_data = GetXlrec(record);
+    TransactionId txid = XLogRecGetTopXid(record);
+    /*
+     * If the top-level xid is valid, we need to assign the subxact to the
+     * top-level xact. We need to do this for all records, hence we do it
+     * before the switch.
+     */
+    if (TransactionIdIsValid(txid)) {
+        ReorderBufferAssignChild(ctx->reorder,
+                                 txid,
+                                 record->decoded_record->xl_xid,
+                                 buf.origptr);
+    }
+
     if (!IsRecordProcess(record)) {
         return;
     }
@@ -493,6 +506,29 @@ static void DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
              */
             ReorderBufferProcessXid(reorder, XLogRecGetXid(r), buf->origptr);
             break;
+        case XLOG_XACT_INVALIDATIONS: {
+            ctx->has_xact_invalidations = true;
+            TransactionId xid;
+            xl_xact_invals *invals;
+
+            xid = XLogRecGetXid(r);
+            invals = (xl_xact_invals *) XLogRecGetData(r);
+
+            /*
+             * Execute the invalidations for xid-less transactions,
+             * otherwise, accumulate them so that they can be processed at
+             * the commit time.
+             */
+            if (TransactionIdIsValid(xid)) {
+                if (!ctx->fast_forward) {
+                    ReorderBufferAddInvalidations(ctx, xid, buf->origptr, invals->nmsgs, invals->msgs);
+                }
+                ReorderBufferXidSetCatalogChanges(ctx->reorder, xid, buf->origptr);
+            } else if ((!ctx->fast_forward)) {
+                ReorderBufferImmediateInvalidation(ctx->reorder, invals->nmsgs, invals->msgs);
+            }
+            break;
+        }
         default:
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("unexpected RM_XACT_ID record type: %u", info)));
@@ -607,6 +643,26 @@ static void AreaDecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             SetTxnVal(txn, XLogRecGetXid(r), buf->origptr, buf->endptr, XLogRecGetOrigin(buf->record), InvalidCommitSeqNo, -1);
             rb->prepare(rb,txn);
             break;
+        case XLOG_XACT_INVALIDATIONS: {
+            ctx->has_xact_invalidations = true;
+            TransactionId xid = XLogRecGetXid(r);
+            xl_xact_invals *invals = (xl_xact_invals *) XLogRecGetData(r);
+
+            /*
+             * Execute the invalidations for xid-less transactions,
+             * otherwise, accumulate them so that they can be processed at
+             * the commit time.
+             */
+            if (TransactionIdIsValid(xid)) {
+                if (!ctx->fast_forward) {
+                    ReorderBufferAddInvalidations(ctx, xid, buf->origptr, invals->nmsgs, invals->msgs);
+                }
+                ReorderBufferXidSetCatalogChanges(ctx->reorder, xid, buf->origptr);
+            } else if ((!ctx->fast_forward)) {
+                ReorderBufferImmediateInvalidation(ctx->reorder, invals->nmsgs, invals->msgs);
+            }
+            break;
+        }
         default:
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("unexpected RM_XACT_ID record type: %u", info)));
@@ -1116,15 +1172,17 @@ static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, Tra
     int i;
     XLogRecPtr origin_id = XLogRecGetOrigin(buf->record);
     XLogRecPtr origin_lsn = origin == NULL ? InvalidXLogRecPtr : origin->origin_lsn;
+    TransactionId *subxids = sub_xids;
 
     /*
      * Process invalidation messages, even if we're not interested in the
      * transaction's contents, since the various caches need to always be
      * consistent.
      */
-    if (ninval_msgs > 0) {
-        if (!ctx->fast_forward)
-            ReorderBufferAddInvalidations(ctx->reorder, xid, buf->origptr, ninval_msgs, msgs);
+    if (ninval_msgs > 0 && !ctx->has_xact_invalidations) {
+        if (!ctx->fast_forward) {
+            ReorderBufferAddInvalidations(ctx, xid, buf->origptr, ninval_msgs, msgs);
+        }
         ReorderBufferXidSetCatalogChanges(ctx->reorder, xid, buf->origptr);
     }
 
@@ -1175,7 +1233,8 @@ static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, Tra
     }
 
     /* replay actions of all transaction + subtransactions in order */
-    ReorderBufferCommit(ctx->reorder, xid, buf->origptr, buf->endptr, origin_id, origin_lsn, csn, commit_time);
+    ReorderBufferCommit(ctx->reorder, xid, nsubxacts, subxids, buf->origptr,
+        buf->endptr, origin_id, origin_lsn, csn, commit_time);
 }
 
 /*
@@ -1240,7 +1299,8 @@ static void DecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change);
+    ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change,
+        (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0));
 }
 
 /*
@@ -1319,7 +1379,8 @@ static void DecodeUInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     change->data.utp.snapshotcsn = curCSN;
 
     change->data.tp.clear_toast_afterwards = true;
-    ReorderBufferQueueChange(ctx, UHeapXlogGetCurrentXid(r, hasCSN), buf->origptr, change);
+    ReorderBufferQueueChange(ctx, UHeapXlogGetCurrentXid(r, hasCSN), buf->origptr, change,
+        (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0));
 }
 
 /*

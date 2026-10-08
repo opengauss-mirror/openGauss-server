@@ -151,4 +151,6 @@ extern void LogAccessExclusiveLock(Oid dbOid, Oid relOid, uint32 seq);
 extern void LogAccessExclusiveLockPrepare(void);
 
 extern XLogRecPtr LogStandbySnapshot(void);
+extern void standby_desc_invalidations(StringInfo buf, int nmsgs, SharedInvalidationMessage *msgs,
+                                       Oid dbId, Oid tsId, bool relcacheInitFileInval);
 #endif /* STANDBY_H */

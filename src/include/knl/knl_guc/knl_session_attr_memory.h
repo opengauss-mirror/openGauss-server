@@ -55,6 +55,7 @@ typedef struct knl_session_attr_memory {
     int memory_reset_percent_list[2];
     int local_syscache_threshold;
     int borrow_work_mem;
+    int logical_decoding_work_mem;
 } knl_session_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_MEMORY_H_ */

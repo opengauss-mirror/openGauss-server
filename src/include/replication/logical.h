@@ -114,6 +114,8 @@ typedef struct LogicalDecodingContext {
     TransactionId write_xid;
 
     bool random_mode;
+    bool streaming; /* support streaming output */
+    bool has_xact_invalidations;
 } LogicalDecodingContext;
 
 typedef struct chosenTable {
@@ -345,6 +347,7 @@ extern void FreeDecodingContext(LogicalDecodingContext* ctx);
 extern void LogicalIncreaseXminForSlot(XLogRecPtr lsn, TransactionId xmin);
 extern void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr restart_lsn);
 extern void LogicalConfirmReceivedLocation(XLogRecPtr lsn);
+extern void ResetLogicalStreamingState(void);
 extern bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin_id);
 extern void CloseLogicalAdvanceConnect();
 extern void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush);

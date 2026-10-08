@@ -762,6 +762,9 @@ typedef struct knl_t_xlog_context {
     /* Should te in-progress insertion log the origin */
     bool include_origin;
 
+    /* Should log the top-xid to support streaming logical decoding */
+    bool include_topxid;
+
     /* Memory context to hold the registered buffer and data references. */
     MemoryContext xloginsert_cxt;
 
