@@ -5159,6 +5159,14 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
                     FlushErrorState();
                     SPI_STACK_LOG("end", ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->query, NULL);
                     _SPI_end_call(true);
+                    /*
+                     * The error may occur during an SPI call or after it has returned
+                     * (for example, a SELECT INTO row-count check). In the latter case,
+                     * _SPI_end_call() above decrements _curid a second time. Restore the
+                     * current connection's idle state so subsequent SPI calls and
+                     * SPI_finish() do not fail with SPI_ERROR_UNCONNECTED.
+                     */
+                    SPI_restore_connection();
                     rc = PLPGSQL_RC_OK;
                 } else {
                     RESTORE_UNIQUE_SQL_CXT();
