@@ -870,38 +870,99 @@ check_postmaster(const char *pgdata)
 }
 
 /*
+ * Overwrite the value in place: keep one '*' so the option is still readable
+ * in the log, and clear the rest.
+ */
+static void WipePasswordValue(char* pchPass)
+{
+    if (pchPass == NULL || *pchPass == '\0') {
+        return;
+    }
+
+    *pchPass = '*';
+    pchPass++;
+    while (*pchPass != '\0') {
+        *pchPass = '\0';
+        pchPass++;
+    }
+}
+
+/*
+ * Locate the value carried by argv[count] for optionName, if any.
+ *
+ * optionName must match the whole option, not just its start: "--encrypt-key"
+ * must not claim "--encrypt-key-source". A long option carries its value after
+ * '=', a short one may have it glued to the flag ("-Wsecret"), and either form
+ * may instead put it in the next argument.
+ *
+ * Returns NULL when this argument is not the option, and sets *usedNext when
+ * the value was taken from argv[count + 1].
+ */
+static char* FindPasswordValue(int argc, char** argv, int count,
+                               const char* optionName, bool* usedNext)
+{
+    size_t optLen = strlen(optionName);
+    const char* arg = argv[count];
+    bool isLongOption = (optLen > 2 && optionName[0] == '-' && optionName[1] == '-');
+
+    *usedNext = false;
+
+    if (strncmp(arg, optionName, optLen) != 0) {
+        return NULL;
+    }
+
+    /* "--option=value" or "-Wvalue" */
+    if (arg[optLen] == '=') {
+        return argv[count] + optLen + 1;
+    }
+    if (arg[optLen] != '\0') {
+        /*
+         * Only a short option may glue its value to the flag. For a long one
+         * the extra text means a different option, such as
+         * "--encrypt-key-source" seen while looking for "--encrypt-key".
+         */
+        if (isLongOption) {
+            return NULL;
+        }
+        return argv[count] + optLen;
+    }
+
+    /*
+     * "--option value"; there may be no value left to wipe.
+     *
+     * getopt_long() takes the next argument as the value even when it starts
+     * with '-', so a secret such as "-Abc123" must be wiped as well.
+     */
+    if (count + 1 >= argc) {
+        return NULL;
+    }
+
+    *usedNext = true;
+    return argv[count + 1];
+}
+
+/*
  * Replace the actual password with *'s.
+ *
+ * Every occurrence is wiped, not just the first one: stopping early would
+ * leave a later copy of the option in the clear.
  */
 void replace_password(int argc, char** argv, const char* optionName)
 {
     int count = 0;
-    char* pchPass = NULL;
-    char* pchTemp = NULL;
 
-    // Check if password option is specified in command line
-    for (count = 0; count < argc; count++) {
-        // Password can be specified by optionName
-        if (strncmp(optionName, argv[count], strlen(optionName)) == 0) {
-            pchTemp = strchr(argv[count], '=');
-            if (pchTemp != NULL) {
-                pchPass = pchTemp + 1;
-            } else if ((NULL != strstr(argv[count], optionName)) && (strlen(argv[count]) > strlen(optionName))) {
-                pchPass = argv[count] + strlen(optionName);
-            } else {
-                pchPass = argv[(int)(count + 1)];
-            }
+    while (count < argc) {
+        bool usedNext = false;
+        char* pchPass = FindPasswordValue(argc, argv, count, optionName, &usedNext);
 
-            // Replace first char of password with * and rest clear it
-            if (strlen(pchPass) > 0) {
-                *pchPass = '*';
-                pchPass = pchPass + 1;
-                while ('\0' != *pchPass) {
-                    *pchPass = '\0';
-                    pchPass++;
-                }
-            }
+        if (pchPass != NULL) {
+            WipePasswordValue(pchPass);
+        }
 
-            break;
+        count++;
+        if (usedNext) {
+            /* the value sat in the next argument, step over it too */
+            count++;
         }
     }
 }
