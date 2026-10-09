@@ -2676,6 +2676,59 @@ static void check_table(RangeTblEntry *rte, Oid *mv_groupid) {
     return;
 }
 
+/*
+ * Check whether the given relation can be used as the source of a materialized view.
+ * If it is a view, expand it and check the underlying base tables recursively,
+ * otherwise ustore/TDE source tables could bypass the checks by view wrapping.
+ * Note privilege check is not performed on view-expanded relations: for tables
+ * wrapped by a view, access control follows the view's ACL semantics at execution time.
+ */
+static void CheckMatviewBaserel(RangeTblEntry *rte, bool isIncremental, List **visitedViews)
+{
+    Relation rel = heap_open(rte->relid, AccessShareLock);
+    if (RelationIsUstoreFormat(rel)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialized view is not supported in ustore yet")));
+    }
+    if (RelationisEncryptEnable(rel)) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("create matview on TDE table failed"),
+                    errdetail("materialized views do not support TDE feature"),
+                        errcause("create materialized views is not supported on TDE table"),
+                            erraction("check CREATE syntax about create the materialized views")));
+    }
+    if (RelationUsesLocalBuffers(rel)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized views must not use temporary tables or views")));
+    }
+
+    if (isIncremental && (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Can not create incremental materialized view on unlogged table")));
+    }
+
+    /* expand the view and check its underlying base tables recursively */
+    if (rel->rd_rel->relkind == RELKIND_VIEW && !list_member_oid(*visitedViews, rte->relid)) {
+        *visitedViews = lappend_oid(*visitedViews, rte->relid);
+        Query* viewQuery = get_view_query(rel);
+        List* subRteList = NIL;
+        (void) query_tree_walker(viewQuery,
+                                 (bool (*)())BasetableWalker,
+                                 (void*)&subRteList,
+                                 QTW_EXAMINE_RTES | QTW_IGNORE_DUMMY);
+        ListCell* slc = NULL;
+        foreach (slc, subRteList) {
+            CheckMatviewBaserel((RangeTblEntry*)lfirst(slc), isIncremental, visitedViews);
+        }
+        list_free_ext(subRteList);
+    }
+
+    heap_close(rel, AccessShareLock);
+}
+
 /* When create or refresh matview, we need check base table is whether supported. */
 void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
 {
@@ -2685,6 +2738,7 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
                              (void*)&rteList,
                              QTW_EXAMINE_RTES | QTW_IGNORE_DUMMY);
 
+    List* visitedViews = NIL;
     ListCell* lc = NULL;
     foreach (lc, rteList) {
         RangeTblEntry *rte = (RangeTblEntry*)lfirst(lc);
@@ -2700,33 +2754,7 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
             }
 #endif
 
-            if (rte->is_ustore) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("materialized view is not supported in ustore yet")));
-            }
-
-            Relation rel = heap_open(rte->relid, AccessShareLock);
-            if (RelationisEncryptEnable(rel)) {
-                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("create matview on TDE table failed"),
-                            errdetail("materialized views do not support TDE feature"),
-                                errcause("create materialized views is not supported on TDE table"),
-                                    erraction("check CREATE syntax about create the materialized views")));
-            }
-            if (RelationUsesLocalBuffers(rel)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("materialized views must not use temporary tables or views")));
-            }
-
-            if (isIncremental && (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Can not create incremental materialized view on unlogged table")));
-            }
-
-            heap_close(rel, AccessShareLock);
+            CheckMatviewBaserel(rte, isIncremental, &visitedViews);
         }
 
         /* privileges are both checked when create/refresh matview */
@@ -2734,6 +2762,7 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
     }
 
     list_free_ext(rteList);
+    list_free(visitedViews);
 }
 
 static bool BasetableWalker(Node *node, List** rteList) {
