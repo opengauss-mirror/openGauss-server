@@ -1019,7 +1019,18 @@ int main(int argc, char *argv[])
      */
     main_tid = pthread_self();
 
-    init_audit(PROG_NAME, argc, argv);
+    /*
+     * The audit record is written when the process leaves, from whatever
+     * argv init_audit() was given. Option parsing below scrubs the key
+     * material out of the real argv, but any error before that point exits
+     * early and would leave the key in the record.
+     *
+     * Hand the audit a private copy that is scrubbed up front instead, so
+     * the record never sees the key whichever way the process ends. The
+     * -W/--password value is masked by the audit writer itself.
+     */
+    init_audit(PROG_NAME, argc, EncryptScrubbedArgvCopy(argc, argv));
+
     /* Parse subcommands and non-subcommand options */
     if (argc > 1)
     {

@@ -403,6 +403,26 @@ void EncryptScrubArgv(int argc, char **argv)
     replace_password(argc, argv, "--encrypt-key");
     replace_password(argc, argv, "--new-encrypt-key");
     replace_password(argc, argv, "--with-key");
+    replace_password(argc, argv, "--with-salt");
+}
+
+/*
+ * Return a copy of the command line with the key material already starred
+ * out, for readers that must never see it. The copy lives as long as the
+ * process does; the audit record is written from it at exit.
+ */
+char **EncryptScrubbedArgvCopy(int argc, char **argv)
+{
+    char **copy = (char **) pgut_malloc(sizeof(char *) * ((size_t) argc + 1));
+    int    i;
+
+    for (i = 0; i < argc; i++) {
+        copy[i] = pgut_strdup(argv[i]);
+    }
+    copy[argc] = NULL;
+
+    EncryptScrubArgv(argc, copy);
+    return copy;
 }
 
 static char *ReadPassphraseFromFile(const char *path)
