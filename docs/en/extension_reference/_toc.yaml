@@ -45,6 +45,8 @@ sections:
     href: ./shark.md
   - label: shark Syntax Introduction
     sections:
+      - label: Keywords
+        href: ./shark_keywords.md
       - label: Data Type
         sections:   
           - label: Character Types

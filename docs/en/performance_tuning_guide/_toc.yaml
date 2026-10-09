@@ -83,7 +83,6 @@ sections:
             href: ./transparent_forwarding_within_backup_machine_affairs.md
           - label: MES worker  Thread Pooling
             href: ./mes_worker_thread_pooling.md 
-
   - label: SQL Optimization
     sections:
       - label: Overview
