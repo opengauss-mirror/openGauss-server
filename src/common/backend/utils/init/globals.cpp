@@ -78,12 +78,14 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93159;
+const uint32 GRAND_VERSION_NUM = 93161;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 WDR_KEY_ACTIVITY_VERSION_NUM = 93161;
+const uint32 LWLOCK_ACTIVITY_VERSION_NUM = 93160;
 const uint32 STREAMABLE_DECODE_VERSION_NUM = 93159;
 const uint32 UPGRADE_SHARK_5_0_VERSION_NUM = 93158;
 const uint32 WDR_ENHANCE_VERSION_NUM = 93157;

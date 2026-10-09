@@ -1424,6 +1424,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
         mustwait = LWLockAttemptLock(lock, mode);
         if (!mustwait) {
             /* XXX: remove before commit? */
+            pgstat_report_lwlock_nw_stat(lock->tranche, true);
             LOG_LWDEBUG("LWLockAcquire", lock, "immediately acquired lock");
             break; /* got the lock */
         }
@@ -1700,11 +1701,13 @@ bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode)
     mustwait = LWLockAttemptLock(lock, mode);
     if (mustwait) {
         /* Failed to get lock, so release interrupt holdoff */
+        pgstat_report_lwlock_nw_stat(lock->tranche, false);
         RESUME_INTERRUPTS();
         LOG_LWDEBUG("LWLockConditionalAcquire", lock, "failed");
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE_FAIL(T_NAME(lock), mode);
     } else {
         /* Add lock to list of locks held by this backend */
+        pgstat_report_lwlock_nw_stat(lock->tranche, true);
         remember_lwlock_hold(lock, mode);
 
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE(T_NAME(lock), mode);
@@ -1753,6 +1756,10 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
     HOLD_INTERRUPTS();
 
     mustwait = LWLockAttemptLock(lock, mode);
+    if (!mustwait) {
+        /* First try succeeded, no waiting involved */
+        pgstat_report_lwlock_nw_stat(lock->tranche, true);
+    }
     if (mustwait) {
         instr_stmt_report_lock(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
         pgstat_report_waitevent(PG_WAIT_LWLOCK | lock->tranche);

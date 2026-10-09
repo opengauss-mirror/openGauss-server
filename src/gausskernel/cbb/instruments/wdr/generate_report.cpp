@@ -4378,6 +4378,182 @@ static void get_summary_host_cpu(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+static void AppendQueryCondition(StringInfoData& query, report_params* params)
+{
+    const char* sqlCondition = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id,
+                %ld::NUMERIC AS interval_sec, '%s' AS node_name
+        ),
+    )";
+    appendStringInfo(&query, sqlCondition, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+/* the number of lock/lwlock events displayed in the WDR lock event top10 report */
+static const int LOCK_EVENT_TOP_N = 10;
+
+static void AppendQueryLockEventTopByCondition(StringInfoData& query, char* type, char* order_by_col, int top_n)
+{
+    const char* query_template = R"(
+        snap_begin_raw AS (
+            SELECT snap_event, snap_request_count, snap_nw_acquired, snap_nw_not_acquired,
+                snap_wait, snap_failed_wait, snap_total_wait_time
+            FROM snapshot.snap_global_wait_events CROSS JOIN snap_info si
+            WHERE snapshot_id = si.begin_snap_id AND snap_nodename = si.node_name AND snap_type = '%s'
+        ),
+        snap_end_raw AS (
+            SELECT snap_event, snap_request_count, snap_nw_acquired, snap_nw_not_acquired,
+                snap_wait, snap_failed_wait, snap_total_wait_time
+            FROM snapshot.snap_global_wait_events CROSS JOIN snap_info si
+            WHERE snapshot_id = si.end_snap_id AND snap_nodename = si.node_name AND snap_type = '%s'
+        ),
+        all_events AS (
+            SELECT snap_event FROM snap_begin_raw
+            UNION
+            SELECT snap_event FROM snap_end_raw
+        ),
+        lock_delta AS (
+            SELECT
+                a.snap_event AS lock_name,
+                GREATEST(COALESCE(e.snap_request_count, 0) - COALESCE(b.snap_request_count, 0), 0)
+                    AS delta_request_count,
+                GREATEST(COALESCE(e.snap_nw_acquired, 0) - COALESCE(b.snap_nw_acquired, 0), 0)
+                    AS delta_nw_acquired,
+                GREATEST(COALESCE(e.snap_nw_not_acquired, 0) - COALESCE(b.snap_nw_not_acquired, 0), 0)
+                    AS delta_nw_not_acquired,
+                GREATEST(COALESCE(e.snap_wait, 0) - COALESCE(b.snap_wait, 0), 0) AS delta_wait,
+                GREATEST(COALESCE(e.snap_failed_wait, 0) - COALESCE(b.snap_failed_wait, 0), 0)
+                    AS delta_failed_wait,
+                GREATEST(COALESCE(e.snap_total_wait_time, 0) - COALESCE(b.snap_total_wait_time, 0), 0)
+                    AS delta_total_wait_us
+            FROM all_events a
+            LEFT JOIN snap_end_raw e ON a.snap_event = e.snap_event
+            LEFT JOIN snap_begin_raw b ON a.snap_event = b.snap_event
+        )
+        SELECT
+            lock_name AS "Lock Name",
+            delta_request_count AS "Total Requests",
+            delta_nw_acquired AS "Acquired NoWait",
+            ROUND(100.0 * delta_nw_acquired / NULLIF(delta_request_count, 0), 2) AS "Pct Acq NoWait",
+            delta_nw_not_acquired AS "Failed NoWait",
+            ROUND(100.0 * delta_nw_not_acquired / NULLIF(delta_request_count, 0), 2) AS "Pct Fail NoWait",
+            delta_wait AS "Acquired Wait",
+            ROUND(100.0 * delta_wait / NULLIF(delta_request_count, 0), 2) AS "Pct Acq Wait",
+            delta_failed_wait AS "Failed Wait",
+            ROUND(100.0 * delta_failed_wait / NULLIF(delta_request_count, 0), 2) AS "Pct Fail Wait",
+            delta_total_wait_us AS "Total Wait us",
+            ROUND( delta_total_wait_us::NUMERIC / NULLIF(delta_wait, 0), 2) AS "Avg Wait us"
+        FROM lock_delta
+        WHERE delta_request_count > 0
+        ORDER BY %s DESC
+        LIMIT %d
+    )";
+
+    appendStringInfo(&query, query_template, type, type, order_by_col, top_n);
+}
+
+/*
+ * Top 10 locks with the most acquire requests between two snapshots. The table
+ * shows the no-wait/wait acquisition results and their percentage of requests.
+ */
+static void get_summary_lock_event_count_top10(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node top 10 locks by acquire request count (no-wait/wait results included)";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Lock Event Request Top 10";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_wait_events")) {
+        AppendQueryCondition(query, params);
+        AppendQueryLockEventTopByCondition(query, "LOCK_EVENT", "delta_request_count", LOCK_EVENT_TOP_N);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+/*
+ * Top 10 locks with the longest total wait time between two snapshots. The
+ * table shows the average wait time per wait-acquired request.
+ */
+static void get_summary_lock_event_duration_top10(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node top 10 locks by total wait time (average wait included)";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Lock Event Duration Top 10";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_wait_events")) {
+        AppendQueryCondition(query, params);
+        AppendQueryLockEventTopByCondition(query, "LOCK_EVENT", "delta_total_wait_us", LOCK_EVENT_TOP_N);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+/*
+ * Top 10 LWLocks with the longest total wait time between two snapshots. The
+ * table shows the average wait time per wait-acquired request.
+ */
+static void get_summary_lwlock_event_duration_top10(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node top 10 LWLocks by total wait time (average wait included)";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "LWLock Event Duration Top 10";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_wait_events")) {
+        AppendQueryCondition(query, params);
+        AppendQueryLockEventTopByCondition(query, "LWLOCK_EVENT", "delta_total_wait_us", LOCK_EVENT_TOP_N);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+/*
+ * Top 10 LWLocks with the most acquire requests between two snapshots. The
+ * table shows the no-wait/wait acquisition results and their percentage of
+ * requests.
+ */
+static void get_summary_lwlock_event_count_top10(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node top 10 LWLocks by acquire request count (no-wait/wait results included)";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "LWLock Event Request Top 10";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_wait_events")) {
+        AppendQueryCondition(query, params);
+        AppendQueryLockEventTopByCondition(query, "LWLOCK_EVENT", "delta_request_count", LOCK_EVENT_TOP_N);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
 static void AppendQueryHostMemory(StringInfoData& query, report_params* params)
 {
     const char* sql = R"(
@@ -4491,6 +4667,25 @@ static void get_summary_host_memory(report_params* params)
     pfree(query.data);
 
     GenReport::add_data(dash, &params->Contents);
+}
+
+static void get_summary_global_lock_event(report_params* params)
+{
+ /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+    get_summary_lwlock_event_duration_top10(params);
+    get_summary_lwlock_event_count_top10(params);
+    get_summary_lock_event_duration_top10(params);
+    get_summary_lock_event_count_top10(params);
 }
 
 /* summary -node io profile */
@@ -5026,6 +5221,158 @@ static void check_report_parameter(report_params* params)
     }
 }
 
+/* Wait time columns of the key activity categories which have wait metrics */
+static const char* g_keyActivityWaitColumns =
+    ",\n            CASE\n"
+    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
+    "                THEN ROUND(d.delta_wait_us / 1000.0, 2)\n"
+    "                ELSE NULL\n"
+    "            END AS \"Total Wait ms\",\n"
+    "            CASE\n"
+    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
+    "                    AND si.interval_sec IS NOT NULL AND si.interval_sec > 0\n"
+    "                THEN ROUND((d.delta_wait_us / 1000.0) / si.interval_sec, 2)\n"
+    "                ELSE NULL\n"
+    "            END AS \"Per Second Wait ms\",\n"
+    "            CASE\n"
+    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
+    "                    AND si.total_xacts IS NOT NULL AND si.total_xacts > 0\n"
+    "                THEN ROUND((d.delta_wait_us / 1000.0) / si.total_xacts, 2)\n"
+    "                ELSE NULL\n"
+    "            END AS \"Per Transaction Wait ms\"";
+
+/* Size column of the key activity categories which have size metrics, displayed in MB */
+static const char* g_keyActivitySizeColumn =
+    ",\n            CASE\n"
+    "                WHEN d.delta_size_bytes IS NOT NULL AND d.delta_size_bytes > 0\n"
+    "                THEN ROUND(d.delta_size_bytes / 1048576.0, 2)\n"
+    "                ELSE NULL\n"
+    "            END AS \"Total Size MB\"";
+
+/*
+ * Column profiles of the six key activity categories. Each category table
+ * displays only the columns relevant to it:
+ *   Buffer/Transaction have counts only, Lock/SMGR have counts and wait time,
+ *   WAL has counts, wait time and written size, Executor has counts and
+ *   temp file size.
+ */
+typedef struct keyActivityColumnProfile {
+    const char* activityType; /* category filter of dbe_perf.global_key_activity */
+    const char* waitColumns;  /* wait time columns, empty when not applicable */
+    const char* sizeColumns;  /* size column, empty when not applicable */
+    const char* orderClause;  /* ORDER BY clause of the category table */
+} keyActivityColumnProfile;
+
+static const keyActivityColumnProfile g_keyActivityColumnProfiles[] = {
+    {"Buffer", "", "", "ORDER BY \"Total Count\" DESC"},
+    {"Transaction", "", "", "ORDER BY \"Total Count\" DESC"},
+    {"Executor", "", g_keyActivitySizeColumn, "ORDER BY \"Total Count\" DESC"},
+    {"Lock", g_keyActivityWaitColumns, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
+    {"SMGR", g_keyActivityWaitColumns, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
+    {"WAL", g_keyActivityWaitColumns, g_keyActivitySizeColumn,
+        "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"}};
+
+static void AppendQueryGlobalKeyActivity(StringInfoData& query, report_params* params,
+    const keyActivityColumnProfile* profile)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id,
+                %ld::NUMERIC AS interval_sec, '%s' AS node_name,
+                %ld::NUMERIC AS total_xacts
+        ),
+        start_data AS (
+            SELECT snap_activity_type AS activity_type, snap_activity_name AS activity_name,
+                snap_total_count AS total_count, snap_total_wait_us AS total_wait_us,
+                snap_total_size_bytes AS total_size_bytes
+            FROM snapshot.snap_global_key_activity ka CROSS JOIN snap_info si
+            WHERE ka.snapshot_id = si.begin_snap_id AND ka.snap_node_name = si.node_name
+        ),
+        end_data AS (
+            SELECT snap_activity_type AS activity_type, snap_activity_name AS activity_name,
+                snap_total_count AS total_count, snap_total_wait_us AS total_wait_us,
+                snap_total_size_bytes AS total_size_bytes
+            FROM snapshot.snap_global_key_activity ka CROSS JOIN snap_info si
+            WHERE ka.snapshot_id = si.end_snap_id AND ka.snap_node_name = si.node_name
+        ),
+        delta_data AS (
+            SELECT
+                COALESCE(e.activity_type, s.activity_type) AS activity_type,
+                COALESCE(e.activity_name, s.activity_name) AS activity_name,
+                GREATEST(COALESCE(e.total_count, 0) - COALESCE(s.total_count, 0), 0)  AS delta_count,
+                GREATEST(COALESCE(e.total_wait_us, 0) - COALESCE(s.total_wait_us, 0),0) AS delta_wait_us,
+                GREATEST(COALESCE(e.total_size_bytes, 0) - COALESCE(s.total_size_bytes, 0), 0) AS delta_size_bytes
+            FROM end_data e FULL OUTER JOIN start_data s
+                ON e.activity_type = s.activity_type AND e.activity_name = s.activity_name
+        )
+        SELECT
+            d.activity_name AS "Activity Name",
+            d.delta_count AS "Total Count",
+            CASE
+                WHEN si.interval_sec IS NOT NULL AND si.interval_sec > 0
+                THEN ROUND(d.delta_count / si.interval_sec, 2)
+                ELSE NULL
+            END AS "Per Second",
+            CASE
+                WHEN si.total_xacts IS NOT NULL AND si.total_xacts > 0
+                THEN ROUND(d.delta_count / si.total_xacts, 2)
+                ELSE NULL
+            END AS "Per Transaction"%s%s
+        FROM delta_data d CROSS JOIN snap_info si
+        WHERE (d.delta_count > 0 OR d.delta_wait_us > 0 OR d.delta_size_bytes > 0)
+            AND d.activity_type = '%s'
+        %s
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params), get_report_snap_diff_trx_count(params),
+                     profile->waitColumns, profile->sizeColumns, profile->activityType,
+                     profile->orderClause);
+}
+
+/** get global key activity */
+static void get_summary_global_key_activity(report_params* params)
+{
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+
+    if (!UpdataReportSnapGapParam(params, "snap_global_key_activity")) {
+        return;
+    }
+
+    /*
+     * Each key activity category is rendered as an independent table
+     * under the Summary dashboard, with only the columns relevant to
+     * that category, in the same order as the function
+     * dbe_perf.get_global_key_activity().
+     */
+    const char* desc = "show the node global key activity";
+
+    for (size_t i = 0; i < lengthof(g_keyActivityColumnProfiles); i++) {
+        const keyActivityColumnProfile* profile = &g_keyActivityColumnProfiles[i];
+        dashboard* dash = CreateDash();
+        dash->dashTitle = "Summary";
+        dash->tableTitle = psprintf("Key Activity - %s", profile->activityType);
+        dash->desc = lappend(dash->desc, (void*)desc);
+
+        StringInfoData query;
+        initStringInfo(&query);
+        AppendQueryGlobalKeyActivity(query, params, profile);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+        pfree(query.data);
+
+        GenReport::add_data(dash, &params->Contents);
+    }
+}
+
 /*
  * Used to execute the query and get the report data and store it in structured memory
  * Input parameters:
@@ -5062,6 +5409,12 @@ void GenReport::get_report_data(report_params* params)
     /* summary - Host CPU memory */
     get_summary_host_cpu(params);
     get_summary_host_memory(params);
+
+    /* summary - Global Key Activity */
+    get_summary_global_key_activity(params);
+
+    /* summary - Global Lock Event */
+    get_summary_global_lock_event(params);
 
     /* summary - IO Profile */
     get_summary_io_profile(params);

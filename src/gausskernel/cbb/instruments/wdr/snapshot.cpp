@@ -131,7 +131,7 @@ static const char* sharedViews[] = {"global_os_runtime", "global_os_threads", "g
     "summary_user_login", "summary_database_sql_stat", "global_ckpt_status", "global_double_write_status",
     "global_pagewriter_status", "global_redo_status",
     "global_rto_status", "global_recovery_status", "global_threadpool_status",
-    "statement_responsetime_percentile"};
+    "statement_responsetime_percentile", "global_key_activity"};
 /*
  * These views represent the state of the database in which they are located
  * select these views in a different database gives the different result,

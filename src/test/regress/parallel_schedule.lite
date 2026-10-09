@@ -332,6 +332,9 @@ test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 co
 
 test: hw_dfx_thread_status
 
+test: wdr_key_activity
+test: lwlock_wait_events
+
 test: stable_function_shippable
 # ----------
 # data partition
