@@ -1600,7 +1600,7 @@ void UBSnapshotBufferInit(UBSnapshotBuffer *buf)
             ub_sigbus_jump_active = 0;
             ereport(ERROR, (errmsg("memset_s failed for UBSnapshotBuffer")));
         }
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1628,7 +1628,7 @@ void UBSnapshotBufferSetSlot(UBSnapshotBuffer *buf,
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         UBSnapshotSlotSet(&buf->slots[0], xmin, xmax, csn);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1660,7 +1660,7 @@ bool UBGetSnapshotFromPrimary(TransactionId *xmin,
         if (ub_fault_rc == 0) {
             ub_sigbus_jump_active = 1;
             bool success = UBSnapshotSlotGet(&buf->slots[0], xmin, xmax, csn);
-            UB_ESB_BARRIER();
+            UbEsbBarrier();
             ub_sigbus_jump_active = 0;
             SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_ONE_UB, one_start_time);
             if (success) {
@@ -1722,7 +1722,7 @@ void UBSnapshotShmemInit(void)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         offset = ctrl->snapshot_offset.load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;

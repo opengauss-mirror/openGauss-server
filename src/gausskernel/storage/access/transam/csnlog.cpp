@@ -886,7 +886,7 @@ void UBCSNLogBufferInit(UBCSNLogBuffer *buf)
             securec_check_c(rc, "\0", "\0");
             offset += chunk;
         }
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -911,7 +911,7 @@ void UBCSNLogBufferSetSlot(UBCSNLogBuffer *buf, TransactionId xid, uint64 csn)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         buf->slots[slot_idx].store(packed_val, std::memory_order_release);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -945,7 +945,7 @@ static void UBCSNLogBufferSetPage(UBCSNLogBuffer *buf, const char *page, Transac
             buf->slots[slot_idx].store(UBCSNLogPackSlot(timeline, csn), std::memory_order_release);
         }
         /* One persistence barrier per SLRU page instead of one per xid. */
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1015,7 +1015,7 @@ void UBCSNLogShmemInit(void)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         offset = ctrl->csnlog_offset.load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1056,7 +1056,7 @@ bool UBGetCSNFromPrimary(TransactionId xid, uint64 *csn)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         slot_val = ubCSNLogBuf->slots[slot_idx].load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
