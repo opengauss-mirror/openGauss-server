@@ -157,7 +157,7 @@ static bool UBTryReuseRememberedMapping(int32 instance_id, size_t expected_size,
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         verify_ok = UBSMemVerification(addr);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -295,7 +295,7 @@ static void InitUBSMemBuffer(UBShmControlBlock *ctrl, char *base_addr)
         oldest_xmin_off = ctrl->oldest_xmin_offset.load();
         snapshot_inited = ctrl->snapshot_inited.load(std::memory_order_acquire);
         snapshot_off = ctrl->snapshot_offset.load();
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -636,7 +636,7 @@ bool UBTxnCacheAttachPrimary(void)
     if (ub_fault_rc_v == 0) {
         ub_sigbus_jump_active = 1;
         verify_ok = UBSMemVerification((char *)new_addr);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -679,7 +679,7 @@ void UBTxnCacheResetReformMeta(void)
         ub_sigbus_jump_active = 1;
         xmin_buf = (UBOldestXminBuffer *)(base_addr + ctrl->oldest_xmin_offset.load());
         snapshot_buf = (UBSnapshotBuffer *)(base_addr + ctrl->snapshot_offset.load());
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
