@@ -11146,9 +11146,6 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
         case OBJECT_LANGUAGE:
             tag = "LANGUAGE";
             break;
-        case OBJECT_DOMAIN:
-            tag = "DOMAIN";
-            break;
         case OBJECT_CONVERSION:
             tag = "CONVERSION";
             break;
