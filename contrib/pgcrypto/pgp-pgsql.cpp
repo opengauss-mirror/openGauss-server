@@ -499,6 +499,7 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     int got_unicode = 0;
     uint8* psw = NULL;
     int pswLen = 0;
+    bool pswOwned = false;
 
     init_work(&ctx, need_text, args, &ex);
 
@@ -528,8 +529,16 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
         MBuf* kbuf = NULL;
 
         if (keypsw) {
-            psw = (uint8*)VARDATA(keypsw);
             pswLen = VARSIZE(keypsw) - VARHDRSZ;
+            if (pswLen > 0) {
+                /* operate on a private copy; never write into the argument datum */
+                psw = (uint8*)palloc(pswLen);
+                errno_t rc = memcpy_s(psw, pswLen, VARDATA(keypsw), pswLen);
+                securec_check(rc, "", "");
+                pswOwned = true;
+            } else {
+                psw = (uint8*)VARDATA(keypsw);
+            }
         }
         kbuf = create_mbuf_from_vardata(key);
         err = pgp_set_pubkey(ctx, kbuf, psw, pswLen, 1);
@@ -556,8 +565,10 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     got_unicode = pgp_get_unicode_mode(ctx);
 
 out:
-    if (psw != NULL && pswLen > 0) {
+    if (pswOwned) {
         (void)memset_s(psw, pswLen, 0, pswLen);
+        pfree(psw);
+        psw = NULL;
     }
     (void)memset_s(&pswLen, sizeof(pswLen), 0, sizeof(pswLen));
 
@@ -747,7 +758,8 @@ Datum pgp_pub_decrypt_bytea(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(data, dataArg);
     PG_FREE_IF_COPY(key, keyArg);
     if (PG_NARGS() > pswArg) {
-        if (psw != NULL) {
+        if (psw != NULL && (Pointer)psw != PG_GETARG_POINTER(pswArg)) {
+            /* psw is a detoasted copy owned by us; scrub it before freeing */
             int pswLen = VARSIZE(psw);
             (void)memset_s(psw, pswLen, 0, pswLen);
         }
@@ -780,7 +792,8 @@ Datum pgp_pub_decrypt_text(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(data, dataArg);
     PG_FREE_IF_COPY(key, keyArg);
     if (PG_NARGS() > pswArg) {
-        if (psw != NULL) {
+        if (psw != NULL && (Pointer)psw != PG_GETARG_POINTER(pswArg)) {
+            /* psw is a detoasted copy owned by us; scrub it before freeing */
             int pswLen = VARSIZE(psw);
             (void)memset_s(psw, pswLen, 0, pswLen);
         }
