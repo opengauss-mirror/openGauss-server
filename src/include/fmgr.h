@@ -206,6 +206,12 @@ typedef struct FunctionCallExtraData {
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
     StartWithFuncEvalInfo swinfo;
+    /*
+     * Per-call coercion context.  The new fmgr ABI dropped the ccontext
+     * member from FunctionCallInfoData; keep the capability available in
+     * the optional per-call data for consumers that still need it.
+     */
+    CoercionContext ccontext;
 } FunctionCallExtraData;
 
 /*
