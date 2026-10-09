@@ -105,8 +105,6 @@ sections:
             href: ./shark-DROP-TRIGGER.md         
           - label: XACT_ABORT
             href: ./shark_xact_abort.md
-          - label: ALIAS
-            href: ./shark_ALIAS.md
       - label: Transactions
         sections: 
           - label: Managing_Transactions
