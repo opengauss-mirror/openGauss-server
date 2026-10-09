@@ -2601,11 +2601,59 @@ typedef enum OSRunInfoTypes {
     TOTAL_OS_RUN_INFO_TYPES
 } OSRunInfoTypes;
 
+#define DISK_NAME_BUF 32
+typedef struct OSDiskIOStats {
+    uint32 major_number;
+    uint32 minor_number;
+    char device_name[DISK_NAME_BUF];
+    uint64 total_reads;
+    uint64 merge_read_num;
+    uint64 sector_read;
+    uint64 read_time_ms;
+    uint64 total_writes;
+    uint64 merge_write_num;
+    uint64 sector_write;
+    uint64 write_time_ms;
+    uint64 now_io_request;
+    uint64 time_inout_op_ms;
+    uint64 time_inout_opwei_ms;
+    uint64 discard_complete;
+    uint64 merge_discard_num;
+    uint64 sector_discard;
+    uint64 discard_time_ms;
+    uint32 sector_size;
+} OSDiskIOStats;
+
 typedef struct MemField {
     const char* name; /* /proc/meminfo field name */
     int startIndex;   /* start index in OSRunInfoTypes */
     int2 unit;          /* unit of the field : 0 byte, 1 sector count */
 } MemField;
+
+typedef struct OSNetDevInfo{
+    char* interface_name;
+    uint64 rx_bytes;
+    uint64 rx_packets;
+    uint64 rx_errors;
+    uint64 rx_dropped;
+    uint64 rx_fifo;
+    uint64 rx_frame;
+    uint64 rx_multicast;
+    uint64 tx_bytes;
+    uint64 tx_packets;
+    uint64 tx_errors;
+    uint64 tx_dropped;
+    uint64 tx_fifo;
+    uint64 tx_colls;
+    uint64 tx_carrier;
+} OSNetDevInfo;
+
+typedef struct OSNetDevExt{
+    char* interface_name;
+    char* ip_address;
+    int32 link_speed_mbps;
+    char* dev_type;
+} OSNetDevExt;
 
 /*
  *this is used to represent the numbers of cpu time we should read from file.BUSY_TIME will be
@@ -2649,6 +2697,9 @@ extern void getCpuTimes(void);
 extern void getVmStat(void);
 extern void getTotalMem(void);
 extern void GetOsMemDetail(void);
+extern int GetOsDiskIoDetail(MemoryContext ctx, OSDiskIOStats **out_stats);
+extern int GetOsNetDevExtDetail(MemoryContext ctx, OSNetDevExt **out_stats);
+extern int GetOsNetDevInfoDetail(MemoryContext ctx, OSNetDevInfo **out_stats);
 extern void getOSRunLoad(void);
 
 extern Datum Int64GetNumberDatum(NumericValue value);

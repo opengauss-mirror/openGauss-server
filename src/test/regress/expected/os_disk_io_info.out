@@ -1,0 +1,28 @@
+-- OS disk IO statistics: builtin function and dbe_perf views
+SELECT * FROM pg_catalog.pg_os_disk_io_info() LIMIT 0;
+ major_number | minor_number | device_name | total_reads | merge_read_num | sector_read | read_time_ms | total_writes | merge_write_num | sector_write | write_time_ms | now_io_request | time_inout_op_ms | time_inout_opwei_ms | discard_complete | merge_discard_num | sector_discard | discard_time_ms | sector_size 
+--------------+--------------+-------------+-------------+----------------+-------------+--------------+--------------+-----------------+--------------+---------------+----------------+------------------+---------------------+------------------+-------------------+----------------+-----------------+-------------
+(0 rows)
+
+SELECT * FROM dbe_perf.os_disk_io_info LIMIT 0;
+ major_number | minor_number | device_name | total_reads | merge_read_num | sector_read | read_time_ms | total_writes | merge_write_num | sector_write | write_time_ms | now_io_request | time_inout_op_ms | time_inout_opwei_ms | discard_complete | merge_discard_num | sector_discard | discard_time_ms | sector_size 
+--------------+--------------+-------------+-------------+----------------+-------------+--------------+--------------+-----------------+--------------+---------------+----------------+------------------+---------------------+------------------+-------------------+----------------+-----------------+-------------
+(0 rows)
+
+SELECT * FROM dbe_perf.global_os_disk_io_info LIMIT 0;
+ node_name | major_number | minor_number | device_name | total_reads | merge_read_num | sector_read | read_time_ms | total_writes | merge_write_num | sector_write | write_time_ms | now_io_request | time_inout_op_ms | time_inout_opwei_ms | discard_complete | merge_discard_num | sector_discard | discard_time_ms | sector_size 
+-----------+--------------+--------------+-------------+-------------+----------------+-------------+--------------+--------------+-----------------+--------------+---------------+----------------+------------------+---------------------+------------------+-------------------+----------------+-----------------+-------------
+(0 rows)
+
+-- at least one block device must be reported (the root device always exists)
+SELECT count(*) > 0 AS has_devices FROM dbe_perf.os_disk_io_info;
+ has_devices 
+-------------
+ t
+(1 row)
+
+SELECT COALESCE(bool_and(total_reads >= 0 AND total_writes >= 0 AND sector_read >= 0 AND sector_write >= 0), true) AS counters_valid FROM dbe_perf.os_disk_io_info;
+ counters_valid 
+----------------
+ t
+(1 row)

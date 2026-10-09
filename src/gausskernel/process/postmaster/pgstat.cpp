@@ -28,6 +28,11 @@
 #include <sys/param.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <unistd.h>
 #include "funcapi.h"
 #include "utils/syscache.h"
 #include "pgstat.h"
@@ -166,6 +171,11 @@ typedef struct PgStatPendingDataChangedEntry {
 #define SysCpuPath "/sys/devices/system/cpu/cpu%u"
 #define ThreadSiblingFile "/sys/devices/system/cpu/cpu0/topology/thread_siblings"
 #define CoreSiblingFile "/sys/devices/system/cpu/cpu0/topology/core_siblings"
+/*
+ * Fields parsed from each /proc/net/dev line: interface name plus
+ * 14 rx/tx counters (rx_compressed and tx_compressed are skipped).
+ */
+#define OsNetDevParseFields 15
 
 extern void WLMGetCPUDataIndicator(PgBackendStatus*, WLMDataIndicator<int64>*);
 
@@ -8060,6 +8070,352 @@ void GetOsMemDetail(void)
             u_sess->stat_cxt.osStatDataArray[SWAP_FREE_BYTES].int64Value);
     }
     #undef SET_DERIVED
+}
+
+static bool IsWholeDiskDevice(const char* device_name)
+{
+    char path[MAXPGPATH];
+    errno_t rc = snprintf_s(path, MAXPGPATH, sizeof(path) - 1, "/sys/block/%s", device_name);
+    securec_check_ss(rc, "\0", "\0");
+    return (access(path, F_OK) == 0);
+}
+
+/*
+* GetOsDiskIoDetail - read /proc/diskstats and parse all block device statistics
+*
+*   ctx       - memory context to allocate the result array (usually multi_call_memory_ctx)
+*   out_stats - output parameter, points to the allocated device statistics array
+*   return    - number of successfully parsed devices, or 0 if file open fails or no devices are found
+*/
+int GetOsDiskIoDetail(MemoryContext ctx, OSDiskIOStats **out_stats)
+{
+    const char* statPath = "/proc/diskstats";
+    FILE* fd = NULL;
+    char* line = NULL;
+    size_t len = 0;
+    int max_disks = 64;
+    int count = 0;
+    OSDiskIOStats* stats = NULL;
+    MemoryContext oldcxt;
+    bool sysfs_available = false;
+
+    fd = fopen(statPath, "r");
+    if (fd == NULL) {
+        ereport(WARNING, (errcode(ERRCODE_IO_ERROR), errmsg("could not open \"/proc/diskstats\": %m")));
+        *out_stats = NULL;
+        return 0;
+    }
+
+    /* /sys/block is used to distinguish whole disks from partitions; fail open when unavailable */
+    sysfs_available = (access("/sys/block", F_OK) == 0);
+
+    /* Switch to the persistent memory context to ensure the allocated data is valid throughout the function call */
+    oldcxt = MemoryContextSwitchTo(ctx);
+
+    PG_TRY();
+    {
+        /* Pre-allocate array space */
+        stats = (OSDiskIOStats*)palloc0(max_disks * sizeof(OSDiskIOStats));
+
+        /* Read and parse each line */
+        while (gs_getline(&line, &len, fd) > 0) {
+            /* If array space is insufficient, dynamically expand */
+            if (count >= max_disks) {
+                max_disks *= 2;
+                stats = (OSDiskIOStats*)repalloc(stats, max_disks * sizeof(OSDiskIOStats));
+            }
+
+            OSDiskIOStats* item = &stats[count];
+            int parsed = sscanf_s(line,
+                "%u %u %31s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+                &item->major_number, &item->minor_number, item->device_name, DISK_NAME_BUF, &item->total_reads,
+                &item->merge_read_num, &item->sector_read, &item->read_time_ms, &item->total_writes,
+                &item->merge_write_num, &item->sector_write, &item->write_time_ms, &item->now_io_request,
+                &item->time_inout_op_ms, &item->time_inout_opwei_ms, &item->discard_complete, &item->merge_discard_num,
+                &item->sector_discard, &item->discard_time_ms
+            );
+
+            /*
+            *  because the kernel version may be different, the number of fields may be 14, 18 or 20.
+            *  here we only support the minimum 14 fields, and the missing discard fields are set to 0.
+            *  if the parsed fields are less than 14, we think the line is invalid.
+            */
+            if (parsed >= 14) {
+                /* if only 14 fields, set discard fields to 0 */
+                if (parsed == 14) {
+                    item->discard_complete = 0;
+                    item->merge_discard_num = 0;
+                    item->sector_discard = 0;
+                    item->discard_time_ms = 0;
+                }
+                /* if parsed 18 or more fields, use them */
+                /* fixed sector size is 512 bytes (kernel logical sector standard) */
+                item->sector_size = 512;
+                /* filter non-physical disk devices: loop back devices, ram disk devices, sr cdrom devices */
+                if (strncmp(item->device_name, "loop", 4) == 0 ||
+                    strncmp(item->device_name, "ram", 3) == 0 ||
+                    strncmp(item->device_name, "sr", 2) == 0) {
+                    if (line != NULL) {
+                        pfree(line);
+                        line = NULL;
+                        len = 0;
+                    }
+                    continue;
+                }
+                /* filter partition devices (e.g. sda1, nvme0n1p1): keep whole disks only,
+                 * otherwise parent disk and partitions are both reported */
+                if (sysfs_available && !IsWholeDiskDevice(item->device_name)) {
+                    if (line != NULL) {
+                        pfree(line);
+                        line = NULL;
+                        len = 0;
+                    }
+                    continue;
+                }
+                count++;
+            }
+
+            if (line != NULL) {
+                pfree(line);
+                line = NULL;
+                len = 0;
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        /* an ereport(ERROR) (e.g. OOM in palloc/repalloc) jumped out: release the line buffer
+         * and close the file before rethrowing, otherwise both leak */
+        if (line != NULL)
+            pfree(line);
+        (void)fclose(fd);
+        MemoryContextSwitchTo(oldcxt);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (line != NULL)
+        pfree(line);
+
+    if (fd != NULL) {
+        (void)fclose(fd);
+    }
+
+    MemoryContextSwitchTo(oldcxt);
+
+    *out_stats = stats;
+    return count;
+}
+
+/*
+* GetOsNetDevInfoDetail - read /proc/net/dev and parse per-NIC rx/tx counters
+*
+*   ctx       - memory context to allocate the result array (usually multi_call_memory_ctx)
+*   out_stats - output parameter, points to the allocated NIC statistics array
+*   return    - number of successfully parsed NICs, or 0 if file open fails
+*/
+int GetOsNetDevInfoDetail(MemoryContext ctx, OSNetDevInfo **out_stats)
+{
+    const char* statPath = "/proc/net/dev";
+    FILE* fd = NULL;
+    char* line = NULL;
+    size_t len = 0;
+    int max_devs = 16;
+    int count = 0;
+    OSNetDevInfo* stats = NULL;
+    MemoryContext oldcxt;
+    char ifname[64];
+
+    fd = fopen(statPath, "r");
+    if (fd == NULL) {
+        ereport(WARNING, (errcode(ERRCODE_IO_ERROR), errmsg("could not open \"/proc/net/dev\": %m")));
+        *out_stats = NULL;
+        return 0;
+    }
+
+    oldcxt = MemoryContextSwitchTo(ctx);
+    stats = (OSNetDevInfo*)palloc0(max_devs * sizeof(OSNetDevInfo));
+
+    /* First two lines are headers, sscanf parse failure skips them automatically */
+    while (gs_getline(&line, &len, fd) > 0) {
+        if (count >= max_devs) {
+            max_devs *= 2;
+            stats = (OSNetDevInfo*)repalloc(stats, max_devs * sizeof(OSNetDevInfo));
+        }
+
+        OSNetDevInfo* item = &stats[count];
+        /* Parse directly into struct fields; %*lu skips rx_compressed and tx_compressed */
+        /* %63[^:] matches iface name up to (not including) the colon separator */
+        int parsed = sscanf(line,
+            " %63[^:]:%lu %lu %lu %lu %lu %lu %*lu %lu %lu %lu %lu %lu %lu %lu %*lu %lu",
+            ifname,
+            &item->rx_bytes, &item->rx_packets, &item->rx_errors, &item->rx_dropped,
+            &item->rx_fifo, &item->rx_frame, &item->rx_multicast,
+            &item->tx_bytes, &item->tx_packets, &item->tx_errors, &item->tx_dropped,
+            &item->tx_fifo, &item->tx_colls, &item->tx_carrier);
+
+        if (parsed != OsNetDevParseFields) {
+            if (line != NULL) {
+                pfree(line);
+                line = NULL;
+                len = 0;
+            }
+            continue;
+        }
+
+        /* Skip lo loopback interface (project convention) */
+        if (strcmp(ifname, "lo") == 0) {
+            if (line != NULL) {
+                pfree(line);
+                line = NULL;
+                len = 0;
+            }
+            continue;
+        }
+
+        item->interface_name = pstrdup(ifname);
+        count++;
+
+        if (line != NULL) {
+            pfree(line);
+            line = NULL;
+            len = 0;
+        }
+    }
+
+    if (fd != NULL) {
+        (void)fclose(fd);
+    }
+
+    MemoryContextSwitchTo(oldcxt);
+
+    *out_stats = stats;
+    return count;
+}
+
+int GetOsNetDevExtDetail(MemoryContext ctx, OSNetDevExt **out_stats)
+{
+    int count = 0;
+    int max_devs = 8;
+    OSNetDevExt* stats = NULL;
+    MemoryContext oldcxt;
+    int sockfd = -1;
+    struct ifconf ifc;
+    struct ifreq ifbuf[64];
+    int num_ifs = 0;
+    int i;
+
+    /*
+    * No global cache: static NIC info (IP, negotiated speed) may change at runtime
+    * due to link up/down or reconfiguration. As a diagnostic function, real-time
+    * accuracy takes priority; call frequency is low, so socket overhead is acceptable.
+    */
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        ereport(WARNING, (errcode(ERRCODE_IO_ERROR), errmsg("could not create socket: %m")));
+        *out_stats = NULL;
+        return 0;
+    }
+
+    /* SIOCGIFCONF 获取网卡列表及 IPv4 地址 */
+    ifc.ifc_len = sizeof(ifbuf);
+    ifc.ifc_buf = (char *)ifbuf;
+    if (ioctl(sockfd, SIOCGIFCONF, &ifc) < 0) {
+        ereport(WARNING, (errcode(ERRCODE_IO_ERROR), errmsg("SIOCGIFCONF failed: %m")));
+        close(sockfd);
+        *out_stats = NULL;
+        return 0;
+    }
+    num_ifs = ifc.ifc_len / sizeof(struct ifreq);
+
+    oldcxt = MemoryContextSwitchTo(ctx);
+    stats = (OSNetDevExt *)palloc0(max_devs * sizeof(OSNetDevExt));
+
+    for (i = 0; i < num_ifs; i++) {
+        struct ifreq *ifr = &ifbuf[i];
+        const char *name = ifr->ifr_name;
+
+        /* Skip lo loopback interface (project convention) */
+        if (strcmp(name, "lo") == 0) {
+            continue;
+        }
+
+        /* Extract IPv4 address from ifr_addr returned by SIOCGIFCONF */
+        struct sockaddr_in *sa = (struct sockaddr_in *)&ifr->ifr_addr;
+        char ip_str[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &sa->sin_addr, ip_str, sizeof(ip_str)) == NULL) {
+            continue;  /* skip unparseable entries */
+        }
+
+        /* Lookup existing entry by interface name (merge multi-IP into single row) */
+        int found = -1;
+        for (int j = 0; j < count; j++) {
+            if (strcmp(stats[j].interface_name, name) == 0) {
+                found = j;
+                break;
+            }
+        }
+
+        if (found >= 0) {
+            /* Append IP to existing entry: "old_ip,new_ip" */
+            char *old_ip = stats[found].ip_address;
+            char *merged = psprintf("%s,%s", old_ip, ip_str);
+            pfree(old_ip);
+            stats[found].ip_address = merged;
+            continue;
+        }
+
+        /* New interface: create entry */
+        if (count >= max_devs) {
+            max_devs *= 2;
+            stats = (OSNetDevExt *)repalloc(stats, max_devs * sizeof(OSNetDevExt));
+        }
+
+        OSNetDevExt *item = &stats[count];
+        item->interface_name = pstrdup(name);
+        item->ip_address = pstrdup(ip_str);
+
+        /*
+        * Auto-detect device type and get link speed:
+        *   docker0, br-XX        dev_type='docker',    speed=-1
+        *   vethXX, vboxXX, virbrX dev_type='virtual',   speed=-1
+        *   others (physical NIC) try SIOCETHTOOL for real negotiated speed, -1 on failure
+        */
+        if (strcmp(name, "docker0") == 0 || strncmp(name, "br-", 3) == 0) {
+            item->dev_type = pstrdup("docker");
+            item->link_speed_mbps = -1;
+        } else if (strncmp(name, "veth", 4) == 0 ||
+                strncmp(name, "vbox", 4) == 0 ||
+                strncmp(name, "virbr", 5) == 0) {
+            item->dev_type = pstrdup("virtual");
+            item->link_speed_mbps = -1;
+        } else {
+            /* Physical NIC: SIOCETHTOOL to get negotiated link speed */
+            struct ifreq speed_ifr;
+            errno_t rc = strncpy_s(speed_ifr.ifr_name, IFNAMSIZ, name, strlen(name));
+            securec_check(rc, "\0", "\0");
+            struct ethtool_cmd edata;
+            edata.cmd = ETHTOOL_GSET;
+            speed_ifr.ifr_data = (char *)&edata;
+            if (ioctl(sockfd, SIOCETHTOOL, &speed_ifr) == 0) {
+                item->link_speed_mbps = ethtool_cmd_speed(&edata);
+                item->dev_type = pstrdup("physical");
+            } else {
+                /* ethtool unsupported (some virtual NICs have no driver), treat as virtual */
+                item->link_speed_mbps = -1;
+                item->dev_type = pstrdup("virtual");
+            }
+        }
+
+        count++;
+    }
+
+    close(sockfd);
+    MemoryContextSwitchTo(oldcxt);
+
+    *out_stats = stats;
+    return count;
 }
 
 /*

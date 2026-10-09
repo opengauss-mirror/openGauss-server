@@ -4345,6 +4345,95 @@ static void AppendQueryTwo(StringInfoData& query, report_params* params)
         get_report_node(params));
 }
 
+static void AppendQueryHostNetwork(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_param AS (
+            SELECT %ld AS curr_snap_id, %ld AS last_snap_id, %ld AS interval_sec, '%s' AS node_name
+        ),
+        last_snap AS (
+            SELECT * FROM snapshot.snap_global_os_net_dev_info, snap_param
+            WHERE snapshot_id = last_snap_id AND snap_node_name = node_name
+        ),
+        curr_snap AS (
+            SELECT * FROM snapshot.snap_global_os_net_dev_info, snap_param
+            WHERE snapshot_id = curr_snap_id AND snap_node_name = node_name
+        ),
+        snap_diff AS (
+            SELECT
+                curr.snap_node_name, curr.snap_interface_name, curr.snap_ip_address, curr.snap_link_speed_mbps,
+                curr.snap_dev_type,
+                CASE WHEN curr.snap_rx_bytes >= last.snap_rx_bytes
+                     THEN curr.snap_rx_bytes - last.snap_rx_bytes
+                     ELSE curr.snap_rx_bytes END AS rx_bytes_delta,
+                CASE WHEN curr.snap_rx_packets >= last.snap_rx_packets
+                     THEN curr.snap_rx_packets - last.snap_rx_packets
+                     ELSE curr.snap_rx_packets END AS rx_packets_delta,
+                CASE WHEN curr.snap_rx_errors >= last.snap_rx_errors
+                     THEN curr.snap_rx_errors - last.snap_rx_errors
+                     ELSE curr.snap_rx_errors END AS rx_errors_delta,
+                CASE WHEN curr.snap_rx_dropped >= last.snap_rx_dropped
+                     THEN curr.snap_rx_dropped - last.snap_rx_dropped
+                     ELSE curr.snap_rx_dropped END AS rx_dropped_delta,
+                CASE WHEN curr.snap_rx_fifo >= last.snap_rx_fifo
+                     THEN curr.snap_rx_fifo - last.snap_rx_fifo
+                     ELSE curr.snap_rx_fifo END AS rx_fifo_delta,
+                CASE WHEN curr.snap_rx_frame >= last.snap_rx_frame
+                     THEN curr.snap_rx_frame - last.snap_rx_frame
+                     ELSE curr.snap_rx_frame END AS rx_frame_delta,
+                CASE WHEN curr.snap_rx_multicast >= last.snap_rx_multicast
+                     THEN curr.snap_rx_multicast - last.snap_rx_multicast
+                     ELSE curr.snap_rx_multicast END AS rx_multicast_delta,
+                CASE WHEN curr.snap_tx_bytes >= last.snap_tx_bytes
+                     THEN curr.snap_tx_bytes - last.snap_tx_bytes
+                     ELSE curr.snap_tx_bytes END AS tx_bytes_delta,
+                CASE WHEN curr.snap_tx_packets >= last.snap_tx_packets
+                     THEN curr.snap_tx_packets - last.snap_tx_packets
+                     ELSE curr.snap_tx_packets END AS tx_packets_delta,
+                CASE WHEN curr.snap_tx_errors >= last.snap_tx_errors
+                     THEN curr.snap_tx_errors - last.snap_tx_errors
+                     ELSE curr.snap_tx_errors END AS tx_errors_delta,
+                CASE WHEN curr.snap_tx_dropped >= last.snap_tx_dropped
+                     THEN curr.snap_tx_dropped - last.snap_tx_dropped
+                     ELSE curr.snap_tx_dropped END AS tx_dropped_delta,
+                CASE WHEN curr.snap_tx_fifo >= last.snap_tx_fifo
+                     THEN curr.snap_tx_fifo - last.snap_tx_fifo
+                     ELSE curr.snap_tx_fifo END AS tx_fifo_delta,
+                CASE WHEN curr.snap_tx_colls >= last.snap_tx_colls
+                     THEN curr.snap_tx_colls - last.snap_tx_colls
+                     ELSE curr.snap_tx_colls END AS tx_colls_delta,
+                CASE WHEN curr.snap_tx_carrier >= last.snap_tx_carrier
+                     THEN curr.snap_tx_carrier - last.snap_tx_carrier
+                     ELSE curr.snap_tx_carrier END AS tx_carrier_delta,
+                (SELECT interval_sec FROM snap_param) AS interval_sec
+            FROM curr_snap curr
+            INNER JOIN last_snap last ON curr.snap_node_name = last.snap_node_name
+                AND curr.snap_interface_name = last.snap_interface_name
+        )
+        SELECT snap_node_name as "Node", snap_interface_name as "Interface",
+               snap_ip_address as "IP Address", snap_link_speed_mbps as "Link Speed Mbps",
+               snap_dev_type as "Device Type",
+               rx_bytes_delta as "Rx Bytes Delta", rx_packets_delta as "Rx Packets Delta",
+               rx_errors_delta as "Rx Errors Delta", rx_dropped_delta as "Rx Dropped Delta",
+               rx_fifo_delta as "Rx FIFO Delta", rx_frame_delta as "Rx Frame Delta",
+               rx_multicast_delta as "Rx Multicast Delta",
+               tx_bytes_delta as "Tx Bytes Delta", tx_packets_delta as "Tx Packets Delta",
+               tx_errors_delta as "Tx Errors Delta", tx_dropped_delta as "Tx Dropped Delta",
+               tx_fifo_delta as "Tx FIFO Delta", tx_colls_delta as "Tx Colls Delta",
+               tx_carrier_delta as "Tx Carrier Delta",
+               ROUND(rx_bytes_delta::NUMERIC / interval_sec / 1048576, 4) AS "Rx MB/s",
+               ROUND(tx_bytes_delta::NUMERIC / interval_sec / 1048576, 4) AS "Tx MB/s",
+               ROUND(rx_packets_delta::NUMERIC / interval_sec, 2) AS "Rx Pkt/s",
+               ROUND(tx_packets_delta::NUMERIC / interval_sec, 2) AS "Tx Pkt/s",
+               ROUND(rx_errors_delta::NUMERIC / interval_sec, 2) AS "Rx Err/s",
+               ROUND(rx_dropped_delta::NUMERIC / interval_sec, 2) AS "Rx Drop/s",
+               ROUND(tx_carrier_delta::NUMERIC / interval_sec, 2) AS "Tx Carrier Err/s"
+        FROM snap_diff
+    )";
+    appendStringInfo(&query, sql, params->end_snap_id, params->begin_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
 /* summary -host cpu */
 static void get_summary_host_cpu(report_params* params)
 {
@@ -4664,6 +4753,120 @@ static void get_summary_host_memory(report_params* params)
     AppendQueryHostMemory(query, params);
 
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+static void AppendQueryHostDiskIO(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_diff AS (
+            SELECT
+                curr.snap_device_name,
+                GREATEST(curr.snap_total_reads - prev.snap_total_reads, 0)   AS diff_read_cnt,
+                GREATEST(curr.snap_sector_read - prev.snap_sector_read, 0)   AS diff_read_sector,
+                GREATEST(curr.snap_read_time_ms - prev.snap_read_time_ms, 0) AS diff_read_ms,
+                GREATEST(curr.snap_total_writes - prev.snap_total_writes, 0) AS diff_write_cnt,
+                GREATEST(curr.snap_sector_write - prev.snap_sector_write, 0) AS diff_write_sector,
+                GREATEST(curr.snap_write_time_ms - prev.snap_write_time_ms, 0) AS diff_write_ms,
+                curr.snap_sector_size as sector_size,
+                %ld AS interval_sec
+            FROM snapshot.snap_global_os_disk_io_info curr
+            JOIN snapshot.snap_global_os_disk_io_info prev
+                ON curr.snap_device_name = prev.snap_device_name
+                AND curr.snap_node_name = prev.snap_node_name
+            WHERE curr.snapshot_id = %ld
+            AND prev.snapshot_id = %ld
+            and curr.snap_node_name = '%s'
+        )
+        SELECT
+            snap_device_name                                                       AS "Device",
+            ROUND(diff_read_cnt::NUMERIC / interval_sec, 1)                        AS "Reads/s",
+            concat(ROUND((diff_read_sector * sector_size::NUMERIC / 1024) / interval_sec, 1), ' KB')
+                                                                                   AS "Read KB/s",
+            concat(ROUND((diff_read_ms::NUMERIC / 1000) / interval_sec, 1), ' s')  AS "Read Time/s",
+            ROUND(diff_write_cnt::NUMERIC / interval_sec, 1)                       AS "Writes/s",
+            concat(ROUND((diff_write_sector * sector_size::NUMERIC / 1024) / interval_sec, 1), ' KB')
+                                                                                   AS "Write KB/s",
+            concat(ROUND((diff_write_ms::NUMERIC / 1000) / interval_sec, 1), ' s') AS "Write Time/s"
+        FROM snap_diff
+        ORDER BY diff_read_sector * sector_size DESC;
+    )";
+    appendStringInfo(&query, sql, params->snap_gap, params->end_snap_id, params->begin_snap_id,
+                     get_report_node(params));
+}
+
+/* summary -host disk io */
+static void get_summary_host_disk_io(report_params* params)
+{
+    /* supported report type: summary/all */
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node host disk io";
+    const char* note = NULL;
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Host Disk IO";
+    dash->desc = lappend(dash->desc, (void*)desc);
+    note = "Reads/s, Read KB/s and Read Time/s: the count, throughput and time spent of read IO "
+           "per second on the device between two snapshots";
+    dash->desc = lappend(dash->desc, (void*)note);
+    note = "Writes/s, Write KB/s and Write Time/s: the count, throughput and time spent of write IO "
+           "per second on the device between two snapshots";
+    dash->desc = lappend(dash->desc, (void*)note);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_os_disk_io_info")) {
+        AppendQueryHostDiskIO(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+/* summary -host network */
+static void get_summary_host_network(report_params* params)
+{
+    /* supported report type: summary/all */
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node host network";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Host Network";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_os_net_dev_info")) {
+        AppendQueryHostNetwork(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
     pfree(query.data);
 
     GenReport::add_data(dash, &params->Contents);
@@ -5409,6 +5612,12 @@ void GenReport::get_report_data(report_params* params)
     /* summary - Host CPU memory */
     get_summary_host_cpu(params);
     get_summary_host_memory(params);
+
+    /* summary - Host Disk IO */
+    get_summary_host_disk_io(params);
+
+    /* summary - Host Network */
+    get_summary_host_network(params);
 
     /* summary - Global Key Activity */
     get_summary_global_key_activity(params);

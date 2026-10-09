@@ -1,0 +1,33 @@
+-- OS net device statistics: builtin functions and dbe_perf views
+SELECT * FROM pg_catalog.pg_os_net_dev_info() LIMIT 0;
+ interface_name | rx_bytes | rx_packets | rx_errors | rx_dropped | rx_fifo | rx_frame | rx_multicast | tx_bytes | tx_packets | tx_errors | tx_dropped | tx_fifo | tx_colls | tx_carrier 
+----------------+----------+------------+-----------+------------+---------+----------+--------------+----------+------------+-----------+------------+---------+----------+------------
+(0 rows)
+
+SELECT * FROM pg_catalog.pg_os_net_dev_ext() LIMIT 0;
+ interface_name | ip_address | link_speed_mbps | dev_type 
+----------------+------------+-----------------+----------
+(0 rows)
+
+SELECT * FROM dbe_perf.os_net_dev_info LIMIT 0;
+ interface_name | rx_bytes | rx_packets | rx_errors | rx_dropped | rx_fifo | rx_frame | rx_multicast | tx_bytes | tx_packets | tx_errors | tx_dropped | tx_fifo | tx_colls | tx_carrier 
+----------------+----------+------------+-----------+------------+---------+----------+--------------+----------+------------+-----------+------------+---------+----------+------------
+(0 rows)
+
+SELECT * FROM dbe_perf.global_os_net_dev_info LIMIT 0;
+ node_name | interface_name | rx_bytes | rx_packets | rx_errors | rx_dropped | rx_fifo | rx_frame | rx_multicast | tx_bytes | tx_packets | tx_errors | tx_dropped | tx_fifo | tx_colls | tx_carrier 
+-----------+----------------+----------+------------+-----------+------------+---------+----------+--------------+----------+------------+-----------+------------+---------+----------+------------
+(0 rows)
+
+-- the loopback interface always exists
+SELECT count(*) > 0 AS has_loopback FROM dbe_perf.os_net_dev_info WHERE interface_name = 'lo';
+ has_loopback 
+--------------
+ t
+(1 row)
+
+SELECT COALESCE(bool_and(rx_bytes >= 0 AND tx_bytes >= 0), true) AS counters_valid FROM dbe_perf.os_net_dev_info;
+ counters_valid 
+----------------
+ t
+(1 row)
