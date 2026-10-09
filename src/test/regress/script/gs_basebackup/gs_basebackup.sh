@@ -8,10 +8,11 @@ format=${7-}
 # backup 
 if [ 'x'${x_option} == 'x' ]
 then
-    # Compatible with old functions
-    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port > $abs_bindir/../$dataNode.log 2>&1
+    # Compatible with old functions. -c fast skips the spread checkpoint
+    # (checkpoint_timeout is 30min in fastcheck), which otherwise dominates runtime.
+    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -c fast > $abs_bindir/../$dataNode.log 2>&1
 else
-    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -X$x_option -F$format > $abs_bindir/../$dataNode.log 2>&1
+    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -c fast -X$x_option -F$format > $abs_bindir/../$dataNode.log 2>&1
 fi
 
 for gs_basebackup_port in {40000..60000};
@@ -49,7 +50,17 @@ fi
 
 
 $abs_bindir/gs_ctl start -o "-p ${gs_basebackup_port} -c listen_addresses=*" -D $abs_bindir/../$dataNode >> $abs_bindir/../$dataNode.log 2>&1
-sleep 10s
+
+# Wait until the backup node accepts connections. Cap at 10s so a failed
+# start still finishes; a healthy start returns in about 1s instead of 10s.
+i=0
+while [ $i -lt 10 ]; do
+    if $abs_bindir/gs_ctl status -D $abs_bindir/../$dataNode >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+    i=`expr $i + 1`
+done
 
 # ----check start or not
 $abs_bindir/gs_ctl status -D $abs_bindir/../$dataNode

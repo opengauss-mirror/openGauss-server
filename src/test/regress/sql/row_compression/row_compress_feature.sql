@@ -102,7 +102,7 @@ create table compress_normal_user.row_noncompression_test_tbl1(COLUMNONE INTEGER
 insert into compress_normal_user.row_compression_test_tbl1 values(0,'ZAINSERT1','aaaaaaaaaaaaaaaaaaaaaaaa', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
 insert into compress_normal_user.row_compression_test_tbl1 values(1,'ZAINSERT1','aaaaaaaaaaaaaaaa', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
 insert into compress_normal_user.row_compression_test_tbl1 values(2,'ZAINSERT1','aaaaaaaa', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
-insert into compress_normal_user.row_compression_test_tbl1 values(generate_series(3, 1000000),'ZAINSERT1','aaaaaaaabbbbbbbbbbbccccccccaaaaaaaaaaaaaaaa', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');  -- for overload the buffer
+insert into compress_normal_user.row_compression_test_tbl1 values(generate_series(3, 500000),'ZAINSERT1','aaaaaaaabbbbbbbbbbbccccccccaaaaaaaaaaaaaaaa', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');  -- for overload the buffer
 checkpoint;
 select * from compress_normal_user.row_compression_test_tbl1 order by COLUMNONE limit 3; -- seq scan
 select count(*) from compress_normal_user.row_compression_test_tbl1; -- seq scan
@@ -110,25 +110,25 @@ create index compress_normal_user.row_compression_test_tbl1_idx on compress_norm
 checkpoint;
 select * from compress_normal_user.row_compression_test_tbl1 order by COLUMNONE limit 3; -- index scan
 select count(*) from compress_normal_user.row_compression_test_tbl1; -- index scan
-insert into compress_normal_user.row_compression_test_tbl1 values(1000001,'ZAINSERT1','bbbbbbbbbbbbbbbbbbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
-insert into compress_normal_user.row_compression_test_tbl1 values(1000002,'ZAINSERT1','bbbbbbbbbbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
-insert into compress_normal_user.row_compression_test_tbl1 values(1000003,'ZAINSERT1','bbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
+insert into compress_normal_user.row_compression_test_tbl1 values(500001,'ZAINSERT1','bbbbbbbbbbbbbbbbbbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
+insert into compress_normal_user.row_compression_test_tbl1 values(500002,'ZAINSERT1','bbbbbbbbbbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
+insert into compress_normal_user.row_compression_test_tbl1 values(500003,'ZAINSERT1','bbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
 checkpoint;
 insert into compress_normal_user.row_compression_test_tbl1 values(generate_series(3, 10000),'ZAINSERT1','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');
 checkpoint;
-insert into compress_normal_user.row_noncompression_test_tbl1 values(generate_series(0, 1000000),'ZAINSERT1','aaaaaaaabbbbbbbbbbbcccccccc', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');  -- for overload the buffer all
+insert into compress_normal_user.row_noncompression_test_tbl1 values(generate_series(0, 500000),'ZAINSERT1','aaaaaaaabbbbbbbbbbbcccccccc', 2, 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc', 'aaaaaaaabbbbbbbbbbbcccccccc');  -- for overload the buffer all
 checkpoint;
 select * from compress_normal_user.row_compression_test_tbl1 order by COLUMNONE desc limit 3; -- index scan
 select count(*) from compress_normal_user.row_compression_test_tbl1; -- index scan
 
 --12.3: do update operations
-update compress_normal_user.row_noncompression_test_tbl1 set columntwo='ZAUPDATE' where columnone>900000; 
+update compress_normal_user.row_noncompression_test_tbl1 set columntwo='ZAUPDATE' where columnone>450000; 
 select count(*) from compress_normal_user.row_noncompression_test_tbl1;
-update compress_normal_user.row_noncompression_test_tbl1 set columntwo='ZAUPDATE' where columnone<100000; 
+update compress_normal_user.row_noncompression_test_tbl1 set columntwo='ZAUPDATE' where columnone<50000; 
 select count(*) from compress_normal_user.row_noncompression_test_tbl1;
 
 --12.4: do delete operations
-delete from compress_normal_user.row_noncompression_test_tbl1 where columnone>700000;
+delete from compress_normal_user.row_noncompression_test_tbl1 where columnone>350000;
 select count(*) from compress_normal_user.row_noncompression_test_tbl1;
 
 --12.5: do vacuum operations

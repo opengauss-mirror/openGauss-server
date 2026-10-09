@@ -74,25 +74,21 @@ test: gs_dump_package gs_dump_pkgfunc trigger_dump gs_dump_synonym dump_trigger_
 test: public_synonym
 test: out_param_func out_param_func_overload
 #test: sqlcode_cursor
-test: gs_dump_tableconstraint
-test: gs_dump_parallel
+test: gs_dump_tableconstraint gs_dump_parallel
 
 # test AI4DB
 test: plpgsql_override_out test_plsql_core plpgsql/plpgsql_normal plpgsql/plpgsql_othercase plpgsql/plpgsql_unsupported plpgsql_dump plpgsql/plpgsql_table
 test: dts16_plsql_dump
 test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
-test: pldeveloper_gs_source
-test: index_advisor
+test: pldeveloper_gs_source index_advisor
 #test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
 test: gs_dump_tableof view_definer_test view_definer_permission_test
-test: analyze_commands
+test: analyze_commands single_node_ddl single_node_sqlbypass
 #test: single_node_job
-test: single_node_ddl
-test: single_node_sqlbypass
 test: median deferrable
 test: array_funcs array_union first_last_agg
 test: fetch_rows_with_ties
@@ -247,6 +243,7 @@ test: single_node_random transactions_test autocommit_test
 #test: single_node_btree_index single_node_hash_index single_node_update 
 
 test: prefixkey_index invisible_index
+# hash_index_002 continues objects from hash_index_001; must stay serial
 test: hash_index_001
 test: hash_index_002
 test: single_node_update parse_fusion
@@ -325,7 +322,7 @@ test: instr_unique_sql
 test: auto_explain plan_table_for_anonymous_block
 test: shutdown
 
-# List/Hash table exchange
+# List/Hash table exchange (share public table names; must stay serial)
 test: hw_partition_list_exchange
 test: hw_partition_hash_exchange
 
@@ -515,32 +512,14 @@ test: forbid_ddl
 
 #test: gin/cgin
 test: cgin_select ignore_keyword_list keywords
-test: gin_select
-
-#test:long/long raw
-test: long_raw_01
-
-# test for binary_double suffix and Constant values
-test: test_binary_suffix
-
-# test for rotate and unrotate function
-test: gb_ora_rotate_unrotate
+test: gin_select long_raw_01 test_binary_suffix gb_ora_rotate_unrotate
 
 test: pg_identity pg_identity_dump_restore
 
 # test for string type char byte semantic
 test: bpchar_charbyte bpchar_cast bpchar_copy bpchar_index bpchar_regexmatch varchar_charbyte varchar_cast varchar_copy varchar_index varchar_regexmatch char_length_semantic
-test: gs_dump_char_semantic
-test: gs_dump_2hash
-# test backup tool audit log
-test: backup_tool_audit
-test: extra_float_digits
-
-test: auto_parameterization
-test: auto_parameterization_views
-
-# test mot when without mot in compile
-test: mot/without_mot_server
+# dump / audit / auto_parameterization / mot: independent, keep off seg_shrink_table
+test: gs_dump_char_semantic gs_dump_2hash backup_tool_audit extra_float_digits auto_parameterization auto_parameterization_views mot/without_mot_server
 
 # test gs_table_shrink and gs_space_shrink_compact function
 test: seg_shrink_table
@@ -548,15 +527,9 @@ test: seg_shrink_table
 # test single column range query
 test: single_col_range trim_perf_opt
 
-# test pg_indexes_verbose views
-test: pg_indexes_verbose
+# short independent cases; do not merge with sequence_cache (shared tab_record_parall_result)
+test: pg_indexes_verbose wdr_enhance pgstat_opt
 
-# WDR enhance: shared memory / protocol n_calls / db sql / unused indexes
-test: wdr_enhance
-
-# pgstat optimization tests
-test: pgstat_opt
-
-# test global sequence cache
+# test global sequence cache (keep separate: both use tab_record_parall_result)
 test: session_sequence_cache
 test: global_sequence_cache
