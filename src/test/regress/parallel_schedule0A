@@ -551,6 +551,9 @@ test: single_col_range trim_perf_opt
 # test pg_indexes_verbose views
 test: pg_indexes_verbose
 
+# WDR enhance: shared memory / protocol n_calls / db sql / unused indexes
+test: wdr_enhance
+
 # pgstat optimization tests
 test: pgstat_opt
 

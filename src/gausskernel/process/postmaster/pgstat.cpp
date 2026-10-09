@@ -9043,7 +9043,15 @@ static void putSharedMemoryDetailEntry(
  */
 static void appendKeyShmemStructDetail(Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
+    /*
+     * Backends / thread-pool workers may have a NULL local ShmemIndex pointer
+     * (inherited only in postmaster / never reattached). Fall back to the
+     * shared header's index so WDR key components are visible via SQL.
+     */
     HTAB* shmemIndex = t_thrd.shemem_ptr_cxt.ShmemIndex;
+    if (shmemIndex == NULL && t_thrd.shemem_ptr_cxt.ShmemSegHdr != NULL) {
+        shmemIndex = (HTAB*)t_thrd.shemem_ptr_cxt.ShmemSegHdr->index;
+    }
     static const char* directNames[] = {"Buffer Blocks",
         "Buffer Descriptors",
         "Buffer Descriptors Extra",
