@@ -114,6 +114,7 @@ static inline void free_sync_standbys_list(List* sync_standbys);
 static int cmp_lsn(const void *a, const void *b);
 static bool DelayIntoMostAvaSync(bool checkSyncNum, SyncStandbyNumState state = STANDBIES_EMPTY);
 SyncWaitRet SSRealtimeBuildWaitForTime(XLogRecPtr XactCommitLSN);
+void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr);
 
 typedef struct TransContext {
     /* for global */
@@ -290,12 +291,25 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * The WalSndCtl is updated quick by WalSnder as usual, so we may be
      * waitting for a while better, instead of acquiring a lock.
      */
+    bool confirmedLSNPending = XLogRecPtrIsValid(t_thrd.proc->syncSetConfirmedLSN);
+    if (confirmedLSNPending) {
+        t_thrd.proc->syncRepState = SYNC_REP_WAITING;
+    }
+
     #define SYNCREPWAIT_TRY_TIMES 10000
     for (int tryTime = 0; tryTime < SYNCREPWAIT_TRY_TIMES; tryTime++) {
          XLogRecPtr loopLSN = (XLogRecPtr)pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
         if (XLByteLE(XactCommitLSN, loopLSN) && !DelayIntoMostAvaSync(true)) {
-            waitStopRes = SYNC_COMPLETE;
             t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
+            /*
+             * The WALSender must persist confirmed_flush before the commit is
+             * acknowledged.  Fall through to the WALSender handoff when the
+             * transaction has a confirmed LSN to save.
+             */
+            if (XLogRecPtrIsValid(t_thrd.proc->syncSetConfirmedLSN)) {
+                break;
+            }
+            waitStopRes = SYNC_COMPLETE;
             RESUME_INTERRUPTS();
             return REPSYNCED;
         }
@@ -348,10 +362,14 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         }
 #endif
 
+        confirmedLSNPending = XLogRecPtrIsValid(t_thrd.proc->syncSetConfirmedLSN);
+        pg_read_barrier();
         if (XLByteLE(XactCommitLSN, remoteLSN) && !DelayIntoMostAvaSync(true)) {
             t_thrd.proc->syncRepState = SYNC_REP_WAIT_COMPLETE;
-            waitStopRes = SYNC_COMPLETE;
-            break;
+            if (!confirmedLSNPending) {
+                waitStopRes = SYNC_COMPLETE;
+                break;
+            }
         }
 
         /*
@@ -498,16 +516,27 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
          * All Backends will Acquire walSyncRepWaitLock, and wait for release if not hold.
          */
         if (LWLockAcquireOrWait(g_instance.wal_cxt.walSyncRepWaitLock->l.lock, LW_EXCLUSIVE)) {
-            t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = t_thrd.proc;
-            pg_write_barrier();
             ResetLatch(&t_thrd.proc->procLatch);
+            /* Publish the backend state before making the request visible. */
+            pg_write_barrier();
+            t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = t_thrd.proc;
+            if (confirmedLSNPending && t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE) {
+                WalSndWakeup();
+            }
             /*
              * Wait on latch.  Any condition that should wake us up will set the
              * latch. When unexpected condition happend and no one set latch, this backend will
              * wake to deal with after a while.
              */
             WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 1000L);
+            if (confirmedLSNPending) {
+                /* Do not let a WALSender keep using the request after it is unpublished. */
+                (void)LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+            }
             t_thrd.walsender_cxt.WalSndCtl->syncWaitProc = NULL;
+            if (confirmedLSNPending) {
+                LWLockRelease(SyncRepLock);
+            }
             LWLockRelease(g_instance.wal_cxt.walSyncRepWaitLock->l.lock);
         }
         remoteLSN = (XLogRecPtr)pg_atomic_barrier_read_u64(&t_thrd.walsender_cxt.WalSndCtl->lsn[mode]);
@@ -659,6 +688,7 @@ void SyncRepReleaseWaiters(void)
     XLogRecPtr replayPtr;
     bool got_recptr = false;
     bool am_sync = false;
+    bool confirmedLSNHandled = false;
 
     /*
      * If this WALSender is serving a standby that is not on the list of
@@ -704,6 +734,18 @@ void SyncRepReleaseWaiters(void)
                                  t_thrd.walsender_cxt.MyWalSnd->sync_standby_group)));
         }
     }
+
+    PGPROC *proc = walsndctl->syncWaitProc;
+    if (got_recptr && am_sync && proc != NULL) {
+        pg_read_barrier();
+        if (proc->syncRepState == SYNC_REP_WAIT_COMPLETE &&
+            XLogRecPtrIsValid(proc->syncSetConfirmedLSN)) {
+            SetXactLastCommitToSyncedStandby(proc->syncSetConfirmedLSN);
+            pg_write_barrier();
+            proc->syncSetConfirmedLSN = InvalidXLogRecPtr;
+            confirmedLSNHandled = true;
+        }
+    }
     LWLockRelease(SyncRepLock);
     /*
      * If the number of sync standbys is less than requested or we aren't
@@ -731,7 +773,7 @@ void SyncRepReleaseWaiters(void)
     /*
      * Wake Backend if lsn array is updated.
      */
-    if (updateResult) {
+    if (updateResult || confirmedLSNHandled) {
         SyncRepWakeBackend();
     }
 }
