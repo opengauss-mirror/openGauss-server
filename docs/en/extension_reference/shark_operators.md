@@ -50,4 +50,4 @@ opengauss=# select * from test1 where id <    > 3;
 
 ## Related Links<a name="section156744489391"></a>
 
-[Operators](../sql_reference/operators.md)
+[Operators](https://docs.opengauss.org/en/docs/latest/sql_reference/brief_tutorial/operators_1.html)

@@ -342,4 +342,4 @@ openGauss=# select * from ADD_CONSTRAINT_DEFAULT;
 
 ## Related Links<a name="section156744489391"></a>
 
-[ALTER TABLE](../sql_reference/alter_table.md)
+[ALTER TABLE](https://docs.opengauss.org/en/docs/latest/sql_reference/alter_table.html)

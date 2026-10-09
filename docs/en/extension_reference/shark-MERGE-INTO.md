@@ -9,7 +9,7 @@ The MERGE INTO statement matches data in the target table and the source table b
 ## Precautions<a name="zh-cn_topic_0283137308_zh-cn_topic_0237122170_section166351045574"></a>
 
 - The user performing the MERGE INTO operation must have both the UPDATE and INSERT privileges on the target table, as well as the SELECT privilege on the source table.
-- This section only contains the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss MERGE INTO syntax, see [MERGE INTO](../sql_reference/merge_into.md).
+- This section only contains the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss MERGE INTO syntax, see [MERGE INTO](https://docs.opengauss.org/en/docs/latest/sql_reference/merge_into.html).
 - The table_hint clause is newly supported.
 
 ## Syntax<a name="zh-cn_topic_0283137308_zh-cn_topic_0237122170_section10551749579"></a>
@@ -158,4 +158,4 @@ openGauss=# DROP TABLE newproducts;
 
 ## Related Links<a name="section156744489391"></a>
 
-[MERGE INTO](../sql_reference/merge_into.md)
+[MERGE INTO](https://docs.opengauss.org/en/docs/latest/sql_reference/merge_into.html)

@@ -65,4 +65,4 @@ CREATE INDEX
 
 ## Related Links<a name="section156744489391"></a>
 
-[CREATE INDEX](../sql_reference/create_index.md)
+[CREATE INDEX](https://docs.opengauss.org/en/docs/latest/sql_reference/create_index.html)

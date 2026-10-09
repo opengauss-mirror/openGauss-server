@@ -8,7 +8,7 @@ Creates a new stored procedure.
 
 ## Notes<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s31780559299b4f62bec935a2c4679b84"></a>
 
-- This section only contains the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss CREATE PROCEDURE syntax, see [CREATE PROCEDURE](../sql_reference/create_procedure.md).
+- This section only contains the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss CREATE PROCEDURE syntax, see [CREATE PROCEDURE](https://docs.opengauss.org/en/docs/latest/sql_reference/create_procedure.html).
 - The CREATE PROC method is newly supported for creating stored procedures, and its functionality is consistent with the CREATE PROCEDURE method.
 
 ## Syntax<a name="en_topic_0283136578_en_topic_0237122106_en_topic_0059777455_sa24c1a88574742bcb5427f58f5abb732"></a>
@@ -77,4 +77,4 @@ INFO:  call procedure: p2
 
 ## Related Links<a name="section156744489391"></a>
 
-[CREATE PROCEDURE](../sql_reference/create_procedure.md)
+[CREATE PROCEDURE](https://docs.opengauss.org/en/docs/latest/sql_reference/create_procedure.html)

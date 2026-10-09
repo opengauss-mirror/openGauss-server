@@ -10,7 +10,7 @@ The SELECT statement acts as a filter overlaid on database tables, utilizing SQL
 
 ## Notes<a name="zh-cn_topic_0283136463_zh-cn_topic_0237122184_zh-cn_topic_0059777449_s42c37979749545719ac9114594f45d93"></a>
 
-- This section only contains the syntax newly added by Shark. The original openGauss syntax has not been deleted or modified. For the original openGauss SELECT syntax, see [SELECT](../sql_reference/select.md).
+- This section only contains the syntax newly added by Shark. The original openGauss syntax has not been deleted or modified. For the original openGauss SELECT syntax, see [SELECT](https://docs.opengauss.org/en/docs/latest/sql_reference/select.html).
 - The TOP clause is newly supported.
 - The table_hint clause is newly supported.
 
@@ -223,4 +223,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## Related Links<a name="section156744489391"></a>
 
-[SELECT](../sql_reference/select.md)
+[SELECT](https://docs.opengauss.org/en/docs/latest/sql_reference/select.html)

@@ -8,7 +8,7 @@ Modifies the attributes of a custom stored procedure.
 
 ## Notes<a name="zh-cn_topic_0283136578_zh-cn_topic_0237122106_zh-cn_topic_0059777455_s31780559299b4f62bec935a2c4679b84"></a>
 
-- This section contains only the syntax added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss ALTER PROCEDURE syntax, see [ALTER PROCEDURE](../sql_reference/alter_procedure.md).
+- This section contains only the syntax added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss ALTER PROCEDURE syntax, see [ALTER PROCEDURE](https://docs.opengauss.org/en/docs/latest/sql_reference/alter_procedure.html).
 - The ALTER PROC method is newly supported for modifying the attributes of a custom stored procedure, and is functionally identical to the ALTER PROCEDURE approach.
 - ALTER PROCEDURE/PROC COMPILE takes effect only in database A, and returns an error in database D indicating it is not supported.
 
@@ -186,4 +186,4 @@ INFO:  call procedure: p2
 
 ## Related Links<a name="section156744489391"></a>
 
-[ALTER PROCEDURE](../sql_reference/alter_procedure.md)
+[ALTER PROCEDURE](https://docs.opengauss.org/en/docs/latest/sql_reference/alter_procedure.html)

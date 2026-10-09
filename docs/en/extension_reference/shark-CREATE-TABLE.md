@@ -338,4 +338,4 @@ openGauss=# CREATE GLOBAL TEMPORARY TABLE ##gtt1
 
 ## Related Links<a name="section156744489391"></a>
 
-[CREATE TABLE](../sql_reference/create_table.md)
+[CREATE TABLE](https://docs.opengauss.org/en/docs/latest/sql_reference/create_table.html)

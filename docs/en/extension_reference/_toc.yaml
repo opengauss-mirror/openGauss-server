@@ -55,7 +55,6 @@ sections:
             href: ./shark_sql_variant_types.md
           - label: varbinary Type
             href: ./shark_varbinary_types.md
-            href: ./shark_varbinary_types.md
       - label: Functions and Operators
         sections:
           - label: shark - System Information Functions

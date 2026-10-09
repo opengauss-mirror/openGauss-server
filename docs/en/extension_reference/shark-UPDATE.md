@@ -8,7 +8,7 @@ Updates data in a table. UPDATE changes the values of the specified columns in a
 
 ## Precautions<a name="zh-cn_topic_0283137651_zh-cn_topic_0237122194_zh-cn_topic_0059778969_s7e9e912f472543cbb190edb83e5f22d3"></a>
 
-- This section describes only the syntax newly added in shark. The original openGauss UPDATE syntax is not deleted or modified. For details about the original openGauss UPDATE syntax, see [UPDATE](../sql_reference/update.md).
+- This section describes only the syntax newly added in shark. The original openGauss UPDATE syntax is not deleted or modified. For details about the original openGauss UPDATE syntax, see [UPDATE](https://docs.opengauss.org/en/docs/latest/sql_reference/update.html).
 - Support for the table_hint clause is added.
 
 ## Syntax Format<a name="zh-cn_topic_0283137651_zh-cn_topic_0237122194_zh-cn_topic_0059778969_sd8d9ff15ff6c45c9aebd16c861936c07"></a>
@@ -94,4 +94,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## Reference<a name="section156744489391"></a>
 
-[UPDATE](../sql_reference/update.md)
+[UPDATE](https://docs.opengauss.org/en/docs/latest/sql_reference/update.html)

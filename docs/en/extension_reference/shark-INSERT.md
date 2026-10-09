@@ -8,7 +8,7 @@ Adds one or more rows of data to a table.
 
 ## Notes<a name="zh-cn_topic_0283137542_zh-cn_topic_0237122167_zh-cn_topic_0059778902_sdd2da7fe44624eb99ee77013ff96c6bd"></a>
 
-- This section contains only the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss INSERT syntax, see [INSERT](../sql_reference/insert.md).
+- This section contains only the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss INSERT syntax, see [INSERT](https://docs.opengauss.org/en/docs/latest/sql_reference/insert.html).
 - The table_hint clause is newly supported.
 
 ## Syntax<a name="zh-cn_topic_0283137542_zh-cn_topic_0237122167_zh-cn_topic_0059778902_se242be9719f44731b261539dbd42d7b9"></a>
@@ -115,4 +115,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## Related Links<a name="section156744489391"></a>
 
-[INSERT](../sql_reference/insert.md)
+[INSERT](https://docs.opengauss.org/en/docs/latest/sql_reference/insert.html)

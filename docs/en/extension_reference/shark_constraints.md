@@ -10,7 +10,7 @@ Constraints can be column-level or table-level. A column-level constraint applie
 
 The constraints in the shark plugin in openGauss are as follows:
 
-- This section contains only the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss syntax, see [Constraints](../sql_reference/constraints.md).
+- This section contains only the syntax newly added by shark. The original openGauss syntax has not been deleted or modified. For the original openGauss syntax, see [Constraints](https://docs.opengauss.org/en/docs/latest/sql_reference/constraints.html).
 - IDENTITY: Used to create an identity column in a table. It takes effect only in D mode under the shark plugin.
 
 ## IDENTITY Constraint<a name="section11621339171820"></a>
@@ -46,4 +46,4 @@ In an INSERT statement, the current value of the IDENTITY column is not updated 
 
 ## Related Links<a name="section156744489391"></a>
 
-[Constraints](../sql_reference/constraints.md)
+[Constraints](https://docs.opengauss.org/en/docs/latest/sql_reference/constraints.html)

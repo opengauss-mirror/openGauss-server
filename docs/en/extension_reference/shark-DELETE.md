@@ -8,7 +8,7 @@ DELETE deletes rows that satisfy the WHERE clause from the specified table. If t
 
 ## NOTE<a name="zh-cn_topic_0283136795_zh-cn_topic_0237122131_zh-cn_topic_0059778379_sfc96c070e8574f4ea9a2726e898fda17"></a>
 
-- This section contains only the syntax newly added by shark. The original openGauss DELETE syntax has not been deleted or modified. For the original openGauss DELETE syntax, see [DELETE](../sql_reference/delete.md).
+- This section contains only the syntax newly added by shark. The original openGauss DELETE syntax has not been deleted or modified. For the original openGauss DELETE syntax, see [DELETE](https://docs.opengauss.org/en/docs/latest/sql_reference/delete.html).
 - The table_hint clause is newly supported.
 
 ## Syntax<a name="zh-cn_topic_0283136795_zh-cn_topic_0237122131_zh-cn_topic_0059778379_s84baecef89484d5f87f57b0545b46202"></a>
@@ -85,4 +85,4 @@ NOTICE:  The nowait option is currently ignored
 
 ## Related Links<a name="section156744489391"></a>
 
-[DELETE](../sql_reference/delete.md)
+[DELETE](https://docs.opengauss.org/en/docs/latest/sql_reference/delete.html)
