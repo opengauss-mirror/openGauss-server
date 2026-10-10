@@ -1249,6 +1249,24 @@ CREATE UNIQUE INDEX test_at_modify_deferrable_temp_idx ON test_at_modify_deferra
 ALTER TABLE test_at_modify_deferrable_temp ADD CONSTRAINT test_at_modify_deferrable_temp_pkey PRIMARY KEY USING INDEX test_at_modify_deferrable_temp_idx DEFERRABLE INITIALLY DEFERRED; -- ERROR
 DROP TABLE test_at_modify_deferrable_temp;
 
+-- test alter column set not null on the column added with a default value
+CREATE TABLE test_at_set_not_null(a int) WITH(STORAGE_TYPE=USTORE);
+INSERT INTO test_at_set_not_null VALUES(1);
+ALTER TABLE test_at_set_not_null ADD COLUMN b int DEFAULT 0;
+SELECT b, b IS NULL FROM test_at_set_not_null;
+ALTER TABLE test_at_set_not_null ALTER COLUMN b SET NOT NULL;
+INSERT INTO test_at_set_not_null VALUES(2);
+INSERT INTO test_at_set_not_null VALUES(3, NULL); -- ERROR
+SELECT * FROM test_at_set_not_null ORDER BY a;
+DROP TABLE test_at_set_not_null;
+
+-- test alter column set not null on the column added without a default value
+CREATE TABLE test_at_set_not_null_no_def(a int) WITH(STORAGE_TYPE=USTORE);
+INSERT INTO test_at_set_not_null_no_def VALUES(1);
+ALTER TABLE test_at_set_not_null_no_def ADD COLUMN b int;
+ALTER TABLE test_at_set_not_null_no_def ALTER COLUMN b SET NOT NULL; -- ERROR
+DROP TABLE test_at_set_not_null_no_def;
+
 -- END
 RESET CURRENT_SCHEMA;
 DROP SCHEMA atbdb_ustore_schema CASCADE;
