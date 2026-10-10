@@ -33,6 +33,8 @@ sections:
         sections:        
           - label: Vectorized Engine
             href: ./vectorized_engine.md
+          - label: Transition Quantitative Analysis
+            href: ./transition_quantitative_analysis.md
           - label: Configuring Vectorization
             href: ./configuring_vectorization.md
       - label: Configuring SMP
@@ -57,6 +59,8 @@ sections:
             href: ./other_factors_affecting_llvm_performance.md
           - label: Recommended Suggestions for LLVM
             href: ./recommended_suggestions_for_llvm.md
+      - label: Configuring The Parallel Query Function
+        href: ./configuring_the_parallel_query_function.md
       - label: Configuring Ustore
         href: ./configuring_ustore.md
       - label: SMP
@@ -67,6 +71,18 @@ sections:
             href: ./resource_load_management_overview.md
           - label: Resource Management Preparation
             href: ./resource_management_preparation.md
+      - label: Configuring Operator Memory Borrowing
+        href: ./configuring_operator_memory_borrowing.md
+      - label: DPA Hash Aggregation Acceleration
+        href: ./dpa_hash_aggregation_acceleration.md
+      - label: Resource Pooling Performance Optimization
+        sections:    
+          - label: Overview
+            href: ./resource_pooling_performance_optimization.md
+          - label: Transparent Forwarding Within Backup Machine Affairs
+            href: ./transparent_forwarding_within_backup_machine_affairs.md
+          - label: MES worker  Thread Pooling
+            href: ./mes_worker_thread_pooling.md 
   - label: SQL Optimization
     sections:
       - label: Overview
@@ -127,6 +143,8 @@ sections:
             href: ./hint_of_parameterized_paths_at_the_same_level.md
           - label: Hint for Degrading Some Errors to Warnings
             href: ./hint_for_degrading_some_errors_to_warnings.md
+      - label: Heap Tables Support Prefetching
+        href: ./heap_tables_support_prefetching.md
   - label: TPC-C Performance Tuning Test Guide
     sections:
       - label: Overview
@@ -169,5 +187,13 @@ sections:
         href: ./case_rewriting_sql_and_deleting_subqueries_1.md
       - label: Case - Rewriting SQL and Deleting Subqueries (2)
         href: ./case_rewriting_sql_and_deleting_subqueries_2.md
+      - label: 案例：改写SQL消除子查询与使用并行查询
+        href: ./case_rewrite_sql_to_eliminate_subqueries_and_utilize_parallel_query_execution.md  
       - label: Case - Rewriting SQL Statements and Deleting in-clause
         href: ./case_rewriting_sql_statements_and_deleting_in_clause.md
+      - label: 案例：修改启动参数解决TPCC大幅度波动
+        href: ./case_modify_startup_parameters_to_resolve_significant_fluctuation_in_tpcc.md
+      - label: 案例：子事务TPCC性能调优
+        href: ./case_sub_transaction_tpcc_performance_tuning.md
+      - label: 基于内存池共享内存降低RTO时间
+        href: ./shared_memory_based_on_memory_pools_reduces_the_rto_time.md
