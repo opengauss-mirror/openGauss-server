@@ -65,6 +65,10 @@ struct GVPageStorage : public annlite::light_env::PageStorage {
     explicit GVPageStorage(annlite::LightEnv* env, RelationData* index);
     ~GVPageStorage() {}
 
+    /* The worker thread must use a relation opened in its own session. */
+    static void set_worker_index(RelationData* rel) { t_worker_index = rel; }
+    static RelationData* get_worker_index() { return t_worker_index; }
+
     using IndexContext = void*;
     using BlockPointer = uintptr_t;
     using BlockId = uint64_t;
@@ -129,6 +133,14 @@ private:
     annlite::light_env::Allocator* m_alloc;
 
     ReadBufferMode get_read_buffer_mode(annlite::PageInitStrategy pis);
+
+    /* Each worker has its own smgr hash and file descriptor cache. */
+    static thread_local RelationData* t_worker_index;
+
+    RelationData* current_index() const
+    {
+        return t_worker_index != nullptr ? t_worker_index : m_index;
+    }
 };
 
 }

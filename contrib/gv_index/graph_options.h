@@ -36,7 +36,6 @@
 #include "lite/subindex/dist_metric/vector_distance_type.h"
 
 #define GRAPH_INDEX_DISTANCE_PROC 1
-#define DatumGetVector(x) ((annlite::NewVector *) PG_DETOAST_DATUM(x))
 
 struct GraphScanCtidTuple {
     ItemPointerData tid;
@@ -58,11 +57,12 @@ typedef GraphScanOpaqueData *GraphScanOpaque;
 
 struct GraphOptions {
     StdRdOptions std_options;
-    char *storage_type;                     /* storage_type: ustore/astore */
+    char *storage_type;                     /* storage_type: auto/ustore/astore */
     int subgraph_count;                     /* subgraph count, must be > 0 */
     int num_parallels;                      /* max threads for build */
     int graph_degree;                       /* graph degree */
     char *quantization_type;                /* quantization type: lvq/pq */
+    char *pruneAlg;                         /* prune algorithm: vamana/npu_knn */
     bool enable_neighbor_embedded;          /* embedded neighbor vectors (experimental legacy, auto-disabled) */
     bool enable_vector_copy;                /* copy vectors during build */
     bool build_with_quantized_vector;       /* use quantized vectors during build */
@@ -81,8 +81,9 @@ struct GraphOptions {
  *   FIELD: GraphOptions 结构体中的成员名（必须与结构体字段名一致，否则编译报错）
  */
 #define GRAPH_RELOPTIONS(XX) \
-    XX("storage_type", "storage_type: ustore/astore", STRING, "astore", 0, 0, NULL, storage_type) \
+    XX("storage_type", "storage_type: auto/ustore/astore", STRING, "auto", 0, 0, ValidateStorageTypeOption, storage_type) \
     XX("quantization_type", "quantization type: lvq/pq", STRING, "lvq", 0, 0, NULL, quantization_type) \
+    XX("prune_alg", "prune algorithm: vamana/npu_knn", STRING, "vamana", 0, 0, ValidatePruneAlg, pruneAlg) \
     XX("subgraph_count", "number of subgraphs", INT, 1, 1, 64, 0, subgraph_count) \
     XX("num_parallels", "max threads for build", INT, 32, 1, 64, 0, num_parallels) \
     XX("graph_degree", "graph degree", INT, 96, 8, 256, 0, graph_degree) \

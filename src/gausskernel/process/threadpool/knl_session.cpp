@@ -1621,6 +1621,8 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->hnsw_distributed_probes = 0;
     datavec_cxt->ivfpq_kreorder = 0;
     datavec_cxt->diskann_probes = 0;
+    datavec_cxt->npuDeviceMask = DEFAULT_NPU_DEVICE_MASK;
+    datavec_cxt->npuDeviceMaxMem = DEFAULT_NPU_DEVICE_MAX_MEM_KB;
     datavec_cxt->diskann_build_in_memory = false;
     datavec_cxt->rbq_refinek = 0.0;
     datavec_cxt->enable_npu = false;

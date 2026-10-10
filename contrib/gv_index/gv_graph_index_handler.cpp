@@ -27,6 +27,7 @@
  */
 
 #include <filesystem>
+#include <cfloat>
 #include "postgres.h"
 #include "fmgr.h"
 #include "access/genam.h"
@@ -37,6 +38,7 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/bytea.h"
+#include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/catcache.h"
 #include "utils/syscache.h"
@@ -124,90 +126,176 @@ static annlite::IndexOptions make_quant_opts(const char *quant_type, uint32_t di
     return annlite::VectorQuantizationConfig::make_quantized_lvq(dim, default_lvq_clusters);
 }
 
-/* 填充 build_options, 使用 GraphOptions 中用户指定的参数，缺失则用默认值 */
-static annlite::IndexOptions build_options_from_graph_options(Relation index, GraphOptions *opts,
-    annlite::VectorDistanceType dist_type)
+struct GraphBuildOptionValues {
+    int dim;
+    int subgraphCount;
+    int numParallels;
+    int graphDegree;
+    bool enableNeighborEmbedded;
+    bool enableVectorCopy;
+    bool buildWithQuantizedVector;
+    const char *quantType;
+    const char *pruneAlg;
+    int pruneAlgorithm;
+    bool isUstore;
+};
+
+static int ResolvePruneAlgorithm(const char *pruneAlg)
 {
-    /* 从rd_att读取向量维度（validate_and_adjust_graph_options 已确保dim > 0） */
-    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
-
-    /* 使用options中的值（validate_and_adjust_graph_options 已确保subgraph_count > 0） */
-    int subgraph_count = opts->subgraph_count;
-    int num_parallels = opts->num_parallels;
-    int graph_degree = opts->graph_degree;
-    bool enable_neighbor_embedded = opts->enable_neighbor_embedded;
-    bool enable_vector_copy = opts->enable_vector_copy;
-    bool build_with_quantized_vec = opts->build_with_quantized_vector;
-
-    const char *quant_type = (char *)opts + *(int *)&(opts->quantization_type);
-    const char *storage_type = (char *)opts + *(int *)&(opts->storage_type);
-
-    /* 从 storage_type 派生 is_ustore 标志 */
-    bool is_ustore = (storage_type != NULL && strcmp(storage_type, "ustore") == 0);
-    if (!is_ustore) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("graph_index doesn't support astore")));
+    bool useNpu = pg_strcasecmp(pruneAlg, "npu_knn") == 0;
+    if (!useNpu) {
+        return annlite::patVAMANA;
     }
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("NPU pruning is not supported in multiple-node builds"),
+                    errhint("Use prune_alg=vamana or build a single-node server.")));
+    return annlite::patVAMANA;
+#elif defined(GV_INDEX_NPU_AVAILABLE)
+    if (!u_sess->datavec_ctx.enable_npu) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("NPU pruning requires enable_npu to be on"),
+                        errhint("Set enable_npu=on or use prune_alg=vamana.")));
+    }
+    return annlite::patNPU_KNN;
+#else
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("NPU support is not available in the installed GaussVector component"),
+                    errhint("Install an NPU-enabled component or use prune_alg=vamana.")));
+    return annlite::patVAMANA;
+#endif
+}
 
-    FAST_NOTICE("graph_index.distance_type = %d (%s)", (int)dist_type,
-        annlite::VectorDistanceTypeNameParser::name(dist_type));
-    FAST_NOTICE("graph_index.subgraph_count = %d", subgraph_count);
-    FAST_NOTICE("graph_index.num_parallels = %d", num_parallels);
-    FAST_NOTICE("graph_index.graph_degree = %d", graph_degree);
-    FAST_NOTICE("graph_index.dim = %d", dim);
-    FAST_NOTICE("graph_index.quantization_type = %s", quant_type);
-    FAST_NOTICE("graph_index.is_ustore = %s", is_ustore ? "true" : "false");
-    FAST_NOTICE("graph_index.enable_neighbor_embedded = %s", enable_neighbor_embedded ? "true" : "false");
-    FAST_NOTICE("graph_index.enable_vector_copy = %s", enable_vector_copy ? "true" : "false");
-    FAST_NOTICE("graph_index.build_with_quantized_vector = %s", build_with_quantized_vec ? "true" : "false");
+static bool ValidateStorageType(Relation heap, const char *storageType)
+{
+    bool isUstore = RelationIsUstoreFormat(heap);
+    if (!isUstore && !RelationIsAstoreFormat(heap)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("gv_graph only supports ASTORE and USTORE heap relations")));
+    }
+    const char *expectedStorageType = isUstore ? "ustore" : "astore";
+    if (storageType != NULL && pg_strcasecmp(storageType, "auto") != 0 &&
+        pg_strcasecmp(storageType, expectedStorageType) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("storage_type \"%s\" does not match heap storage type \"%s\"",
+                               storageType == NULL ? "<null>" : storageType, expectedStorageType)));
+    }
+    return isUstore;
+}
 
-    annlite::IndexOptions bopt = {
-        {"distance_type", (int)dist_type},
-        {"max_threads", (int)num_parallels},
+static GraphBuildOptionValues ReadGraphBuildOptionValues(Relation heap, Relation index, GraphOptions *opts)
+{
+    GraphBuildOptionValues values;
+    values.dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    values.subgraphCount = opts->subgraph_count;
+    values.numParallels = opts->num_parallels;
+    values.graphDegree = opts->graph_degree;
+    values.enableNeighborEmbedded = opts->enable_neighbor_embedded;
+    values.enableVectorCopy = opts->enable_vector_copy;
+    values.buildWithQuantizedVector = opts->build_with_quantized_vector;
+    values.quantType = (char *)opts + *(int *)&(opts->quantization_type);
+    const char *storageType = (char *)opts + *(int *)&(opts->storage_type);
+    values.pruneAlg = opts->pruneAlg == NULL ? "vamana" : (char *)opts + *(int *)&(opts->pruneAlg);
+    values.pruneAlgorithm = ResolvePruneAlgorithm(values.pruneAlg);
+    values.isUstore = ValidateStorageType(heap, storageType);
+    return values;
+}
+
+static void LogGraphBuildOptions(const GraphBuildOptionValues &values, annlite::VectorDistanceType distType)
+{
+    FAST_NOTICE("graph_index.distance_type = %d (%s)", (int)distType,
+        annlite::VectorDistanceTypeNameParser::name(distType));
+    FAST_NOTICE("graph_index.subgraph_count = %d", values.subgraphCount);
+    FAST_NOTICE("graph_index.num_parallels = %d", values.numParallels);
+    FAST_NOTICE("graph_index.graph_degree = %d", values.graphDegree);
+    FAST_NOTICE("graph_index.dim = %d", values.dim);
+    FAST_NOTICE("graph_index.quantization_type = %s", values.quantType);
+    FAST_NOTICE("graph_index.prune_alg = %s", values.pruneAlg);
+    FAST_NOTICE("graph_index.is_ustore = %s", values.isUstore ? "true" : "false");
+    FAST_NOTICE("graph_index.enable_neighbor_embedded = %s", values.enableNeighborEmbedded ? "true" : "false");
+    FAST_NOTICE("graph_index.enable_vector_copy = %s", values.enableVectorCopy ? "true" : "false");
+    FAST_NOTICE("graph_index.build_with_quantized_vector = %s", values.buildWithQuantizedVector ? "true" : "false");
+}
+
+static annlite::IndexOptions MakeBaseBuildOptions(const GraphBuildOptionValues &values,
+    annlite::VectorDistanceType distType)
+{
+    annlite::IndexOptions buildOptions = {
+        {"distance_type", (int)distType},
+        {"max_threads", (int)values.numParallels},
         {"builder_type", (int)annlite::GraphBuilderType::gbmVamanaDiskGraphBuilder},
         {"edge_builder_type", (int)annlite::EdgeBuilderType::ebtCpuDefaultBuilder},
-        {"prune_algorithm", (int)annlite::patVAMANA},
+        {"prune_algorithm", (int)values.pruneAlgorithm},
         {"work_mem", 16_GB},
         {"shared_mem", 16_GB},
         {"instruction_set", (int)annlite::IS_NEON},
         {"vector_transform_options.transform_type", (int)annlite::tsOriginal},
-        {"vector_transform_options.dimension", (int)dim},
-        {"vector_transform_options.transform_dim", (int)dim},
-        {"build_with_quantized_vector", (bool)build_with_quantized_vec},
+        {"vector_transform_options.dimension", (int)values.dim},
+        {"vector_transform_options.transform_dim", (int)values.dim},
+        {"build_with_quantized_vector", (bool)values.buildWithQuantizedVector},
         {"enable_hnsw_navigator", (bool)false},
         {"enable_bptree", (bool)true},
-        {"enable_vector_copy", (bool)enable_vector_copy},
+        {"enable_vector_copy", (bool)values.enableVectorCopy},
         {"enable_lsg", (bool)false},
         {"neighbor_format", (int)annlite::NeighborOptions::nftNeighborOnly},
-        {"neighbor_options.enable_neighbor_embedded", (bool)enable_neighbor_embedded},
-        {"subgraph_options.subgraph_count", (int)subgraph_count},
+        {"neighbor_options.enable_neighbor_embedded", (bool)values.enableNeighborEmbedded},
+        {"subgraph_options.subgraph_count", (int)values.subgraphCount},
         {"subgraph_options.subgraph_max_relative_size", (int)1},
         {"subgraph_options.subgraph_vertex_duplication", (int)2},
-        {"graph_degree", (int)graph_degree},
+        {"graph_degree", (int)values.graphDegree},
         {"graph_degree_redundancy", (double)0.3},
         {"insert_beam_search_limit", (int)100},
         {"insert_candidates_limit", (int)400},
         {"enable_pq_min_rows", (int)256},
-        {"is_ustore", (bool)is_ustore}
+        {"is_ustore", (bool)values.isUstore}
     };
-    /* Append quantization config - fp32 则不追加任何量化参数 */
-    annlite::IndexOptions quant_opts = make_quant_opts(quant_type, (uint32_t)dim);
-    bopt.append_all(quant_opts);
-    return bopt;
+    return buildOptions;
+}
+
+#if defined(GV_INDEX_NPU_AVAILABLE) && !defined(ENABLE_MULTIPLE_NODES)
+static void AppendNpuBuildOptions(annlite::IndexOptions &buildOptions, const GraphBuildOptionValues &values)
+{
+    if (values.pruneAlgorithm == annlite::patNPU_KNN) {
+        if (u_sess->datavec_ctx.npuDeviceMask < 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("npu_device_mask must be non-negative")));
+        }
+        annlite::IndexOptions npuOptions = {
+            {"npu_device_mask", u_sess->datavec_ctx.npuDeviceMask},
+            {"npu_device_max_mem", static_cast<size_t>(u_sess->datavec_ctx.npuDeviceMaxMem) * 1024}
+        };
+        buildOptions.append_all(npuOptions);
+    }
+}
+#endif
+
+/* 填充 build_options, 使用 GraphOptions 中用户指定的参数，缺失则用默认值 */
+static annlite::IndexOptions build_options_from_graph_options(Relation heap, Relation index, GraphOptions *opts,
+    annlite::VectorDistanceType dist_type)
+{
+    GraphBuildOptionValues values = ReadGraphBuildOptionValues(heap, index, opts);
+    LogGraphBuildOptions(values, dist_type);
+    annlite::IndexOptions buildOptions = MakeBaseBuildOptions(values, dist_type);
+    buildOptions.append_all(make_quant_opts(values.quantType, (uint32_t)values.dim));
+#if defined(GV_INDEX_NPU_AVAILABLE) && !defined(ENABLE_MULTIPLE_NODES)
+    AppendNpuBuildOptions(buildOptions, values);
+#endif
+    return buildOptions;
 }
 
 static void graph_build_indexfile(Relation heap, Relation index, IndexInfo *index_info, GraphOptions *opts,
-    annlite::VectorDistanceType dist_type)
+    annlite::VectorDistanceType dist_type, double *heapTuples, double *indexTuples)
 {
     using KeyBase = float;
     using LightEnvImpl = gs_vector::GVLightEnvImpl;
     using IndexType = annlite::Index<KeyBase, annlite::Value64, uint32_t, annlite::PageBasedToolKitEnv>;
 
     LightEnvImpl light_env_impl(index);
-    annlite::IndexOptions build_options = build_options_from_graph_options(index, opts, dist_type);
+    annlite::IndexOptions build_options = build_options_from_graph_options(heap, index, opts, dist_type);
 
     // 数据源 - 从堆表读取向量数据，返回annlite::Value64(二进制与GraphValueTypeV3兼容)
     using DataSource = gs_vector::GVDataSourceImpl<KeyBase, annlite::Value64>;
-    DataSource data_source(heap, index, index_info, true);
+    DataSource data_source(heap, index, index_info, RelationIsUstoreFormat(heap));
 
     IndexType* graph_index = CreateGraphIndex(&light_env_impl);
     // create_metapage 内部会先调用DocFactory::init初始化存储，再创建page0的metapage
@@ -215,6 +303,8 @@ static void graph_build_indexfile(Relation heap, Relation index, IndexInfo *inde
     graph_index->train(&data_source, build_options);
     graph_index->close();
     DestroyGraphIndex(graph_index);
+    *heapTuples = data_source.heap_tuples();
+    *indexTuples = data_source.index_tuples();
 }
 
 /*
@@ -236,6 +326,7 @@ static IndexBuildResult* gv_graph_ambuild(Relation heap, Relation index, IndexIn
         Datum reloptions_datum = get_index_reloptions_datum(RelationGetRelid(index));
         if (reloptions_datum != (Datum)0) {
             index->rd_options = gv_graph_amoptions(reloptions_datum, true);
+            pfree(DatumGetPointer(reloptions_datum));
         } else {
             index->rd_options = gv_graph_amoptions((Datum)0, true);
         }
@@ -247,15 +338,12 @@ static IndexBuildResult* gv_graph_ambuild(Relation heap, Relation index, IndexIn
         RelationGetRelationName(index), (void*)index->rd_options, (int)dist_type);
     /* 校验并调整参数（在构建开始前完成） */
     validate_and_adjust_graph_options(index, opts);
-    graph_build_indexfile(heap, index, indexInfo, opts, dist_type);
+    graph_build_indexfile(heap, index, indexInfo, opts, dist_type, &result->heap_tuples, &result->index_tuples);
 
     /* 刷所有索引页到WAL日志并提交 */
     RelationOpenSmgr(index);
     gv_graph_xlog_write_page(index, smgrnblocks(index->rd_smgr, MAIN_FORKNUM),
                              RM_GRAPH_ID, XLOG_GRAPH_WRITE_FULL_PAGES);
-
-    result->heap_tuples = 0;
-    result->index_tuples = 0;
 
     return result;
 }
@@ -273,6 +361,10 @@ static bool gv_graph_aminsert(Relation index, Datum *values, const bool *isnull,
                         ItemPointer heap_tid, Relation heap, IndexUniqueCheck checkUnique)
 {
     FAST_NOTICE("aminsert called (index: %s)", RelationGetRelationName(index));
+
+    if (isnull[0]) {
+        return false;
+    }
 
     Datum src = values[0];
     Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
@@ -306,6 +398,9 @@ static bool gv_graph_aminsert(Relation index, Datum *values, const bool *isnull,
 
         pfree_ext(itup);
     }
+    if (DatumGetPointer(dst) != DatumGetPointer(src)) {
+        pfree(DatumGetPointer(dst));
+    }
     return true;
 }
 
@@ -320,15 +415,31 @@ static void graph_vacuum(Relation index, IndexBulkDeleteResult *stats,
     annlite::IndexOptions vaccum_options = {{"needs_wal", (bool)true}, {"enable_bptree", (bool)true}};
     IndexType* graph_index = CreateGraphIndex(&light_env_impl);
     graph_index->open(true);
-    bool is_ustore = false;
     annlite::VectorMetaPage meta;
-    if (graph_index->read_metapage(meta)) {
-        is_ustore = meta.is_ustore;
+    if (!graph_index->read_metapage(meta)) {
+        graph_index->close();
+        DestroyGraphIndex(graph_index);
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("failed to read gv_graph metapage for index \"%s\"",
+                               RelationGetRelationName(index))));
     }
-    VacuumFilter<annlite::Value64> filter(index, is_ustore, callback, callback_state);
+    bool isUstore = meta.is_ustore;
+    VacuumFilter<annlite::Value64> filter(index, isUstore, callback, callback_state);
     graph_index->bulk_delete(filter, vaccum_options);
     graph_index->close();
     DestroyGraphIndex(graph_index);
+}
+
+static IndexBulkDeleteResult *gv_graph_update_vacuum_stats(IndexVacuumInfo *info,
+                                                           IndexBulkDeleteResult *stats)
+{
+    if (stats == NULL) {
+        stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
+    }
+    stats->num_pages = RelationGetNumberOfBlocks(info->index);
+    stats->num_index_tuples = info->num_heap_tuples;
+    stats->estimated_count = info->estimated_count;
+    return stats;
 }
 
 /* 4. ambulkdelete */
@@ -350,6 +461,7 @@ static IndexBulkDeleteResult *gv_graph_ambulkdelete(IndexVacuumInfo *info, Index
     if (!IndexIsLive(index->rd_index)) {
         return stats;
     }
+    stats = gv_graph_update_vacuum_stats(info, stats);
     graph_vacuum(index, stats, callback, callback_state);
     return stats;
 }
@@ -363,9 +475,7 @@ static IndexBulkDeleteResult *gv_graph_amvacuumcleanup(IndexVacuumInfo *info, In
     if (info->analyze_only) {
         return stats;
     }
-    IndexBulkDeleteResult *bulk_delete_res = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
-    stats = bulk_delete_res;
-    graph_vacuum(info->index, stats, NULL, NULL);
+    stats = gv_graph_update_vacuum_stats(info, stats);
     return stats;
 }
 
@@ -375,6 +485,13 @@ static void gv_graph_amcostestimate(PlannerInfo *root, IndexPath *path, double l
                                Cost *indexStartupCost, Cost *indexTotalCost,
                                Selectivity *indexSelectivity, double *indexCorrelation)
 {
+    if (path->indexorderbys == NULL) {
+        *indexStartupCost = DBL_MAX;
+        *indexTotalCost = DBL_MAX;
+        *indexSelectivity = 0;
+        *indexCorrelation = 0;
+        return;
+    }
     Relation indexRel = NULL;
     indexRel = index_open(path->indexinfo->indexoid, AccessShareLock);
     FAST_NOTICE("amcostestimate called (index: %s)", RelationGetRelationName(indexRel));
@@ -404,7 +521,7 @@ static bytea *gv_graph_amoptions(Datum reloptions, bool validate)
      * set the varlena header (VARSIZE) for relcache. fill_rel_options does this
      * internally but we set it explicitly here as a safeguard. */
     Size total_string_size = 0;
-    options = parseRelOptions(reloptions, false, gv_graph_kind_id, &numoptions);
+    options = parseRelOptions(reloptions, validate, gv_graph_kind_id, &numoptions);
 
     /* if none set, still return a default-initialized struct (ambuild expects non-null rd_options) */
     if (numoptions == 0) {
@@ -421,7 +538,7 @@ static bytea *gv_graph_amoptions(Datum reloptions, bool validate)
     }
     Size total_size = sizeof(GraphOptions) + total_string_size;
     rdopts = (GraphOptions *)allocateReloptStruct(sizeof(GraphOptions), options, numoptions);
-    fillRelOptions((void *)rdopts, sizeof(GraphOptions), options, numoptions, false,
+    fillRelOptions((void *)rdopts, sizeof(GraphOptions), options, numoptions, validate,
         graph_relopt_tab, lengthof(graph_relopt_tab));
     /* free string value copies allocated by parse_rel_options */
     for (int i = 0; i < numoptions; i++) {
@@ -474,9 +591,8 @@ static void gv_graph_amrescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanK
 
     so->first = true;
     so->next_scan_index = 0;
-    if (so->ctid_tuples != nullptr) {
-        pfree(so->ctid_tuples);
-    }
+    so->total_num_tuple = 0;
+    pfree_ext(so->ctid_tuples);
     if (keys && scan->numberOfKeys >0) {
         rc = memmove_s(scan->keyData, (size_t)(scan->numberOfKeys * sizeof(ScanKeyData)), keys,
                         (size_t)(scan->numberOfKeys * sizeof(ScanKeyData)));
@@ -489,12 +605,59 @@ static void gv_graph_amrescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanK
     }
 }
 
+template <typename ResultSet>
+static void CopyUniqueScanResults(ResultSet &resultSet, size_t count, size_t requestedCount, GraphScanOpaque so)
+{
+    HASHCTL hashCtl;
+    MemSet(&hashCtl, 0, sizeof(hashCtl));
+    hashCtl.keysize = sizeof(ItemPointerData);
+    hashCtl.entrysize = sizeof(ItemPointerData);
+    hashCtl.hcxt = CurrentMemoryContext;
+    HTAB *seenTids = hash_create("gv_graph scan TID dedup", Max((long)count, 1L), &hashCtl,
+                                 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    size_t uniqueCount = 0;
+    so->ctid_tuples = (GraphScanCtidTuple *)palloc0(
+        sizeof(GraphScanCtidTuple) * Max(requestedCount, (size_t)1));
+    for (size_t i = 0; i < count && uniqueCount < requestedCount; ++i) {
+        const auto* entry = reinterpret_cast<const GraphValueTypeV3*>(&resultSet[i].value());
+        ItemPointerData sourceTid = entry->index_tuple.t_tid;
+        ItemPointerData tidKey;
+        MemSet(&tidKey, 0, sizeof(tidKey));
+        ItemPointerSet(&tidKey, ItemPointerGetBlockNumber(&sourceTid), ItemPointerGetOffsetNumber(&sourceTid));
+        bool found = false;
+        (void)hash_search(seenTids, (void *)&tidKey, HASH_ENTER, &found);
+        if (!found) {
+            so->ctid_tuples[uniqueCount++].tid = tidKey;
+        }
+    }
+    hash_destroy(seenTids);
+    so->total_num_tuple = uniqueCount;
+    FAST_NOTICE("GRAPH_tuples_returned: raw=%zu unique=%zu", count, uniqueCount);
+}
+
 void graph_index_first(IndexScanDesc scan, GraphScanOpaque so)
 {
-    annlite::NewVector *vector = DatumGetVector(scan->orderByData->sk_argument);
+    if (scan->numberOfOrderBys < 1 || scan->orderByData == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("gv_graph index scans require an ORDER BY vector distance expression")));
+    }
+    if ((scan->orderByData->sk_flags & SK_ISNULL) != 0) {
+        so->total_num_tuple = 0;
+        return;
+    }
+    Datum queryDatum = scan->orderByData->sk_argument;
+    Datum detoastedQuery = PointerGetDatum(PG_DETOAST_DATUM(queryDatum));
+    annlite::NewVector *vector = (annlite::NewVector *)DatumGetPointer(detoastedQuery);
     size_t dim = vector->dim;
 
-    size_t rerank_ncandidates = (size_t)u_sess->attr.attr_common.gv_graph_nprobes;
+    size_t requestedCandidates = (size_t)u_sess->attr.attr_common.gv_graph_nprobes;
+    size_t subgraphCount = 1;
+    GraphOptions *opts = (GraphOptions *)scan->indexRelation->rd_options;
+    if (opts != NULL) {
+        subgraphCount = (size_t)Max(opts->subgraph_count, 1);
+    }
+    size_t rawCandidates = Min(requestedCandidates * subgraphCount, (size_t)INT_MAX);
 
     using KeyBase = float;
     using LightEnvImpl = gs_vector::GVLightEnvImpl;
@@ -507,7 +670,7 @@ void graph_index_first(IndexScanDesc scan, GraphScanOpaque so)
     using ResultSet = typename annlite::PageBasedToolKitEnv::Memory::template SmallArray<ValuePair>;
     using AllocatorWrapper = annlite::toolkit::AllocatorWrapper;
     AllocatorWrapper allocator(&light_env_impl);
-    ResultSet result_set(allocator, rerank_ncandidates);
+    ResultSet result_set(allocator, rawCandidates);
 
     IndexType* graph_index = CreateGraphIndex(&light_env_impl);
     graph_index->open(false);
@@ -515,33 +678,37 @@ void graph_index_first(IndexScanDesc scan, GraphScanOpaque so)
     annlite::VectorMetaPage meta;
     bool need_normalize = true;
     bool is_ustore = false;
-    if (graph_index->read_metapage(meta)) {
-        need_normalize = (meta.dist_type == annlite::COSINE_DIST_FUNC);
-        is_ustore = meta.is_ustore;
+    if (!graph_index->read_metapage(meta)) {
+        graph_index->close();
+        DestroyGraphIndex(graph_index);
+        result_set.destructor();
+        if (DatumGetPointer(detoastedQuery) != DatumGetPointer(queryDatum)) {
+            pfree(DatumGetPointer(detoastedQuery));
+        }
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("failed to read gv_graph metapage for index \"%s\"",
+                               RelationGetRelationName(scan->indexRelation))));
     }
-    DataSourceIter iter(scan->heapRelation, scan->indexRelation, true);
+    need_normalize = (meta.dist_type == annlite::COSINE_DIST_FUNC);
+    is_ustore = meta.is_ustore;
+    DataSourceIter iter(scan->heapRelation, scan->indexRelation, is_ustore);
     SelectFilter<annlite::Value64> filter(scan, is_ustore);
     annlite::IndexOptions search_options = {
         {"search_type", (int)annlite::NORMAL_ANN},
-        {"candidates", (int)rerank_ncandidates},
+        {"candidates", (int)rawCandidates},
         {"enable_brute_force_threshold", (int)0},
         {"need_normalized", (bool)need_normalize}};
     FAST_NOTICE("GRAPH_search need_normalize=%d dist_type=%d", (int)need_normalize, (int)meta.dist_type);
-    size_t count = graph_index->search(&result_set[0], rerank_ncandidates, &vector->x[0], dim, filter, search_options,
+    size_t count = graph_index->search(&result_set[0], rawCandidates, &vector->x[0], dim, filter, search_options,
                                         iter, meta.dist_type);
     graph_index->close();
     DestroyGraphIndex(graph_index);
     iter.close();
-    so->total_num_tuple = count;
-    FAST_NOTICE("GRAPH_tuples_returned: %zu", count);
-    // no rerank now
-    so->ctid_tuples = (GraphScanCtidTuple *)palloc0(sizeof(GraphScanCtidTuple) * so->total_num_tuple);
-    for (size_t i = 0; i < (size_t)so->total_num_tuple; ++i) {
-        // Value64(binary-compatible with GraphValueTypeV3):
-        const auto* entry = reinterpret_cast<const GraphValueTypeV3*>(&result_set[i].value());
-        so->ctid_tuples[i].tid = entry->index_tuple.t_tid;
-    }
+    CopyUniqueScanResults(result_set, count, requestedCandidates, so);
     result_set.destructor();
+    if (DatumGetPointer(detoastedQuery) != DatumGetPointer(queryDatum)) {
+        pfree(DatumGetPointer(detoastedQuery));
+    }
 }
 
 /* 11. amgettuple */
@@ -576,7 +743,7 @@ static void gv_graph_amendscan(IndexScanDesc scan)
     FAST_NOTICE("amendscan called");
     GraphScanOpaque so = (GraphScanOpaque)scan->opaque;
 
-    pfree(so->ctid_tuples);
+    pfree_ext(so->ctid_tuples);
     pfree(so);
     scan->opaque = NULL;
 }
@@ -588,6 +755,9 @@ static bool gv_graph_amdelete(Relation index, Datum *values, const bool *isnull,
 {
     FAST_NOTICE("amdelete called (index:%s, is_rollback:%s)",
         RelationGetRelationName(index), isRollbackIndex ? "true" : "false");
+    if (isnull[0]) {
+        return false;
+    }
     using KeyBase = float;
     using LightEnvImpl = gs_vector::GVLightEnvImpl;
     using IndexType = annlite::Index<KeyBase, annlite::Value64, uint32_t, annlite::PageBasedToolKitEnv>;
@@ -599,7 +769,7 @@ static bool gv_graph_amdelete(Relation index, Datum *values, const bool *isnull,
         IndexTuple itup = index_form_tuple(curDesc, values, &fake_isnull[0]);
         pfree(curDesc);
         itup->t_tid = *heap_t_ctid;
-        VectorIndexXidData vxid;
+        VectorIndexXidData vxid = {InvalidTransactionId, InvalidTransactionId};
         DeleteFilter<annlite::Value64> filter(index, itup, FrozenTransactionId);
         GraphValueTypeV3 value(itup, vxid);
 
@@ -617,6 +787,162 @@ static bool gv_graph_amdelete(Relation index, Datum *values, const bool *isnull,
     return true;
 }
 
+extern "C" Datum gv_graph_ambuild_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_ambuild_sql);
+Datum gv_graph_ambuild_sql(PG_FUNCTION_ARGS)
+{
+    enum { HEAP_RELATION_ARG = 0, INDEX_RELATION_ARG, INDEX_INFO_ARG };
+    PG_RETURN_POINTER(gv_graph_ambuild((Relation)PG_GETARG_POINTER(HEAP_RELATION_ARG),
+        (Relation)PG_GETARG_POINTER(INDEX_RELATION_ARG), (IndexInfo *)PG_GETARG_POINTER(INDEX_INFO_ARG)));
+}
+
+extern "C" Datum gv_graph_ambuildempty_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_ambuildempty_sql);
+Datum gv_graph_ambuildempty_sql(PG_FUNCTION_ARGS)
+{
+    enum { INDEX_RELATION_ARG = 0 };
+    gv_graph_ambuildempty((Relation)PG_GETARG_POINTER(INDEX_RELATION_ARG));
+    PG_RETURN_VOID();
+}
+
+extern "C" Datum gv_graph_aminsert_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_aminsert_sql);
+Datum gv_graph_aminsert_sql(PG_FUNCTION_ARGS)
+{
+    enum { INDEX_RELATION_ARG = 0, VALUES_ARG, IS_NULL_ARG, HEAP_TID_ARG, HEAP_RELATION_ARG, UNIQUE_CHECK_ARG };
+    PG_RETURN_BOOL(gv_graph_aminsert((Relation)PG_GETARG_POINTER(INDEX_RELATION_ARG),
+        (Datum *)PG_GETARG_POINTER(VALUES_ARG), (const bool *)PG_GETARG_POINTER(IS_NULL_ARG),
+        (ItemPointer)PG_GETARG_POINTER(HEAP_TID_ARG), (Relation)PG_GETARG_POINTER(HEAP_RELATION_ARG),
+        (IndexUniqueCheck)PG_GETARG_INT32(UNIQUE_CHECK_ARG)));
+}
+
+extern "C" Datum gv_graph_ambulkdelete_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_ambulkdelete_sql);
+Datum gv_graph_ambulkdelete_sql(PG_FUNCTION_ARGS)
+{
+    enum { VACUUM_INFO_ARG = 0, STATS_ARG, CALLBACK_ARG, CALLBACK_STATE_ARG };
+    PG_RETURN_POINTER(gv_graph_ambulkdelete((IndexVacuumInfo *)PG_GETARG_POINTER(VACUUM_INFO_ARG),
+        (IndexBulkDeleteResult *)PG_GETARG_POINTER(STATS_ARG),
+        (IndexBulkDeleteCallback)PG_GETARG_POINTER(CALLBACK_ARG), PG_GETARG_POINTER(CALLBACK_STATE_ARG)));
+}
+
+extern "C" Datum gv_graph_amvacuumcleanup_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amvacuumcleanup_sql);
+Datum gv_graph_amvacuumcleanup_sql(PG_FUNCTION_ARGS)
+{
+    enum { VACUUM_INFO_ARG = 0, STATS_ARG };
+    PG_RETURN_POINTER(gv_graph_amvacuumcleanup((IndexVacuumInfo *)PG_GETARG_POINTER(VACUUM_INFO_ARG),
+        (IndexBulkDeleteResult *)PG_GETARG_POINTER(STATS_ARG)));
+}
+
+extern "C" Datum gv_graph_amcostestimate_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amcostestimate_sql);
+Datum gv_graph_amcostestimate_sql(PG_FUNCTION_ARGS)
+{
+    enum {
+        ROOT_ARG = 0,
+        INDEX_PATH_ARG,
+        LOOP_COUNT_ARG,
+        STARTUP_COST_ARG,
+        TOTAL_COST_ARG,
+        SELECTIVITY_ARG,
+        CORRELATION_ARG
+    };
+    gv_graph_amcostestimate((PlannerInfo *)PG_GETARG_POINTER(ROOT_ARG),
+        (IndexPath *)PG_GETARG_POINTER(INDEX_PATH_ARG), PG_GETARG_FLOAT8(LOOP_COUNT_ARG),
+        (Cost *)PG_GETARG_POINTER(STARTUP_COST_ARG), (Cost *)PG_GETARG_POINTER(TOTAL_COST_ARG),
+        (Selectivity *)PG_GETARG_POINTER(SELECTIVITY_ARG), (double *)PG_GETARG_POINTER(CORRELATION_ARG));
+    PG_RETURN_VOID();
+}
+
+extern "C" Datum gv_graph_amoptions_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amoptions_sql);
+Datum gv_graph_amoptions_sql(PG_FUNCTION_ARGS)
+{
+    enum { RELOPTIONS_ARG = 0, VALIDATE_ARG };
+    bytea *result = gv_graph_amoptions(PG_GETARG_DATUM(RELOPTIONS_ARG), PG_GETARG_BOOL(VALIDATE_ARG));
+    if (result != NULL) {
+        PG_RETURN_BYTEA_P(result);
+    }
+    PG_RETURN_NULL();
+}
+
+extern "C" Datum gv_graph_ambeginscan_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_ambeginscan_sql);
+Datum gv_graph_ambeginscan_sql(PG_FUNCTION_ARGS)
+{
+    enum { INDEX_RELATION_ARG = 0, KEY_COUNT_ARG, ORDER_BY_COUNT_ARG };
+    PG_RETURN_POINTER(gv_graph_ambeginscan((Relation)PG_GETARG_POINTER(INDEX_RELATION_ARG),
+        PG_GETARG_INT32(KEY_COUNT_ARG), PG_GETARG_INT32(ORDER_BY_COUNT_ARG)));
+}
+
+extern "C" Datum gv_graph_amrescan_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amrescan_sql);
+Datum gv_graph_amrescan_sql(PG_FUNCTION_ARGS)
+{
+    enum { SCAN_ARG = 0, KEYS_ARG, KEY_COUNT_ARG, ORDER_BYS_ARG, ORDER_BY_COUNT_ARG };
+    gv_graph_amrescan((IndexScanDesc)PG_GETARG_POINTER(SCAN_ARG), (ScanKey)PG_GETARG_POINTER(KEYS_ARG),
+        PG_GETARG_INT32(KEY_COUNT_ARG), (ScanKey)PG_GETARG_POINTER(ORDER_BYS_ARG),
+        PG_GETARG_INT32(ORDER_BY_COUNT_ARG));
+    PG_RETURN_VOID();
+}
+
+extern "C" Datum gv_graph_amgettuple_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amgettuple_sql);
+Datum gv_graph_amgettuple_sql(PG_FUNCTION_ARGS)
+{
+    enum { SCAN_ARG = 0, DIRECTION_ARG };
+    PG_RETURN_BOOL(gv_graph_amgettuple((IndexScanDesc)PG_GETARG_POINTER(SCAN_ARG),
+        (ScanDirection)PG_GETARG_INT32(DIRECTION_ARG)));
+}
+
+extern "C" Datum gv_graph_amendscan_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amendscan_sql);
+Datum gv_graph_amendscan_sql(PG_FUNCTION_ARGS)
+{
+    enum { SCAN_ARG = 0 };
+    gv_graph_amendscan((IndexScanDesc)PG_GETARG_POINTER(SCAN_ARG));
+    PG_RETURN_VOID();
+}
+
+extern "C" Datum gv_graph_amdelete_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT PG_FUNCTION_INFO_V1(gv_graph_amdelete_sql);
+Datum gv_graph_amdelete_sql(PG_FUNCTION_ARGS)
+{
+    enum { INDEX_RELATION_ARG = 0, VALUES_ARG, IS_NULL_ARG, HEAP_TID_ARG, IS_INPLACE_UPDATE_ARG };
+    PG_RETURN_BOOL(gv_graph_amdelete((Relation)PG_GETARG_POINTER(INDEX_RELATION_ARG),
+        (Datum *)PG_GETARG_POINTER(VALUES_ARG), (const bool *)PG_GETARG_POINTER(IS_NULL_ARG),
+        (ItemPointer)PG_GETARG_POINTER(HEAP_TID_ARG), PG_GETARG_BOOL(IS_INPLACE_UPDATE_ARG)));
+}
+
+static void SetGraphAmFunctionNames(IndexAmRoutine *amroutine)
+{
+    errno_t rc = strcpy_s(amroutine->ambuildfuncname, NAMEDATALEN, "gv_graph_ambuild_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->ambuildemptyfuncname, NAMEDATALEN, "gv_graph_ambuildempty_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->aminsertfuncname, NAMEDATALEN, "gv_graph_aminsert_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->ambulkdeletefuncname, NAMEDATALEN, "gv_graph_ambulkdelete_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amvacuumcleanupfuncname, NAMEDATALEN, "gv_graph_amvacuumcleanup_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amcostestimatefuncname, NAMEDATALEN, "gv_graph_amcostestimate_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amoptionsfuncname, NAMEDATALEN, "gv_graph_amoptions_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->ambeginscanfuncname, NAMEDATALEN, "gv_graph_ambeginscan_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amrescanfuncname, NAMEDATALEN, "gv_graph_amrescan_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amgettuplefuncname, NAMEDATALEN, "gv_graph_amgettuple_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amendscanfuncname, NAMEDATALEN, "gv_graph_amendscan_sql");
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(amroutine->amdeletefuncname, NAMEDATALEN, "gv_graph_amdelete_sql");
+    securec_check(rc, "\0", "\0");
+}
+
 Datum gv_graph_index_handler(PG_FUNCTION_ARGS)
 {
     IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
@@ -625,7 +951,7 @@ Datum gv_graph_index_handler(PG_FUNCTION_ARGS)
     amroutine->amstrategies = 0;
     amroutine->amsupport = 5;
     amroutine->amoptsprocnum = 0;
-    amroutine->amcanorder = true;
+    amroutine->amcanorder = false;
     amroutine->amcanorderbyop = true;
     amroutine->amcanbackward = false;
     amroutine->amcanunique = false;
@@ -661,5 +987,6 @@ Datum gv_graph_index_handler(PG_FUNCTION_ARGS)
     amroutine->amgetbitmap = NULL;
     amroutine->ammarkpos = NULL;
 
+    SetGraphAmFunctionNames(amroutine);
     PG_RETURN_POINTER(amroutine);
 }

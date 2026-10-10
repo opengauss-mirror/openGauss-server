@@ -37,6 +37,7 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/bytea.h"
+#include "utils/datum.h"
 #include "utils/memutils.h"
 #include "utils/catcache.h"
 #include "utils/syscache.h"
@@ -52,6 +53,25 @@
 #include "pg_init.h"
 #include "storage/smgr/smgr.h"
 #include "access/generic_xlog.h"
+
+static void ValidatePruneAlg(const char *value)
+{
+    if (pg_strcasecmp(value, "vamana") != 0 && pg_strcasecmp(value, "npu_knn") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid prune_alg value \"%s\"", value),
+                        errhint("Valid values are \"vamana\" and \"npu_knn\".")));
+    }
+}
+
+static void ValidateStorageTypeOption(const char *value)
+{
+    if (pg_strcasecmp(value, "auto") != 0 && pg_strcasecmp(value, "astore") != 0 &&
+        pg_strcasecmp(value, "ustore") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid storage_type value \"%s\"", value),
+                        errhint("Valid values are \"auto\", \"astore\", and \"ustore\".")));
+    }
+}
 
 /*
  * 使用 GRAPH_RELOPTIONS X-macro 生成 add_*_reloption 调用。
@@ -125,20 +145,17 @@ void gv_graph_xlog_write_page(Relation rel, BlockNumber nblocks, RmgrId rmid, ui
  */
 Datum get_index_reloptions_datum(Oid indexId)
 {
-    Relation pgclassRel = index_open(indexId, AccessShareLock);
     Datum reloptions = (Datum)0;
 
-    /* pgclassRel 的 rd_att 就是 pg_class 的 TupleDesc */
     HeapTuple tuple = SearchSysCache1(RELOID, indexId);
     if (HeapTupleIsValid(tuple)) {
         bool isnull;
-        reloptions = fastgetattr(tuple, Anum_pg_class_reloptions, pgclassRel->rd_att, &isnull);
-        if (isnull)
-            reloptions = (Datum)0;
+        Datum cachedReloptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
+        if (!isnull) {
+            reloptions = datumCopy(cachedReloptions, false, -1);
+        }
         ReleaseSysCache(tuple);
     }
-
-    index_close(pgclassRel, AccessShareLock);
     return reloptions;
 }
 
