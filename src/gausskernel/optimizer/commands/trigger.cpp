@@ -3190,7 +3190,6 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
         utuple->disk_tuple = &tbuf.hdr;
         utuple->ctid = *tid;
 
-
         ExecSetSlotDescriptor(slot, relation->rd_att);
         if (newSlot != NULL) {
             TM_Result inplacetest;
@@ -3204,6 +3203,7 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
             /*
              * lock inplacetuple for update
              */
+ultrmark:
             inplacetest = tableam_tuple_lock(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation, utuple,
                 &buffer, estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd, false, false, false,
                 estate->es_snapshot, tid, false);
@@ -3227,34 +3227,64 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
                      */
                     if (tmfd.cmax != estate->es_output_cid)
                         ereport(ERROR, (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
-                            errmsg("tuple to be updated was already modified by an operation triggered by the current "
-                                   "command"),
-                            errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes "
-                                    "to other rows.")));
+                            errmsg("tuple to be updated was already modified by an operation triggered by "
+                                   "the current command"),
+                            errhint("Consider using an AFTER trigger instead of a BEFORE trigger to "
+                                    "propagate changes to other rows.")));
 
                     /* treat it as deleted; do not process */
                     return NULL;
 
                 case TM_Ok:
-                    *newSlot = NULL;
                     ExecStoreTuple(utuple, slot, InvalidBuffer, false);
                     result = ExecCopySlotTuple(slot);
                     ReleaseBuffer(buffer);
 
                     break;
 
-                case TM_Updated:
+                case TM_Updated: {
+                    ReleaseBuffer(buffer);
                     if (IsolationUsesXactSnapshot())
                         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
 
+                    /*
+                     * Recheck the tuple using EPQ. For MERGE, we leave this
+                     * to the caller (it must do additional rechecking, and
+                     * might end up executing a different action entirely).
+                     */
                     if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE) {
-                        ReleaseBuffer(buffer);
                         result = NULL;
                         break;
                     }
-                    elog(ERROR, "unexpected table_tuple_lock status: %u", inplacetest);
+
+                    /* it was updated, so look at the updated version */
+                    TupleTableSlot* epqslot = NULL;
+
+                    epqslot = EvalPlanQual(
+                        estate, epqstate, RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation,
+                        relinfo->ri_RangeTableIndex, LockTupleExclusive, &tmfd.ctid, tmfd.xmax, false);
+                    if (!TupIsNull(epqslot)) {
+                        *tid = tmfd.ctid;
+                        *newSlot = epqslot;
+
+                        /*
+                         * EvalPlanQual already locked the tuple, but we
+                         * re-call uheap lock tuple anyway as an easy way of
+                         * re-fetching the correct tuple.  Speed is hardly a
+                         * criterion in this path anyhow.
+                         */
+                        utuple->ctid = *tid;
+                        goto ultrmark;
+                    }
+
+                    /*
+                     * if tuple was deleted or PlanQual failed for updated tuple -
+                     * we must not process this tuple!
+                     */
+                    result = NULL;
                     break;
+                }
 
                 case TM_Deleted:
                     if (IsolationUsesXactSnapshot())
