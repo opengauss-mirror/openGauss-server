@@ -557,6 +557,7 @@ typedef struct _SubscriptionInfo {
     char *subpublications;
     char *subbinary;
     char *submatchddlowner;
+    char *substreaming;
 } SubscriptionInfo;
 
 /*

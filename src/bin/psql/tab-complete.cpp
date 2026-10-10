@@ -869,7 +869,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
     /* ALTER SUBSCRIPTION <name> SET ( */
     else if (pg_strcasecmp(PREV5_WD, "ALTER") == 0 && pg_strcasecmp(PREV4_WD, "SUBSCRIPTION") == 0 &&
         pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "(") == 0) {
-        static const char * const listAlterSubSet2[] = {"slot_name", "synchronous_commit", NULL};
+        static const char * const listAlterSubSet2[] = {"slot_name", "synchronous_commit", "streaming", NULL};
         COMPLETE_WITH_LIST(listAlterSubSet2);
     }
 

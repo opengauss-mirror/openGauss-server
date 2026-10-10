@@ -63,6 +63,12 @@ static void pg_output_begin(
 static void pg_decode_commit_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
 static void pg_decode_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
 static void pg_decode_prepare_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
+static void pg_decode_stream_start(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
+static void pg_decode_stream_stop(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
+static void pg_decode_stream_abort(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr abort_lsn);
+static void pg_decode_stream_commit(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
+static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation rel,
+                                   ReorderBufferChange* change);
 static void pg_decode_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
     int nrelations, Relation relations[], ReorderBufferChange *change);
 static void pg_decode_change(
@@ -73,6 +79,39 @@ static void pg_decode_ddl(LogicalDecodingContext *ctx,
                           const char *prefix, Oid relid,
                           DeparsedCommandType cmdtype,
                           Size sz, const char *message);
+
+typedef struct MppdbDecodingTxnData {
+    bool xactWroteChanges;
+    bool streamWroteChanges;
+    bool streamStarted;
+} MppdbDecodingTxnData;
+
+static MppdbDecodingTxnData* get_txn_data(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, bool create)
+{
+    if (txn == NULL)
+        return NULL;
+    MppdbDecodingTxnData* data = (MppdbDecodingTxnData*)txn->output_plugin_private;
+    if (data == NULL && create) {
+        data = (MppdbDecodingTxnData*)MemoryContextAllocZero(ctx->context, sizeof(MppdbDecodingTxnData));
+        txn->output_plugin_private = data;
+    }
+    return data;
+}
+
+static void free_txn_data(ReorderBufferTXN* txn)
+{
+    if (txn != NULL && txn->output_plugin_private != NULL) {
+        pfree(txn->output_plugin_private);
+        txn->output_plugin_private = NULL;
+    }
+}
+
+static void mark_stream_top_change(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
+{
+    ReorderBufferTXN* toptxn = rbtxn_get_toptxn(txn);
+    if (toptxn != txn)
+        get_txn_data(ctx, toptxn, true)->xactWroteChanges = true;
+}
 
 void _PG_init(void)
 {
@@ -94,6 +133,11 @@ void _PG_output_plugin_init(OutputPluginCallbacks* cb)
     cb->filter_by_origin_cb = pg_decode_filter;
     cb->shutdown_cb = pg_decode_shutdown;
     cb->ddl_cb = pg_decode_ddl;
+    cb->stream_start_cb = pg_decode_stream_start;
+    cb->stream_stop_cb = pg_decode_stream_stop;
+    cb->stream_abort_cb = pg_decode_stream_abort;
+    cb->stream_commit_cb = pg_decode_stream_commit;
+    cb->stream_change_cb = pg_decode_stream_change;
 }
 
 /* initialize this plugin */
@@ -114,6 +158,7 @@ static void pg_decode_startup(LogicalDecodingContext* ctx, OutputPluginOptions* 
     data->only_local = true;
     data->tableWhiteList = NIL;
     data->include_originid = false;
+    data->enable_streaming = false;
 
     /* read default option from GUC */
     DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();
@@ -129,6 +174,7 @@ static void pg_decode_startup(LogicalDecodingContext* ctx, OutputPluginOptions* 
     foreach (option, ctx->output_plugin_options) {
         ParseDecodingOptionPlugin(option, data, opt);
     }
+    ctx->streaming &= data->enable_streaming;
 }
 
 /* cleanup this plugin's resources */
@@ -146,8 +192,9 @@ static void pg_decode_shutdown(LogicalDecodingContext* ctx)
 static void pg_decode_begin_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
 {
     PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
 
-    data->xact_wrote_changes = false;
+    txndata->xactWroteChanges = false;
     if (data->skip_empty_xacts)
         return;
 
@@ -171,9 +218,13 @@ static void pg_output_begin(LogicalDecodingContext* ctx, PluginTestDecodingData*
 static void pg_decode_commit_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn)
 {
     PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    bool xactWroteChanges = txndata->xactWroteChanges;
+    free_txn_data(txn);
 
-    if (data->skip_empty_xacts && !data->xact_wrote_changes)
+    if (data->skip_empty_xacts && !xactWroteChanges) {
         return;
+    }
 
     OutputPluginPrepareWrite(ctx, true);
     if (data->include_xids)
@@ -192,9 +243,12 @@ static void pg_decode_commit_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* 
 static void pg_decode_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
 {
     PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
-
-    if (data->skip_empty_xacts && !data->xact_wrote_changes)
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    bool xactWroteChanges = txndata->xactWroteChanges;
+    free_txn_data(txn);
+    if (data->skip_empty_xacts && !xactWroteChanges) {
         return;
+    }
 
     OutputPluginPrepareWrite(ctx, true);
     if (data->include_xids)
@@ -208,13 +262,84 @@ static void pg_decode_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* t
     OutputPluginWrite(ctx, true);
 }
 
+static void pg_decode_stream_start(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
+{
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    txndata->streamWroteChanges = false;
+    txndata->streamStarted = !((PluginTestDecodingData*)ctx->output_plugin_private)->skip_empty_xacts;
+    if (!txndata->streamStarted) {
+        return;
+    }
+    OutputPluginPrepareWrite(ctx, true);
+    appendStringInfo(ctx->out, "{\"type\":\"stream_start\",\"xid\":%lu}", txn->xid);
+    OutputPluginWrite(ctx, true);
+}
+
+static void pg_decode_stream_stop(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
+{
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    if (!txndata->streamStarted) {
+        return;
+    }
+    OutputPluginPrepareWrite(ctx, true);
+    appendStringInfo(ctx->out, "{\"type\":\"stream_stop\",\"xid\":%lu}", txn->xid);
+    OutputPluginWrite(ctx, true);
+}
+
+static void pg_decode_stream_abort(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr abort_lsn)
+{
+    ReorderBufferTXN* toptxn = rbtxn_get_toptxn(txn);
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, toptxn, true);
+    bool xactWroteChanges = txndata->xactWroteChanges;
+    PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
+    if (txn == toptxn)
+        free_txn_data(toptxn);
+    if (data->skip_empty_xacts && !xactWroteChanges) {
+        return;
+    }
+    OutputPluginPrepareWrite(ctx, true);
+    appendStringInfo(ctx->out, "{\"type\":\"stream_abort\",\"xid\":%lu}", txn->xid);
+    OutputPluginWrite(ctx, true);
+}
+
+static void pg_decode_stream_commit(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn)
+{
+    PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    bool xactWroteChanges = txndata->xactWroteChanges;
+    free_txn_data(txn);
+    if (data->skip_empty_xacts && !xactWroteChanges) {
+        return;
+    }
+    OutputPluginPrepareWrite(ctx, true);
+    appendStringInfo(ctx->out, "{\"type\":\"stream_commit\",\"xid\":%lu}", txn->xid);
+    OutputPluginWrite(ctx, true);
+}
+
+static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation rel,
+                                   ReorderBufferChange* change)
+{
+    PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    txndata->streamWroteChanges = true;
+    mark_stream_top_change(ctx, txn);
+    if (data->skip_empty_xacts && !txndata->streamStarted) {
+        OutputPluginPrepareWrite(ctx, true);
+        appendStringInfo(ctx->out, "{\"type\":\"stream_start\",\"xid\":%lu}", txn->xid);
+        OutputPluginWrite(ctx, true);
+        txndata->streamStarted = true;
+    }
+    pg_decode_change(ctx, txn, rel, change);
+}
+
 /* PREPARE callback */
 static void pg_decode_prepare_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
 {
     PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
-
-    if (data->skip_empty_xacts && !data->xact_wrote_changes)
+    MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+    if (data->skip_empty_xacts && !txndata->xactWroteChanges) {
         return;
+    }
 
     OutputPluginPrepareWrite(ctx, true);
     if (data->include_xids)
@@ -325,11 +450,19 @@ static void pg_decode_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *tx
 
     data = (PluginTestDecodingData*)ctx->output_plugin_private;
 
-    /* output BEGIN if we haven't yet */
-    if (data->skip_empty_xacts && !data->xact_wrote_changes) {
-        pg_output_begin(ctx, data, txn, false);
+    if (ctx->streaming) {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
+        txndata->streamWroteChanges = true;
+        mark_stream_top_change(ctx, txn);
+    } else {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
     }
-    data->xact_wrote_changes = true;
 
     /* Avoid leaking memory by using and resetting our own context */
     old = MemoryContextSwitchTo(data->context);
@@ -377,12 +510,19 @@ static void pg_decode_change(
     char* res = NULL;
     data = (PluginTestDecodingData*)ctx->output_plugin_private;
 
-    /* output BEGIN if we haven't yet */
-    if (data->skip_empty_xacts && !data->xact_wrote_changes && txn != nullptr) {
-        pg_output_begin(ctx, data, txn, false);
+    if (ctx->streaming) {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges && txn != nullptr)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
+        txndata->streamWroteChanges = true;
+        mark_stream_top_change(ctx, txn);
+    } else {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges && txn != nullptr)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
     }
-    data->xact_wrote_changes = true;
-
     class_form = RelationGetForm(relation);
     tupdesc = RelationGetDescr(relation);
 
@@ -522,11 +662,19 @@ static void pg_decode_ddl(LogicalDecodingContext *ctx,
 
     data = (PluginTestDecodingData *)ctx->output_plugin_private;
 
-    /* Output BEGIN if we haven't yet */
-    if (data->skip_empty_xacts && !data->xact_wrote_changes) {
-        pg_output_begin(ctx, data, txn, false);
+    if (ctx->streaming) {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
+        txndata->streamWroteChanges = true;
+        mark_stream_top_change(ctx, txn);
+    } else {
+        MppdbDecodingTxnData* txndata = get_txn_data(ctx, txn, true);
+        if (data->skip_empty_xacts && !txndata->xactWroteChanges)
+            pg_output_begin(ctx, data, txn, false);
+        txndata->xactWroteChanges = true;
     }
-    data->xact_wrote_changes = true;
 
     /* Avoid leaking memory by using and resetting our own context */
     old = MemoryContextSwitchTo(data->context);
