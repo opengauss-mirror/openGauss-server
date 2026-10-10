@@ -40,6 +40,7 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "executor/instrument.h"
+#include "pgstat_threadio_stats.h"
 #include "gssignal/gs_signal.h"
 #include "knl/knl_thread.h"
 #include "optimizer/cost.h"
@@ -2023,6 +2024,17 @@ static void KnlTSmbWriterInit(KnlTSmbWriterContext *smbWriterCxt)
     smbWriterCxt->smbWriterAuxIdx = -1;
 }
 
+static inline void knl_thread_io_stat_init(
+    PgStat_ThreadIOStats (*local_thread_io_stats)[THREAD_IO_OBJECT_MAX][THREAD_IO_CONTEXT_MAX])
+{
+    MemSet(local_thread_io_stats, 0, sizeof(*local_thread_io_stats));
+}
+
+static inline void knl_thread_io_stat_init_single(PgStat_ThreadIOStats* stats)
+{
+    MemSet(stats, 0, sizeof(PgStat_ThreadIOStats));
+}
+
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
@@ -2163,6 +2175,7 @@ void knl_thread_init(knl_thread_role role)
 #endif
     knl_t_inval_msg_init(&t_thrd.inval_msg_cxt);
     KnlTSmbWriterInit(&t_thrd.smbWriterCxt);
+    knl_thread_io_stat_init(&t_thrd.local_thread_io_stats);
 }
 
 void knl_thread_layout_dump(void)

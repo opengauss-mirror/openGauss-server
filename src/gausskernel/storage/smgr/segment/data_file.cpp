@@ -28,6 +28,7 @@
 #include "commands/verify.h"
 #include "executor/executor.h"
 #include "pgstat.h"
+#include "portability/instr_time.h"
 #include "storage/smgr/fd.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/smgr/segment.h"
@@ -888,7 +889,9 @@ int seg_sync_filetag(const FileTag *ftag, char *path)
     SegPhysicalFile *sf = &lf->segfiles[ftag->segno];
 
     SegmentCheck((uint32)sf->sliceno == ftag->segno);
+    ThreadIoTimer timer;
     int ret = pg_fsync(sf->fd);
+    pgstat_track_thread_io_fsync(IO_OBJECT_RELATION, IO_CONTEXT_NORMAL, timer.elapsed_us());
 
     ereport(DEBUG1, (errmsg("segment fsync %s", path)));
 

@@ -2993,6 +2993,11 @@ void vacuum_delay_point(void)
     /* Always check for interrupts */
     CHECK_FOR_INTERRUPTS();
 
+    /* Flush thread IO stats periodically during long scans so that they are
+     * not held locally until the operation ends. Safe mid-transaction: table
+     * statistics are not touched here, unlike pgstat_report_stat(). */
+    pgstat_flush_threadio_stats();
+
     /* Nap if appropriate */
     if (t_thrd.vacuum_cxt.VacuumCostActive && !InterruptPending &&
         t_thrd.vacuum_cxt.VacuumCostBalance >= u_sess->attr.attr_storage.VacuumCostLimit) {

@@ -1441,6 +1441,8 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
         do_autovacuum();
     }
 
+    pgstat_send_threadio_stats();
+
     /*
      * The launcher will be notified of my death in ProcKill, *if* we managed
      * to get a worker slot at all

@@ -2061,6 +2061,7 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
     bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
     if (found) {
         u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
+        pgstat_track_thread_io_hit(IO_OBJECT_TEMP_RELATION, IO_CONTEXT_NORMAL);
     } else {
         u_sess->instr_cxt.pg_buffer_usage->local_blks_read++;
         pgstatCountLocalBlocksRead4SessionLevel();
@@ -2147,6 +2148,27 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
     pg_atomic_write_u32(((volatile uint32 *)&bufHdr->state) + 1, buf_state >> 32);
 
     return BufferDescriptorGetBuffer(bufHdr);
+}
+
+static inline ThreadIOContextType get_io_context_from_strategy(BufferAccessStrategy strategy)
+{
+    if (strategy != NULL) {
+        switch (strategy->btype) {
+            case BAS_BULKREAD:
+                return IO_CONTEXT_BULKREAD;
+            case BAS_BULKWRITE:
+                return IO_CONTEXT_BULKWRITE;
+            case BAS_VACUUM:
+                return IO_CONTEXT_VACUUM;
+            default:
+                break;
+        }
+    }
+
+    if (t_thrd.role == APPLY_WORKER || t_thrd.role == APPLY_LAUNCHER)
+        return IO_CONTEXT_REPLICATION;
+
+    return IO_CONTEXT_NORMAL;
 }
 
 /*
@@ -2270,7 +2292,11 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                     rdStatus =  SMGR_RD_CRC_ERROR;
                 }
             } else {
+                ThreadIOContextType saved_io_context = t_thrd.cur_thread_io_context;
+                if (AmStartupProcess() || AmPageRedoWorker())
+                    t_thrd.cur_thread_io_context = IO_CONTEXT_RECOVERY;
                 rdStatus = smgrread(smgr, forkNum, blockNum, (char *)bufBlock);
+                t_thrd.cur_thread_io_context = saved_io_context;
                 if (rdStatus == SMGR_RD_RETRY) {
                     *need_repair = true;
                     return false;
@@ -2584,6 +2610,7 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
         bufHdr = LocalBufferAlloc(smgr, forkNum, firstBlockNum, &found);
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
+            pgstat_track_thread_io_hit(IO_OBJECT_TEMP_RELATION, IO_CONTEXT_NORMAL);
         } else {
             u_sess->instr_cxt.pg_buffer_usage->local_blks_read++;
             pgstatCountLocalBlocksRead4SessionLevel();
@@ -2605,6 +2632,7 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
         }
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
+            pgstat_track_thread_io_hit(IO_OBJECT_RELATION, get_io_context_from_strategy(strategy));
         } else {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_read++;
             pgstatCountSharedBlocksRead4SessionLevel();
@@ -2684,7 +2712,10 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
     }
     
     /* Bulk-read function, read a batch of pages from disk */
+    ThreadIOContextType saved_io_context = t_thrd.cur_thread_io_context;
+    t_thrd.cur_thread_io_context = get_io_context_from_strategy(strategy);
     smgrbulkread(smgr, forkNum, firstBlockNum, actual_bulk_count, buf_read);
+    t_thrd.cur_thread_io_context = saved_io_context;
     
     /* We start to get blocks from buf_read one by one */
     for (index = 0; index < actual_bulk_count; index++) {
@@ -2858,6 +2889,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
+            pgstat_track_thread_io_hit(IO_OBJECT_TEMP_RELATION, IO_CONTEXT_NORMAL);
         } else {
             u_sess->instr_cxt.pg_buffer_usage->local_blks_read++;
             pgstatCountLocalBlocksRead4SessionLevel();
@@ -2876,7 +2908,10 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
          * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
          * not currently in memory.
          */
+        ThreadIOContextType saved_io_context = t_thrd.cur_thread_io_context;
+        t_thrd.cur_thread_io_context = get_io_context_from_strategy(strategy);
         bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+        t_thrd.cur_thread_io_context = saved_io_context;
         if (bufHdr == NULL) {
             SSErrorIfPageReadCancelPending();
             if (ENABLE_DMS && AmDmsProcess() && !dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) &&
@@ -2892,6 +2927,7 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
         }
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
+            pgstat_track_thread_io_hit(IO_OBJECT_RELATION, get_io_context_from_strategy(strategy));
         } else {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_read++;
             pgstatCountSharedBlocksRead4SessionLevel();
@@ -3204,8 +3240,11 @@ neon_replica_read_page:
 
     bufBlock = isLocalBuf ? LocalBufHdrGetBlock(bufHdr) : BufHdrGetBlock(bufHdr);
 
+    ThreadIOContextType saved_io_context = t_thrd.cur_thread_io_context;
+    t_thrd.cur_thread_io_context = get_io_context_from_strategy(strategy);
     bool needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum,
                                                       mode, isExtend, bufBlock, pblk, &need_repair);
+    t_thrd.cur_thread_io_context = saved_io_context;
     // if (need_repair) {
     //     LWLockRelease(((BufferDesc *)bufHdr)->io_in_progress_lock);
     //     UnpinBuffer(bufHdr, true);
@@ -3977,6 +4016,12 @@ retry:
         pgstat_report_waitevent(WAIT_EVENT_END);
 
         Assert(IsBufferRefCountZero(buf_state, buf->buf_id));
+
+        if (strategy != NULL && strategy->current_was_in_ring) {
+            pgstat_track_thread_io_reuse(IO_OBJECT_RELATION, get_io_context_from_strategy(strategy));
+        } else {
+            pgstat_track_thread_io_evict(IO_OBJECT_RELATION, get_io_context_from_strategy(strategy));
+        }
 
         /* Must copy buffer flags while we still hold the spinlock */
         old_flags = buf_state & BUF_FLAG_MASK;
@@ -6807,7 +6852,13 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
         }
     } else {
         SegmentCheck(!IsSegmentFileNode(bufdesc->tag.rnode));
+        ThreadIOContextType saved_io_context = t_thrd.cur_thread_io_context;
+        if (AmStartupProcess() || AmPageRedoWorker())
+            t_thrd.cur_thread_io_context = IO_CONTEXT_RECOVERY;
+        else if (t_thrd.role == APPLY_WORKER || t_thrd.role == APPLY_LAUNCHER)
+            t_thrd.cur_thread_io_context = IO_CONTEXT_REPLICATION;
         smgrwrite(reln, bufferinfo.blockinfo.forknum, bufferinfo.blockinfo.blkno, bufToWrite, skipFsync);
+        t_thrd.cur_thread_io_context = saved_io_context;
     }
 
     if (u_sess->attr.attr_common.track_io_timing) {

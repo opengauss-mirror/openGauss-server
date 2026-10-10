@@ -144,6 +144,7 @@ typedef struct dashboard {
     List* desc;       /* Description of the table */
     char* dashTitle;  /* dashboard title */
     char* tableTitle; /* table title */
+    char* groupTitle; /* optional sub-group heading rendered before the table title */
 } dashboard;
 
 typedef enum { HAVE_SQLID, HAVE_SQLTEXT, HAVE_OTHER } ColName;
@@ -229,6 +230,7 @@ static dashboard* CreateDash(void)
     dash->type = NIL;
     dash->dashTitle = NULL;
     dash->tableTitle = NULL;
+    dash->groupTitle = NULL;
     return dash;
 }
 
@@ -677,6 +679,7 @@ void GenReport::DescToHtml(List* descList, StringInfoData& descHtml)
 void GenReport::dashboad_to_html(List* rowList, StringInfoData& dashboadHtml)
 {
     char* prevTableTitle = NULL;
+    char* prevGroupTitle = NULL;
     foreach_cell(cell, rowList)
     {
         if (lfirst(cell) == NULL) {
@@ -685,6 +688,12 @@ void GenReport::dashboad_to_html(List* rowList, StringInfoData& dashboadHtml)
         dashboard* dash = (dashboard*)lfirst(cell);
         char* tableTitle = (char*)dash->tableTitle;
         char* htmlId = SpaceToUnderline(tableTitle);
+        /* print the sub-group heading before the first dashboard of each group */
+        if (dash->groupTitle != NULL &&
+            (prevGroupTitle == NULL || strcmp(dash->groupTitle, prevGroupTitle) != 0)) {
+            appendStringInfo(&dashboadHtml, "<h4 class=\"wdr\">%s</h4>\n", dash->groupTitle);
+        }
+        prevGroupTitle = dash->groupTitle;
         if (prevTableTitle == NULL || strcmp(tableTitle, prevTableTitle) != 0) {
             appendStringInfo(&dashboadHtml, "<a class=\"wdr\"></a><h3 class=\"wdr\" id=\"%s\" ", htmlId);
             appendStringInfo(&dashboadHtml,
@@ -4758,6 +4767,220 @@ static void get_summary_host_memory(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+static void AppendQueryInstanceIOThreadType(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id,
+                %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        begin_raw AS (
+            SELECT snap_io_role_id, snap_role_name, snap_object_name,
+                snap_context_name, snap_num_reads, snap_num_writes,
+                snap_bytes_read, snap_bytes_written, snap_read_time_ms,
+                snap_write_time_ms, snap_hits, snap_evictions,
+                snap_fsyncs, snap_total_fsync_time_ms
+            FROM snapshot.snap_global_thread_io_stat t
+            CROSS JOIN snap_info si
+            WHERE t.snapshot_id = si.begin_snap_id
+                AND t.snap_node_name = si.snap_node_name
+        ),
+        end_raw AS (
+            SELECT snap_io_role_id, snap_role_name, snap_object_name,
+                snap_context_name, snap_num_reads, snap_num_writes,
+                snap_bytes_read, snap_bytes_written, snap_read_time_ms,
+                snap_write_time_ms, snap_hits, snap_evictions,
+                snap_fsyncs, snap_total_fsync_time_ms
+            FROM snapshot.snap_global_thread_io_stat t
+            CROSS JOIN snap_info si
+            WHERE t.snapshot_id = si.end_snap_id
+                AND t.snap_node_name = si.snap_node_name
+        ),
+        all_keys AS (
+            SELECT snap_io_role_id, snap_role_name, snap_object_name,
+                snap_context_name
+            FROM begin_raw
+            UNION
+            SELECT snap_io_role_id, snap_role_name, snap_object_name,
+                snap_context_name
+            FROM end_raw
+        ),
+        snap_diff AS (
+            SELECT
+                k.snap_role_name AS role_name,
+                GREATEST(COALESCE(e.snap_num_reads, 0)
+                    - COALESCE(b.snap_num_reads, 0), 0) AS num_reads,
+                GREATEST(COALESCE(e.snap_num_writes, 0)
+                    - COALESCE(b.snap_num_writes, 0), 0) AS num_writes,
+                GREATEST(COALESCE(e.snap_bytes_read, 0)
+                    - COALESCE(b.snap_bytes_read, 0), 0) AS bytes_read,
+                GREATEST(COALESCE(e.snap_bytes_written, 0)
+                    - COALESCE(b.snap_bytes_written, 0), 0) AS bytes_written,
+                GREATEST(COALESCE(e.snap_read_time_ms, 0)
+                    - COALESCE(b.snap_read_time_ms, 0), 0) AS read_time_ms,
+                GREATEST(COALESCE(e.snap_write_time_ms, 0)
+                    - COALESCE(b.snap_write_time_ms, 0), 0) AS write_time_ms,
+                GREATEST(COALESCE(e.snap_hits, 0)
+                    - COALESCE(b.snap_hits, 0), 0) AS hits,
+                GREATEST(COALESCE(e.snap_evictions, 0)
+                    - COALESCE(b.snap_evictions, 0), 0) AS evictions,
+                GREATEST(COALESCE(e.snap_fsyncs, 0)
+                    - COALESCE(b.snap_fsyncs, 0), 0) AS fsyncs,
+                GREATEST(COALESCE(e.snap_total_fsync_time_ms, 0)
+                    - COALESCE(b.snap_total_fsync_time_ms, 0), 0)
+                    AS fsync_time_ms
+            FROM all_keys k
+            LEFT JOIN begin_raw b
+                ON b.snap_io_role_id = k.snap_io_role_id
+                AND b.snap_object_name = k.snap_object_name
+                AND b.snap_context_name = k.snap_context_name
+            LEFT JOIN end_raw e
+                ON e.snap_io_role_id = k.snap_io_role_id
+                AND e.snap_object_name = k.snap_object_name
+                AND e.snap_context_name = k.snap_context_name
+        ),
+        thread_io AS (
+            SELECT role_name,
+                SUM(num_reads) AS num_reads, SUM(num_writes) AS num_writes,
+                SUM(bytes_read) AS bytes_read,
+                SUM(bytes_written) AS bytes_written,
+                SUM(read_time_ms) AS read_time_ms,
+                SUM(write_time_ms) AS write_time_ms,
+                SUM(hits) AS hits, SUM(evictions) AS evictions,
+                SUM(fsyncs) AS fsyncs, SUM(fsync_time_ms) AS fsync_time_ms
+            FROM snap_diff GROUP BY role_name
+        )
+        SELECT
+            role_name AS "Role Name",
+            num_reads AS "Reads",
+            ROUND(num_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            num_writes AS "Writes",
+            ROUND(num_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND(bytes_read / 1048576.0, 2) AS "Read MB",
+            ROUND(bytes_read / si.interval_sec / 1048576.0, 2)
+                AS "Per Sec Read MB",
+            ROUND(bytes_written / 1048576.0, 2) AS "Write MB",
+            ROUND(bytes_written / si.interval_sec / 1048576.0, 2)
+                AS "Per Sec Write MB",
+            ROUND(read_time_ms::numeric, 2) AS "Read Time ms",
+            ROUND(write_time_ms::numeric, 2) AS "Write Time ms",
+            hits AS "Hits", evictions AS "Evictions",
+            fsyncs AS "Fsyncs",
+            ROUND(fsync_time_ms::numeric, 2) AS "Fsync Time ms"
+        FROM thread_io CROSS JOIN snap_info si
+        ORDER BY (bytes_read + bytes_written) DESC
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+/** summary - Instance IO Thread Type */
+static void get_summary_instance_io_thread_type(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io thread type";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "Thread Type";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_thread_io_stat")) {
+        AppendQueryInstanceIOThreadType(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+static void AppendQueryInstanceIOFileType(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        data_file_io AS (
+            SELECT
+                'Data File' AS file_type,
+                GREATEST(SUM(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0)), 0) AS total_reads,
+                GREATEST(SUM(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0)), 0) AS total_writes,
+                GREATEST(SUM(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0)), 0) AS total_blk_read,
+                GREATEST(SUM(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0)), 0) AS total_blk_written,
+                GREATEST(SUM(COALESCE(t2.snap_readtim, 0) - COALESCE(t1.snap_readtim, 0)), 0) AS total_read_time_us,
+                GREATEST(SUM(COALESCE(t2.snap_writetim, 0) - COALESCE(t1.snap_writetim, 0)), 0) AS total_write_time_us
+            FROM snapshot.snap_global_file_iostat t2 CROSS JOIN snap_info si
+            LEFT JOIN snapshot.snap_global_file_iostat t1 ON t1.snap_node_name = t2.snap_node_name
+                 AND t1.snap_filenum = t2.snap_filenum AND t1.snapshot_id = si.begin_snap_id
+            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+        ),
+        wal_io AS (
+            SELECT
+                'WAL Log' AS file_type,
+                0 AS total_reads,
+                GREATEST(SUM(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0)), 0) AS total_writes,
+                0 AS total_blk_read,
+                GREATEST(SUM(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0)), 0) AS total_blk_written,
+                0 AS total_read_time_us,
+                GREATEST(SUM(COALESCE(t2.snap_writetim, 0) - COALESCE(t1.snap_writetim, 0)), 0) AS total_write_time_us
+            FROM snapshot.snap_global_file_redo_iostat t2 CROSS JOIN snap_info si
+            LEFT JOIN snapshot.snap_global_file_redo_iostat t1 ON t1.snap_node_name = t2.snap_node_name
+                 AND t1.snapshot_id = si.begin_snap_id
+            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+        ),
+        combined_io AS (
+            SELECT file_type, total_reads, total_writes,
+                total_blk_read, total_blk_written,
+                total_read_time_us, total_write_time_us
+            FROM data_file_io
+            UNION ALL
+            SELECT file_type, total_reads, total_writes,
+                total_blk_read, total_blk_written,
+                total_read_time_us, total_write_time_us
+            FROM wal_io
+        )
+        SELECT
+            file_type AS "File Type",
+            total_reads AS "Total Reads",
+            ROUND(total_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            total_writes AS "Total Writes",
+            ROUND(total_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO Mb",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO Mb",
+            ROUND(total_read_time_us / si.interval_sec / 1000.0, 2) AS "Per Sec Read ms",
+            ROUND(total_write_time_us / si.interval_sec / 1000.0, 2) AS "Per Sec Write ms"
+        FROM combined_io CROSS JOIN snap_info si
+        ORDER BY "Total IO Mb" DESC
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+/** summary - Instance IO Thread Type */
+static void get_summary_instance_io_file_type(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io file type (DTAT & WAL)";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "File Type";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_file_iostat")) {
+        AppendQueryInstanceIOFileType(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+
 static void AppendQueryHostDiskIO(StringInfoData& query, report_params* params)
 {
     const char* sql = R"(
@@ -4838,6 +5061,302 @@ static void get_summary_host_disk_io(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+
+static void AppendQueryInstanceIODatabase(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        db_io_stats AS (
+            SELECT
+                COALESCE(pg_database.datname, 'global') AS db_name,
+                SUM(GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0)) AS total_reads,
+                SUM(GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0)) AS total_writes,
+                SUM(GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0)) AS total_blk_read,
+                SUM(GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0)) AS total_blk_written
+            FROM snapshot.snap_global_file_iostat t2  CROSS JOIN snap_info si
+            LEFT JOIN snapshot.snap_global_file_iostat t1 ON t1.snap_node_name = t2.snap_node_name
+                 AND t1.snap_dbid = t2.snap_dbid AND t1.snap_filenum = t2.snap_filenum
+                 AND t1.snapshot_id = si.begin_snap_id
+            LEFT JOIN pg_database ON pg_database.oid = t2.snap_dbid
+            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+            GROUP BY pg_database.datname
+        )
+        SELECT
+            db_name AS "Database",
+            total_reads AS "Total Reads",
+            ROUND(total_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            total_writes AS "Total Writes",
+            ROUND(total_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
+        FROM db_io_stats  CROSS JOIN snap_info si
+        ORDER BY "Total IO MB" DESC
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+static void get_summary_instance_io_database(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io database";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "Database";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_file_iostat")) {
+        AppendQueryInstanceIODatabase(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+
+static void AppendQueryInstanceIOTablespace(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        tablespace_io_stats AS (
+            SELECT
+                COALESCE(pg_tablespace.spcname, 'global') AS tspace_name,
+                SUM(GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0)) AS total_reads,
+                SUM(GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0)) AS total_writes,
+                SUM(GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0)) AS total_blk_read,
+                SUM(GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0)) AS total_blk_written
+            FROM snapshot.snap_global_file_iostat t2 CROSS JOIN snap_info si
+            LEFT JOIN snapshot.snap_global_file_iostat t1 ON t1.snap_node_name = t2.snap_node_name
+                AND t1.snap_spcid = t2.snap_spcid AND t1.snap_filenum = t2.snap_filenum
+                AND t1.snapshot_id = si.begin_snap_id
+            LEFT JOIN pg_tablespace ON pg_tablespace.oid = t2.snap_spcid
+            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+            GROUP BY pg_tablespace.spcname
+        )
+        SELECT
+            tspace_name AS "Tablespace",
+            total_reads AS "Total Reads",
+            ROUND(total_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            total_writes AS "Total Writes",
+            ROUND(total_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
+        FROM tablespace_io_stats CROSS JOIN snap_info si
+        ORDER BY "Total IO MB" DESC
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+static void get_summary_instance_io_tablespace(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io tablespace";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "Tablespace";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_file_iostat")) {
+        AppendQueryInstanceIOTablespace(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        relkind_mapping AS (
+            SELECT 'r' AS relkind, 'TABLE' AS object_type UNION ALL
+            SELECT 'i', 'INDEX' UNION ALL
+            SELECT 't', 'TOAST TABLE' UNION ALL
+            SELECT 'S', 'SEQUENCE' UNION ALL
+            SELECT 'm', 'MATERIALIZED VIEW'
+        ),
+        end_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
+        ),
+        begin_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
+        ),
+        file_object_type AS (
+            SELECT t2.snap_filenum, COALESCE(mapping.object_type, 'OTHER') AS object_type
+            FROM end_snapshot_data t2
+            LEFT JOIN pg_class ON pg_class.relfilenode = t2.snap_filenum
+                AND pg_class.relfilenode <> 0
+                AND t2.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+            LEFT JOIN relkind_mapping mapping ON pg_class.relkind = mapping.relkind
+        ),
+        file_io_diff AS (
+            SELECT
+                t2.snap_filenum,
+                GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
+                GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
+                GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
+                GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0) AS diff_blk_written
+            FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
+                ON t1.snap_filenum = t2.snap_filenum AND t1.snap_dbid = t2.snap_dbid
+        ),
+        object_io_stats AS (
+            SELECT
+                fot.object_type,
+                COUNT(DISTINCT fid.snap_filenum) AS object_count,
+                SUM(fid.diff_reads) AS total_reads,
+                SUM(fid.diff_writes) AS total_writes,
+                SUM(fid.diff_blk_read) AS total_blk_read,
+                SUM(fid.diff_blk_written) AS total_blk_written
+            FROM file_io_diff fid JOIN file_object_type fot ON fid.snap_filenum = fot.snap_filenum
+            GROUP BY fot.object_type
+        )
+        SELECT
+            object_type AS "Object Type",
+            object_count AS "Object Count",
+            total_reads AS "Total Reads",
+            ROUND(total_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            total_writes AS "Total Writes",
+            ROUND(total_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
+            ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
+        FROM object_io_stats CROSS JOIN snap_info si
+        ORDER BY "Total IO MB" DESC
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+static void get_summary_instance_io_database_object_type(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io database object type "
+        "(table, index, toast, sequence, materialized view, other global shared objects and associated objects)";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "Database Object Type";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_file_iostat")) {
+        AppendQueryInstanceIODatabaseObjectType(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
+        WITH snap_info AS (
+            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
+        ),
+        end_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
+                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
+        ),
+        begin_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd,fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
+        ),
+        file_io_diff AS (
+            SELECT
+                t2.snap_filenum, t2.snap_dbid, t2.snap_spcid,
+                GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
+                GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
+                GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
+                GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0) AS diff_blk_written
+            FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
+                ON t1.snap_filenum = t2.snap_filenum AND t1.snap_dbid = t2.snap_dbid
+        ),
+        file_detail AS (
+            SELECT
+                fid.snap_filenum, fid.snap_dbid, fid.snap_spcid,
+                fid.diff_reads, fid.diff_writes, fid.diff_blk_read, fid.diff_blk_written,
+                COALESCE(pg_database.datname, 'Global') AS db_name,
+                COALESCE(pg_tablespace.spcname, 'pg_default') AS tspace_name,
+                pg_class.relname AS object_name,
+                CASE
+                    WHEN fid.snap_dbid = 0 OR fid.snap_filenum = 0 THEN 'Global Shared System File'
+                    WHEN fid.snap_spcid IS NOT NULL AND fid.snap_spcid != 0 THEN
+                        COALESCE(pg_tablespace.spcname, 'custom_tablespace') || '/' || fid.snap_filenum::text
+                    ELSE
+                        'base/' || fid.snap_dbid::text || '/' || fid.snap_filenum::text
+                END AS file_path
+            FROM file_io_diff fid
+            LEFT JOIN pg_database ON pg_database.oid = fid.snap_dbid
+            LEFT JOIN pg_tablespace ON pg_tablespace.oid = fid.snap_spcid
+            LEFT JOIN pg_class ON pg_class.relfilenode = fid.snap_filenum
+                AND pg_class.relfilenode <> 0
+                AND fid.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+        )
+        SELECT
+            file_path AS "File Path",
+            db_name AS "Database",
+            tspace_name AS "Tablespace",
+            object_name AS "Object Name",
+            diff_reads AS "Total Reads",
+            ROUND(diff_reads / si.interval_sec, 2) AS "Per Sec Reads",
+            diff_writes AS "Total Writes",
+            ROUND(diff_writes / si.interval_sec, 2) AS "Per Sec Writes",
+            ROUND((diff_blk_read + diff_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
+            ROUND((diff_blk_read + diff_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
+        FROM file_detail CROSS JOIN snap_info si
+        WHERE diff_reads > 0 OR diff_writes > 0
+        ORDER BY (diff_blk_read + diff_blk_written) DESC
+        LIMIT 10
+    )";
+    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+                     params->snap_gap, get_report_node(params));
+}
+
+static void get_summary_instance_io_database_object_path(report_params* params)
+{
+    dashboard* dash = CreateDash();
+
+    const char* desc = "show the node instance io database object path";
+    dash->dashTitle = "Summary";
+    dash->groupTitle = "Instance IO";
+    dash->tableTitle = "Database Object Path";
+    dash->desc = lappend(dash->desc, (void*)desc);
+
+    StringInfoData query;
+    initStringInfo(&query);
+    if (UpdataReportSnapGapParam(params, "snap_global_file_iostat")) {
+        AppendQueryInstanceIODatabaseObjectPath(query, params);
+        GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
+    }
+    pfree(query.data);
+
+    GenReport::add_data(dash, &params->Contents);
+}
+
+
 /* summary -host network */
 static void get_summary_host_network(report_params* params)
 {
@@ -4872,6 +5391,33 @@ static void get_summary_host_network(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+
+/**
+    summary - Instance IO
+    support following statistics: thread type, file type, database, tablespace,
+    database object type, database object path
+*/
+static void get_summary_instance_io(report_params* params)
+{
+    /* supported report scope: node */
+    if (!is_single_node_report(params)) {
+        return;
+    }
+    if (!is_summary_report(params) && !is_full_report(params)) {
+        return;
+    }
+
+    if (!get_report_node(params)) {
+        return;
+    }
+    get_summary_instance_io_thread_type(params);
+    get_summary_instance_io_file_type(params);
+    get_summary_instance_io_database(params);
+    get_summary_instance_io_tablespace(params);
+    get_summary_instance_io_database_object_type(params);
+    get_summary_instance_io_database_object_path(params);
+}
+
 static void get_summary_global_lock_event(report_params* params)
 {
  /* supported report scope: node */
@@ -4890,6 +5436,7 @@ static void get_summary_global_lock_event(report_params* params)
     get_summary_lock_event_duration_top10(params);
     get_summary_lock_event_count_top10(params);
 }
+
 
 /* summary -node io profile */
 static void get_summary_node_file_iostat(report_params* params, dashboard* dash)
@@ -5612,6 +6159,9 @@ void GenReport::get_report_data(report_params* params)
     /* summary - Host CPU memory */
     get_summary_host_cpu(params);
     get_summary_host_memory(params);
+
+    /** summary - Instance IO */
+    get_summary_instance_io(params);
 
     /* summary - Host Disk IO */
     get_summary_host_disk_io(params);

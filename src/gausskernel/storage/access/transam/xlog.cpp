@@ -2869,6 +2869,9 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
                                        t_thrd.xlog_cxt.openLogOff, (unsigned long)nbytes, TRANSLATE_ERRNO)));
             }
 
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes,
+                u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0, true);
+
             if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
                 ++g_instance.wal_cxt.xlogFlushStats->writeTimes;
                 g_instance.wal_cxt.xlogFlushStats->totalActualXlogSyncBytes += actualBytes;
@@ -2906,6 +2909,8 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
                 INSTR_TIME_SET_CURRENT(endTime);
                 INSTR_TIME_SUBTRACT(endTime, startTime);
                 elapsedTime = INSTR_TIME_GET_MICROSEC(endTime);
+                pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                    u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
                 /* Add statistics */
                 if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
                     ++g_instance.wal_cxt.xlogFlushStats->syncTimes;
@@ -3594,6 +3599,8 @@ void XLogDoFlush()
         INSTR_TIME_SET_CURRENT(endTime);
         INSTR_TIME_SUBTRACT(endTime, startTime);
         elapsedTime = INSTR_TIME_GET_MICROSEC(endTime);
+        pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+            u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
         if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
             ++g_instance.wal_cxt.xlogFlushStats->syncTimes;
             g_instance.wal_cxt.xlogFlushStats->totalSyncTime += elapsedTime;
@@ -10955,6 +10962,8 @@ void StartupXLOG(void)
             ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false when starting redo")));
 
             bool startPromotion = false;
+            TimestampTz threadioLastFlush = 0;
+            const int threadioFlushIntervalMs = 1000;
             do {
                 TermFileData term_file;
 
@@ -10979,6 +10988,13 @@ void StartupXLOG(void)
 
                 /* Handle interrupt signals of startup process */
                 RedoInterruptCallBack();
+
+                TimestampTz threadioNow = GetCurrentTimestamp();
+                if (threadioLastFlush == 0 ||
+                    TimestampDifferenceExceeds(threadioLastFlush, threadioNow, threadioFlushIntervalMs)) {
+                    threadioLastFlush = threadioNow;
+                    pgstat_send_threadio_stats();
+                }
 
                 /*
                  * Pause WAL replay, if requested by a hot-standby session via SetRecoveryPause().
@@ -17982,15 +17998,19 @@ bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char *readBu
         reqLen = (int)(XLogSegSize - startoff);
     }
 
-    int readbytes = read(t_thrd.xlog_cxt.readFile, readBuf, reqLen);
-    if (readbytes <= 0) {
-        (void)close(t_thrd.xlog_cxt.readFile);
-        t_thrd.xlog_cxt.readFile = -1;
-        ereport(ERROR,
-                (errcode_for_file_access(),
-                 errmsg("could not read from log segment %s, offset %u, length %lu: %s",
-                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff, INT2ULONG(reqLen), TRANSLATE_ERRNO)));
+    {
+        ThreadIoTimer timer;
+        int readbytes = read(t_thrd.xlog_cxt.readFile, readBuf, reqLen);
+        if (readbytes <= 0) {
+            (void)close(t_thrd.xlog_cxt.readFile);
+            t_thrd.xlog_cxt.readFile = -1;
+            ereport(ERROR,
+                    (errcode_for_file_access(),
+                     errmsg("could not read from log segment %s, offset %u, length %lu: %s",
+                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
+                            t_thrd.xlog_cxt.readOff, INT2ULONG(reqLen), TRANSLATE_ERRNO)));
+        }
+        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, timer.elapsed_us(), false);
     }
 
     t_thrd.xlog_cxt.readOff += reqLen;
@@ -18800,20 +18820,24 @@ try_again:
         goto next_record_is_invalid;
     }
     pgstat_report_waitevent(WAIT_EVENT_WAL_READ);
-    ret = read(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ);
-    pgstat_report_waitevent(WAIT_EVENT_END);
-    if (ret != XLOG_BLCKSZ) {
-        ereport(emode_for_corrupt_record(emode, RecPtr),
-                (errcode_for_file_access(),
-                    errmsg("could not read from log file %s to offset %u: %s",
-                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
-                        t_thrd.xlog_cxt.readOff, TRANSLATE_ERRNO)));
-        if (errno == EINTR) {
-            errno = 0;
-            pg_usleep(1000);
-            goto try_again;
+    {
+        ThreadIoTimer timer;
+        ret = read(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ);
+        pgstat_report_waitevent(WAIT_EVENT_END);
+        if (ret != XLOG_BLCKSZ) {
+            ereport(emode_for_corrupt_record(emode, RecPtr),
+                    (errcode_for_file_access(),
+                        errmsg("could not read from log file %s to offset %u: %s",
+                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
+                            t_thrd.xlog_cxt.readOff, TRANSLATE_ERRNO)));
+            if (errno == EINTR) {
+                errno = 0;
+                pg_usleep(1000);
+                goto try_again;
+            }
+            goto next_record_is_invalid;
         }
-        goto next_record_is_invalid;
+        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)ret, timer.elapsed_us(), false);
     }
     Assert(targetSegNo == t_thrd.xlog_cxt.readSegNo);
     Assert(targetPageOff == t_thrd.xlog_cxt.readOff);
@@ -20771,8 +20795,15 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
     if (xlogreader->preReadBuf == NULL) {
-        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
-                                    t_thrd.xlog_cxt.readOff);
+        {
+            ThreadIoTimer timer;
+            actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
+                                        t_thrd.xlog_cxt.readOff);
+            if (actualBytes == t_thrd.xlog_cxt.readLen) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
+                    false);
+            }
+        }
     } else {
         actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf,
                                                  t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readFile);
@@ -21142,7 +21173,15 @@ retry:
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
     if (xlogreader->preReadBuf == NULL) {
-        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
+        {
+            ThreadIoTimer timer;
+            actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
+                                        t_thrd.xlog_cxt.readOff);
+            if (actualBytes == t_thrd.xlog_cxt.readLen) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
+                    false);
+            }
+        }
     } else {
         actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen,
                                                     t_thrd.xlog_cxt.readFile);
@@ -21561,7 +21600,13 @@ retry:
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-    actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
+    {
+        ThreadIoTimer timer;
+        actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
+        if (actualBytes == XLOG_BLCKSZ) {
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(), false);
+        }
+    }
     if (actualBytes != XLOG_BLCKSZ) {
         ereport(LOG, (errmsg("%s read failed", SS_XLOGDIR)));
         goto next_record_is_invalid;

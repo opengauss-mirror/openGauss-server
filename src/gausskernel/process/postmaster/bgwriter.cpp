@@ -323,6 +323,7 @@ void BackgroundWriterMain(void)
          * Send off activity statistics to the stats collector
          */
         pgstat_send_bgwriter();
+        pgstat_send_threadio_stats();
 
         if (FirstCallSinceLastCheckpoint()) {
             /*
@@ -639,6 +640,9 @@ void invalid_buffer_bgwriter_main()
         drop_rel_all_forks_buffers();
         drop_rel_one_fork_buffers();
         drop_rel_all_cucache();
+
+        /* Send off thread IO statistics collected during buffer invalidation */
+        pgstat_send_threadio_stats();
     }
 }
 

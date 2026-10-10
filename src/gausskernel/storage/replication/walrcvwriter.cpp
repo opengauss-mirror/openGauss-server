@@ -19,6 +19,7 @@
 #include "catalog/pg_tablespace.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "replication/walreceiver.h"
 #include "replication/dataqueue.h"
 #include "replication/datareceiver.h"
@@ -216,10 +217,15 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
         INSTR_TIME_SET_CURRENT(startTime);
         byteswritten = write(recvFile, buf, segbytes);
         INSTR_TIME_SET_CURRENT(endTime);
+        INSTR_TIME_SUBTRACT(endTime, startTime);
+        uint64 elapsedTime = (uint64)INSTR_TIME_GET_MICROSEC(endTime);
+
+        if (byteswritten > 0) {
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
+                u_sess->attr.attr_common.track_io_timing ? elapsedTime : 0, true);
+        }
 
         if (g_instance.wal_cxt.walRecvWriterStats->isEnableStat) {
-            INSTR_TIME_SUBTRACT(endTime, startTime);
-            PgStat_Counter elapsedTime = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(endTime);
             SpinLockAcquire(&g_instance.wal_cxt.walRecvWriterStats->mutex);
             volatile bool recheck = g_instance.wal_cxt.walRecvWriterStats->isEnableStat;
             if (recheck) {
@@ -899,6 +905,9 @@ void walrcvWriterMain(void)
         while (!t_thrd.worker_sig_flags.shutdown_requested && WalDataRcvWrite() > 0) {
         }
 
+        /* Send off thread IO statistics collected during WAL receive/write */
+        pgstat_send_threadio_stats();
+
         if (t_thrd.worker_sig_flags.shutdown_requested) {
             ereport(LOG, (errmsg("walrcvwriter thread shut down")));
             /*
@@ -1278,7 +1287,14 @@ static void XLogWalRcvWriteFromUwal(WalRcvCtlBlock *walrcb, char *buf, Size nbyt
         /* OK to write the logs */
         errno = 0;
 
-        byteswritten = write(recvFile, buf, segbytes);
+        {
+            ThreadIoTimer timer;
+            byteswritten = write(recvFile, buf, segbytes);
+            if (byteswritten > 0) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
+                    timer.elapsed_us(), true);
+            }
+        }
         if (byteswritten <= 0) {
             /* if write didn't set errno, assume no disk space */
             if (errno == 0)

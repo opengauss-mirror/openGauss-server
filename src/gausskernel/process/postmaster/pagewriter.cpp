@@ -1339,6 +1339,8 @@ static void ckpt_pagewriter_main_thread_loop(void)
         ckpt_pagewriter_main_thread_flush_dirty_page();
     }
 
+    pgstat_send_threadio_stats();
+
     /* Control all the pagewriter threads to exit*/
     HandlePageWriterExit();
     return;
@@ -1473,6 +1475,7 @@ static void ckpt_pagewriter_sub_thread_loop()
         }
 
         smgrcloseall();
+        pgstat_send_threadio_stats();
     }
 
     return;

@@ -376,6 +376,9 @@ start_rollback:
                 undowork.slotPtr)));
         RemoveRollbackRequest(undowork.xid, undowork.startUndoPtr, gs_thread_self());
     }
+    /* Send off thread IO statistics collected during rollback */
+    pgstat_send_threadio_stats();
+
     while (retryTimes < MAX_RETRY_TIMES && !t_thrd.worker_sig_flags.got_SIGTERM) {
         if (pmState == PM_WAIT_BACKENDS) {
             break;

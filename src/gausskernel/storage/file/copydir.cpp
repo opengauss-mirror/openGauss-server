@@ -449,7 +449,7 @@ static int fsync_fname_ext(const char* fname, bool isdir, bool ignore_perm, int 
         return 0;
     } else if (fd < 0) {
         ereport(elevel, (errcode_for_file_access(),
-            errmsg("could not open file \"%s\": %s", fname), gs_strerror(save_errno)));
+            errmsg("could not open file \"%s\": %s", fname, gs_strerror(save_errno))));
         return -1;
     }
 

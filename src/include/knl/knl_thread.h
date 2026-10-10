@@ -80,6 +80,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_txnstatus.h"
 #include "postmaster/rack_mem_cleaner.h"
+#include "pgstat_threadio_stats.h"
 /* USE_UB_TXN_CACHE - BEGIN */
 #include "access/clog.h"
 #include "access/csnlog.h"
@@ -3672,6 +3673,8 @@ typedef struct knl_thrd_context {
     XLogRecPtr repairLsn;
     KnlTSmbWriterContext smbWriterCxt;
     KnlTRackMemCleanerContext rackMemCleanerCxt;
+    PgStat_ThreadIOStats local_thread_io_stats[THREAD_IO_OBJECT_MAX][THREAD_IO_CONTEXT_MAX];
+    ThreadIOContextType cur_thread_io_context;
 } knl_thrd_context;
 
 static_assert(sizeof(knl_thrd_context) <= 60000, "knl_thrd_context exceeds phase-1 size budget");
@@ -3764,6 +3767,5 @@ void RedoInterruptCallBack();
 RedoPageRepairCallBackFunc RegisterRedoPageRepairCallBack(RedoPageRepairCallBackFunc func);
 void RedoPageRepairCallBack(RepairBlockKey key, XLogPhyBlock pblk);
 extern void VerifyMemoryContext();
-
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */

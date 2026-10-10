@@ -1910,6 +1910,7 @@ typedef struct knl_u_stat_context {
     union NumericValue* osStatDataArray;
     struct OSRunInfoDesc* osStatDescArray;
     TimestampTz last_report;
+    TimestampTz last_threadio_report;
     /* High-frequency DB stats: accumulate locally, flush at xact end or in pgstat_report_stat */
     int64 pgStatPendingDeadlocks;
     int64 pgStatPendingTempFiles;

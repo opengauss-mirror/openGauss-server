@@ -114,7 +114,8 @@ char* GetTableColAttr(const char* viewname, bool onlyViewCol, bool addType);
  */
 static const char* sharedViews[] = {"global_os_runtime", "global_os_threads", "global_instance_time",
     "summary_workload_sql_count", "summary_workload_sql_elapse_time", "global_workload_transaction",
-    "summary_workload_transaction", "global_thread_wait_status", "global_memory_node_detail",
+    "summary_workload_transaction", "global_thread_wait_status", "global_thread_io_stat",
+    "global_memory_node_detail",
     "global_shared_memory_detail", "global_os_disk_io_info", "global_os_net_dev_info",
 #ifdef ENABLE_MULTIPLE_NODES
     "global_comm_delay", "global_comm_recv_stream", "global_comm_send_stream", "global_comm_status",

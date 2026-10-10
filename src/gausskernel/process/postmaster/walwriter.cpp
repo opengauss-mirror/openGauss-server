@@ -342,6 +342,7 @@ void WalWriterMain(void)
             times_wrote_nothing = 0;
         }
 
+        pgstat_send_threadio_stats();
         pgstat_report_activity(STATE_IDLE, NULL);
     }
 }

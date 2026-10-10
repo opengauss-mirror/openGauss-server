@@ -179,6 +179,89 @@ typedef enum knl_thread_role {
     SW_SENDER,
 } knl_thread_role;
 
+typedef enum knl_thread_io_role {
+    /* ---- Core (mandatory): IO threads on the critical path of physical WAL streaming replication ---- */
+    IO_WORKER,                /* Backend worker: user SQL read/write IO (incl. thread pool worker) */
+    IO_WAL_SENDER,            /* WAL sender: reads WAL segments and sends them over the network */
+    IO_CHECKPOINTER,          /* Checkpointer: dirty page writeback and file fsync */
+    IO_BGWRITER,              /* Background writer: dirty page writeback */
+    IO_AUTOVACUUM_WORKER,     /* Autovacuum worker: data page read/write */
+    IO_STARTUP,               /* Startup (recovery) thread: redo replay read IO */
+    IO_WALWRITER,             /* WAL writer: WAL segment file write (incl. auxiliary segment preallocation) */
+    IO_WALRECWRITE,           /* WAL receive writer: standby WAL flush to disk; WALRECEIVER itself writes no disk */
+    IO_ARCH,                  /* Archiver: reads WAL segments and writes archive files */
+
+    /* ---- Optional features: enabled depending on deployment, not on the default primary/standby path ---- */
+    IO_UNDO_WORKER,           /* ustore undo worker/recycler */
+    IO_CATCHUP,               /* Data-page replication catchup: reads pages sequentially, like DATARECWRITER */
+    IO_PARALLEL_DECODE,       /* Parallel logical decoder: reads WAL for decoding */
+    IO_APPLY_WORKER,          /* Logical replication apply worker: reads/writes data pages */
+    IO_DATARECWRITER,         /* Data-page replication: receive/write thread */
+    IO_PAGEWRITER,            /* Page compression writer */
+    IO_BGWORKER,              /* Generic bgworker: IO depends on the registered task */
+
+    THREAD_IO_ROLE_MAX,       /* Boundary of valid roles, not a valid role itself */
+    IO_UNSUPPORTED = 0xFFFF   /* Invalid thread: skipped from IO statistics */
+} knl_thread_io_role;
+
+/**
+ * @brief Map a native thread role (knl_thread_role) to a compact IO statistics
+ *        role (knl_thread_io_role).
+ *
+ * @param raw_role Native thread role (t_thrd.role)
+ * @return Compact IO statistics role; IO_UNSUPPORTED when there is no mapping
+ */
+static inline knl_thread_io_role get_knl_thread_io_role(knl_thread_role raw_role) {
+    switch (raw_role) {
+        case WORKER:
+        case THREADPOOL_WORKER:
+        case STREAM_WORKER:
+            return IO_WORKER;
+        case WAL_NORMAL_SENDER:
+        case WAL_HADR_SENDER:
+        case WAL_HADR_CN_SENDER:
+        case WAL_SHARE_STORE_SENDER:
+        case WAL_STANDBY_SENDER:
+        case WAL_DB_SENDER:
+            return IO_WAL_SENDER;
+        case CHECKPOINT_THREAD:
+            return IO_CHECKPOINTER;
+        case BGWRITER:
+            return IO_BGWRITER;
+        case AUTOVACUUM_WORKER:
+            return IO_AUTOVACUUM_WORKER;
+        case STARTUP:
+            return IO_STARTUP;
+        case WALWRITER:
+        case WALWRITERAUXILIARY:
+            return IO_WALWRITER;
+        case WALRECWRITE:
+            return IO_WALRECWRITE;
+        case ARCH:
+            return IO_ARCH;
+        case UNDO_RECYCLER:
+        case UNDO_WORKER:
+            return IO_UNDO_WORKER;
+        case LOGICAL_READ_RECORD:
+        case PARALLEL_DECODE:
+            return IO_PARALLEL_DECODE;
+        case APPLY_WORKER:
+            return IO_APPLY_WORKER;
+        case DATARECIVER:
+        case DATARECWRITER:
+            return IO_DATARECWRITER;
+        case CATCHUP:
+            return IO_CATCHUP;
+        case PAGEWRITER_THREAD:
+        case PAGEREPAIR_THREAD:
+            return IO_PAGEWRITER;
+        case BGWORKER:
+            return IO_BGWORKER;
+        default:
+            return IO_UNSUPPORTED;
+    }
+}
+
 #ifdef USE_SPQ
 typedef enum {
     ROLE_UTILITY = 0,      /* Operating as a simple database engine */

@@ -21,6 +21,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "knl/knl_thread.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "libpq/pqformat.h"
@@ -522,6 +523,7 @@ static void PgstatRecvPrunestat(PgStat_MsgPrune* msg, int len);
 
 static void pgstat_send_badblock_stat(void);
 static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg, int len);
+static void pgstat_recv_threadio_stats(PgStat_MsgThreadIO* msg, int len);
 
 static bool checkSysFileSystem(void);
 static bool checkLogicalCpu(uint32 cpuNum);
@@ -923,6 +925,100 @@ static void pgstat_free_tablist(void)
 }
 
 /* ----------
+ * pgstat_send_threadio_stats() -
+ *
+ *      Send thread IO statistics to the collector.
+ * ----------
+ */
+void pgstat_send_threadio_stats(void)
+{
+    PgStat_MsgThreadIO msg;
+    int object_id;
+    int context_id;
+    errno_t rc;
+
+    static const PgStat_ThreadIOStats all_zeroes = {0};
+    knl_thread_io_role io_role = get_knl_thread_io_role(t_thrd.role);
+
+    if (io_role == IO_UNSUPPORTED)
+        return;
+
+    if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET)
+        return;
+
+    pgstat_setheader(&msg.m_hdr, PGSTAT_MTYPE_THREADIOSTATS);
+    msg.m_nentries = 0;
+
+    /* Traverse all object and context types */
+    for (object_id = 0; object_id < THREAD_IO_OBJECT_MAX; object_id++) {
+        for (context_id = 0; context_id < THREAD_IO_CONTEXT_MAX; context_id++) {
+            PgStat_ThreadIOStats* stats = &t_thrd.local_thread_io_stats[object_id][context_id];
+            PgStat_MsgThreadIOEntry* entry;
+
+            /* Skip if no statistics accumulated */
+            if (memcmp(stats, &all_zeroes, sizeof(PgStat_ThreadIOStats)) == 0)
+                continue;
+
+            entry = &msg.m_stats[msg.m_nentries];
+            entry->role_id = (uint32)io_role;
+            entry->object_id = (uint32)object_id;
+            entry->context_id = (uint32)context_id;
+            rc = memcpy_s(&entry->stats, sizeof(PgStat_ThreadIOStats), stats, sizeof(PgStat_ThreadIOStats));
+            securec_check(rc, "\0", "\0");
+
+            if ((unsigned int)++msg.m_nentries >= PGSTAT_NUM_THREADIO_ENTRIES) {
+                pgstat_send(&msg, offsetof(PgStat_MsgThreadIO, m_stats[0]) + msg.m_nentries * sizeof(PgStat_MsgThreadIOEntry));
+                msg.m_nentries = 0;
+            }
+
+            /* Reset the statistics after sending */
+            rc = memset_s(stats, sizeof(PgStat_ThreadIOStats), 0, sizeof(PgStat_ThreadIOStats));
+            securec_check(rc, "\0", "\0");
+        }
+    }
+
+    if (msg.m_nentries > 0)
+        pgstat_send(&msg, offsetof(PgStat_MsgThreadIO, m_stats[0]) + msg.m_nentries * sizeof(PgStat_MsgThreadIOEntry));
+}
+
+/* ----------
+ * pgstat_flush_threadio_stats() -
+ *
+ *      Flush thread IO statistics from long-running scan points (vacuum or
+ *      analyze delay points). Unlike pgstat_report_stat(), this does not
+ *      touch table statistics, so it is safe to call mid-transaction even
+ *      when transaction-dependent table counts are pending.
+ *      Throttled by PGSTAT_STAT_INTERVAL to bound message traffic.
+ * ----------
+ */
+void pgstat_flush_threadio_stats(void)
+{
+    TimestampTz now = GetCurrentTimestamp();
+    if (!TimestampDifferenceExceeds(u_sess->stat_cxt.last_threadio_report, now, PGSTAT_STAT_INTERVAL))
+        return;
+    u_sess->stat_cxt.last_threadio_report = now;
+    pgstat_send_threadio_stats();
+}
+
+static bool pgstat_have_pending_thread_io(void)
+{
+    static const PgStat_ThreadIOStats all_zeroes = {0};
+    int object_id;
+    int context_id;
+
+    for (object_id = 0; object_id < THREAD_IO_OBJECT_MAX; object_id++) {
+        for (context_id = 0; context_id < THREAD_IO_CONTEXT_MAX; context_id++) {
+            if (memcmp(&t_thrd.local_thread_io_stats[object_id][context_id],
+                       &all_zeroes,
+                       sizeof(PgStat_ThreadIOStats)) != 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* ----------
  * pgstat_report_stat() -
  *
  *	Must be called by processes that performs DML: tcop/postgres.c, logical
@@ -946,9 +1042,14 @@ void pgstat_report_stat(bool force)
     errno_t rc = EOK;
 
     bool have_pending = pgstat_pending_have_updates();
-    /* Don't expend a clock check if nothing to do */
+    /*
+     * Don't expend a clock check if nothing to do.  Pending thread IO must
+     * be treated as "something to do": thread IO flush is governed by the
+     * PGSTAT_STAT_INTERVAL check below alone, not by other stats presence.
+     */
     bool stat_no_change = ((u_sess->stat_cxt.pgStatTabList == NULL || u_sess->stat_cxt.pgStatTabList->tsa_used == 0) &&
-                           !u_sess->stat_cxt.have_function_stats && !force && !have_pending);
+                           !u_sess->stat_cxt.have_function_stats && !force && !have_pending &&
+                           !pgstat_have_pending_thread_io());
     if (stat_no_change) {
         return;
     }
@@ -1059,6 +1160,9 @@ void pgstat_report_stat(bool force)
 
     /* Now, send function statistics */
     pgstat_send_funcstats();
+
+    /* Now, send thread IO statistics */
+    pgstat_send_threadio_stats();
 
     /* Flush pending high-frequency DB stats into shmem */
     pgstat_flush_pending(force);
@@ -5759,6 +5863,9 @@ void pgstat_send(void* msg, int len)
         case PGSTAT_MTYPE_PRUNESTAT:
             PgstatRecvPrunestat((PgStat_MsgPrune*)msg, len);
             break;
+        case PGSTAT_MTYPE_THREADIOSTATS:
+            pgstat_recv_threadio_stats((PgStat_MsgThreadIO*)msg, len);
+            break;
         default:
             break;
     }
@@ -6260,6 +6367,7 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
                 securec_check(rc, "", "");
                 dbentry->tables = NULL;
                 dbentry->functions = NULL;
+                dbentry->thread_io = NULL;
 
                 /*
                  * Don't collect tables if not the requested DB (or the
@@ -7635,6 +7743,67 @@ static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg, int len)
         }
 
         pgstat_shared_release_lock(func_lock);
+    }
+}
+
+/* ----------
+ * pgstat_recv_threadio_stats() -
+ *
+ *	Process thread IO statistics from a backend.
+ * ----------
+ */
+static void pgstat_recv_threadio_stats(PgStat_MsgThreadIO* msg, int len)
+{
+    PgStat_MsgThreadIOEntry* entrymsg = &(msg->m_stats[0]);
+    int i;
+
+    for (i = 0; i < msg->m_nentries; i++, entrymsg++) {
+        LWLock* threadio_lock = NULL;
+        bool found = false;
+        PgStatSharedThreadIOKey key;
+        key.role_id = entrymsg->role_id;
+        key.object_id = entrymsg->object_id;
+        key.context_id = entrymsg->context_id;
+        PgStatSharedThreadIOEntry* entry =
+            pgstat_shared_get_threadio_entry(&key, true, LW_EXCLUSIVE, &threadio_lock, &found);
+        if (entry == NULL) {
+            pgstat_shared_release_lock(threadio_lock);
+            continue;
+        }
+
+        if (!found) {
+            entry->stats = entrymsg->stats;
+        } else {
+            entry->stats.num_reads += entrymsg->stats.num_reads;
+            entry->stats.num_writes += entrymsg->stats.num_writes;
+            entry->stats.bytes_read += entrymsg->stats.bytes_read;
+            entry->stats.bytes_written += entrymsg->stats.bytes_written;
+            entry->stats.read_time += entrymsg->stats.read_time;
+            entry->stats.write_time += entrymsg->stats.write_time;
+            entry->stats.writebacks += entrymsg->stats.writebacks;
+            entry->stats.writeback_time += entrymsg->stats.writeback_time;
+            if (entrymsg->stats.max_writeback_time > entry->stats.max_writeback_time) {
+                entry->stats.max_writeback_time = entrymsg->stats.max_writeback_time;
+            }
+            entry->stats.extend_bytes += entrymsg->stats.extend_bytes;
+            entry->stats.extend_time += entrymsg->stats.extend_time;
+            if (entrymsg->stats.max_extend_time > entry->stats.max_extend_time) {
+                entry->stats.max_extend_time = entrymsg->stats.max_extend_time;
+            }
+            entry->stats.hits += entrymsg->stats.hits;
+            entry->stats.evictions += entrymsg->stats.evictions;
+            entry->stats.reuses += entrymsg->stats.reuses;
+            entry->stats.fsyncs += entrymsg->stats.fsyncs;
+            entry->stats.total_fsync_time += entrymsg->stats.total_fsync_time;
+            if (entrymsg->stats.max_read_time > entry->stats.max_read_time) {
+                entry->stats.max_read_time = entrymsg->stats.max_read_time;
+            }
+            if (entrymsg->stats.max_write_time > entry->stats.max_write_time) {
+                entry->stats.max_write_time = entrymsg->stats.max_write_time;
+            }
+        }
+
+        pgstat_shared_release_lock(threadio_lock);
     }
 }
 

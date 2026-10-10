@@ -34,12 +34,14 @@
 #define PGSTAT_SHMEM_DB_HASH_SIZE 256
 #define PGSTAT_SHMEM_TAB_HASH_SIZE 524288 /* 512K, covers 400K+ tables/partitions/TOAST with headroom */
 #define PGSTAT_SHMEM_FUNC_HASH_SIZE 8192
+#define PGSTAT_SHMEM_THREADIO_HASH_SIZE 1024
 /* Ratio (0.0-1.0) of hash size above which we log "near full" warning. */
 #define PGSTAT_SHMEM_HASH_NEAR_FULL_RATIO 0.9
 
 #define PGSTAT_SNAPSHOT_DB_HASH_SIZE 16
 #define PGSTAT_SNAPSHOT_TAB_HASH_SIZE 512
 #define PGSTAT_SNAPSHOT_FUNC_HASH_SIZE 512
+#define PGSTAT_SNAPSHOT_THREADIO_HASH_SIZE 512
 
 static inline uint32 pgstat_hash_dbid(Oid dbid)
 {
@@ -54,6 +56,11 @@ static inline uint32 pgstat_hash_tabkey(const PgStatSharedTabKey* key)
 static inline uint32 pgstat_hash_funckey(const PgStatSharedFuncKey* key)
 {
     return tag_hash((const void*)key, sizeof(PgStatSharedFuncKey));
+}
+
+static inline uint32 pgstat_hash_threadiokey(const PgStatSharedThreadIOKey* key)
+{
+    return tag_hash((const void*)key, sizeof(PgStatSharedThreadIOKey));
 }
 
 static inline LWLock* pgstat_db_lock(PgStatSharedState* s, Oid dbid)
@@ -72,6 +79,12 @@ static inline LWLock* pgstat_func_lock(PgStatSharedState* s, const PgStatSharedF
 {
     uint32 hash = pgstat_hash_funckey(key);
     return &s->func_locks[hash % PGSTAT_FUNC_NPARTITIONS].lock;
+}
+
+static inline LWLock* pgstat_threadio_lock(PgStatSharedState* s, const PgStatSharedThreadIOKey* key)
+{
+    uint32 hash = pgstat_hash_threadiokey(key);
+    return &s->threadio_locks[hash % PGSTAT_THREADIO_NPARTITIONS].lock;
 }
 
 static void pgstat_lock_all(LWLockPadded* locks, int count, LWLockMode mode)
@@ -116,6 +129,24 @@ static void pgstat_shared_init_func_entry(PgStatSharedFuncEntry* entry, const Pg
     entry->key = *key;
 }
 
+static void pgstat_shared_init_threadio_entry(PgStatSharedThreadIOEntry* entry, const PgStatSharedThreadIOKey* key)
+{
+    errno_t rc = memset_s(entry, sizeof(PgStatSharedThreadIOEntry), 0, sizeof(PgStatSharedThreadIOEntry));
+    securec_check(rc, "\0", "\0");
+    entry->key = *key;
+}
+
+static void pgstat_threadio_hash_warn_near_full(PgStatSharedState* s)
+{
+    long num_entries = hash_get_num_entries(s->threadio_hash);
+    if (num_entries >= (long)(PGSTAT_SHMEM_THREADIO_HASH_SIZE * PGSTAT_SHMEM_HASH_NEAR_FULL_RATIO)) {
+        ereport(WARNING,
+            (errmsg("pgstat threadio hash near full: current entries %ld, limit %d; "
+                     "new threadio stats may not be recorded",
+                num_entries, PGSTAT_SHMEM_THREADIO_HASH_SIZE)));
+    }
+}
+
 static void pgstat_func_hash_warn_near_full(PgStatSharedState* s)
 {
     long num_entries = hash_get_num_entries(s->func_hash);
@@ -138,6 +169,7 @@ Size PgStatShmemSize(void)
     size = add_size(size, hash_estimate_size(PGSTAT_SHMEM_DB_HASH_SIZE, sizeof(PgStatSharedDBEntry)));
     size = add_size(size, hash_estimate_size(PGSTAT_SHMEM_TAB_HASH_SIZE, sizeof(PgStatSharedTabEntry)));
     size = add_size(size, hash_estimate_size(PGSTAT_SHMEM_FUNC_HASH_SIZE, sizeof(PgStatSharedFuncEntry)));
+    size = add_size(size, hash_estimate_size(PGSTAT_SHMEM_THREADIO_HASH_SIZE, sizeof(PgStatSharedThreadIOEntry)));
     return size;
 }
 
@@ -148,16 +180,18 @@ Size PgStatShmemSize(void)
 Size PgStatShmemUsedSize(void)
 {
     PgStatSharedState* s = pgstat_get_shared_state();
-    if (s == NULL || s->db_hash == NULL || s->tab_hash == NULL || s->func_hash == NULL) {
+    if (s == NULL || s->db_hash == NULL || s->tab_hash == NULL || s->func_hash == NULL || s->threadio_hash == NULL) {
         return 0;
     }
     long n_db = hash_get_num_entries(s->db_hash);
     long n_tab = hash_get_num_entries(s->tab_hash);
     long n_func = hash_get_num_entries(s->func_hash);
+    long n_threadio = hash_get_num_entries(s->threadio_hash);
     Size used = MAXALIGN(sizeof(PgStatSharedState));
     used = add_size(used, hash_estimate_size(n_db, sizeof(PgStatSharedDBEntry)));
     used = add_size(used, hash_estimate_size(n_tab, sizeof(PgStatSharedTabEntry)));
     used = add_size(used, hash_estimate_size(n_func, sizeof(PgStatSharedFuncEntry)));
+    used = add_size(used, hash_estimate_size(n_threadio, sizeof(PgStatSharedThreadIOEntry)));
     return used;
 }
 
@@ -181,6 +215,8 @@ void PgStatShmemInit(void)
         LWLockInitialize(&s->tab_locks[i].lock, LWTRANCHE_PGSTAT_HASH);
     for (int i = 0; i < PGSTAT_FUNC_NPARTITIONS; i++)
         LWLockInitialize(&s->func_locks[i].lock, LWTRANCHE_PGSTAT_HASH);
+    for (int i = 0; i < PGSTAT_THREADIO_NPARTITIONS; i++)
+        LWLockInitialize(&s->threadio_locks[i].lock, LWTRANCHE_PGSTAT_HASH);
     LWLockInitialize(&s->global_lock.lock, LWTRANCHE_PGSTAT_HASH);
 
     rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
@@ -206,6 +242,14 @@ void PgStatShmemInit(void)
     ctl.hash = tag_hash;
     s->func_hash = ShmemInitHash("PgStat FUNC Hash", PGSTAT_SHMEM_FUNC_HASH_SIZE,
         PGSTAT_SHMEM_FUNC_HASH_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION);
+
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = sizeof(PgStatSharedThreadIOKey);
+    ctl.entrysize = sizeof(PgStatSharedThreadIOEntry);
+    ctl.hash = tag_hash;
+    s->threadio_hash = ShmemInitHash("PgStat THREADIO Hash", PGSTAT_SHMEM_THREADIO_HASH_SIZE,
+        PGSTAT_SHMEM_THREADIO_HASH_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION);
 
     rc = memset_s(&s->global_stats, sizeof(PgStat_GlobalStats), 0, sizeof(PgStat_GlobalStats));
     securec_check(rc, "\0", "\0");
@@ -466,6 +510,111 @@ PgStatSharedFuncEntry* pgstat_shared_get_func_entry(
     return entry;
 }
 
+uint32 pgstat_threadio_partition_index(const PgStatSharedThreadIOKey* key)
+{
+    return pgstat_hash_threadiokey(key) % (uint32)PGSTAT_THREADIO_NPARTITIONS;
+}
+
+LWLock* pgstat_shared_threadio_lock_for_key(const PgStatSharedThreadIOKey* key)
+{
+    PgStatSharedState* s = pgstat_get_shared_state();
+    if (s == NULL) {
+        return NULL;
+    }
+    return pgstat_threadio_lock(s, key);
+}
+
+PgStatSharedThreadIOEntry* pgstat_shared_get_threadio_entry_under_threadiolock(
+    const PgStatSharedThreadIOKey* key, bool create, bool* found)
+{
+    PgStatSharedState* s = pgstat_get_shared_state();
+    if (s == NULL) {
+        return NULL;
+    }
+
+    LWLock* l = pgstat_threadio_lock(s, key);
+    Assert(LWLockHeldByMe(l));
+
+    HASHACTION action = create ? HASH_ENTER : HASH_FIND;
+    bool local_found = false;
+    PgStatSharedThreadIOEntry* entry =
+        (PgStatSharedThreadIOEntry*)hash_search(s->threadio_hash, key, action, &local_found);
+
+    if (entry == NULL) {
+        if (create) {
+            ereport(WARNING,
+                (errmsg("pgstat threadio entry creation failed (hash may be full), role %u object %u context %u",
+                    key->role_id, key->object_id, key->context_id)));
+        }
+        if (found) {
+            *found = false;
+        }
+        return NULL;
+    }
+
+    if (!local_found && create) {
+        pgstat_shared_init_threadio_entry(entry, key);
+        pgstat_threadio_hash_warn_near_full(s);
+    }
+
+    if (found) {
+        *found = local_found;
+    }
+    return entry;
+}
+
+PgStatSharedThreadIOEntry* pgstat_shared_get_threadio_entry(
+    const PgStatSharedThreadIOKey* key, bool create, LWLockMode mode, LWLock** lock, bool* found)
+{
+    PgStatSharedState* s = pgstat_get_shared_state();
+    if (s == NULL) {
+        return NULL;
+    }
+
+    LWLock* l = pgstat_threadio_lock(s, key);
+    bool locked = false;
+    if (!LWLockHeldByMe(l)) {
+        LWLockAcquire(l, mode);
+        locked = true;
+    }
+
+    HASHACTION action = create ? HASH_ENTER : HASH_FIND;
+    bool local_found = false;
+    PgStatSharedThreadIOEntry* entry =
+        (PgStatSharedThreadIOEntry*)hash_search(s->threadio_hash, key, action, &local_found);
+
+    if (entry == NULL) {
+        if (create) {
+            ereport(WARNING,
+                (errmsg("pgstat threadio entry creation failed (hash may be full), role %u object %u context %u",
+                    key->role_id, key->object_id, key->context_id)));
+        }
+        if (locked) {
+            LWLockRelease(l);
+        }
+        if (lock) {
+            *lock = NULL;
+        }
+        if (found) {
+            *found = false;
+        }
+        return NULL;
+    }
+
+    if (!local_found && create) {
+        pgstat_shared_init_threadio_entry(entry, key);
+        pgstat_threadio_hash_warn_near_full(s);
+    }
+
+    if (found) {
+        *found = local_found;
+    }
+    if (lock) {
+        *lock = locked ? l : NULL;
+    }
+    return entry;
+}
+
 void pgstat_shared_release_lock(LWLock* lock)
 {
     if (lock != NULL) {
@@ -659,6 +808,13 @@ static PgStat_StatDBEntry* snapshot_get_db_entry(HTAB* dbhash, MemoryContext mcx
         entry->functions =
             hash_create("Per-database function", PGSTAT_SNAPSHOT_FUNC_HASH_SIZE, &hash_ctl,
                 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        hash_ctl.keysize = sizeof(PgStat_StatThreadIOKey);
+        hash_ctl.entrysize = sizeof(PgStat_StatThreadIOEntry);
+        hash_ctl.hash = tag_hash;
+        entry->thread_io =
+            hash_create("Per-database thread io", PGSTAT_SNAPSHOT_THREADIO_HASH_SIZE, &hash_ctl,
+                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
     }
 
     return entry;
@@ -795,6 +951,34 @@ static void copy_snapshot_fill_func_entries(HTAB* dbhash, MemoryContext mcxt, Oi
     pgstat_unlock_all(pgstat_get_shared_state()->func_locks, PGSTAT_FUNC_NPARTITIONS);
 }
 
+static void copy_snapshot_fill_threadio_entries(HTAB* dbhash, MemoryContext mcxt, Oid onlydb)
+{
+    (void)onlydb;
+    PgStat_StatDBEntry* dbentry = snapshot_get_db_entry(dbhash, mcxt, InvalidOid, true);
+    if (dbentry == NULL || dbentry->thread_io == NULL) {
+        return;
+    }
+
+    pgstat_lock_all(pgstat_get_shared_state()->threadio_locks, PGSTAT_THREADIO_NPARTITIONS, LW_SHARED);
+    HASH_SEQ_STATUS iostat;
+    hash_seq_init(&iostat, pgstat_get_shared_state()->threadio_hash);
+    PgStatSharedThreadIOEntry* sthreadio = NULL;
+    while ((sthreadio = (PgStatSharedThreadIOEntry*)hash_seq_search(&iostat)) != NULL) {
+        PgStat_StatThreadIOKey key;
+        key.role_id = sthreadio->key.role_id;
+        key.object_id = sthreadio->key.object_id;
+        key.context_id = sthreadio->key.context_id;
+        bool found = false;
+        PgStat_StatThreadIOEntry* threadioentry =
+            (PgStat_StatThreadIOEntry*)hash_search(dbentry->thread_io, &key, HASH_ENTER, &found);
+        if (threadioentry != NULL) {
+            threadioentry->key = key;
+            threadioentry->stats = sthreadio->stats;
+        }
+    }
+    pgstat_unlock_all(pgstat_get_shared_state()->threadio_locks, PGSTAT_THREADIO_NPARTITIONS);
+}
+
 void pgstat_shared_copy_snapshot(Oid onlydb, MemoryContext mcxt, HTAB** out_dbhash, PgStat_GlobalStats* out_global)
 {
     if (out_dbhash != NULL) {
@@ -831,6 +1015,7 @@ void pgstat_shared_copy_snapshot(Oid onlydb, MemoryContext mcxt, HTAB** out_dbha
     copy_snapshot_fill_db_entries(dbhash, mcxt, onlydb);
     copy_snapshot_fill_tab_entries(dbhash, mcxt, onlydb);
     copy_snapshot_fill_func_entries(dbhash, mcxt, onlydb);
+    copy_snapshot_fill_threadio_entries(dbhash, mcxt, onlydb);
     MemoryContextSwitchTo(old);
 }
 

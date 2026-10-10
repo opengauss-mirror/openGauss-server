@@ -267,6 +267,9 @@ void DataRcvWriterMain(void)
         while (!t_thrd.worker_sig_flags.shutdown_requested && DataRcvWrite() > 0) {
         }
 
+        /* Send off thread IO statistics collected during data page receive/write */
+        pgstat_send_threadio_stats();
+
         if (t_thrd.worker_sig_flags.shutdown_requested) {
             ereport(LOG, (errmsg("datarcvwriter thread shut down")));
             /*
