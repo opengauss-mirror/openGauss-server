@@ -558,7 +558,7 @@ static void AreaDecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     XLogReaderState *r = buf->record;
     uint8 info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
     ReorderBuffer *rb = ctx->reorder;
-    ReorderBufferTXN *txn = (struct ReorderBufferTXN *)palloc(sizeof(struct ReorderBufferTXN));
+    ReorderBufferTXN *txn = (struct ReorderBufferTXN *)palloc0(sizeof(struct ReorderBufferTXN));
     bool compress = (bool)(XLogRecGetInfo(r) & XLR_REL_COMPRESS);
     if (txn == NULL)
         return;

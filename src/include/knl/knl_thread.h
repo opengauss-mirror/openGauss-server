@@ -3410,6 +3410,12 @@ typedef struct knl_t_apply_worker_context {
     CommitSeqNo curRemoteCsn;
     bool isSkipTransaction;
     List *subNewOids;
+    bool inStreamedTransaction;
+    TransactionId streamXid;
+    void *streamFile;
+    HTAB *streamXidHash;
+    MemoryContext logicalStreamingContext;
+    bool streamCleanupRegistered;
 } knl_t_apply_worker_context;
 
 typedef struct knl_t_publication_context {
@@ -3419,6 +3425,8 @@ typedef struct knl_t_publication_context {
     bool updateConninfoNeeded;
     bool isNewPubNeeded;
     bool firstTimeSendConninfo;
+    bool inStreaming;
+    List *streamedRelids;
 } knl_t_publication_context;
 
 typedef struct knl_t_dms_context {

@@ -32,6 +32,7 @@ typedef enum {
     LOGICALREP_PROTO_VERSION_NUM,
     LOGICALREP_CONNINFO_PROTO_VERSION_NUM,
     LOGICALREP_NEWPUB_PROTO_VERSION_NUM,
+    LOGICALREP_STREAMING_PROTO_VERSION_NUM,
     LOGICALREP_PROTO_MAX_VERSION_NUM
 } LOGICALREP_VERSION_NUM;
 
@@ -55,6 +56,10 @@ typedef struct LogicalRepTupleData {
 #define LOGICALREP_COLUMN_TEXT        't'
 #define LOGICALREP_COLUMN_BINARY    'b' /* added in PG14 */
 #define LOGICAL_REP_MSG_DDL   'L'
+#define LOGICAL_REP_MSG_STREAM_START  's'
+#define LOGICAL_REP_MSG_STREAM_STOP   'E'
+#define LOGICAL_REP_MSG_STREAM_COMMIT 'c'
+#define LOGICAL_REP_MSG_STREAM_ABORT  'A'
 
 typedef uint32 LogicalRepRelId;
 
@@ -92,30 +97,46 @@ typedef struct LogicalRepCommitData {
     TimestampTz committime;
 } LogicalRepCommitData;
 
+typedef struct LogicalRepStreamAbortData {
+    TransactionId xid;
+    TransactionId subxid;
+} LogicalRepStreamAbortData;
+
 extern void logicalrep_write_begin(StringInfo out, ReorderBufferTXN *txn);
 extern void logicalrep_read_begin(StringInfo in, LogicalRepBeginData *begin_data);
 extern void logicalrep_write_commit(StringInfo out, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
 extern void logicalrep_read_commit(StringInfo in, LogicalRepCommitData *commit_data);
 extern void logicalrep_write_origin(StringInfo out, const char *origin, XLogRecPtr origin_lsn);
-extern void logicalrep_write_insert(StringInfo out, Relation rel, HeapTuple newtuple, bool binary);
-extern LogicalRepRelId logicalrep_read_insert(StringInfo in, LogicalRepTupleData *newtup);
-extern void logicalrep_write_update(StringInfo out, Relation rel, HeapTuple oldtuple, HeapTuple newtuple, bool binary);
-extern LogicalRepRelId logicalrep_read_update(StringInfo in, bool *has_oldtuple, LogicalRepTupleData *oldtup,
+extern void logicalrep_write_insert(StringInfo out, TransactionId xid, Relation rel, HeapTuple newtuple, bool binary);
+extern LogicalRepRelId logicalrep_read_insert(StringInfo in, TransactionId *xid, LogicalRepTupleData *newtup);
+extern void logicalrep_write_update(StringInfo out, TransactionId xid, Relation rel, HeapTuple oldtuple,
+    HeapTuple newtuple, bool binary);
+extern LogicalRepRelId logicalrep_read_update(StringInfo in, TransactionId *xid, bool *has_oldtuple,
+    LogicalRepTupleData *oldtup,
     LogicalRepTupleData *newtup);
-extern void logicalrep_write_delete(StringInfo out, Relation rel, HeapTuple oldtuple, bool binary);
-extern LogicalRepRelId logicalrep_read_delete(StringInfo in, LogicalRepTupleData *oldtup);
-extern void logicalrep_write_truncate(StringInfo out, int nrelids, Oid relids[],
+extern void logicalrep_write_delete(StringInfo out, TransactionId xid, Relation rel, HeapTuple oldtuple, bool binary);
+extern LogicalRepRelId logicalrep_read_delete(StringInfo in, TransactionId *xid, LogicalRepTupleData *oldtup);
+extern void logicalrep_write_truncate(StringInfo out, TransactionId xid, int nrelids, Oid relids[],
                                       bool cascade, bool restart_seqs);
-extern List *logicalrep_read_truncate(StringInfo in,
+extern List *logicalrep_read_truncate(StringInfo in, TransactionId *xid,
                                       bool *cascade, bool *restart_seqs);
-extern void logicalrep_write_rel(StringInfo out, Relation rel);
-extern LogicalRepRelation *logicalrep_read_rel(StringInfo in);
-extern void logicalrep_write_typ(StringInfo out, Oid typoid);
-extern void logicalrep_read_typ(StringInfo out, LogicalRepTyp *ltyp);
+extern void logicalrep_write_rel(StringInfo out, TransactionId xid, Relation rel);
+extern LogicalRepRelation *logicalrep_read_rel(StringInfo in, TransactionId *xid);
+extern void logicalrep_write_typ(StringInfo out, TransactionId xid, Oid typoid);
+extern void logicalrep_read_typ(StringInfo out, TransactionId *xid, LogicalRepTyp *ltyp);
 extern void logicalrep_write_conninfo(StringInfo out, char* conninfo);
 extern void logicalrep_read_conninfo(StringInfo in, char** conninfo);
-extern void logicalrep_write_ddl(StringInfo out, XLogRecPtr lsn,
+extern void logicalrep_write_ddl(StringInfo out, TransactionId xid, XLogRecPtr lsn,
                                 const char *prefix, Size sz, const char *message);
-extern char *logicalrep_read_ddl(StringInfo in, XLogRecPtr *lsn, const char **prefix, Size *sz);
+extern char *logicalrep_read_ddl(StringInfo in, TransactionId *xid, XLogRecPtr *lsn,
+                                const char **prefix, Size *sz);
+extern void logicalrep_write_stream_start(StringInfo out, TransactionId xid, bool firstSegment);
+extern TransactionId logicalrep_read_stream_start(StringInfo in, bool *firstSegment);
+extern void logicalrep_write_stream_stop(StringInfo out);
+extern void logicalrep_read_stream_stop(StringInfo in);
+extern void logicalrep_write_stream_commit(StringInfo out, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+extern TransactionId logicalrep_read_stream_commit(StringInfo in, LogicalRepCommitData *commit_data);
+extern void logicalrep_write_stream_abort(StringInfo out, TransactionId xid, TransactionId subxid);
+extern void logicalrep_read_stream_abort(StringInfo in, LogicalRepStreamAbortData *abortData);
 
 #endif /* LOGICALREP_PROTO_H */

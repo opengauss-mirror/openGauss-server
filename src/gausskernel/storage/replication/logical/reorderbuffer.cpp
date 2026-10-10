@@ -1597,7 +1597,7 @@ ReorderBufferApplyDDLMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
                                 ReorderBufferChange *change)
 {
     if (change->data.ddl.cmdtype != DCT_NewPub || t_thrd.publication_cxt.isNewPubNeeded) {
-        rb->ddl(rb, txn, change->lsn,
+        rb->ddl(rb, txn, change->txn->xid, change->lsn,
             change->data.ddl.prefix,
             change->data.ddl.relid,
             change->data.ddl.cmdtype,
@@ -2372,7 +2372,10 @@ static void ReorderBufferProcessTXN(
                         relations[nrelations++] = relation;
                     }
 
-                    rb->apply_truncate(rb, txn, nrelations, relations, change);
+                    if (streaming)
+                        rb->stream_truncate(rb, txn, nrelations, relations, change);
+                    else
+                        rb->apply_truncate(rb, txn, nrelations, relations, change);
 
                     for (i = 0; i < nrelations; i++)
                         RelationClose(relations[i]);
@@ -4599,6 +4602,18 @@ bool ResolveCminCmaxDuringDecoding(HTAB *tuplecid_data, Snapshot snapshot, HeapT
     BlockNumber blockno = InvalidBlockNumber;
     bool updated_mapping = false;
     int rc = 0;
+
+    /*
+     * While streaming an in-progress transaction, catalog changes may become
+     * visible to the decoder before their tuple CID records are decoded.  In
+     * that case ReorderBufferBuildTupleCidHash() has not created the hash yet.
+     * Treat this the same as a tuple CID that has not been decoded yet; the
+     * historic visibility caller already handles an unresolved CID.
+     */
+    if (tuplecid_data == NULL) {
+        return false;
+    }
+
     /* be careful about padding */
     rc = memset_s(&key, sizeof(key), 0, sizeof(key));
     securec_check(rc, "", "");

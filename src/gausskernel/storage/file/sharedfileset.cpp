@@ -139,6 +139,14 @@ File SharedFileSetOpen(SharedFileSet *fileset, const char *name)
     return file;
 }
 
+File SharedFileSetOpenForWrite(SharedFileSet *fileset, const char *name)
+{
+    char path[MAXPGPATH];
+
+    SharedFilePath(path, fileset, name);
+    return PathNameOpenTemporaryFileForWrite(path);
+}
+
 /*
  * Delete a file that was created with PathNameCreateShared().
  * Return true if the file existed, false if didn't.
@@ -211,4 +219,3 @@ static void SharedFilePath(char *path, SharedFileSet *fileset, const char *name)
     errno_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dirpath, name);
     securec_check_ss(rc, "", "");
 }
-

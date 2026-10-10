@@ -1851,6 +1851,30 @@ File PathNameOpenTemporaryFile(char *path)
 }
 
 /*
+ * Open a shared temporary file for continued writing.  Unlike a regular
+ * temporary file, the file is not removed when this handle is closed.
+ */
+File PathNameOpenTemporaryFileForWrite(char *path)
+{
+    File file;
+
+    ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
+
+    file = PathNameOpenFile(path, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR, FILE_INVALID, false);
+    if (file <= 0 && errno != ENOENT) {
+        ereport(ERROR,
+            (errcode_for_file_access(), errmsg("could not open temporary file \"%s\" for writing: %m", path)));
+    }
+
+    if (file > 0) {
+        GetVfdCache(false)[file].fdstate |= FD_TEMP_FILE_LIMIT;
+        RegisterTemporaryFile(file, false);
+    }
+
+    return file;
+}
+
+/*
  * Delete a file by pathname.  Return true if the file existed, false if
  * didn't.
  */

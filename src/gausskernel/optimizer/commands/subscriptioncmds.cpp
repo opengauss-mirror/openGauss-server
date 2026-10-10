@@ -65,6 +65,7 @@
 #define SUBOPT_SKIPLSN              0x00000100
 #define SUBOPT_MATCHDDLOWNER        0x00000200
 #define SUBOPT_SYNC_CONNINFO        0x00000400
+#define SUBOPT_STREAMING            0x00000800
 
 /* check if the 'val' has 'bits' set */
 #define IsSet(val, bits)  (((val) & (bits)) == (bits))
@@ -86,6 +87,7 @@ typedef struct SubOpts
     bool connect;
     bool matchddlowner;
     bool syncconninfo;
+    bool streaming;
     XLogRecPtr skiplsn;
 } SubOpts;
 
@@ -129,6 +131,9 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
     }
     if (IsSet(supported_opts, SUBOPT_SYNC_CONNINFO)) {
         opts->syncconninfo = true;
+    }
+    if (IsSet(supported_opts, SUBOPT_STREAMING)) {
+        opts->streaming = false;
     }
 
     /* Parse options */
@@ -249,6 +254,18 @@ static void parse_subscription_options(const List *stmt_options, bits32 supporte
 
             opts->specified_opts |= SUBOPT_SYNC_CONNINFO;
             opts->syncconninfo = defGetBoolean(defel);
+        } else if (IsSet(supported_opts, SUBOPT_STREAMING) && strcmp(defel->defname, "streaming") == 0) {
+            if (t_thrd.proc->workingVersionNum < SUBSCRIPTION_STREAMING_VERSION_NUM) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("streaming is not supported before working version %u",
+                        SUBSCRIPTION_STREAMING_VERSION_NUM)));
+            }
+            if (IsSet(opts->specified_opts, SUBOPT_STREAMING)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            }
+            opts->specified_opts |= SUBOPT_STREAMING;
+            opts->streaming = defGetBoolean(defel);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized subscription parameter: %s", defel->defname)));
@@ -534,7 +551,8 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      * Connection and publication should not be specified here.
      */
     supported_opts = (SUBOPT_ENABLED | SUBOPT_SLOT_NAME | SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY |
-                      SUBOPT_COPY_DATA | SUBOPT_CONNECT | SUBOPT_MATCHDDLOWNER | SUBOPT_SYNC_CONNINFO);
+                      SUBOPT_COPY_DATA | SUBOPT_CONNECT | SUBOPT_MATCHDDLOWNER | SUBOPT_SYNC_CONNINFO |
+                      SUBOPT_STREAMING);
     parse_subscription_options(stmt->options, supported_opts, &opts);
 
     /*
@@ -581,6 +599,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(opts.binary);
     values[Anum_pg_subscription_submatchddlowner - 1] = BoolGetDatum(opts.matchddlowner);
     values[Anum_pg_subscription_subsyncconninfo - 1] = BoolGetDatum(opts.syncconninfo);
+    values[Anum_pg_subscription_substreaming - 1] = BoolGetDatum(opts.streaming);
 
     /* encrypt conninfo */
     char *encryptConninfo = EncryptOrDecryptConninfo(stmt->conninfo, 'E');
@@ -901,7 +920,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     if (!stmt->refresh) {
         supported_opts = (SUBOPT_CONNINFO | SUBOPT_PUBLICATION | SUBOPT_ENABLED | SUBOPT_SLOT_NAME |
                           SUBOPT_SYNCHRONOUS_COMMIT | SUBOPT_BINARY | SUBOPT_SKIPLSN | SUBOPT_MATCHDDLOWNER |
-                          SUBOPT_SYNC_CONNINFO);
+                          SUBOPT_SYNC_CONNINFO | SUBOPT_STREAMING);
         parse_subscription_options(stmt->options, supported_opts, &opts);
     } else {
         supported_opts = SUBOPT_COPY_DATA;
@@ -997,6 +1016,10 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     if (IsSet(opts.specified_opts, SUBOPT_SYNC_CONNINFO)) {
         values[Anum_pg_subscription_subsyncconninfo - 1] = BoolGetDatum(opts.syncconninfo);
         replaces[Anum_pg_subscription_subsyncconninfo - 1] = true;
+    }
+    if (IsSet(opts.specified_opts, SUBOPT_STREAMING)) {
+        values[Anum_pg_subscription_substreaming - 1] = BoolGetDatum(opts.streaming);
+        replaces[Anum_pg_subscription_substreaming - 1] = true;
     }
 
     tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);

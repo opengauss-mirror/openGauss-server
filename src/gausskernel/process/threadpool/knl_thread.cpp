@@ -1265,6 +1265,12 @@ static void KnlTApplyWorkerInit(knl_t_apply_worker_context* applyWorkerCxt)
     applyWorkerCxt->logicalRepRelMapContext = NULL;
     applyWorkerCxt->applyContext = NULL;
     applyWorkerCxt->subNewOids = NIL;
+    applyWorkerCxt->inStreamedTransaction = false;
+    applyWorkerCxt->streamXid = InvalidTransactionId;
+    applyWorkerCxt->streamFile = NULL;
+    applyWorkerCxt->streamXidHash = NULL;
+    applyWorkerCxt->logicalStreamingContext = NULL;
+    applyWorkerCxt->streamCleanupRegistered = false;
 }
 
 static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)

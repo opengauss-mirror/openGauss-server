@@ -37,6 +37,7 @@ extern void SharedFileSetInit(SharedFileSet *fileset);
 extern void SharedFileSetAttach(SharedFileSet *fileset);
 extern File SharedFileSetCreate(SharedFileSet *fileset, const char *name);
 extern File SharedFileSetOpen(SharedFileSet *fileset, const char *name);
+extern File SharedFileSetOpenForWrite(SharedFileSet *fileset, const char *name);
 extern bool SharedFileSetDelete(SharedFileSet *fileset, const char *name, bool errorOnFailure);
 extern void SharedFileSetDeleteAll(const SharedFileSet *fileset);
 

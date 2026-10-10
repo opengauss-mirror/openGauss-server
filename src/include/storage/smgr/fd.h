@@ -121,6 +121,7 @@ extern int FreeSocket(int sockfd);
 /* Operations used for sharing named temporary files */
 extern File PathNameCreateTemporaryFile(char *name, bool error_on_failure, bool inter_xact = false);
 extern File PathNameOpenTemporaryFile(char *name);
+extern File PathNameOpenTemporaryFileForWrite(char *name);
 extern bool PathNameDeleteTemporaryFile(const char *name, bool error_on_failure);
 extern void PathNameCreateTemporaryDir(const char *base, const char *name);
 extern void PathNameDeleteTemporaryDir(const char *name);

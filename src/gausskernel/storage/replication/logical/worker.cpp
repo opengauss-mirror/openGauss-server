@@ -80,6 +80,7 @@
 #include "rewrite/rewriteHandler.h"
 
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/buffile.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
@@ -103,6 +104,8 @@
 
 static const int NAPTIME_PER_CYCLE = 10; /* max sleep time between cycles (10ms) */
 static const double HALF = 0.5;
+static const int STREAM_XID_HASH_INITIAL_SIZE = 32;
+static const int STREAM_SUBXACT_INITIAL_CAPACITY = 16;
 
 typedef struct FlushPosition {
     dlist_node node;
@@ -115,11 +118,35 @@ typedef struct SlotErrCallbackArg {
     int remote_attnum;
 } SlotErrCallbackArg;
 
+typedef struct StreamSubXactInfo {
+    TransactionId xid;
+    int fileno;
+    off_t offset;
+} StreamSubXactInfo;
+
+typedef struct StreamXidHashEntry {
+    TransactionId xid;
+    SharedFileSet *fileset;
+    StreamSubXactInfo *subxacts;
+    int nsubxacts;
+    int maxsubxacts;
+    TransactionId lastSubxid;
+} StreamXidHashEntry;
+
+static const char *STREAM_CHANGE_FILE_NAME = "changes";
+
 static void send_feedback(XLogRecPtr recvpos, bool force, bool requestReply);
 static void store_flush_position(XLogRecPtr remote_lsn);
 static void reread_subscription(void);
 static void ApplyWorkerProcessMsg(char type, StringInfo s, XLogRecPtr *lastRcv);
 static void apply_dispatch(StringInfo s);
+static void apply_handle_stream_start(StringInfo s);
+static void apply_handle_stream_stop(StringInfo s);
+static void apply_handle_stream_abort(StringInfo s);
+static void apply_handle_stream_commit(StringInfo s);
+static void apply_finish_commit(LogicalRepCommitData *commit_data);
+static void ApplyStreamingReset(bool closeStreamFile);
+static void apply_streaming_cleanup(int code, Datum arg);
 static void apply_handle_conninfo(StringInfo s);
 static void UpdateConninfo(char* standbysInfo);
 static Oid find_conflict_tuple(EState *estate, TupleTableSlot *remoteslot, TupleTableSlot *localslot,
@@ -565,25 +592,30 @@ static void apply_handle_commit(StringInfo s)
 
     logicalrep_read_commit(s, &commit_data);
 
-    Assert(commit_data.commit_lsn == t_thrd.applyworker_cxt.remoteFinalLsn);
+    apply_finish_commit(&commit_data);
+}
+
+static void apply_finish_commit(LogicalRepCommitData *commit_data)
+{
+    Assert(commit_data->commit_lsn == t_thrd.applyworker_cxt.remoteFinalLsn);
 
     if (IsTransactionState()) {
         /*
          * Update origin state so we can restart streaming from correct
          * position in case of crash.
          */
-        u_sess->reporigin_cxt.originTs = commit_data.committime;
-        u_sess->reporigin_cxt.originLsn = commit_data.end_lsn;
+        u_sess->reporigin_cxt.originTs = commit_data->committime;
+        u_sess->reporigin_cxt.originLsn = commit_data->end_lsn;
 
         CommitTransactionCommand();
         pgstat_report_stat(false);
-        store_flush_position(commit_data.end_lsn);
+        store_flush_position(commit_data->end_lsn);
     }
 
     t_thrd.applyworker_cxt.inRemoteTransaction = false;
 
     /* Process any tables that are being synchronized in parallel. */
-    process_syncing_tables(commit_data.end_lsn);
+    process_syncing_tables(commit_data->end_lsn);
 
     if (t_thrd.applyworker_cxt.curWorker->needCheckConflict) {
         t_thrd.applyworker_cxt.curWorker->needCheckConflict = false;
@@ -609,10 +641,11 @@ static void apply_handle_commit(StringInfo s)
 static void apply_handle_origin(StringInfo s)
 {
     /*
-     * ORIGIN message can only come inside remote transaction and before
-     * any actual writes.
+     * ORIGIN message can only come inside a streamed transaction or inside
+     * a remote transaction and before any actual writes.
      */
-    if (!t_thrd.applyworker_cxt.inRemoteTransaction || (IsTransactionState() && !AM_TABLESYNC_WORKER))
+    if (!t_thrd.applyworker_cxt.inStreamedTransaction &&
+        (!t_thrd.applyworker_cxt.inRemoteTransaction || (IsTransactionState() && !AM_TABLESYNC_WORKER)))
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("ORIGIN message sent out of order")));
 }
 
@@ -628,7 +661,7 @@ static void apply_handle_relation(StringInfo s)
 {
     LogicalRepRelation *rel;
 
-    rel = logicalrep_read_rel(s);
+    rel = logicalrep_read_rel(s, NULL);
     logicalrep_relmap_update(rel);
 }
 
@@ -641,7 +674,7 @@ static void apply_handle_type(StringInfo s)
 {
     LogicalRepTyp typ;
 
-    logicalrep_read_typ(s, &typ);
+    logicalrep_read_typ(s, NULL, &typ);
 }
 
 /*
@@ -765,7 +798,7 @@ static void apply_handle_insert(StringInfo s)
         return;
     }
 
-    relid = logicalrep_read_insert(s, &newtup);
+    relid = logicalrep_read_insert(s, NULL, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel)) {
         /*
@@ -969,7 +1002,7 @@ static void apply_handle_update(StringInfo s)
         return;
     }
 
-    relid = logicalrep_read_update(s, &has_oldtup, &oldtup, &newtup);
+    relid = logicalrep_read_update(s, NULL, &has_oldtup, &oldtup, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel)) {
         /*
@@ -1168,7 +1201,7 @@ static void apply_handle_delete(StringInfo s)
         return;
     }
 
-    relid = logicalrep_read_delete(s, &oldtup);
+    relid = logicalrep_read_delete(s, NULL, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel)) {
         /*
@@ -1248,7 +1281,11 @@ static void apply_handle_truncate(StringInfo s)
 
     ensure_transaction();
 
-    remote_relids = logicalrep_read_truncate(s, &cascade, &restart_seqs);
+    if (t_thrd.applyworker_cxt.isSkipTransaction) {
+        return;
+    }
+
+    remote_relids = logicalrep_read_truncate(s, NULL, &cascade, &restart_seqs);
 
     foreach(lc, remote_relids)
     {
@@ -1465,7 +1502,11 @@ apply_handle_ddl(StringInfo s)
 
     ensure_transaction();
 
-    message = logicalrep_read_ddl(s, &lsn, &prefix, &sz);
+    if (t_thrd.applyworker_cxt.isSkipTransaction) {
+        return;
+    }
+
+    message = logicalrep_read_ddl(s, NULL, &lsn, &prefix, &sz);
 
     begin_replication_step();
 
@@ -1590,14 +1631,343 @@ apply_handle_ddl(StringInfo s)
     end_replication_step();
 }
 
+static void StreamInitHash(void)
+{
+    HASHCTL ctl;
+    errno_t rc;
+
+    if (t_thrd.applyworker_cxt.streamXidHash != NULL) {
+        return;
+    }
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    if (rc != EOK) {
+        securec_check(rc, "", "");
+    }
+    ctl.keysize = sizeof(TransactionId);
+    ctl.entrysize = sizeof(StreamXidHashEntry);
+    ctl.hcxt = t_thrd.applyworker_cxt.applyContext;
+    t_thrd.applyworker_cxt.streamXidHash = hash_create("logical replication streamed transactions",
+        STREAM_XID_HASH_INITIAL_SIZE,
+        &ctl, HASH_ELEM | HASH_CONTEXT | HASH_BLOBS);
+}
+
+static StreamXidHashEntry *stream_find_entry(TransactionId xid, bool missingOk)
+{
+    if (t_thrd.applyworker_cxt.streamXidHash == NULL) {
+        if (missingOk)
+            return NULL;
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+            errmsg("streamed transaction %lu is not known", xid)));
+    }
+    StreamXidHashEntry *entry = (StreamXidHashEntry *)hash_search(
+        t_thrd.applyworker_cxt.streamXidHash, &xid, HASH_FIND, NULL);
+    if (entry == NULL && !missingOk)
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+            errmsg("streamed transaction %lu is not known", xid)));
+    return entry;
+}
+
+static void stream_cleanup(TransactionId xid)
+{
+    StreamXidHashEntry *entry = stream_find_entry(xid, false);
+
+    SharedFileSetDeleteAll(entry->fileset);
+    pfree(entry->fileset);
+    pfree_ext(entry->subxacts);
+    (void)hash_search(t_thrd.applyworker_cxt.streamXidHash, &xid, HASH_REMOVE, NULL);
+}
+
+static void ApplyStreamingReset(bool closeStreamFile)
+{
+    HASH_SEQ_STATUS status;
+    StreamXidHashEntry *entry;
+
+    if (t_thrd.applyworker_cxt.streamFile != NULL) {
+        if (closeStreamFile)
+            BufFileClose((BufFile *)t_thrd.applyworker_cxt.streamFile);
+        t_thrd.applyworker_cxt.streamFile = NULL;
+    }
+
+    if (t_thrd.applyworker_cxt.streamXidHash != NULL) {
+        hash_seq_init(&status, t_thrd.applyworker_cxt.streamXidHash);
+        while ((entry = (StreamXidHashEntry *)hash_seq_search(&status)) != NULL) {
+            if (entry->fileset != NULL) {
+                SharedFileSetDeleteAll(entry->fileset);
+                pfree(entry->fileset);
+            }
+            pfree_ext(entry->subxacts);
+        }
+        hash_destroy(t_thrd.applyworker_cxt.streamXidHash);
+        t_thrd.applyworker_cxt.streamXidHash = NULL;
+    }
+
+    t_thrd.applyworker_cxt.streamXid = InvalidTransactionId;
+    t_thrd.applyworker_cxt.inStreamedTransaction = false;
+    t_thrd.applyworker_cxt.inRemoteTransaction = false;
+    t_thrd.applyworker_cxt.isSkipTransaction = false;
+    list_free_ext(t_thrd.applyworker_cxt.subNewOids);
+}
+
+static void apply_streaming_cleanup(int code, Datum arg)
+{
+    ApplyStreamingReset(true);
+}
+
+static void stream_track_subxact(StreamXidHashEntry *entry, TransactionId xid)
+{
+    int i;
+
+    if (xid == entry->xid || xid == entry->lastSubxid) {
+        return;
+    }
+    entry->lastSubxid = xid;
+    for (i = entry->nsubxacts - 1; i >= 0; i--) {
+        if (entry->subxacts[i].xid == xid) {
+            return;
+        }
+    }
+    if (entry->nsubxacts == entry->maxsubxacts) {
+        MemoryContext oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.applyContext);
+        entry->maxsubxacts = entry->maxsubxacts == 0 ? STREAM_SUBXACT_INITIAL_CAPACITY :
+            entry->maxsubxacts + entry->maxsubxacts;
+        if (entry->subxacts == NULL) {
+            entry->subxacts = (StreamSubXactInfo *)palloc(sizeof(StreamSubXactInfo) * entry->maxsubxacts);
+        } else {
+            entry->subxacts = (StreamSubXactInfo *)repalloc(entry->subxacts,
+                sizeof(StreamSubXactInfo) * entry->maxsubxacts);
+        }
+        MemoryContextSwitchTo(oldctx);
+    }
+    entry->subxacts[entry->nsubxacts].xid = xid;
+    BufFileTell((BufFile *)t_thrd.applyworker_cxt.streamFile,
+        &entry->subxacts[entry->nsubxacts].fileno, &entry->subxacts[entry->nsubxacts].offset);
+    entry->nsubxacts++;
+}
+
+static void stream_write_change(char action, TransactionId xid, StringInfo s)
+{
+    StreamXidHashEntry *entry = stream_find_entry(t_thrd.applyworker_cxt.streamXid, false);
+    int len = 1 + s->len - s->cursor;
+    BufFile *file = (BufFile *)t_thrd.applyworker_cxt.streamFile;
+
+    stream_track_subxact(entry, xid);
+    if (BufFileWrite(file, &len, sizeof(len)) != sizeof(len) ||
+        BufFileWrite(file, &action, sizeof(action)) != sizeof(action) ||
+        BufFileWrite(file, &s->data[s->cursor], s->len - s->cursor) != (size_t)(s->len - s->cursor))
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write streamed transaction data: %m")));
+}
+
+static void apply_handle_stream_start(StringInfo s)
+{
+    bool firstSegment;
+    bool found = false;
+    StreamXidHashEntry *entry;
+    MemoryContext oldctx;
+
+    if (t_thrd.applyworker_cxt.inStreamedTransaction)
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("nested stream start message")));
+    ensure_transaction();
+    StreamInitHash();
+    t_thrd.applyworker_cxt.streamXid = logicalrep_read_stream_start(s, &firstSegment);
+    if (!TransactionIdIsValid(t_thrd.applyworker_cxt.streamXid))
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+            errmsg("invalid transaction ID in stream start message")));
+    oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.applyContext);
+    entry = (StreamXidHashEntry *)hash_search(t_thrd.applyworker_cxt.streamXidHash,
+        &t_thrd.applyworker_cxt.streamXid, firstSegment ? HASH_ENTER : HASH_FIND, &found);
+    if (firstSegment) {
+        if (found)
+            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg("duplicate first segment for streamed transaction %lu", t_thrd.applyworker_cxt.streamXid)));
+        entry->xid = t_thrd.applyworker_cxt.streamXid;
+        entry->subxacts = NULL;
+        entry->nsubxacts = 0;
+        entry->maxsubxacts = 0;
+        entry->lastSubxid = InvalidTransactionId;
+        entry->fileset = NULL;
+        entry->fileset = (SharedFileSet *)palloc0(sizeof(SharedFileSet));
+        SharedFileSetInit(entry->fileset);
+        t_thrd.applyworker_cxt.streamFile = BufFileCreateShared(entry->fileset, STREAM_CHANGE_FILE_NAME);
+    } else {
+        if (entry == NULL)
+            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg("stream continuation for unknown transaction %lu", t_thrd.applyworker_cxt.streamXid)));
+        t_thrd.applyworker_cxt.streamFile =
+            BufFileOpenSharedForWrite(entry->fileset, STREAM_CHANGE_FILE_NAME);
+        if (t_thrd.applyworker_cxt.streamFile == NULL)
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("streamed transaction file for %lu does not exist", t_thrd.applyworker_cxt.streamXid)));
+        if (BufFileSeekToEnd((BufFile *)t_thrd.applyworker_cxt.streamFile) != 0)
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek streamed transaction file: %m")));
+    }
+    MemoryContextSwitchTo(oldctx);
+    t_thrd.applyworker_cxt.inStreamedTransaction = true;
+    pgstat_report_activity(STATE_RUNNING, NULL);
+}
+
+static void apply_handle_stream_stop(StringInfo s)
+{
+    if (!t_thrd.applyworker_cxt.inStreamedTransaction)
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("stream stop sent out of order")));
+    logicalrep_read_stream_stop(s);
+    BufFileClose((BufFile *)t_thrd.applyworker_cxt.streamFile);
+    t_thrd.applyworker_cxt.streamFile = NULL;
+    t_thrd.applyworker_cxt.streamXid = InvalidTransactionId;
+    t_thrd.applyworker_cxt.inStreamedTransaction = false;
+    CommitTransactionCommand();
+    pgstat_report_activity(STATE_IDLE, NULL);
+}
+
+static void apply_handle_stream_abort(StringInfo s)
+{
+    LogicalRepStreamAbortData abort_data;
+    StreamXidHashEntry *entry;
+    int i;
+
+    if (t_thrd.applyworker_cxt.inStreamedTransaction)
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("stream abort sent inside a stream segment")));
+    logicalrep_read_stream_abort(s, &abort_data);
+    if (abort_data.xid == abort_data.subxid) {
+        stream_cleanup(abort_data.xid);
+        return;
+    }
+    entry = stream_find_entry(abort_data.xid, false);
+    for (i = entry->nsubxacts - 1; i >= 0; i--) {
+        if (entry->subxacts[i].xid == abort_data.subxid) {
+            break;
+        }
+    }
+    if (i < 0) {
+        return;
+    }
+    BufFile *file = BufFileOpenSharedForWrite(entry->fileset, STREAM_CHANGE_FILE_NAME);
+    if (file == NULL)
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("streamed transaction file for %lu does not exist", abort_data.xid)));
+    BufFileTruncate(file, entry->subxacts[i].fileno, entry->subxacts[i].offset);
+    BufFileClose(file);
+    entry->nsubxacts = i;
+    entry->lastSubxid = InvalidTransactionId;
+}
+
+static void apply_streamed_changes(BufFile *file, char **data, int *bufferSize)
+{
+    bool hasMore = true;
+
+    while (hasMore) {
+        CHECK_FOR_INTERRUPTS();
+
+        int len;
+        size_t nread = BufFileRead(file, &len, sizeof(len));
+        if (nread == 0) {
+            hasMore = false;
+            continue;
+        }
+        if (nread != sizeof(len) || len <= 0)
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid streamed transaction record")));
+        if (len > *bufferSize) {
+            MemoryContext oldctx = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+            *data = (char *)repalloc(*data, len);
+            *bufferSize = len;
+            MemoryContextSwitchTo(oldctx);
+        }
+        if (BufFileRead(file, *data, len) != (size_t)len)
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("incomplete streamed transaction record")));
+        StringInfoData change = {*data, len, len, 0};
+        MemoryContext oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.messageContext);
+        apply_dispatch(&change);
+        MemoryContextSwitchTo(oldctx);
+        MemoryContextReset(t_thrd.applyworker_cxt.messageContext);
+    }
+}
+
+static void apply_handle_stream_commit(StringInfo s)
+{
+    LogicalRepCommitData commit_data;
+    TransactionId xid;
+    StreamXidHashEntry *entry;
+    BufFile *file;
+    int bufferSize = BLCKSZ;
+    char *data;
+    MemoryContext oldctx;
+
+    if (t_thrd.applyworker_cxt.inStreamedTransaction)
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("stream commit sent inside a stream segment")));
+    xid = logicalrep_read_stream_commit(s, &commit_data);
+    entry = stream_find_entry(xid, false);
+    ensure_transaction();
+    t_thrd.applyworker_cxt.inRemoteTransaction = true;
+    t_thrd.applyworker_cxt.remoteFinalLsn = commit_data.commit_lsn;
+    IsSkippingChanges(commit_data.commit_lsn);
+    oldctx = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    file = BufFileOpenShared(entry->fileset, STREAM_CHANGE_FILE_NAME);
+    if (file == NULL)
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("streamed transaction file for %lu does not exist", xid)));
+    if (BufFileSeek(file, 0, 0, SEEK_SET) != 0)
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not rewind streamed transaction file: %m")));
+    data = (char *)palloc(bufferSize);
+    MemoryContextSwitchTo(oldctx);
+    apply_streamed_changes(file, &data, &bufferSize);
+    BufFileClose(file);
+    pfree(data);
+    apply_finish_commit(&commit_data);
+    stream_cleanup(xid);
+}
+
 /*
  * Logical replication protocol message dispatcher.
  */
+static void apply_streamed_message(StringInfo s, char action)
+{
+    switch (action) {
+        case LOGICAL_REP_MSG_STREAM_STOP:
+            apply_handle_stream_stop(s);
+            break;
+        case 'O':
+            apply_handle_origin(s);
+            break;
+        case 'R':
+        case 'Y':
+        case 'I':
+        case 'U':
+        case 'D':
+        case 'T':
+        case LOGICAL_REP_MSG_DDL: {
+            TransactionId xid = pq_getmsgint64(s);
+            if (!TransactionIdIsValid(xid))
+                ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                    errmsg("invalid transaction ID in streamed message")));
+            stream_write_change(action, xid, s);
+            break;
+        }
+        default:
+            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg("invalid logical replication message type \"%c\" inside stream segment", action)));
+    }
+}
+
 static void apply_dispatch(StringInfo s)
 {
     char action = pq_getmsgbyte(s);
 
+    if (t_thrd.applyworker_cxt.inStreamedTransaction) {
+        apply_streamed_message(s, action);
+        return;
+    }
     switch (action) {
+        case LOGICAL_REP_MSG_STREAM_START:
+            apply_handle_stream_start(s);
+            break;
+        case LOGICAL_REP_MSG_STREAM_COMMIT:
+            apply_handle_stream_commit(s);
+            break;
+        case LOGICAL_REP_MSG_STREAM_ABORT:
+            apply_handle_stream_abort(s);
+            break;
+        case LOGICAL_REP_MSG_STREAM_STOP:
+            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("stream stop sent out of order")));
+            break;
         /* BEGIN */
         case 'B':
             apply_handle_begin(s);
@@ -1689,7 +2059,9 @@ static void get_flush_position(XLogRecPtr *write, XLogRecPtr *flush, bool *have_
         }
     }
 
-    *have_pending_txes = !dlist_is_empty(&t_thrd.applyworker_cxt.lsnMapping);
+    *have_pending_txes = !dlist_is_empty(&t_thrd.applyworker_cxt.lsnMapping) ||
+        (t_thrd.applyworker_cxt.streamXidHash != NULL &&
+         hash_get_num_entries(t_thrd.applyworker_cxt.streamXidHash) > 0);
 }
 
 /*
@@ -1868,7 +2240,8 @@ static void LogicalRepApplyLoop(XLogRecPtr last_received)
             send_feedback(last_received, requestReply, requestReply);
         }
 
-        if (!t_thrd.applyworker_cxt.inRemoteTransaction) {
+        if (!t_thrd.applyworker_cxt.inRemoteTransaction &&
+            !t_thrd.applyworker_cxt.inStreamedTransaction) {
             /*
              * If we didn't get any transactions for a while there might be
              * unconsumed invalidation messages in the queue, consume them now.
@@ -2056,7 +2429,8 @@ static void reread_subscription(void)
     * The launcher will start a new worker.
     */
     if (strcmp(newsub->name, t_thrd.applyworker_cxt.mySubscription->name) != 0 ||
-        newsub->binary != t_thrd.applyworker_cxt.mySubscription->binary) {
+        newsub->binary != t_thrd.applyworker_cxt.mySubscription->binary ||
+        newsub->streaming != t_thrd.applyworker_cxt.mySubscription->streaming) {
             ereport(LOG, (errmsg("logical replication apply worker for subscription \"%s\" "
                 "will restart because of a parameter change", t_thrd.applyworker_cxt.mySubscription->name)));
             proc_exit(0);
@@ -2193,6 +2567,8 @@ void ApplyWorkerMain()
         FlushErrorState();
 
         AbortOutOfAnyTransaction();
+        /* ResourceOwner has closed stream files, so only discard stale handles and state here. */
+        ApplyStreamingReset(false);
 
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
@@ -2246,6 +2622,10 @@ void ApplyWorkerMain()
     /* Load the subscription into persistent memory context. */
     t_thrd.applyworker_cxt.applyContext =
         AllocSetContextCreate(TopMemoryContext, "ApplyContext", ALLOCSET_DEFAULT_SIZES);
+    if (!t_thrd.applyworker_cxt.streamCleanupRegistered) {
+        on_proc_exit(apply_streaming_cleanup, (Datum)0);
+        t_thrd.applyworker_cxt.streamCleanupRegistered = true;
+    }
     StartTransactionCommand();
     oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.applyContext);
     t_thrd.applyworker_cxt.mySubscription = GetSubscription(t_thrd.applyworker_cxt.curWorker->subid, true);
@@ -2335,10 +2715,12 @@ void ApplyWorkerMain()
     options.logical = true;
     options.startpoint = origin_startpos;
     options.slotname = myslotname;
-    options.protoVersion = LOGICALREP_NEWPUB_PROTO_VERSION_NUM;
+    options.protoVersion = (!AM_TABLESYNC_WORKER && t_thrd.applyworker_cxt.mySubscription->streaming) ?
+        LOGICALREP_STREAMING_PROTO_VERSION_NUM : LOGICALREP_NEWPUB_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
     options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
     options.useSnapshot = AM_TABLESYNC_WORKER;
+    options.streaming = !AM_TABLESYNC_WORKER && t_thrd.applyworker_cxt.mySubscription->streaming;
 
     /* Start normal logical streaming replication. */
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_startstreaming(&options);

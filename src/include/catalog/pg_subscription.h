@@ -57,13 +57,14 @@ CATALOG(pg_subscription,6126) BKI_SHARED_RELATION BKI_ROWTYPE_OID(6128) BKI_SCHE
     bool submatchddlowner;   /* True if replicated objects by DDL replication
                               * should match the original owner on the publisher */
     bool subsyncconninfo;    /* True if allow synchronization of connection info */
+    bool substreaming;       /* True if in-progress transactions may be streamed */
 #endif
 }
 FormData_pg_subscription;
 
 typedef FormData_pg_subscription *Form_pg_subscription;
 
-#define Natts_pg_subscription 12
+#define Natts_pg_subscription 13
 #define Anum_pg_subscription_subdbid 1
 #define Anum_pg_subscription_subname 2
 #define Anum_pg_subscription_subowner 3
@@ -76,6 +77,7 @@ typedef FormData_pg_subscription *Form_pg_subscription;
 #define Anum_pg_subscription_subskiplsn 10
 #define Anum_pg_subscription_submatchddlowner 11
 #define Anum_pg_subscription_subsyncconninfo 12
+#define Anum_pg_subscription_substreaming 13
 
 typedef struct Subscription {
     Oid oid;            /* Oid of the subscription */
@@ -93,6 +95,7 @@ typedef struct Subscription {
     bool matchddlowner; /* Indicated if replicated objects by DDL repllication
                          * shold match the original owner on th publisher */
     bool subsyncconninfo;
+    bool streaming;
 } Subscription;
 
 

@@ -288,6 +288,10 @@ void StartRemoteStreaming(const LibpqrcvConnectParam *options)
             appendStringInfoString(&cmd, ", usesnapshot 'true'");
         }
 
+        if (options->streaming) {
+            appendStringInfoString(&cmd, ", streaming 'true'");
+        }
+
         appendStringInfoChar(&cmd, ')');
     }
 

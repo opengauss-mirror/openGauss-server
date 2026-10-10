@@ -126,6 +126,9 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
         sub->subsyncconninfo = DatumGetBool(datum);
     }
 
+    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_substreaming, &isnull);
+    sub->streaming = isnull ? false : DatumGetBool(datum);
+
     ReleaseSysCache(tup);
 
     return sub;
