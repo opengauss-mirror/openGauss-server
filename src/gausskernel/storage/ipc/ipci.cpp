@@ -193,8 +193,8 @@ Size ComputeTotalSizeOfShmem()
         }
 #ifndef ENABLE_LITE_MODE
         size = add_size(size, TxnSnapCapShmemSize());
-        size = add_size(size, RbCleanerShmemSize());
 #endif
+        size = add_size(size, RbCleanerShmemSize());
 
 #ifdef PGXC
         size = add_size(size, NodeTablesShmemSize());
@@ -401,9 +401,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         TxnSnapCapShmemInit();
 #endif
         CfsShrinkerShmemInit();
-#ifndef ENABLE_LITE_MODE
         RbCleanerShmemInit();
-#endif
     }
     ReplicationSlotsShmemInit();
 #ifndef ENABLE_MULTIPLE_NODES
