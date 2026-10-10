@@ -80,6 +80,7 @@
 #include "optimizer/streamplan.h"
 #include "utils/relcache.h"
 #include "utils/guc.h"
+#include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
@@ -870,6 +871,91 @@ static bool ann_orderby_plan_is_unsafe(PlannerGlobal* glob, Plan* topPlan)
     return unsafe;
 }
 
+/*
+ * A transparent Join may carry an approximate ORDER BY value without using
+ * it to decide whether a row matches.  After setrefs, a consumed child
+ * distance can be a FLOAT8 Var/Param or a field hidden inside a whole-row
+ * reference.  Expression walking treats Vars/Params as leaves, so it cannot
+ * discover the fields of a RECORD/composite value (including a domain).
+ * Reject these opaque references as well as the original distance operators.
+ * Rejecting unrelated FLOAT8/composite join keys is deliberately conservative.
+ */
+static bool ann_orderby_join_expr_consumes_distance(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Var) || IsA(node, Param)) {
+        Oid typeId = getBaseType(exprType(node));
+        /* After setrefs a whole-row value can occupy an ordinary slot, so
+         * checking only Var.varattno == 0 would still miss the dependency. */
+        if (typeId == FLOAT8OID || type_is_rowtype(typeId)) {
+            return true;
+        }
+    }
+    if (IsA(node, AnnOrderByRef)) {
+        return true;
+    }
+    if (IsA(node, OpExpr)) {
+        Oid opno = ((OpExpr*)node)->opno;
+        if (opno == VECTOR_L2_DISTANCE_OPERATOR_OID ||
+            opno == VECTOR_COSINE_DISTANCE_OPERATOR_OID) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(
+        node, (bool (*)())ann_orderby_join_expr_consumes_distance, context);
+}
+
+static bool ann_orderby_join_allows_approx(Node* node)
+{
+    Join* join = (Join*)node;
+
+    /* plan.qual filters output rows; joinqual/nulleqqual determine matches. */
+    if (ann_orderby_join_expr_consumes_distance((Node*)join->plan.qual, NULL) ||
+        ann_orderby_join_expr_consumes_distance((Node*)join->joinqual, NULL) ||
+        ann_orderby_join_expr_consumes_distance((Node*)join->nulleqqual, NULL)) {
+        return false;
+    }
+
+    switch (nodeTag(node)) {
+        case T_NestLoop: {
+            ListCell* lc = NULL;
+            foreach (lc, ((NestLoop*)node)->nestParams) {
+                NestLoopParam* param = (NestLoopParam*)lfirst(lc);
+                if (ann_orderby_join_expr_consumes_distance((Node*)param->paramval, NULL)) {
+                    return false;
+                }
+            }
+            break;
+        }
+        case T_MergeJoin:
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((MergeJoin*)node)->mergeclauses, NULL)) {
+                return false;
+            }
+            break;
+        case T_HashJoin:
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((HashJoin*)node)->hashclauses, NULL)) {
+                return false;
+            }
+#ifdef USE_SPQ
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((HashJoin*)node)->hashqualclauses, NULL)) {
+                return false;
+            }
+#endif
+            break;
+        default:
+            return false;
+    }
+
+    return true;
+}
+
 static bool ann_orderby_node_allows_approx(Node* node)
 {
     /* Only transparent consumers may inherit an approximate distance.
@@ -898,6 +984,23 @@ static bool ann_orderby_node_allows_approx(Node* node)
         case T_MergeAppend:
         case T_SubqueryScan:
             break;
+        case T_Hash:
+            /* Hash keys belong to the parent HashJoin, whose checks have
+             * already restricted the inherited safety context.  Hash stores
+             * child tuples (including the distance) unchanged, even across
+             * batches; retain the common qual/transparent-tlist checks below.
+             * Never restore a context rejected by an ancestor consumer. */
+            if (((Plan*)node)->lefttree == NULL || ((Plan*)node)->righttree != NULL) {
+                return false;
+            }
+            break;
+        case T_NestLoop:
+        case T_MergeJoin:
+        case T_HashJoin:
+            if (!ann_orderby_join_allows_approx(node)) {
+                return false;
+            }
+            break;
         default:
             /* Includes Param: plan_tree_walker can reach an InitPlan via
              * its PARAM_EXEC without invoking our T_SubPlan callback. */
@@ -905,7 +1008,10 @@ static bool ann_orderby_node_allows_approx(Node* node)
     }
 
     Plan* plan = (Plan*)node;
-    if (plan->qual != NIL) {
+    /* A qualifying Join has already proved that plan.qual is independent of
+     * the distance.  Other transparent nodes still require an empty qual. */
+    if (!IsA(node, NestLoop) && !IsA(node, MergeJoin) && !IsA(node, HashJoin) &&
+        plan->qual != NIL) {
         return false;
     }
     ListCell* lc = NULL;
@@ -941,7 +1047,7 @@ static bool rewrite_ann_orderby_distance_walker(Node* node, void* context)
         AnnIndexScan* scan = (AnnIndexScan*)node;
 
         if ((walkerCxt->mpwc.status & UNDER_STREAM) == 0 &&
-            !scan->index_only_scan && !scan->is_ustore && !scan->scan.isPartTbl &&
+            !scan->is_ustore && !scan->scan.isPartTbl &&
             scan->scan.plan.dop <= 1 && !ScanDirectionIsBackward(scan->indexorderdir) &&
             list_length(scan->indexorderbyorig) == 1 && scan->scan.plan.targetlist != NIL) {
             Relation indexRel = index_open(scan->indexid, AccessShareLock);

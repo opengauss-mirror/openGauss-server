@@ -1,2 +1,3 @@
 test: union_all_required_columns
 test: union_all_required_columns_safety
+test: union_all_ann_feature_matrix

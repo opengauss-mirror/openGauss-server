@@ -1,0 +1,1095 @@
+-- UNION ALL Top-K, required-column pruning, and DiskANN distance reuse.
+-- Each distance family is planned in four cumulative GUC stages.
+SET client_min_messages = warning;
+DROP SCHEMA IF EXISTS union_all_ann_feature_matrix_test CASCADE;
+CREATE SCHEMA union_all_ann_feature_matrix_test;
+SET search_path = union_all_ann_feature_matrix_test, public;
+-- Deliberately omit row_id indexes.  This keeps the snapshot Anti Join on the
+-- Sort -> scan shape that previously exposed shared-targetlist corruption.
+CREATE TABLE delta_t
+(
+    row_id bigint,
+    title text,
+    embedding vector(4)
+);
+CREATE TABLE snapshot_t
+(
+    row_id bigint,
+    title text,
+    embedding vector(4)
+);
+CREATE TABLE delete_t
+(
+    row_id bigint
+);
+INSERT INTO delta_t VALUES
+    (3,   'delta-3',   '[3.25,1,1,1]'),
+    (101, 'delta-101', '[1.5,2,3,4]'),
+    (102, 'delta-102', '[2.5,3,4,5]'),
+    (103, 'delta-103', '[3.5,4,5,6]'),
+    (104, 'delta-104', '[4.5,5,6,7]'),
+    (105, 'delta-105', '[5.5,6,7,8]'),
+    (106, 'delta-106', '[6.5,7,8,9]');
+INSERT INTO snapshot_t VALUES
+    (1, 'snapshot-1', '[1,1,2,3]'),
+    (2, 'snapshot-2', '[2,2,3,4]'),
+    (3, 'snapshot-3', '[3,3,4,5]'),
+    (4, 'snapshot-4', '[4,4,5,6]'),
+    (5, 'snapshot-5', '[5,5,6,7]'),
+    (6, 'snapshot-6', '[6,6,7,8]');
+INSERT INTO delete_t VALUES (2), (5), (99);
+CREATE INDEX delta_l2_diskann ON delta_t
+    USING diskann (embedding vector_l2_ops);
+CREATE INDEX snapshot_l2_diskann ON snapshot_t
+    USING diskann (embedding vector_l2_ops);
+CREATE INDEX delta_cosine_diskann ON delta_t
+    USING diskann (embedding vector_cosine_ops);
+CREATE INDEX snapshot_cosine_diskann ON snapshot_t
+    USING diskann (embedding vector_cosine_ops);
+CREATE VIEW union_view AS
+SELECT row_id, title, embedding
+FROM delta_t
+UNION ALL
+SELECT s.row_id, s.title, s.embedding
+FROM snapshot_t s
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM delete_t d
+    WHERE d.row_id = s.row_id
+);
+ANALYZE delta_t;
+ANALYZE snapshot_t;
+ANALYZE delete_t;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_hashjoin = off;
+SET enable_mergejoin = on;
+SET enable_nestloop = off;
+-- -------------------------------------------------------------------------
+-- L2: all off -> Top-K -> required columns -> exact L2 distance reuse.
+-- -------------------------------------------------------------------------
+SET enable_union_all_diskann_topk_pushdown = off;
+SET enable_union_all_required_columns_pushdown = off;
+SET ann_orderby_distance_reuse = off;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]'
+LIMIT 4;
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+               ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
+                     Output: delta_t.row_id, delta_t.embedding, (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                     Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                     Filter Mode: Post-Filter
+                     Filter: (delta_t.row_id > 2)
+               ->  Sort
+                     Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, (("*SELECT* 2".embedding <-> '[0,0,0,0]'::vector))
+                     Sort Key: (("*SELECT* 2".embedding <-> '[0,0,0,0]'::vector))
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, ("*SELECT* 2".embedding <-> '[0,0,0,0]'::vector)
+                           ->  Merge Anti Join
+                                 Output: s.row_id, s.title, s.embedding
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, s.title, s.embedding
+                                       Sort Key: s.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, s.title, s.embedding
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(30 rows)
+
+SET enable_union_all_diskann_topk_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]'
+LIMIT 4;
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: "*SELECT* 1".row_id, (("*SELECT* 1".embedding <-> '[0,0,0,0]'::vector))
+   ->  Sort
+         Output: "*SELECT* 1".row_id, (("*SELECT* 1".embedding <-> '[0,0,0,0]'::vector))
+         Sort Key: (("*SELECT* 1".embedding <-> '[0,0,0,0]'::vector))
+         ->  Result
+               Output: "*SELECT* 1".row_id, ("*SELECT* 1".embedding <-> '[0,0,0,0]'::vector)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".row_id, "*SELECT* 1".embedding
+                           Filter: ("*SELECT* 1".row_id > 2)
+                           ->  Limit
+                                 Output: delta_t.row_id, delta_t.title, delta_t.embedding, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                                 ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
+                                       Output: delta_t.row_id, delta_t.title, delta_t.embedding, (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                                       Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                                       Filter Mode: Post-Filter
+                                       Filter: (delta_t.row_id > 2)
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
+                           Filter: ("*SELECT* 2".row_id > 2)
+                           ->  Limit
+                                 Output: s.row_id, s.title, s.embedding, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                 ->  Sort
+                                       Output: s.row_id, s.title, s.embedding, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       ->  Merge Anti Join
+                                             Output: s.row_id, s.title, s.embedding, (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Merge Cond: (s.row_id = d.row_id)
+                                             ->  Sort
+                                                   Output: s.row_id, s.title, s.embedding
+                                                   Sort Key: s.row_id
+                                                   ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                                         Output: s.row_id, s.title, s.embedding
+                                                         Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                                         Filter Mode: Post-Filter
+                                                         Filter: (s.row_id > 2)
+                                             ->  Sort
+                                                   Output: d.row_id
+                                                   Sort Key: d.row_id
+                                                   ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                                         Output: d.row_id
+(42 rows)
+
+SET enable_union_all_required_columns_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]'
+LIMIT 4;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                           Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                           Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
+                           ->  Merge Anti Join
+                                 Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
+
+SET ann_orderby_distance_reuse = l2;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <-> '[0,0,0,0]'
+LIMIT 4;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
+                           Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                           Sort Key: ((s.embedding <-> '[0,0,0,0]'::vector))
+                           ->  Merge Anti Join
+                                 Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
+                                             Order By: (s.embedding <-> '[0,0,0,0]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
+
+-- -------------------------------------------------------------------------
+-- Cosine: openGauss uses <=>.  A nonzero query vector is required because a
+-- zero vector has no defined cosine direction.
+-- -------------------------------------------------------------------------
+SET enable_union_all_diskann_topk_pushdown = off;
+SET enable_union_all_required_columns_pushdown = off;
+SET ann_orderby_distance_reuse = off;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <=> '[1,1,1,1]'
+LIMIT 4;
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+               ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                     Output: delta_t.row_id, delta_t.embedding, (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                     Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                     Filter Mode: Post-Filter
+                     Filter: (delta_t.row_id > 2)
+               ->  Sort
+                     Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, (("*SELECT* 2".embedding <=> '[1,1,1,1]'::vector))
+                     Sort Key: (("*SELECT* 2".embedding <=> '[1,1,1,1]'::vector))
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, ("*SELECT* 2".embedding <=> '[1,1,1,1]'::vector)
+                           ->  Merge Anti Join
+                                 Output: s.row_id, s.title, s.embedding
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, s.title, s.embedding
+                                       Sort Key: s.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, s.title, s.embedding
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(30 rows)
+
+SET enable_union_all_diskann_topk_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <=> '[1,1,1,1]'
+LIMIT 4;
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: "*SELECT* 1".row_id, (("*SELECT* 1".embedding <=> '[1,1,1,1]'::vector))
+   ->  Sort
+         Output: "*SELECT* 1".row_id, (("*SELECT* 1".embedding <=> '[1,1,1,1]'::vector))
+         Sort Key: (("*SELECT* 1".embedding <=> '[1,1,1,1]'::vector))
+         ->  Result
+               Output: "*SELECT* 1".row_id, ("*SELECT* 1".embedding <=> '[1,1,1,1]'::vector)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".row_id, "*SELECT* 1".embedding
+                           Filter: ("*SELECT* 1".row_id > 2)
+                           ->  Limit
+                                 Output: delta_t.row_id, delta_t.title, delta_t.embedding, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                                 ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                                       Output: delta_t.row_id, delta_t.title, delta_t.embedding, (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                                       Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                                       Filter Mode: Post-Filter
+                                       Filter: (delta_t.row_id > 2)
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
+                           Filter: ("*SELECT* 2".row_id > 2)
+                           ->  Limit
+                                 Output: s.row_id, s.title, s.embedding, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                 ->  Sort
+                                       Output: s.row_id, s.title, s.embedding, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                       Sort Key: ((s.embedding <=> '[1,1,1,1]'::vector))
+                                       ->  Merge Anti Join
+                                             Output: s.row_id, s.title, s.embedding, (s.embedding <=> '[1,1,1,1]'::vector)
+                                             Merge Cond: (s.row_id = d.row_id)
+                                             ->  Sort
+                                                   Output: s.row_id, s.title, s.embedding
+                                                   Sort Key: s.row_id
+                                                   ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                                         Output: s.row_id, s.title, s.embedding
+                                                         Order By: (s.embedding <=> '[1,1,1,1]'::vector)
+                                                         Filter Mode: Post-Filter
+                                                         Filter: (s.row_id > 2)
+                                             ->  Sort
+                                                   Output: d.row_id
+                                                   Sort Key: d.row_id
+                                                   ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                                         Output: d.row_id
+(42 rows)
+
+SET enable_union_all_required_columns_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <=> '[1,1,1,1]'
+LIMIT 4;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                           Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                           Sort Key: ((s.embedding <=> '[1,1,1,1]'::vector))
+                           ->  Merge Anti Join
+                                 Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, (s.embedding <=> '[1,1,1,1]'::vector)
+                                             Order By: (s.embedding <=> '[1,1,1,1]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
+
+SET ann_orderby_distance_reuse = cosine;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <=> '[1,1,1,1]'
+LIMIT 4;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                           Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                           Sort Key: ((s.embedding <=> '[1,1,1,1]'::vector))
+                           ->  Merge Anti Join
+                                 Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                 Merge Cond: (s.row_id = d.row_id)
+                                 ->  Sort
+                                       Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                       Sort Key: s.row_id
+                                       ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                             Order By: (s.embedding <=> '[1,1,1,1]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+                                 ->  Sort
+                                       Output: d.row_id
+                                       Sort Key: d.row_id
+                                       ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                             Output: d.row_id
+(34 rows)
+
+-- A Join may pass the approximate value through, but may not consume it to
+-- decide matches or filter rows.  This outer Join reads the subquery distance
+-- in its join condition, so the nested Ann Index Scan must retain the exact
+-- single-parenthesized projection.
+CREATE TABLE cosine_gate(max_distance float8);
+INSERT INTO cosine_gate VALUES (2.0);
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT q.row_id
+FROM
+(
+    SELECT row_id, embedding <=> '[1,1,1,1]' AS distance
+    FROM delta_t
+    WHERE row_id > 2
+    ORDER BY embedding <=> '[1,1,1,1]'
+    LIMIT 4
+) q
+JOIN cosine_gate g ON q.distance < g.max_distance
+ORDER BY q.distance
+LIMIT 4;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+   ->  Nested Loop
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+         Join Filter: (((delta_t.embedding <=> '[1,1,1,1]'::vector)) < g.max_distance)
+         ->  Limit
+               Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+               ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                     Output: delta_t.row_id, (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                     Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                     Filter Mode: Post-Filter
+                     Filter: (delta_t.row_id > 2)
+         ->  Materialize
+               Output: g.max_distance
+               ->  Seq Scan on union_all_ann_feature_matrix_test.cosine_gate g
+                     Output: g.max_distance
+(16 rows)
+
+-- <+> is L1 in this openGauss tree, not cosine.  With every requested
+-- feature enabled it must remain outside both DiskANN cosine Top-K pushdown
+-- and cosine AM-distance reuse.
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id
+FROM union_view
+WHERE row_id > 2
+ORDER BY embedding <+> '[0,0,0,0]'
+LIMIT 4;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <+> '[0,0,0,0]'::vector))
+   ->  Sort
+         Output: delta_t.row_id, ((delta_t.embedding <+> '[0,0,0,0]'::vector))
+         Sort Key: ((delta_t.embedding <+> '[0,0,0,0]'::vector))
+         ->  Result
+               Output: delta_t.row_id, ((delta_t.embedding <+> '[0,0,0,0]'::vector))
+               ->  Append
+                     ->  Seq Scan on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, (delta_t.embedding <+> '[0,0,0,0]'::vector)
+                           Filter: (delta_t.row_id > 2)
+                     ->  Merge Anti Join
+                           Output: s.row_id, (s.embedding <+> '[0,0,0,0]'::vector)
+                           Merge Cond: (s.row_id = d.row_id)
+                           ->  Sort
+                                 Output: s.row_id, s.embedding
+                                 Sort Key: s.row_id
+                                 ->  Seq Scan on union_all_ann_feature_matrix_test.snapshot_t s
+                                       Output: s.row_id, s.embedding
+                                       Filter: (s.row_id > 2)
+                           ->  Sort
+                                 Output: d.row_id
+                                 Sort Key: d.row_id
+                                 ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                       Output: d.row_id
+(25 rows)
+
+-- P1: a whole-row RECORD hides the float8 distance dependency.  Both join
+-- conditions and NestLoop parameters must fail closed, including after
+-- setrefs has placed that whole-row value in an ordinary output slot.
+-- LIMIT exceeds the eight candidates: a missing row is not Top-K truncation.
+CREATE TABLE join_guard_t(id integer, embedding vector(4));
+INSERT INTO join_guard_t
+SELECT g, ('[' || (g+1) || ',' || (2*g+3) || ',' ||
+           (3*g+5) || ',' || (4*g+7) || ']')::vector
+FROM generate_series(1,8) g;
+CREATE INDEX join_guard_cos ON join_guard_t
+USING diskann(embedding vector_cosine_ops) WITH(index_size=16);
+CREATE TABLE join_guard_gates(id integer);
+INSERT INTO join_guard_gates SELECT generate_series(1,8);
+ANALYZE join_guard_t;
+ANALYZE join_guard_gates;
+SET enable_union_all_diskann_topk_pushdown=off;
+SET enable_union_all_required_columns_pushdown=off;
+SET enable_expr_fusion=off;
+SET enable_hashjoin=off;
+SET enable_mergejoin=off;
+SET enable_nestloop=on;
+SET ann_orderby_distance_reuse=cosine;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) ORDER BY q.distance;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: q.id, q.distance
+   Join Filter: (q.* = ROW(g.id, .000927228781839928::double precision))
+   ->  Subquery Scan on q
+         Output: q.id, q.distance, q.*
+         ->  Limit
+               Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+               ->  Ann Index Scan using join_guard_cos on union_all_ann_feature_matrix_test.join_guard_t
+                     Output: join_guard_t.id, (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+                     Order By: (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+   ->  Materialize
+         Output: g.id
+         ->  Seq Scan on union_all_ann_feature_matrix_test.join_guard_gates g
+               Output: g.id
+(14 rows)
+
+SET enable_mergejoin=on;
+SET enable_nestloop=off;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) ORDER BY q.distance;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: q.id, q.distance
+   Sort Key: q.distance
+   ->  Merge Join
+         Output: q.id, q.distance
+         Merge Cond: (q.* = (ROW(g.id, .000927228781839928::double precision)))
+         ->  Sort
+               Output: q.id, q.distance, q.*
+               Sort Key: q.*
+               ->  Subquery Scan on q
+                     Output: q.id, q.distance, q.*
+                     ->  Limit
+                           Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+                           ->  Ann Index Scan using join_guard_cos on union_all_ann_feature_matrix_test.join_guard_t
+                                 Output: join_guard_t.id, (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+                                 Order By: (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+         ->  Sort
+               Output: g.id, (ROW(g.id, .000927228781839928::double precision))
+               Sort Key: (ROW(g.id, .000927228781839928::double precision))
+               ->  Seq Scan on union_all_ann_feature_matrix_test.join_guard_gates g
+                     Output: g.id, ROW(g.id, .000927228781839928::double precision)
+(21 rows)
+
+SET enable_mergejoin=off;
+SET enable_nestloop=on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+CROSS JOIN LATERAL (SELECT g.id FROM join_guard_gates g
+ WHERE q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) OFFSET 0) hit ORDER BY q.distance;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: q.id, q.distance
+   ->  Subquery Scan on q
+         Output: q.id, q.distance, q.*
+         ->  Limit
+               Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+               ->  Ann Index Scan using join_guard_cos on union_all_ann_feature_matrix_test.join_guard_t
+                     Output: join_guard_t.id, (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+                     Order By: (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+   ->  Limit
+         Output: g.id
+         ->  Seq Scan on union_all_ann_feature_matrix_test.join_guard_gates g
+               Output: g.id
+               Filter: (q.* = ROW(g.id, .000927228781839928::double precision))
+(14 rows)
+
+-- Dynamic execution prevents this result-capture aggregate from disabling
+-- reuse in the SELECT under test.  Each mode replans the same tested SQL.
+CREATE FUNCTION join_guard_capture(query_text text) RETURNS SETOF record AS $$
+BEGIN
+    RETURN QUERY EXECUTE query_text;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TABLE join_guard_cases(label text, algorithm text, query_text text);
+INSERT INTO join_guard_cases VALUES('01_whole_row_nest', 'nest', $query$
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('02_whole_row_merge', 'merge', $query$
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('03_whole_row_param', 'nest', $query$
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+CROSS JOIN LATERAL (SELECT g.id FROM join_guard_gates g
+ WHERE q = ROW(g.id, cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector)) OFFSET 0) hit ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('04_direct_distance', 'nest', $query$
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q.id=g.id AND q.distance=cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector) ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('05_scalar_param', 'nest', $query$
+SELECT q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+CROSS JOIN LATERAL (SELECT g.id FROM join_guard_gates g
+ WHERE g.id=q.id AND q.distance=cosine_distance('[2,5,8,11]'::vector, '[11,23,35,47]'::vector) OFFSET 0) hit ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('06_transparent_nest', 'nest', $query$
+SELECT /*+ leading((q g)) nestloop(q g) */ q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q.id=g.id ORDER BY q.distance
+$query$);
+INSERT INTO join_guard_cases VALUES('07_transparent_merge', 'merge', $query$
+SELECT /*+ leading((q g)) mergejoin(q g) */ q.id, q.distance FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+ FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q.id=g.id ORDER BY q.distance
+$query$);
+CREATE FUNCTION join_guard_check()
+RETURNS TABLE(scenario text, off_ids integer[], on_ids integer[],
+              same_ids boolean, ref_scans integer, approximate_rows bigint) AS $$
+DECLARE
+    c record;
+    line text;
+    awaiting_output boolean;
+BEGIN
+    FOR c IN SELECT * FROM join_guard_cases ORDER BY label LOOP
+        PERFORM set_config('enable_nestloop', CASE WHEN c.algorithm='nest' THEN 'on' ELSE 'off' END, true);
+        PERFORM set_config('enable_mergejoin', CASE WHEN c.algorithm='merge' THEN 'on' ELSE 'off' END, true);
+        PERFORM set_config('ann_orderby_distance_reuse','off',true);
+        SELECT coalesce(array_agg(r.id ORDER BY r.id),ARRAY[]::integer[])
+          INTO off_ids FROM join_guard_capture(c.query_text) r(id integer,distance float8);
+
+        PERFORM set_config('ann_orderby_distance_reuse','cosine',true);
+        SELECT coalesce(array_agg(r.id ORDER BY r.id),ARRAY[]::integer[]),
+               coalesce(sum(CASE WHEN float8send(r.distance) IS DISTINCT FROM
+                   float8send(cosine_distance(t.embedding,'[11,23,35,47]'::vector))
+                   THEN 1 ELSE 0 END),0)
+          INTO on_ids,approximate_rows
+          FROM join_guard_capture(c.query_text) r(id integer,distance float8)
+          JOIN join_guard_t t ON t.id=r.id;
+
+        ref_scans:=0;
+        awaiting_output:=false;
+        FOR line IN EXECUTE 'EXPLAIN (VERBOSE ON,COSTS OFF) ' || c.query_text LOOP
+            IF position('Ann Index Scan' IN line)>0 THEN
+                awaiting_output:=true;
+            ELSIF awaiting_output AND position('Output:' IN line)>0 THEN
+                IF position('((' IN line)>0 AND position('<=>' IN line)>0 THEN
+                    ref_scans:=ref_scans+1;
+                END IF;
+                awaiting_output:=false;
+            END IF;
+        END LOOP;
+        scenario:=c.label;
+        same_ids:=(off_ids IS NOT DISTINCT FROM on_ids);
+        RETURN NEXT;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+-- The five consuming cases must keep id=1, use no AM projection and return
+-- the exact SQL distance.  The two row_id-only joins must still reuse.
+SELECT * FROM join_guard_check() ORDER BY scenario;
+       scenario       |      off_ids      |      on_ids       | same_ids | ref_scans | approximate_rows 
+----------------------+-------------------+-------------------+----------+-----------+------------------
+ 01_whole_row_nest    | {1}               | {1}               | t        |         0 |                0
+ 02_whole_row_merge   | {1}               | {1}               | t        |         0 |                0
+ 03_whole_row_param   | {1}               | {1}               | t        |         0 |                0
+ 04_direct_distance   | {1}               | {1}               | t        |         0 |                0
+ 05_scalar_param      | {1}               | {1}               | t        |         0 |                0
+ 06_transparent_nest  | {1,2,3,4,5,6,7,8} | {1,2,3,4,5,6,7,8} | t        |         1 |                8
+ 07_transparent_merge | {1,2,3,4,5,6,7,8} | {1,2,3,4,5,6,7,8} | t        |         1 |                8
+(7 rows)
+
+SET enable_expr_fusion=on;
+SELECT * FROM join_guard_check() ORDER BY scenario;
+       scenario       |      off_ids      |      on_ids       | same_ids | ref_scans | approximate_rows 
+----------------------+-------------------+-------------------+----------+-----------+------------------
+ 01_whole_row_nest    | {1}               | {1}               | t        |         0 |                0
+ 02_whole_row_merge   | {1}               | {1}               | t        |         0 |                0
+ 03_whole_row_param   | {1}               | {1}               | t        |         0 |                0
+ 04_direct_distance   | {1}               | {1}               | t        |         0 |                0
+ 05_scalar_param      | {1}               | {1}               | t        |         0 |                0
+ 06_transparent_nest  | {1,2,3,4,5,6,7,8} | {1,2,3,4,5,6,7,8} | t        |         1 |                8
+ 07_transparent_merge | {1,2,3,4,5,6,7,8} | {1,2,3,4,5,6,7,8} | t        |         1 |                8
+(7 rows)
+
+RESET enable_expr_fusion;
+-- P2: the build-side Hash must pass the same safe distance as the probe side.
+-- Keep full plans for build/probe and the production-style right anti join.
+SET enable_hashjoin=on;
+SET enable_mergejoin=off;
+SET enable_nestloop=off;
+SET ann_orderby_distance_reuse=cosine;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id, q.distance
+FROM join_guard_gates g JOIN
+ (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+  FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+ON q.id=g.id ORDER BY q.distance;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+   Sort Key: ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+   ->  Hash Join
+         Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+         Hash Cond: (g.id = join_guard_t.id)
+         ->  Seq Scan on union_all_ann_feature_matrix_test.join_guard_gates g
+               Output: g.id
+         ->  Hash
+               Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+               ->  Limit
+                     Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+                     ->  Ann Index Scan using join_guard_cos on union_all_ann_feature_matrix_test.join_guard_t
+                           Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+                           Order By: (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+(15 rows)
+
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT /*+ leading((q g)) hashjoin(q g) */ q.id, q.distance
+FROM (SELECT id, embedding <=> '[11,23,35,47]'::vector AS distance
+      FROM join_guard_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN join_guard_gates g ON q.id=g.id ORDER BY q.distance;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Sort
+   Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+   Sort Key: ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+   ->  Hash Join
+         Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+         Hash Cond: (join_guard_t.id = g.id)
+         ->  Limit
+               Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+               ->  Ann Index Scan using join_guard_cos on union_all_ann_feature_matrix_test.join_guard_t
+                     Output: join_guard_t.id, ((join_guard_t.embedding <=> '[11,23,35,47]'::vector))
+                     Order By: (join_guard_t.embedding <=> '[11,23,35,47]'::vector)
+         ->  Hash
+               Output: g.id
+               ->  Seq Scan on union_all_ann_feature_matrix_test.join_guard_gates g
+                     Output: g.id
+(15 rows)
+
+SET enable_union_all_diskann_topk_pushdown=on;
+SET enable_union_all_required_columns_pushdown=on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT row_id FROM union_view WHERE row_id>2
+ORDER BY embedding <=> '[1,1,1,1]'::vector LIMIT 4;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+   ->  Result
+         Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+               ->  Limit
+                     Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
+                           Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
+                           Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: (delta_t.row_id > 2)
+               ->  Limit
+                     Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                     ->  Sort
+                           Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                           Sort Key: ((s.embedding <=> '[1,1,1,1]'::vector))
+                           ->  Hash Right Anti Join
+                                 Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                 Hash Cond: (d.row_id = s.row_id)
+                                 ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
+                                       Output: d.row_id
+                                 ->  Hash
+                                       Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                       ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
+                                             Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
+                                             Order By: (s.embedding <=> '[1,1,1,1]'::vector)
+                                             Filter Mode: Post-Filter
+                                             Filter: (s.row_id > 2)
+(30 rows)
+
+SET enable_union_all_diskann_topk_pushdown=off;
+SET enable_union_all_required_columns_pushdown=off;
+CREATE TABLE hash_guard_gates AS
+SELECT id, cosine_distance(embedding,'[11,23,35,47]'::vector) AS distance
+FROM join_guard_t;
+CREATE TABLE hash_extra_gates(id integer);
+INSERT INTO hash_extra_gates VALUES(1),(1),(2),(9);
+ANALYZE hash_guard_gates;
+ANALYZE hash_extra_gates;
+CREATE TABLE hash_guard_cases(label text, query_text text);
+INSERT INTO hash_guard_cases VALUES ('build', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance
+FROM hash_guard_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q ON q.id=g.id$q$);
+INSERT INTO hash_guard_cases VALUES ('probe', $q$
+SELECT /*+ leading((q g)) hashjoin(q g) */ q.id,q.distance
+FROM (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+ ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+JOIN hash_guard_gates g ON q.id=g.id$q$);
+INSERT INTO hash_guard_cases VALUES ('distance_key', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance
+FROM hash_guard_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+ON q.id=g.id AND q.distance=g.distance$q$);
+INSERT INTO hash_guard_cases VALUES ('distance_filter', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance
+FROM hash_guard_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+ON q.id=g.id AND q.distance>=g.distance AND q.distance<=g.distance$q$);
+INSERT INTO hash_guard_cases VALUES ('record_filter', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance
+FROM hash_guard_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q
+ON q.id=g.id AND q=ROW(g.id,g.distance)$q$);
+-- Unsafe first branch must not turn off its safe sibling (or vice versa).
+INSERT INTO hash_guard_cases
+SELECT 'siblings', a.query_text || ' UNION ALL ' || b.query_text
+FROM hash_guard_cases a, hash_guard_cases b
+WHERE a.label='record_filter' AND b.label='build';
+INSERT INTO hash_guard_cases
+SELECT 'siblings_reverse', a.query_text || ' UNION ALL ' || b.query_text
+FROM hash_guard_cases a, hash_guard_cases b
+WHERE a.label='build' AND b.label='record_filter';
+INSERT INTO hash_guard_cases VALUES ('duplicates', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance
+FROM hash_extra_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q ON q.id=g.id$q$);
+INSERT INTO hash_guard_cases VALUES ('left_null', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ g.id,q.distance
+FROM hash_extra_gates g LEFT JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q ON q.id=g.id$q$);
+INSERT INTO hash_guard_cases VALUES ('empty_build', $q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ g.id,q.distance
+FROM hash_extra_gates g LEFT JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance FROM join_guard_t
+  WHERE id>100 ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 40) q ON q.id=g.id$q$);
+CREATE FUNCTION hash_guard_check()
+RETURNS TABLE(scenario text, rows_off bigint, rows_on bigint, same_ids boolean,
+              null_rows bigint, hash_joins integer, ref_scans integer, approximate_rows bigint) AS $$
+DECLARE
+    c record; line text; awaiting_output boolean;
+    off_ids text; on_ids text; off_nulls bigint;
+BEGIN
+    FOR c IN SELECT * FROM hash_guard_cases ORDER BY label LOOP
+        PERFORM set_config('ann_orderby_distance_reuse','off',true);
+        SELECT count(*),array_agg(r.id ORDER BY r.id)::text,
+               sum(CASE WHEN r.distance IS NULL THEN 1 ELSE 0 END)
+          INTO rows_off,off_ids,off_nulls
+          FROM join_guard_capture(c.query_text) r(id integer,distance float8);
+        PERFORM set_config('ann_orderby_distance_reuse','cosine',true);
+        SELECT count(*),array_agg(r.id ORDER BY r.id)::text,
+               sum(CASE WHEN r.distance IS NULL THEN 1 ELSE 0 END),
+               sum(CASE WHEN r.distance IS NOT NULL AND
+                             float8send(r.distance) IS DISTINCT FROM float8send(t.distance)
+                        THEN 1 ELSE 0 END) INTO rows_on,on_ids,null_rows,approximate_rows
+          FROM join_guard_capture(c.query_text) r(id integer,distance float8)
+          LEFT JOIN hash_guard_gates t ON t.id=r.id;
+        hash_joins:=0; ref_scans:=0; awaiting_output:=false;
+        FOR line IN EXECUTE 'EXPLAIN (VERBOSE ON,COSTS OFF) ' || c.query_text LOOP
+            IF line ~ 'Hash (.* )?Join' THEN hash_joins:=hash_joins+1; END IF;
+            IF position('Ann Index Scan' IN line)>0 THEN
+                awaiting_output:=true;
+            ELSIF awaiting_output AND position('Output:' IN line)>0 THEN
+                IF position('((' IN line)>0 THEN ref_scans:=ref_scans+1; END IF;
+                awaiting_output:=false;
+            END IF;
+        END LOOP;
+        scenario:=c.label;
+        same_ids:=(off_ids IS NOT DISTINCT FROM on_ids) AND (off_nulls IS NOT DISTINCT FROM null_rows);
+        RETURN NEXT;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+SET enable_expr_fusion=off;
+SELECT * FROM hash_guard_check() ORDER BY scenario;
+     scenario     | rows_off | rows_on | same_ids | null_rows | hash_joins | ref_scans | approximate_rows 
+------------------+----------+---------+----------+-----------+------------+-----------+------------------
+ build            |        8 |       8 | t        |         0 |          1 |         1 |                8
+ distance_filter  |        8 |       8 | t        |         0 |          1 |         0 |                0
+ distance_key     |        8 |       8 | t        |         0 |          1 |         0 |                0
+ duplicates       |        3 |       3 | t        |         0 |          1 |         1 |                3
+ empty_build      |        4 |       4 | t        |         4 |          1 |         1 |                0
+ left_null        |        4 |       4 | t        |         1 |          1 |         1 |                3
+ probe            |        8 |       8 | t        |         0 |          1 |         1 |                8
+ record_filter    |        8 |       8 | t        |         0 |          1 |         0 |                0
+ siblings         |       16 |      16 | t        |         0 |          2 |         1 |                8
+ siblings_reverse |       16 |      16 | t        |         0 |          2 |         1 |                8
+(10 rows)
+
+SET enable_expr_fusion=on;
+SELECT * FROM hash_guard_check() ORDER BY scenario;
+     scenario     | rows_off | rows_on | same_ids | null_rows | hash_joins | ref_scans | approximate_rows 
+------------------+----------+---------+----------+-----------+------------+-----------+------------------
+ build            |        8 |       8 | t        |         0 |          1 |         1 |                8
+ distance_filter  |        8 |       8 | t        |         0 |          1 |         0 |                0
+ distance_key     |        8 |       8 | t        |         0 |          1 |         0 |                0
+ duplicates       |        3 |       3 | t        |         0 |          1 |         1 |                3
+ empty_build      |        4 |       4 | t        |         4 |          1 |         1 |                0
+ left_null        |        4 |       4 | t        |         1 |          1 |         1 |                3
+ probe            |        8 |       8 | t        |         0 |          1 |         1 |                8
+ record_filter    |        8 |       8 | t        |         0 |          1 |         0 |                0
+ siblings         |       16 |      16 | t        |         0 |          2 |         1 |                8
+ siblings_reverse |       16 |      16 | t        |         0 |          2 |         1 |                8
+(10 rows)
+
+-- 32 small vectors with 4kB inline payloads force real Hash batches at 64kB.
+-- The returned payload prevents pruning it away before the Hash build.
+CREATE TABLE hash_payload_t(id integer,embedding vector(4),payload text);
+ALTER TABLE hash_payload_t ALTER COLUMN payload SET STORAGE PLAIN;
+INSERT INTO hash_payload_t
+SELECT g,('['||(g+1)||','||(2*g+3)||','||(3*g+5)||','||(4*g+7)||']')::vector,
+       repeat(md5(g::text),125) FROM generate_series(1,32) g;
+CREATE INDEX hash_payload_cos ON hash_payload_t
+USING diskann(embedding vector_cosine_ops) WITH(index_size=64);
+CREATE INDEX hash_payload_l2 ON hash_payload_t
+USING diskann(embedding vector_l2_ops) WITH(index_size=64);
+CREATE TABLE hash_payload_gates AS SELECT id FROM hash_payload_t;
+CREATE TABLE hash_rounds(n integer);
+INSERT INTO hash_rounds VALUES(0),(1),(2);
+ANALYZE hash_payload_t;
+ANALYZE hash_payload_gates;
+ANALYZE hash_rounds;
+CREATE TABLE hash_lifecycle_cases(label text, mem text, query_text text);
+INSERT INTO hash_lifecycle_cases VALUES ('in_memory','4MB',$q$
+SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance,q.payload
+FROM hash_payload_gates g JOIN
+ (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance,payload
+  FROM hash_payload_t ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 80) q
+ON q.id=g.id$q$);
+INSERT INTO hash_lifecycle_cases
+SELECT 'spill','64kB',query_text FROM hash_lifecycle_cases WHERE label='in_memory';
+INSERT INTO hash_lifecycle_cases VALUES ('rescan','64kB',$q$
+SELECT r.id,r.distance,r.payload FROM hash_rounds p CROSS JOIN LATERAL
+ (SELECT /*+ leading((g q)) hashjoin(g q) */ q.id,q.distance,q.payload
+  FROM hash_payload_gates g JOIN
+   (SELECT id,embedding <=> '[11,23,35,47]'::vector AS distance,payload
+    FROM hash_payload_t WHERE id>p.n
+    ORDER BY embedding <=> '[11,23,35,47]'::vector LIMIT 80) q
+  ON q.id=g.id OFFSET 0) r$q$);
+CREATE FUNCTION hash_lifecycle_check(reuse_mode text)
+RETURNS TABLE(scenario text, row_count bigint, rows_ok boolean, values_ok boolean,
+              hash_seen boolean, batched boolean, rescanned boolean, ref_scans integer) AS $$
+DECLARE
+    c record; query_text text; baseline text; line text; expected_rows bigint;
+    off_ids text; on_ids text; saved_mem text:=current_setting('work_mem');
+    awaiting_output boolean;
+BEGIN
+    baseline:='SELECT id,embedding <=> ''[11,23,35,47]''::vector AS distance,payload '
+              || 'FROM hash_payload_t ORDER BY embedding <=> ''[11,23,35,47]''::vector LIMIT 80';
+    IF reuse_mode='l2' THEN baseline:=replace(baseline,'<=>','<->'); END IF;
+    FOR c IN SELECT * FROM hash_lifecycle_cases ORDER BY label LOOP
+        PERFORM set_config('work_mem',c.mem,true);
+        query_text:=c.query_text;
+        IF reuse_mode='l2' THEN query_text:=replace(query_text,'<=>','<->'); END IF;
+        expected_rows:=CASE WHEN c.label='rescan' THEN 93 ELSE 32 END;
+        PERFORM set_config('ann_orderby_distance_reuse','off',true);
+        SELECT array_agg(r.id ORDER BY r.id)::text INTO off_ids
+          FROM join_guard_capture(query_text) r(id integer,distance float8,payload text);
+        PERFORM set_config('ann_orderby_distance_reuse',reuse_mode,true);
+        SELECT count(*),array_agg(r.id ORDER BY r.id)::text,
+               bool_and(float8send(r.distance)=float8send(b.distance) AND r.payload=b.payload)
+          INTO row_count,on_ids,values_ok
+          FROM join_guard_capture(query_text) r(id integer,distance float8,payload text)
+          JOIN join_guard_capture(baseline) b(id integer,distance float8,payload text) ON r.id=b.id;
+        rows_ok:=(off_ids IS NOT DISTINCT FROM on_ids) AND row_count=expected_rows;
+        hash_seen:=false; batched:=false; rescanned:=false;
+        ref_scans:=0; awaiting_output:=false;
+        -- Observe the real execution path, rather than assuming low memory
+        -- caused batching or that LATERAL caused a Hash rebuild.
+        FOR line IN EXECUTE 'EXPLAIN (ANALYZE,VERBOSE,COSTS OFF,TIMING OFF) ' || query_text LOOP
+            IF line ~ 'Hash \(actual' THEN
+                hash_seen:=true;
+                IF substring(line FROM 'loops=([0-9]+)')::integer>1 THEN rescanned:=true; END IF;
+            END IF;
+            IF substring(line FROM 'Batches: ([0-9]+)')::integer>1 THEN batched:=true; END IF;
+            IF position('Ann Index Scan' IN line)>0 THEN
+                awaiting_output:=true;
+            ELSIF awaiting_output AND position('Output:' IN line)>0 THEN
+                IF position('((' IN line)>0 THEN ref_scans:=ref_scans+1; END IF;
+                awaiting_output:=false;
+            END IF;
+        END LOOP;
+        scenario:=c.label;
+        RETURN NEXT;
+    END LOOP;
+    PERFORM set_config('work_mem',saved_mem,true);
+END;
+$$ LANGUAGE plpgsql;
+SET enable_material=off;
+SET enable_expr_fusion=off;
+SELECT * FROM hash_lifecycle_check('cosine') ORDER BY scenario;
+ scenario  | row_count | rows_ok | values_ok | hash_seen | batched | rescanned | ref_scans 
+-----------+-----------+---------+-----------+-----------+---------+-----------+-----------
+ in_memory |        32 | t       | t         | t         | f       | f         |         1
+ rescan    |        93 | t       | t         | t         | t       | t         |         1
+ spill     |        32 | t       | t         | t         | t       | f         |         1
+(3 rows)
+
+SELECT * FROM hash_lifecycle_check('l2') ORDER BY scenario;
+ scenario  | row_count | rows_ok | values_ok | hash_seen | batched | rescanned | ref_scans 
+-----------+-----------+---------+-----------+-----------+---------+-----------+-----------
+ in_memory |        32 | t       | t         | t         | f       | f         |         1
+ rescan    |        93 | t       | t         | t         | t       | t         |         1
+ spill     |        32 | t       | t         | t         | t       | f         |         1
+(3 rows)
+
+SET enable_expr_fusion=on;
+SELECT * FROM hash_lifecycle_check('cosine') ORDER BY scenario;
+ scenario  | row_count | rows_ok | values_ok | hash_seen | batched | rescanned | ref_scans 
+-----------+-----------+---------+-----------+-----------+---------+-----------+-----------
+ in_memory |        32 | t       | t         | t         | f       | f         |         1
+ rescan    |        93 | t       | t         | t         | t       | t         |         1
+ spill     |        32 | t       | t         | t         | t       | f         |         1
+(3 rows)
+
+SELECT * FROM hash_lifecycle_check('l2') ORDER BY scenario;
+ scenario  | row_count | rows_ok | values_ok | hash_seen | batched | rescanned | ref_scans 
+-----------+-----------+---------+-----------+-----------+---------+-----------+-----------
+ in_memory |        32 | t       | t         | t         | f       | f         |         1
+ rescan    |        93 | t       | t         | t         | t       | t         |         1
+ spill     |        32 | t       | t         | t         | t       | f         |         1
+(3 rows)
+
+RESET enable_material;
+RESET enable_expr_fusion;
+RESET ann_orderby_distance_reuse;
+RESET enable_union_all_required_columns_pushdown;
+RESET enable_union_all_diskann_topk_pushdown;
+RESET enable_nestloop;
+RESET enable_mergejoin;
+RESET enable_hashjoin;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+RESET search_path;
+DROP SCHEMA union_all_ann_feature_matrix_test CASCADE;
+RESET client_min_messages;
