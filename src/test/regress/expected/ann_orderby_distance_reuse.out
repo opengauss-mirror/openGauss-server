@@ -55,9 +55,8 @@ LIMIT 10;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t
          Output: id, (embedding <-> '[11,23,35,47]'::vector)
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
-(7 rows)
+(6 rows)
 
 CREATE TEMP TABLE l2_off AS
 SELECT * FROM ann_capture($q$
@@ -83,9 +82,8 @@ LIMIT 10;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t
          Output: id, ((embedding <-> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
-(7 rows)
+(6 rows)
 
 EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
 SELECT /*+ indexscan(ann_l2_t ann_l2_idx) */
@@ -101,11 +99,10 @@ LIMIT 10;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t (actual rows=10 loops=1)
          Output: id, ((embedding <-> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
          Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(9 rows)
+(8 rows)
 
 CREATE TEMP TABLE l2_exact AS
 SELECT * FROM ann_capture($q$
@@ -352,11 +349,10 @@ LIMIT 3;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t (actual rows=3 loops=1)
          Output: id, ((embedding <-> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
          Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(9 rows)
+(8 rows)
 
 -- Two equal outputs may read the same publication twice; a different
 -- query vector must remain an ordinary expression and never receive the
@@ -378,11 +374,10 @@ LIMIT 3;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t (actual rows=3 loops=1)
          Output: id, ((embedding <-> '[11,23,35,47]'::vector)), ((embedding <-> '[11,23,35,47]'::vector)), (embedding <-> '[6,13,20,27]'::vector)
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
          Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(9 rows)
+(8 rows)
 
 -- A never-entered branch must report zero work, not a fabricated fallback.
 EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
@@ -399,10 +394,9 @@ LIMIT 0;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t (Actual time: never executed)
          Output: id, ((embedding <-> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
 --? Total runtime: .* ms
-(8 rows)
+(7 rows)
 
 -- The flattened expression engine must consume the same reference.
 SET enable_expr_fusion = on;
@@ -420,11 +414,10 @@ LIMIT 3;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t (actual rows=3 loops=1)
          Output: id, ((embedding <-> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
          Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(9 rows)
+(8 rows)
 
 SET enable_expr_fusion = off;
 -- l2 must reject cosine; cosine may request its normalized value.
@@ -445,9 +438,8 @@ LIMIT 3;
    ->  Ann Index Scan using ann_cos_idx on ann_orderby_reuse_test.ann_l2_t
          Output: id, (embedding <=> '[11,23,35,47]'::vector)
          Order By: (ann_l2_t.embedding <=> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
-(7 rows)
+(6 rows)
 
 SET ann_orderby_distance_reuse = cosine;
 -- cosine is independent from l2 and must not reuse an L2 index result.
@@ -465,9 +457,8 @@ LIMIT 3;
    ->  Ann Index Scan using ann_l2_idx on ann_orderby_reuse_test.ann_l2_t
          Output: id, (embedding <-> '[11,23,35,47]'::vector)
          Order By: (ann_l2_t.embedding <-> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
-(7 rows)
+(6 rows)
 
 EXPLAIN (ANALYZE, VERBOSE ON, COSTS OFF, TIMING OFF)
 SELECT /*+ indexscan(ann_l2_t ann_cos_idx) */
@@ -483,11 +474,10 @@ LIMIT 3;
    ->  Ann Index Scan using ann_cos_idx on ann_orderby_reuse_test.ann_l2_t (actual rows=3 loops=1)
          Output: id, ((embedding <=> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <=> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: (ann_l2_t.title IS NOT NULL)
          Rows Removed by Filter: 1
 --? Total runtime: .* ms
-(9 rows)
+(8 rows)
 
 CREATE TEMP TABLE cosine_approx AS
 SELECT * FROM ann_capture($q$
@@ -553,9 +543,8 @@ LIMIT 3;
    ->  Ann Index Scan using ann_cos_idx on ann_orderby_reuse_test.ann_l2_t
          Output: id, ((embedding <=> '[11,23,35,47]'::vector))
          Order By: (ann_l2_t.embedding <=> '[11,23,35,47]'::vector)
-         Filter Mode: Post-Filter
          Filter: ((ann_l2_t.title IS NOT NULL) AND ((ann_l2_t.embedding <=> '[11,23,35,47]'::vector) < 1e-05::double precision))
-(7 rows)
+(6 rows)
 
 -- Typical delta UNION ALL (snapshot anti-join delete) Top-10 structure.
 CREATE TABLE delta_t (row_id bigint PRIMARY KEY, title text, embedding vector(4));
@@ -606,7 +595,6 @@ LIMIT 10;
                      ->  Ann Index Scan using delta_embedding_diskann on ann_orderby_reuse_test.delta_t (actual rows=6 loops=1)
                            Output: delta_t.row_id, ((delta_t.embedding <-> '[11,23,35,47]'::vector))
                            Order By: (delta_t.embedding <-> '[11,23,35,47]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.title IS NOT NULL)
                ->  Limit (actual rows=5 loops=1)
                      Output: s.row_id, ((s.embedding <-> '[11,23,35,47]'::vector))
@@ -624,7 +612,7 @@ LIMIT 10;
                                        Output: d.row_id
                                        Heap Fetches: 3
 --? Total runtime: .* ms
-(29 rows)
+(28 rows)
 
 CREATE TEMP TABLE union_reuse_on AS
 SELECT * FROM ann_capture($q$
@@ -699,7 +687,6 @@ LIMIT 10;
                      ->  Ann Index Scan using delta_cosine_diskann on ann_orderby_reuse_test.delta_t (actual rows=4 loops=1)
                            Output: delta_t.row_id, ((delta_t.embedding <=> '[11,23,35,47]'::vector))
                            Order By: (delta_t.embedding <=> '[11,23,35,47]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.title IS NOT NULL)
                ->  Limit (actual rows=7 loops=1)
                      Output: s.row_id, ((s.embedding <=> '[11,23,35,47]'::vector))
@@ -717,7 +704,7 @@ LIMIT 10;
                                        Output: d.row_id
                                        Heap Fetches: 3
 --? Total runtime: .* ms
-(29 rows)
+(28 rows)
 
 RESET ann_orderby_distance_reuse;
 RESET enable_union_all_diskann_topk_pushdown;

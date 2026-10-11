@@ -89,7 +89,6 @@ LIMIT 4;
                ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
                      Output: delta_t.row_id, delta_t.embedding, (delta_t.embedding <-> '[0,0,0,0]'::vector)
                      Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                     Filter Mode: Post-Filter
                      Filter: (delta_t.row_id > 2)
                ->  Sort
                      Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, (("*SELECT* 2".embedding <-> '[0,0,0,0]'::vector))
@@ -110,7 +109,7 @@ LIMIT 4;
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(30 rows)
+(29 rows)
 
 SET enable_union_all_diskann_topk_pushdown = on;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -137,7 +136,6 @@ LIMIT 4;
                                  ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
                                        Output: delta_t.row_id, delta_t.title, delta_t.embedding, (delta_t.embedding <-> '[0,0,0,0]'::vector)
                                        Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                                       Filter Mode: Post-Filter
                                        Filter: (delta_t.row_id > 2)
                      ->  Subquery Scan on "*SELECT* 2"
                            Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
@@ -156,14 +154,13 @@ LIMIT 4;
                                                    ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                                          Output: s.row_id, s.title, s.embedding
                                                          Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                                         Filter Mode: Post-Filter
                                                          Filter: (s.row_id > 2)
                                              ->  Sort
                                                    Output: d.row_id
                                                    Sort Key: d.row_id
                                                    ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                                          Output: d.row_id
-(42 rows)
+(40 rows)
 
 SET enable_union_all_required_columns_pushdown = on;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -185,7 +182,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
                            Output: delta_t.row_id, (delta_t.embedding <-> '[0,0,0,0]'::vector)
                            Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
@@ -201,14 +197,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                              Output: s.row_id, (s.embedding <-> '[0,0,0,0]'::vector)
                                              Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 SET ann_orderby_distance_reuse = l2;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -230,7 +225,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_l2_diskann on union_all_ann_feature_matrix_test.delta_t
                            Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                            Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
@@ -246,14 +240,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_l2_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                              Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                                              Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 -- -------------------------------------------------------------------------
 -- Cosine: openGauss uses <=>.  A nonzero query vector is required because a
@@ -279,7 +272,6 @@ LIMIT 4;
                ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                      Output: delta_t.row_id, delta_t.embedding, (delta_t.embedding <=> '[1,1,1,1]'::vector)
                      Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                     Filter Mode: Post-Filter
                      Filter: (delta_t.row_id > 2)
                ->  Sort
                      Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding, (("*SELECT* 2".embedding <=> '[1,1,1,1]'::vector))
@@ -300,7 +292,7 @@ LIMIT 4;
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(30 rows)
+(29 rows)
 
 SET enable_union_all_diskann_topk_pushdown = on;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -327,7 +319,6 @@ LIMIT 4;
                                  ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                                        Output: delta_t.row_id, delta_t.title, delta_t.embedding, (delta_t.embedding <=> '[1,1,1,1]'::vector)
                                        Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                                       Filter Mode: Post-Filter
                                        Filter: (delta_t.row_id > 2)
                      ->  Subquery Scan on "*SELECT* 2"
                            Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
@@ -346,14 +337,13 @@ LIMIT 4;
                                                    ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                                          Output: s.row_id, s.title, s.embedding
                                                          Order By: (s.embedding <=> '[1,1,1,1]'::vector)
-                                                         Filter Mode: Post-Filter
                                                          Filter: (s.row_id > 2)
                                              ->  Sort
                                                    Output: d.row_id
                                                    Sort Key: d.row_id
                                                    ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                                          Output: d.row_id
-(42 rows)
+(40 rows)
 
 SET enable_union_all_required_columns_pushdown = on;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -375,7 +365,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                            Output: delta_t.row_id, (delta_t.embedding <=> '[1,1,1,1]'::vector)
                            Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
@@ -391,14 +380,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                              Output: s.row_id, (s.embedding <=> '[1,1,1,1]'::vector)
                                              Order By: (s.embedding <=> '[1,1,1,1]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 SET ann_orderby_distance_reuse = cosine;
 EXPLAIN (VERBOSE ON, COSTS OFF)
@@ -420,7 +408,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                            Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
                            Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
@@ -436,14 +423,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                              Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
                                              Order By: (s.embedding <=> '[1,1,1,1]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_ann_feature_matrix_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 -- A Join may pass the approximate value through, but may not consume it to
 -- decide matches or filter rows.  This outer Join reads the subquery distance
@@ -476,13 +462,12 @@ LIMIT 4;
                ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                      Output: delta_t.row_id, (delta_t.embedding <=> '[1,1,1,1]'::vector)
                      Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                     Filter Mode: Post-Filter
                      Filter: (delta_t.row_id > 2)
          ->  Materialize
                Output: g.max_distance
                ->  Seq Scan on union_all_ann_feature_matrix_test.cosine_gate g
                      Output: g.max_distance
-(16 rows)
+(15 rows)
 
 -- <+> is L1 in this openGauss tree, not cosine.  With every requested
 -- feature enabled it must remain outside both DiskANN cosine Top-K pushdown
@@ -810,7 +795,6 @@ ORDER BY embedding <=> '[1,1,1,1]'::vector LIMIT 4;
                      ->  Ann Index Scan using delta_cosine_diskann on union_all_ann_feature_matrix_test.delta_t
                            Output: delta_t.row_id, ((delta_t.embedding <=> '[1,1,1,1]'::vector))
                            Order By: (delta_t.embedding <=> '[1,1,1,1]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
@@ -827,9 +811,8 @@ ORDER BY embedding <=> '[1,1,1,1]'::vector LIMIT 4;
                                        ->  Ann Index Scan using snapshot_cosine_diskann on union_all_ann_feature_matrix_test.snapshot_t s
                                              Output: s.row_id, ((s.embedding <=> '[1,1,1,1]'::vector))
                                              Order By: (s.embedding <=> '[1,1,1,1]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
-(30 rows)
+(28 rows)
 
 SET enable_union_all_diskann_topk_pushdown=off;
 SET enable_union_all_required_columns_pushdown=off;

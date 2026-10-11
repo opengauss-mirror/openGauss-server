@@ -24,6 +24,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/relscan.h"
+#include "access/datavec/diskann.h"
 #include "access/tableam.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
@@ -963,7 +964,7 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
     /* Only DiskANN heap scans use this reorder protocol. HNSW, index-only,
      * bucket and Ustore execution retain their own access contracts. */
     if (index_state->iss_RelationDesc->rd_rel->relam == DISKANN_AM_OID &&
-        !node->is_ustore &&
+        !node->index_only_scan && !node->is_ustore &&
         !RELATION_HAS_BUCKET(current_relation) && list_length(node->indexorderbyorig) == 1 &&
         exprType((Node*)linitial(node->indexorderbyorig)) == FLOAT8OID) {
         index_state->iss_DiskannOrdered = true;

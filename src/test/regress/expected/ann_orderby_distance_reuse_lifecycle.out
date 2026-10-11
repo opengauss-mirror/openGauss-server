@@ -51,9 +51,8 @@ ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
    ->  Ann Index Scan using delta_idx on ann_reuse_lifecycle.delta_t
          Output: id, ((embedding <-> '[10000,20000,30000,40000]'::vector))
          Order By: (delta_t.embedding <-> '[10000,20000,30000,40000]'::vector)
-         Filter Mode: Post-Filter
          Filter: (delta_t.id > 0)
-(7 rows)
+(6 rows)
 
 CREATE TEMP TABLE ordered_l2 AS SELECT * FROM capture_order($q$
  SELECT /*+ indexscan(delta_t delta_idx) */ id, embedding <-> '[10000,20000,30000,40000]'::vector AS distance,
@@ -183,7 +182,6 @@ ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
                      ->  Ann Index Scan using delta_idx on ann_reuse_lifecycle.delta_t
                            Output: delta_t.id, ((delta_t.embedding <-> '[10000,20000,30000,40000]'::vector))
                            Order By: (delta_t.embedding <-> '[10000,20000,30000,40000]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.title IS NOT NULL)
                ->  Limit
                      Output: s.id, ((s.embedding <-> '[10000,20000,30000,40000]'::vector))
@@ -198,7 +196,7 @@ ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
                                        Filter: (s.title IS NOT NULL)
                                  ->  Index Only Scan using delete_t_pkey on ann_reuse_lifecycle.delete_t d
                                        Output: d.id
-(26 rows)
+(25 rows)
 
 CREATE TEMP TABLE union_top10 AS SELECT * FROM capture_order($q$
  SELECT id,embedding <-> '[10000,20000,30000,40000]'::vector AS distance,

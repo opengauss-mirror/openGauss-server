@@ -129,7 +129,17 @@ void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey
     so->rowToken = 0;
     scan->xs_ann_orderby.scan_epoch = so->scanEpoch;
     DiskAnnInvalidateOrderByDistance(scan);
+    /* Every rescan owns a new query and distance-publication epoch. Keep
+     * vector storage reusable, but discard all old results and graph visits. */
     so->curpos = 0;
+    so->candidates.resize(0);
+    so->ncandidates = 0;
+    so->curIterNum = 0;
+    so->nexpextedCandidates = 0;
+    so->value = (Datum)0;
+    so->orderedBatch = false;
+    so->queue->clear();
+    blockhash_reset(so->blocks);
 }
 
 IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys)
@@ -178,6 +188,13 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->queue->_data = VectorList<Neighbor>();
     MemoryContextSwitchTo(oldCtx);
 
+    /* The AM owns ORDER BY output storage even for ordinary heap scans.
+     * This is the same descriptor contract used by GiST, independent of
+     * returning index tuples or supporting INCLUDE attributes. */
+    if (norderbys > 0) {
+        scan->xs_orderbyvals = (Datum*)palloc0(sizeof(Datum) * norderbys);
+        scan->xs_orderbynulls = (bool*)palloc0(sizeof(bool) * norderbys);
+    }
     scan->opaque = so;
 
     return scan;
@@ -485,6 +502,9 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
     bool found = false;
     float *query = DatumGetVector(so->value)->x;
 
+    /* A wider beam restarts at the frozen entry points. Visits from the
+     * preceding beam cannot suppress those entry points or their edges. */
+    blockhash_reset(blocks);
     queue->reserve(so->nexpextedCandidates);
 
     VectorList<BlockNumber> *frozenBlknos = &(so->frozenBlks);

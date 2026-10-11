@@ -234,7 +234,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
                            Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                            Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.row_id > 2)
                ->  Limit
                      Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
@@ -250,14 +249,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
                                              Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                                              Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.row_id > 2)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_required_columns_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 -- A non-indexed predicate gives the delta branch a representative DiskANN
 -- plan.  title is legal in Filter but must not occur in any Output list.
@@ -280,7 +278,6 @@ LIMIT 4;
                      ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
                            Output: delta_t.row_id, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                            Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                           Filter Mode: Post-Filter
                            Filter: (delta_t.title IS NOT NULL)
                ->  Limit
                      Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
@@ -296,14 +293,13 @@ LIMIT 4;
                                        ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
                                              Output: s.row_id, ((s.embedding <-> '[0,0,0,0]'::vector))
                                              Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                             Filter Mode: Post-Filter
                                              Filter: (s.title IS NOT NULL)
                                  ->  Sort
                                        Output: d.row_id
                                        Sort Key: d.row_id
                                        ->  Seq Scan on union_all_required_columns_test.delete_t d
                                              Output: d.row_id
-(34 rows)
+(32 rows)
 
 -- A delete-side filter column ends at its scan Filter.  Only d.row_id reaches
 -- the Anti Join; unused_delete never enters a plan Output list.
@@ -402,7 +398,6 @@ LIMIT 4;
                                  ->  Ann Index Scan using delta_embedding_diskann on union_all_required_columns_test.delta_t
                                        Output: delta_t.row_id, delta_t.title, delta_t.embedding, ((delta_t.embedding <-> '[0,0,0,0]'::vector))
                                        Order By: (delta_t.embedding <-> '[0,0,0,0]'::vector)
-                                       Filter Mode: Post-Filter
                                        Filter: (delta_t.row_id > 2)
                      ->  Subquery Scan on "*SELECT* 2"
                            Output: "*SELECT* 2".row_id, "*SELECT* 2".embedding
@@ -421,14 +416,13 @@ LIMIT 4;
                                                    ->  Ann Index Scan using snapshot_embedding_diskann on union_all_required_columns_test.snapshot_t s
                                                          Output: s.row_id, s.title, s.embedding
                                                          Order By: (s.embedding <-> '[0,0,0,0]'::vector)
-                                                         Filter Mode: Post-Filter
                                                          Filter: (s.row_id > 2)
                                              ->  Sort
                                                    Output: d.row_id
                                                    Sort Key: d.row_id
                                                    ->  Seq Scan on union_all_required_columns_test.delete_t d
                                                          Output: d.row_id
-(42 rows)
+(40 rows)
 
 SET enable_union_all_required_columns_pushdown = on;
 -- A nested four-leaf UNION ALL guards recursive SetOperationStmt metadata

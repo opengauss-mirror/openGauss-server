@@ -237,9 +237,8 @@ Limit
               ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
                     Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
                     Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
-                    Filter Mode: Post-Filter
                     Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
-(25 rows)
+(24 rows)
 SELECT 'mode-off-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Two branch-worker metadata', 'Ordinary Sort nodes',
@@ -327,9 +326,8 @@ Limit
                     ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
                           Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
                           Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
-                          Filter Mode: Post-Filter
                           Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
-(29 rows)
+(28 rows)
 SELECT 'force-supported-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property NOT IN ('Zero branch-worker metadata', 'Ordinary Sort nodes',
@@ -414,9 +412,8 @@ Limit
               ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
                     Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
                     Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
-                    Filter Mode: Post-Filter
                     Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
-(25 rows)
+(24 rows)
 SELECT 'auto-cost-serial' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
@@ -494,9 +491,8 @@ Limit
                     ->  Ann Index Scan using hybrid_recall_schedule_hnsw_idx on public.hybrid_recall_schedule_docs
                           Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id
                           Order By: (hybrid_recall_schedule_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
-                          Filter Mode: Post-Filter
                           Filter: (hybrid_recall_schedule_docs.tenant_id = 1)
-(29 rows)
+(28 rows)
 SELECT 'auto-cost-parallel' AS test_case, plan_property, observed
 FROM hybrid_recall_schedule_plan_properties('base')
 WHERE plan_property IN ('Hybrid Recall nodes', 'Serial RRF strategies',
