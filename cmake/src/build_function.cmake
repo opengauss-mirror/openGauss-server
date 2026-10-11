@@ -204,7 +204,7 @@ ENDMACRO(CHECK_CC_ENABLE)
 
 function(GET_VERSIONSTR_FROMGIT ret)
     set(PG_VERSION "9.2.4")
-    set(OPENGAUSS_VERSION "7.0.0")
+    set(OPENGAUSS_VERSION "8.0.0-RC1")
     execute_process(COMMAND gcc -dumpmachine OUTPUT_VARIABLE host OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND g++ --version OUTPUT_VARIABLE cc_version OUTPUT_STRIP_TRAILING_WHITESPACE)
     string(REGEX REPLACE "\n.*" "" cc_string "${cc_version}")
