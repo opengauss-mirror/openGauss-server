@@ -67,6 +67,8 @@ sections:
             href: ./ogmem_install.md
           - label: 配置
             href: ./ogmem_configuration.md
+          - label: 记忆可视化
+            href: ./ogmem_visualization.md
       - label: 架构
         href: ./ogmem_architecture.md
       - label: API
