@@ -56,6 +56,7 @@ test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
 test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix chr_gbk insert_date_to_date
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views test_cursor_arg_defexpr
+test: drop_column_view_trigger
 
 # test multiple statistics
 test: functional_dependency

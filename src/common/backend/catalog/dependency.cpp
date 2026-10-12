@@ -198,6 +198,7 @@ static bool stack_address_present_add_flags(const ObjectAddress* object, int fla
 static void getRelationDescription(StringInfo buffer, Oid relid);
 static void getOpFamilyDescription(StringInfo buffer, Oid opfid);
 static void MarkMlogColumnAsInvalidOid(ObjectAddresses* addresses);
+static bool shouldKeepDependView(DropBehavior behavior, const ObjectAddress* origObject);
 
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
@@ -380,6 +381,7 @@ void performDeletion(const ObjectAddress* object, DropBehavior behavior, int fla
      * everything directly or indirectly dependent on it).
      */
     targetObjects = new_object_addresses();
+    targetObjects->keepViewTriggers = shouldKeepDependView(behavior, object);
 
     findDependentObjects(object,
         DEPFLAG_ORIGINAL,
@@ -469,6 +471,7 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
      * delete it when we reach its owner.
      */
     targetObjects = new_object_addresses();
+    targetObjects->keepViewTriggers = shouldKeepDependView(behavior, (objects->numrefs == 1) ? objects->refs : NULL);
 
     for (i = 0; i < objects->numrefs; i++) {
         const ObjectAddress* thisobj = objects->refs + i;
@@ -853,6 +856,15 @@ void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressS
         otherObject.classId = foundDep->classid;
         otherObject.objectId = foundDep->objid;
         otherObject.objectSubId = foundDep->objsubid;
+
+        /* Keep triggers owned by retained views; independent dependency paths still apply. */
+        if (targetObjects->keepViewTriggers && foundDep->classid == TriggerRelationId &&
+            foundDep->deptype == DEPENDENCY_AUTO && object->classId == RelationRelationId &&
+            !(mystack.flags & DEPFLAG_ORIGINAL) &&
+            (pendingObjects == NULL || !object_address_present(object, pendingObjects)) &&
+            get_rel_relkind(object->objectId) == RELKIND_VIEW) {
+            continue;
+        }
 
         /*
          * Must lock the dependent object before recursing to it.
@@ -2362,6 +2374,7 @@ ObjectAddresses* new_object_addresses(const int maxRefs)
     addrs->maxrefs = maxRefs;
     addrs->refs = (ObjectAddress*)palloc(addrs->maxrefs * sizeof(ObjectAddress));
     addrs->extras = NULL; /* until/unless needed */
+    addrs->keepViewTriggers = false;
 
     return addrs;
 }
