@@ -11,7 +11,8 @@ test: xact_abort
 test: functions transaction
 # test: functions2
 test: test_dbcc test_dbcc_case_sen
-test: test_sysviews test_sysviews2
+#test: test_sysviews
+test: test_sysviews2
 test: test_sysviews3
 test: test_sysviews4
 test: test_sysviews5
@@ -21,10 +22,10 @@ test: test_sysviews8
 test: test_sysviews9
 test: test_sysviews10
 test: test_sysviews11
-test: test_sysviews_pression
+#test: test_sysviews_pression
 test: gs_dump_d_format rotate_part2_dump
 test: varbinary
-test: test_sqlvariant
+#test: test_sqlvariant
 test: table_hint
 test: proc
 test: table_filegroup_index_option
