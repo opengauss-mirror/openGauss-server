@@ -438,8 +438,8 @@ def make_manifest(successful_images, namespace='opengauss/opengauss', dry_run=Fa
     """
     Create and push Docker manifests with multi-arch support.
     Generates three types of manifests:
-    1. OS-specific manifests (e.g.: 7.0.0-RC3.B001-openEuler20.03)
-    2. Version manifest (e.g.: 7.0.0-RC3.B001)
+    1. OS-specific manifests (e.g.: 8.0.0-RC1.B001-openEuler20.03)
+    2. Version manifest (e.g.: 8.0.0-RC1.B001)
     3. Latest manifest (when requested and single OS exists)
     """
 

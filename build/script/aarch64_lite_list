@@ -1022,4 +1022,4 @@
 ./include/pqcomm.h
 ./include/pqexpbuffer.h
 [version]
-7.0.0
+8.0.0-RC1
