@@ -7,6 +7,9 @@
 -- so no snapshot operations in this script.
 -- ============================================================
 
+DO $upgrade_global_key_activity$
+DECLARE
+    function_definition text := $function_definition$
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_key_activity()
 RETURNS TABLE(activity_type text, activity_name text, total_count bigint, total_wait_us bigint,
     total_size_bytes bigint
@@ -128,6 +131,17 @@ SELECT 'Executor'::text, 'Temporary File Count'::text, temp_files, NULL, NULL FR
 UNION ALL
 SELECT 'Executor'::text, 'Temp File Size'::text, NULL, NULL, temp_bytes FROM stat_agg
 $$ LANGUAGE SQL STABLE;
+$function_definition$;
+BEGIN
+    IF pg_catalog.current_setting('sql_compatibility') = 'B' THEN
+        -- Dolphin resolves untyped UNION inputs as text. Type the numeric
+        -- NULL placeholders only in B format and preserve existing casts.
+        function_definition := pg_catalog.regexp_replace(
+            function_definition, E'\\mNULL\\M(?![[:space:]]*::)', 'NULL::bigint', 'g');
+    END IF;
+    EXECUTE function_definition;
+END;
+$upgrade_global_key_activity$;
 
 -- node_name labels instance-level aggregates (cluster-wide sums), not per-node rows
 CREATE OR REPLACE VIEW dbe_perf.global_key_activity AS SELECT node_name, t.* FROM dbe_perf.node_name, dbe_perf.get_global_key_activity() t;
