@@ -85,7 +85,7 @@ bool UBSyncOldestXminInNodeTable()
         if (ub_fault_rc == 0) {
             ub_sigbus_jump_active = 1;
             ub_oldest_xmin = ubBuf->slots[node_id].load(std::memory_order_acquire);
-            UB_ESB_BARRIER();
+            UbEsbBarrier();
             ub_sigbus_jump_active = 0;
         } else {
             ub_sigbus_jump_active = 0;
@@ -337,7 +337,7 @@ void UBOldestXminBufferInit(UBOldestXminBuffer *buf)
         for (int i = 0; i < UB_OLDEST_XMIN_SLOTS; i++) {
             buf->slots[i].store(0, std::memory_order_release);
         }
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -369,7 +369,7 @@ bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 o
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         old_val = buf->slots[slot_idx].load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -386,7 +386,7 @@ bool UBOldestXminBufferSetSlot(UBOldestXminBuffer *buf, uint32 node_id, uint64 o
     if (ub_fault_rc_w == 0) {
         ub_sigbus_jump_active = 1;
         buf->slots[slot_idx].store(oldest_xmin, std::memory_order_release);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -411,7 +411,7 @@ uint64 UBOldestXminBufferGetSlot(UBOldestXminBuffer *buf, uint32 node_id)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         val = buf->slots[slot_idx].load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -439,7 +439,7 @@ void UBOldestXminShmemInit(void)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         offset = ctrl->oldest_xmin_offset.load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;

@@ -29170,6 +29170,8 @@ PLATFORM_ARCH=$(uname -m)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
   if [[ $CFLAGS == *"__ARM_LSE"* ]];then
     CFLAGS="-march=armv8.2-a+crc+lse $CFLAGS"
+  elif [[ $CFLAGS == *"__ARM_NO_LSE"* ]];then
+    CFLAGS="-march=armv8-a+crc $CFLAGS"
   else
     CFLAGS="-march=armv8.2-a+crc $CFLAGS"
   fi
