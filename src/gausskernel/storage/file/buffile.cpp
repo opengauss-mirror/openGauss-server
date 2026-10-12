@@ -281,12 +281,12 @@ BufFile *BufFileCreateShared(SharedFileSet *fileset, const char *name)
  * BufFileExport() to make sure that it is ready to be opened by other
  * backends and render it read-only.
  */
-BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name)
+static BufFile *BufFileOpenSharedInternal(SharedFileSet *fileset, const char *name, bool readOnly)
 {
-    BufFile *file = (BufFile *)palloc(sizeof(BufFile));
+    BufFile *file;
     char segment_name[MAXPGPATH];
     Size capacity = 16;
-    File *files = (File *)palloc(sizeof(File) * capacity);
+    File *files;
     int nfiles = 0;
 
     file = (BufFile *)palloc(sizeof(BufFile) + BLCKSZ);
@@ -296,28 +296,33 @@ BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name)
      * We don't know how many segments there are, so we'll probe the
      * filesystem to find out.
      */
-    for (;;) {
+    bool hasSegment = true;
+    while (hasSegment) {
         /* See if we need to expand our file segment array. */
         if ((uint32)nfiles + 1 > capacity) {
-            capacity *= 2;
+            capacity += capacity;
             files = (File *)repalloc(files, sizeof(File) * capacity);
         }
         /* Try to load a segment. */
         SharedSegmentName(segment_name, name, nfiles);
-        files[nfiles] = SharedFileSetOpen(fileset, segment_name);
-        if (files[nfiles] <= 0)
-            break;
-        ++nfiles;
-
-        CHECK_FOR_INTERRUPTS();
+        files[nfiles] = readOnly ? SharedFileSetOpen(fileset, segment_name) :
+            SharedFileSetOpenForWrite(fileset, segment_name);
+        hasSegment = files[nfiles] > 0;
+        if (hasSegment) {
+            ++nfiles;
+            CHECK_FOR_INTERRUPTS();
+        }
     }
 
     /*
      * If we didn't find any files at all, then no BufFile exists with this
      * name.
      */
-    if (nfiles == 0)
+    if (nfiles == 0) {
+        pfree(files);
+        pfree(file);
         return NULL;
+    }
 
     file->buffer = ((char *)file) + sizeof(BufFile);
     file->numFiles = nfiles;
@@ -330,12 +335,60 @@ BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name)
     file->curOffset = 0L;
     file->pos = 0;
     file->nbytes = 0;
-    file->readOnly = true; /* Can't write to files opened this way */
+    file->readOnly = readOnly;
     file->fileset = fileset;
     file->name = pstrdup(name);
     file->isTemp = true;
 
     return file;
+}
+
+BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name)
+{
+    return BufFileOpenSharedInternal(fileset, name, true);
+}
+
+BufFile *BufFileOpenSharedForWrite(SharedFileSet *fileset, const char *name)
+{
+    return BufFileOpenSharedInternal(fileset, name, false);
+}
+
+void BufFileTruncate(BufFile *file, int fileno, off_t offset)
+{
+    int i;
+    char segment_name[MAXPGPATH];
+
+    Assert(file->isTemp);
+    Assert(!file->readOnly);
+    if (fileno < 0 || fileno >= file->numFiles || offset < 0 || offset > MAX_PHYSICAL_FILESIZE) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid shared BufFile truncate position %d/%ld", fileno, (long)offset)));
+    }
+    if (BufFileFlush(file) != 0) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not flush shared BufFile before truncation: %m")));
+    }
+    if (FileTruncate(file->files[fileno], offset, WAIT_EVENT_BUFFILE_WRITE, file->isInterXact) != 0) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not truncate shared BufFile: %m")));
+    }
+
+    for (i = file->numFiles - 1; i > fileno; i--) {
+        SharedSegmentName(segment_name, file->name, i);
+        FileClose(file->files[i], file->isInterXact);
+        if (!SharedFileSetDelete(file->fileset, segment_name, true)) {
+            ereport(ERROR, (errcode_for_file_access(),
+                errmsg("could not delete shared BufFile segment \"%s\": %m", segment_name)));
+        }
+    }
+
+    file->numFiles = fileno + 1;
+    file->files = (File *)repalloc(file->files, sizeof(File) * file->numFiles);
+    file->offsets = (off_t *)repalloc(file->offsets, sizeof(off_t) * file->numFiles);
+    file->offsets[fileno] = offset;
+    file->curFile = fileno;
+    file->curOffset = offset;
+    file->pos = 0;
+    file->nbytes = 0;
+    file->dirty = false;
 }
 
 /*
@@ -407,6 +460,7 @@ static void CloseTempBufFile(BufFile* file)
     /* release the buffer space */
     pfree(file->files);
     pfree(file->offsets);
+    pfree_ext(file->name);
     pfree(file);
 }
 
@@ -773,6 +827,23 @@ void BufFileTell(BufFile* file, int* fileno, off_t* offset)
     *offset = file->curOffset + file->pos;
 }
 
+int BufFileSeekToEnd(BufFile *file)
+{
+    off_t offset;
+
+    if (BufFileFlush(file) != 0)
+        return EOF;
+    offset = FileSeek(file->files[file->numFiles - 1], 0, SEEK_END, file->isInterXact);
+    if (offset < 0)
+        return EOF;
+    file->curFile = file->numFiles - 1;
+    file->curOffset = offset;
+    file->offsets[file->curFile] = offset;
+    file->pos = 0;
+    file->nbytes = 0;
+    return 0;
+}
+
 /*
  * BufFileSeekBlock --- block-oriented seek
  *
@@ -873,4 +944,3 @@ long BufFileAppend(BufFile *target, BufFile *source)
 
     return startBlock;
 }
-

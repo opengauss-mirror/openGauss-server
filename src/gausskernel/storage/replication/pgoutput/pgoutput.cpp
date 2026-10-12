@@ -51,6 +51,10 @@ static void pgoutput_ddl(LogicalDecodingContext *ctx,
                          const char *prefix, Oid relid,
                          DeparsedCommandType cmdtype,
                          Size sz, const char *message);
+static void pgoutput_stream_start(LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
+static void pgoutput_stream_stop(LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
+static void pgoutput_stream_abort(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr abort_lsn);
+static void pgoutput_stream_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
 
 static bool pgoutput_origin_filter(LogicalDecodingContext *ctx, RepOriginId origin_id);
 
@@ -58,6 +62,7 @@ static List *LoadPublications(List *pubnames);
 static void publication_invalidation_cb(Datum arg, int cacheid, uint32 hashvalue);
 static bool ReplconninfoChanged();
 static bool GetConninfo(StringInfoData* standbysInfo);
+static void MaybeSendConninfo(LogicalDecodingContext *ctx);
 
 typedef struct PGOutputTxnData
 {
@@ -96,6 +101,11 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
     cb->filter_by_origin_cb = pgoutput_origin_filter;
     cb->shutdown_cb = pgoutput_shutdown;
     cb->ddl_cb = pgoutput_ddl;
+    cb->stream_start_cb = pgoutput_stream_start;
+    cb->stream_stop_cb = pgoutput_stream_stop;
+    cb->stream_abort_cb = pgoutput_stream_abort;
+    cb->stream_commit_cb = pgoutput_stream_commit;
+    cb->stream_change_cb = pgoutput_change;
 }
 
 static void parse_output_parameters(List *options, PGOutputData *data)
@@ -105,8 +115,10 @@ static void parse_output_parameters(List *options, PGOutputData *data)
     bool publication_names_given = false;
     bool binary_option_given = false;
     bool use_snapshot_given = false;
+    bool streamingGiven = false;
 
     data->binary = false;
+    data->streaming = false;
 
     foreach (lc, options) {
         DefElem *defel = (DefElem *)lfirst(lc);
@@ -148,6 +160,16 @@ static void parse_output_parameters(List *options, PGOutputData *data)
             use_snapshot_given = true;
 
             t_thrd.walsender_cxt.isUseSnapshot = true;
+        } else if (strcmp(defel->defname, "streaming") == 0) {
+            if (t_thrd.proc->workingVersionNum < SUBSCRIPTION_STREAMING_VERSION_NUM) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("streaming is not supported before working version %u",
+                        SUBSCRIPTION_STREAMING_VERSION_NUM)));
+            }
+            if (streamingGiven)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            streamingGiven = true;
+            data->streaming = defGetBoolean(defel);
         } else
             elog(ERROR, "unrecognized pgoutput option: %s", defel->defname);
     }
@@ -193,6 +215,17 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         if (list_length(data->publication_names) < 1)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("publication_names parameter missing")));
 
+        if (!data->streaming) {
+            ctx->streaming = false;
+        } else if (data->protocol_version < LOGICALREP_STREAMING_PROTO_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("requested proto_version=%u does not support streaming, need %u or higher",
+                    data->protocol_version, LOGICALREP_STREAMING_PROTO_VERSION_NUM)));
+        } else if (!ctx->streaming) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("streaming requested, but not supported by output plugin")));
+        }
+
         /* Init publication state. */
         data->publications = NIL;
         t_thrd.publication_cxt.publications_valid = false;
@@ -203,10 +236,14 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
             t_thrd.publication_cxt.isNewPubNeeded = true;
         }
         t_thrd.publication_cxt.firstTimeSendConninfo = true;
+        t_thrd.publication_cxt.inStreaming = false;
+        t_thrd.publication_cxt.streamedRelids = NIL;
         CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
         /* Initialize relation schema cache. */
         init_rel_sync_cache(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    } else {
+        ctx->streaming = false;
     }
 }
 
@@ -287,6 +324,11 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
     logicalrep_write_commit(ctx->out, txn, commit_lsn);
     OutputPluginWrite(ctx, true);
 
+    MaybeSendConninfo(ctx);
+}
+
+static void MaybeSendConninfo(LogicalDecodingContext *ctx)
+{
     /*
      * Send the newest connection information to the subscriber,
      * when the connection information about the standby changes.
@@ -336,9 +378,14 @@ static inline bool CheckAction(ReorderBufferChangeType type, PublicationActions 
     return true;
 }
 
-static void MaybeSendSchema(LogicalDecodingContext *ctx, Relation relation, RelationSyncEntry *relentry)
+static void MaybeSendSchema(LogicalDecodingContext *ctx, TransactionId xid, Relation relation,
+    RelationSyncEntry *relentry)
 {
-    if (relentry->schema_sent) {
+    if (!TransactionIdIsValid(xid) && relentry->schema_sent) {
+        return;
+    }
+    if (TransactionIdIsValid(xid) &&
+        list_member_oid(t_thrd.publication_cxt.streamedRelids, RelationGetRelid(relation))) {
         return;
     }
 
@@ -359,14 +406,21 @@ static void MaybeSendSchema(LogicalDecodingContext *ctx, Relation relation, Rela
             continue;
 
         OutputPluginPrepareWrite(ctx, false);
-        logicalrep_write_typ(ctx->out, att->atttypid);
+        logicalrep_write_typ(ctx->out, xid, att->atttypid);
         OutputPluginWrite(ctx, false);
     }
 
     OutputPluginPrepareWrite(ctx, false);
-    logicalrep_write_rel(ctx->out, relation);
+    logicalrep_write_rel(ctx->out, xid, relation);
     OutputPluginWrite(ctx, false);
-    relentry->schema_sent = true;
+    if (!TransactionIdIsValid(xid)) {
+        relentry->schema_sent = true;
+    } else {
+        MemoryContext oldctx = MemoryContextSwitchTo(ctx->context);
+        t_thrd.publication_cxt.streamedRelids =
+            lappend_oid(t_thrd.publication_cxt.streamedRelids, RelationGetRelid(relation));
+        MemoryContextSwitchTo(oldctx);
+    }
 }
 
 /*
@@ -380,6 +434,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     RelationSyncEntry *relentry;
     Oid relrewrite = RelationGetRelrewriteOption(relation);
     bool table_rewrite = false;
+    TransactionId xid = t_thrd.publication_cxt.inStreaming ? change->txn->xid : InvalidTransactionId;
 
     if (OidIsValid(relrewrite)) {
         table_rewrite = true;
@@ -418,7 +473,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     /*
      * Write the relation schema if the current schema haven't been sent yet.
      */
-    MaybeSendSchema(ctx, relation, relentry);
+    MaybeSendSchema(ctx, xid, relation, relentry);
 
     /* Send the data */
     switch (change->action) {
@@ -431,10 +486,10 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
                 * publisher and subscriber is consistent.
                 */
                 if (table_rewrite) {
-                    logicalrep_write_update(ctx->out, relation,
+                    logicalrep_write_update(ctx->out, xid, relation,
                                             NULL, &change->data.tp.newtuple->tuple, data->binary);
                 } else {
-                    logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
+                    logicalrep_write_insert(ctx->out, xid, relation, &change->data.tp.newtuple->tuple, data->binary);
                 }
                 OutputPluginWrite(ctx, true);
             }
@@ -442,7 +497,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
         case REORDER_BUFFER_CHANGE_UINSERT:
             if (change->data.utp.newtuple != NULL) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_insert(ctx->out, relation,
+                logicalrep_write_insert(ctx->out, xid, relation,
                     (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
                 OutputPluginWrite(ctx, true);
             }
@@ -452,7 +507,8 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
                 HeapTuple oldtuple = change->data.tp.oldtuple ? &change->data.tp.oldtuple->tuple : NULL;
 
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_update(ctx->out, relation, oldtuple, &change->data.tp.newtuple->tuple, data->binary);
+                logicalrep_write_update(ctx->out, xid, relation, oldtuple,
+                    &change->data.tp.newtuple->tuple, data->binary);
                 OutputPluginWrite(ctx, true);
             }
             break;
@@ -463,7 +519,8 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
                     ((HeapTuple)(&change->data.utp.oldtuple->tuple)) : NULL;
 
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_update(ctx->out, relation, oldtuple, (HeapTuple)(&change->data.utp.newtuple->tuple),
+                logicalrep_write_update(ctx->out, xid, relation, oldtuple,
+                    (HeapTuple)(&change->data.utp.newtuple->tuple),
                     data->binary);
                 OutputPluginWrite(ctx, true);
             }
@@ -472,7 +529,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
         case REORDER_BUFFER_CHANGE_DELETE:
             if (change->data.tp.oldtuple) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_delete(ctx->out, relation, &change->data.tp.oldtuple->tuple, data->binary);
+                logicalrep_write_delete(ctx->out, xid, relation, &change->data.tp.oldtuple->tuple, data->binary);
                 OutputPluginWrite(ctx, true);
             } else
                 elog(DEBUG1, "didn't send DELETE change because of missing oldtuple");
@@ -480,7 +537,8 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
         case REORDER_BUFFER_CHANGE_UDELETE:
             if (change->data.utp.oldtuple) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_delete(ctx->out, relation, (HeapTuple)(&change->data.utp.oldtuple->tuple), data->binary);
+                logicalrep_write_delete(ctx->out, xid, relation,
+                    (HeapTuple)(&change->data.utp.oldtuple->tuple), data->binary);
                 OutputPluginWrite(ctx, true);
             } else
                 elog(DEBUG1, "didn't send DELETE change because of missing oldtuple");
@@ -503,6 +561,7 @@ static void pgoutput_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *txn
     int i;
     int nrelids;
     Oid *relids;
+    TransactionId xid = t_thrd.publication_cxt.inStreaming ? change->txn->xid : InvalidTransactionId;
 
     old = MemoryContextSwitchTo(data->common.context);
 
@@ -523,12 +582,13 @@ static void pgoutput_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *txn
         }
 
         relids[nrelids++] = relid;
-        MaybeSendSchema(ctx, relation, relentry);
+        MaybeSendSchema(ctx, xid, relation, relentry);
     }
 
     if (nrelids > 0) {
         OutputPluginPrepareWrite(ctx, true);
         logicalrep_write_truncate(ctx->out,
+                                  xid,
                                   nrelids,
                                   relids,
                                   change->data.truncate.cascade,
@@ -575,6 +635,7 @@ static void pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLo
                          Oid relid, DeparsedCommandType cmdtype, Size sz, const char *message)
 {
     PGOutputTxnData *txndata = (PGOutputTxnData *) txn->output_plugin_private;
+    TransactionId xid = t_thrd.publication_cxt.inStreaming ? ctx->write_xid : InvalidTransactionId;
 
     /*
      * Check if the given object is published. Note that for dropped objects,
@@ -683,11 +744,17 @@ static void pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLo
     }
 
     /* Send BEGIN if we haven't yet */
-    pgoutput_begin_txn(ctx, txn);
+    if (!t_thrd.publication_cxt.inStreaming)
+        pgoutput_begin_txn(ctx, txn);
 
     OutputPluginPrepareWrite(ctx, true);
-    logicalrep_write_ddl(ctx->out, message_lsn, prefix, sz, message);
+    logicalrep_write_ddl(ctx->out, xid, message_lsn, prefix, sz, message);
     OutputPluginWrite(ctx, true);
+
+    if (t_thrd.publication_cxt.inStreaming) {
+        list_free_ext(t_thrd.publication_cxt.streamedRelids);
+        t_thrd.publication_cxt.streamedRelids = NIL;
+    }
 }
 
 /*
@@ -699,6 +766,58 @@ static bool pgoutput_origin_filter(LogicalDecodingContext *ctx, RepOriginId orig
         return true;
     }
     return false;
+}
+
+static void pgoutput_stream_start(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+    bool sendOrigin = txn->origin_id != InvalidRepOriginId && !rbtxn_is_streamed(txn);
+
+    Assert(!t_thrd.publication_cxt.inStreaming);
+    OutputPluginPrepareWrite(ctx, !sendOrigin);
+    logicalrep_write_stream_start(ctx->out, txn->xid, !rbtxn_is_streamed(txn));
+    if (sendOrigin) {
+        char *origin = NULL;
+        if (replorigin_by_oid(txn->origin_id, true, &origin)) {
+            OutputPluginWrite(ctx, false);
+            OutputPluginPrepareWrite(ctx, true);
+            logicalrep_write_origin(ctx->out, origin, InvalidXLogRecPtr);
+        }
+    }
+    OutputPluginWrite(ctx, true);
+    t_thrd.publication_cxt.inStreaming = true;
+    t_thrd.publication_cxt.streamedRelids = NIL;
+}
+
+static void pgoutput_stream_stop(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+    Assert(t_thrd.publication_cxt.inStreaming);
+    OutputPluginPrepareWrite(ctx, true);
+    logicalrep_write_stream_stop(ctx->out);
+    OutputPluginWrite(ctx, true);
+    t_thrd.publication_cxt.inStreaming = false;
+    list_free_ext(t_thrd.publication_cxt.streamedRelids);
+}
+
+static void pgoutput_stream_abort(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr abort_lsn)
+{
+    ReorderBufferTXN *toptxn = rbtxn_get_toptxn(txn);
+
+    Assert(!t_thrd.publication_cxt.inStreaming);
+    OutputPluginPrepareWrite(ctx, true);
+    logicalrep_write_stream_abort(ctx->out, toptxn->xid, txn->xid);
+    OutputPluginWrite(ctx, true);
+    if (txn == toptxn)
+        clean_txn_data(txn);
+}
+
+static void pgoutput_stream_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr commit_lsn)
+{
+    Assert(!t_thrd.publication_cxt.inStreaming);
+    clean_txn_data(txn);
+    OutputPluginPrepareWrite(ctx, true);
+    logicalrep_write_stream_commit(ctx->out, txn, commit_lsn);
+    OutputPluginWrite(ctx, true);
+    MaybeSendConninfo(ctx);
 }
 
 /*

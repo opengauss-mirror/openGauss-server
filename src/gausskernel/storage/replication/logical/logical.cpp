@@ -90,6 +90,7 @@ static void truncate_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
 static void ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+                            TransactionId change_xid,
                             XLogRecPtr message_lsn, const char *prefix,
                             Oid relid, DeparsedCommandType cmdtype,
                             Size message_size, const char *message);
@@ -221,6 +222,7 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     ctx->reorder->stream_abort = stream_abort_cb_wrapper;
     ctx->reorder->stream_commit = stream_commit_cb_wrapper;
     ctx->reorder->stream_change = stream_change_cb_wrapper;
+    ctx->reorder->stream_truncate = truncate_cb_wrapper;
 
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
@@ -1116,8 +1118,7 @@ bool filter_by_origin_cb_wrapper(LogicalDecodingContext *ctx, RepOriginId origin
     return ret;
 }
 
-static void 
-ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+static void ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, TransactionId change_xid,
                         XLogRecPtr message_lsn, const char *prefix,
                         Oid relid, DeparsedCommandType cmdtype,
                         Size message_size, const char *message)
@@ -1142,7 +1143,7 @@ ddl_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 
     /* set output state */
     ctx->accept_writes = true;
-    ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+    ctx->write_xid = change_xid;
     ctx->write_location = message_lsn;
 
     /* do the actual work: call callback */

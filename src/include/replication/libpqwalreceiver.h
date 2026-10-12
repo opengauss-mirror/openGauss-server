@@ -39,6 +39,7 @@ typedef struct LibpqrcvConnectParam {
     List *publicationNames; /* String list of publications */
     bool binary;            /* Ask publisher to use binary */
     bool useSnapshot;       /* Use snapshot or not */
+    bool streaming;         /* Stream in-progress transactions */
 }LibpqrcvConnectParam;
 
 /*

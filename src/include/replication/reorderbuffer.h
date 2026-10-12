@@ -471,6 +471,7 @@ typedef void (*ReorderBufferCommitCB)(ReorderBuffer* rb, ReorderBufferTXN* txn, 
 /* DDL message callback signature */
 typedef void (*ReorderBufferDDLMessageCB) (ReorderBuffer *rb,
                                             ReorderBufferTXN *txn,
+                                            TransactionId change_xid,
                                             XLogRecPtr message_lsn,
                                             const char *prefix,
                                             Oid relid,
@@ -547,6 +548,7 @@ struct ReorderBuffer {
     ReorderBufferStreamAbortCB stream_abort;
     ReorderBufferStreamCommitCB stream_commit;
     ReorderBufferStreamChangeCB stream_change;
+    ReorderBufferApplyTruncateCB stream_truncate;
 
     /*
      * Pointer that will be passed untouched to the callbacks.

@@ -78,12 +78,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93164;
+const uint32 GRAND_VERSION_NUM = 93165;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 SUBSCRIPTION_STREAMING_VERSION_NUM = 93165;
 const uint32 THREAD_IO_STATS_VERSION_NUM = 93164;
 const uint32 OS_DISK_VERSION_NUM = 93163;
 const uint32 OS_NET_DEV_VERSION_NUM = 93162;
