@@ -20334,6 +20334,13 @@ static ObjectAddress ATExecClusterOn(Relation rel, const char* indexName, LOCKMO
     Oid indexOid;
     ObjectAddress address;
 
+    /* Ustore tables do not support CLUSTER. */
+    if (rel->rd_tam_ops == TableAmUstore) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cluster not supported in ustore")));
+    }
+
     indexOid = get_relname_relid(indexName, rel->rd_rel->relnamespace);
 
     if (!OidIsValid(indexOid))
