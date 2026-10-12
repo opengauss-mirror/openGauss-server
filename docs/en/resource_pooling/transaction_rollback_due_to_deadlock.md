@@ -78,4 +78,4 @@ A deadlock is a cyclic dependency where two or more transactions hold locks that
 
 ## Solution
 
-openGauss resolves deadlocks automatically via its built-in detector. The system cancels the youngest or least costly transaction to break the cycle. You can tune the detection sensitivity using the `deadlock_timeout` parameter. For details, see [Lock Management](../database_reference/lock_management.md).
+openGauss resolves deadlocks automatically via its built-in detector. The system cancels the youngest or least costly transaction to break the cycle. You can tune the detection sensitivity using the `deadlock_timeout` parameter. For details, see [Lock Management](https://docs.opengauss.org/en/docs/latest/database_reference/lock_management.html).

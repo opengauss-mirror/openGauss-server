@@ -9,7 +9,7 @@ Compared to traditional `gs_initdb` database creation, resource pooling divides 
 
 ### Prerequisites
 
-- The project has been compiled successfully. For compilation instructions, see [Compiling the Version](../compilation_guide/compiling_the_version.md).
+- The project has been compiled successfully. For compilation instructions, see [Compiling the Version](https://docs.opengauss.org/en/docs/latest/compilation_guide/compiling_the_version.html).
 - The host has mounted the storage array LUNs, the Ultrapath multipathing software is installed, and the storage devices are available.
 
 ### Procedure
@@ -245,6 +245,7 @@ Obtain the SCRLock installation package from the openGauss community.
 | | SCRLock Packages (Examples):<br>- OCK_scrlock_openEuler-22.03-LTS-aarch64.tar.gz<br>- OCK_scrlock_openEuler-20.03-LTS-x86_64.tar.gz | Select the package matching your OS and architecture. |
 
 **Table 2** OS and OFED Compatibility
+<a name="zh-cn_topic_0000002082250312_table364115286293"></a>
 
 | OS Version | OFED Version (x86) | OFED Version (Arm) |
 | :--- | :--- | :--- |
