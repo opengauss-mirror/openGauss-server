@@ -19507,6 +19507,9 @@ static void AttachEachCommandInQueue(
                     }
                 }
 
+                /* Preserve the comment when recreating the index. */
+                stmt->idxcomment = GetComment(oldId, RelationRelationId, 0);
+
                 tab = ATGetQueueEntry(wqueue, rel);
                 newcmd = makeNode(AlterTableCmd);
                 newcmd->subtype = AT_ReAddIndex;
@@ -19524,16 +19527,21 @@ static void AttachEachCommandInQueue(
                     Constraint* con = NULL;
 
                     switch (cmd->subtype) {
-                        case AT_AddIndex:
+                        case AT_AddIndex: {
                             Assert(IsA(cmd->def, IndexStmt));
                             SetPartionIndexType((IndexStmt*)cmd->def, rel, true);
+                            Oid oldIndexId = get_constraint_index(oldId);
                             if (!rewrite) {
                                 if (RelationIsPartitioned(rel) && !((IndexStmt*)cmd->def)->isGlobal) {
-                                    tryReusePartedIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def, rel);
+                                    tryReusePartedIndex(oldIndexId, (IndexStmt*)cmd->def, rel);
                                 } else {
-                                    TryReuseIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def);
+                                    TryReuseIndex(oldIndexId, (IndexStmt*)cmd->def);
                                 }
                             }
+
+                            /* Preserve the comment on the constraint backing index. */
+                            ((IndexStmt*)cmd->def)->idxcomment =
+                                GetComment(oldIndexId, RelationRelationId, 0);
 
                             cmd->subtype = AT_ReAddIndex;
                             tab->subcmds[AT_PASS_OLD_INDEX] = lappend(tab->subcmds[AT_PASS_OLD_INDEX], cmd);
@@ -19542,6 +19550,7 @@ static void AttachEachCommandInQueue(
                                 setPrimaryNotnull(rel->rd_id, (IndexStmt*)cmd->def, tab);
                             }
                             break;
+                        }
                         case AT_AddConstraint:
                             Assert(IsA(cmd->def, Constraint));
                             con = (Constraint*)cmd->def;
