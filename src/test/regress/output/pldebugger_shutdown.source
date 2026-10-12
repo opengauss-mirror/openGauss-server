@@ -17,7 +17,7 @@ Success to perform gs_guc!
 Success to perform gs_guc!
 -- start
 \! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/start.log 2>&1
-\! sleep 5
+\! i=0; while [ $i -lt 10 ]; do @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode >/dev/null 2>&1 && break; sleep 1; i=`expr $i + 1`; done
 \! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "show log_directory; show enable_thread_pool;"
 --?.*
 --?.*
@@ -97,7 +97,7 @@ connection to server was lost
 \! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
 --?gs_ctl: server is running .*
 \! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/stop.log 2>&1
-\! sleep 5
+\! i=0; while [ $i -lt 10 ]; do @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode >/dev/null 2>&1 || break; sleep 1; i=`expr $i + 1`; done
 \! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
 no server running
 \! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
@@ -124,7 +124,7 @@ connection to server was lost
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode -c "enable_thread_pool=on" 2>&1 | grep Success
 Success to perform gs_guc!
 \! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/start2.log 2>&1
-\! sleep 5
+\! i=0; while [ $i -lt 10 ]; do @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode >/dev/null 2>&1 && break; sleep 1; i=`expr $i + 1`; done
 \! port=`expr @portstring@ + 5` && @abs_bindir@/gsql -X -q -d postgres -p $port -c "show enable_thread_pool;"
  enable_thread_pool 
 --------------------
@@ -137,7 +137,7 @@ Success to perform gs_guc!
 \! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
 --?gs_ctl: server is running .*
 \! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode > @abs_srcdir@/tmp_check/pldebugger_shutdown/stop2.log 2>&1
-\! sleep 5
+\! i=0; while [ $i -lt 10 ]; do @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode >/dev/null 2>&1 || break; sleep 1; i=`expr $i + 1`; done
 \! @abs_bindir@/gs_ctl status -D @abs_srcdir@/tmp_check/pldebugger_shutdown/datanode | grep running
 no server running
 \! cat @abs_srcdir@/tmp_check/pldebugger_shutdown/temp.log
