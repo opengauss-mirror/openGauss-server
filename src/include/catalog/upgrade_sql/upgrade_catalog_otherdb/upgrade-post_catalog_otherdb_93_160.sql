@@ -28,8 +28,49 @@ RETURNS SETOF RECORD STABLE ROWS 100 LANGUAGE INTERNAL NOT FENCED NOT SHIPPABLE 
 -- 2. rebuild wait events objects
 DROP VIEW IF EXISTS dbe_perf.global_wait_events CASCADE;
 DROP FUNCTION IF EXISTS dbe_perf.get_global_wait_events() CASCADE;
-DROP VIEW IF EXISTS dbe_perf.wait_events CASCADE;
-CREATE VIEW dbe_perf.wait_events AS SELECT * FROM pg_catalog.get_instr_wait_event(NULL);
+-- Dolphin owns a view that depends on wait_events. Preserve that view and
+-- its extension membership while rebuilding wait_events in this transaction.
+DO $$
+DECLARE
+    dolphin_view_definition text;
+BEGIN
+    -- Return one NULL row when this database has no Dolphin member view.
+    SELECT pg_catalog.max(pg_catalog.pg_get_viewdef(c.oid))
+      INTO dolphin_view_definition
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_catalog.pg_depend d
+        ON d.classid = 'pg_catalog.pg_class'::regclass
+       AND d.objid = c.oid
+       AND d.deptype = 'e'
+      JOIN pg_catalog.pg_extension e
+        ON d.refclassid = 'pg_catalog.pg_extension'::regclass
+       AND d.refobjid = e.oid
+     WHERE n.nspname = 'performance_schema'
+       AND c.relname = 'events_waits_summary_global_by_event_name'
+       AND c.relkind = 'v'
+       AND e.extname = 'dolphin';
+
+    IF dolphin_view_definition IS NOT NULL THEN
+        -- Remove the query dependency without dropping the extension member.
+        CREATE OR REPLACE VIEW performance_schema.events_waits_summary_global_by_event_name AS
+        SELECT NULL::text AS event_name,
+               NULL::bigint AS count_star,
+               NULL::bigint AS sum_timer_wait,
+               NULL::bigint AS min_timer_wait,
+               NULL::bigint AS avg_timer_wait,
+               NULL::bigint AS max_timer_wait
+         WHERE false;
+    END IF;
+
+    DROP VIEW IF EXISTS dbe_perf.wait_events CASCADE;
+    CREATE VIEW dbe_perf.wait_events AS SELECT * FROM pg_catalog.get_instr_wait_event(NULL);
+
+    IF dolphin_view_definition IS NOT NULL THEN
+        EXECUTE 'CREATE OR REPLACE VIEW performance_schema.events_waits_summary_global_by_event_name AS '
+                || dolphin_view_definition;
+    END IF;
+END$$;
 
 -- the function body must be kept byte-identical with performance_views.sql,
 -- otherwise pg_proc.prosrc differs from a fresh install and the upgrade
