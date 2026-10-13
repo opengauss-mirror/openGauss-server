@@ -991,6 +991,65 @@ FROM (
 ) s;
 4
 DROP TABLE IF EXISTS frwt_setop_case;
+-- issue 8558: apply PERCENT once, after gathering all SMP rows.
+CREATE TABLE frwt_percent_smp(id int) WITH (orientation=row);
+INSERT INTO frwt_percent_smp SELECT n FROM generate_series(1, 1000) n;
+ANALYZE frwt_percent_smp;
+SET rewrite_rule='none';
+SET enable_vector_engine=on;
+SET query_dop=1;
+SET enable_force_smp=off;
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp FETCH FIRST 50 PERCENT ROWS ONLY
+) s;
+500
+SET query_dop=4;
+SET enable_force_smp=on;
+-- The lower Limit passes all rows through; only the upper Limit applies PERCENT.
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp FETCH FIRST 50 PERCENT ROWS ONLY
+) s;
+Aggregate
+  ->  Limit
+        ->  Streaming(type: LOCAL GATHER dop: 1/4)
+              ->  Limit
+                    ->  Seq Scan on frwt_percent_smp
+-- Ordinary LIMIT must retain its partial Limit below Gather.
+EXPLAIN (COSTS OFF)
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp LIMIT 10
+) s;
+Aggregate
+  ->  Limit
+        ->  Streaming(type: LOCAL GATHER dop: 1/4)
+              ->  Limit
+                    ->  Seq Scan on frwt_percent_smp
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp FETCH FIRST 50 PERCENT ROWS ONLY
+) s;
+500
+-- OFFSET must also be applied only above Gather.
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp
+    OFFSET 900 ROWS FETCH FIRST 50 PERCENT ROWS ONLY
+) s;
+100
+SELECT count(*), min(id), max(id) FROM (
+    SELECT id FROM frwt_percent_smp ORDER BY id
+    OFFSET 100 ROWS FETCH FIRST 33.4 PERCENT ROWS ONLY
+) s;
+334|101|434
+SELECT count(*) FROM (
+    SELECT id FROM frwt_percent_smp ORDER BY id % 10
+    FETCH FIRST 33.4 PERCENT ROWS WITH TIES
+) s;
+400
+RESET rewrite_rule;
+RESET enable_vector_engine;
+RESET query_dop;
+RESET enable_force_smp;
+DROP TABLE frwt_percent_smp;
 \pset tuples_only off
 \pset format aligned
 \c postgres
