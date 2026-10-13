@@ -783,6 +783,7 @@
 ./lib/libaws-cpp-sdk-s3.so
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
+./lib/libstrncoll.so*
 ./lib/postgresql/age.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so

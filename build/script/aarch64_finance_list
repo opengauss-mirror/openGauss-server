@@ -888,6 +888,7 @@
 ./lib/libzstd.so*
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
+./lib/libstrncoll.so*
 ./lib/libdssapi.so
 ./lib/libdms.so
 ./lib/libhcom4db.so

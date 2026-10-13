@@ -1010,6 +1010,21 @@ Datum bpcharcmp_locale(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(cmp);
 }
 
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+Datum bpcharcmp_locale_n(PG_FUNCTION_ARGS)
+{
+    BpChar* arg1 = PG_GETARG_BPCHAR_PP(0);
+    BpChar* arg2 = PG_GETARG_BPCHAR_PP(1);
+    int len1 = bcTruelen_internal(arg1);
+    int len2 = bcTruelen_internal(arg2);
+    int cmp = varstr_cmp_locale_n(VARDATA_ANY(arg1), len1, VARDATA_ANY(arg2), len2,
+                                  PG_GET_COLLATION());
+    PG_FREE_IF_COPY(arg1, 0);
+    PG_FREE_IF_COPY(arg2, 1);
+    PG_RETURN_INT32(cmp);
+}
+#endif
+
 Datum bpchar_sortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);

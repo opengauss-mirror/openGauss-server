@@ -165,6 +165,12 @@ LIBS += -lcjson
 LIBS += -lonnxruntime -ltokenizers
 
 ##########################################################################
+# append strncoll for custom locale-aware bounded comparison
+############################################################################
+LIBS += -lstrncoll
+LDFLAGS += -L$(top_builddir)/src/lib/strncoll
+
+##########################################################################
 # append xgboost for xgboost algorithm : libxgboost.so attached by dlopen
 ############################################################################
 #LIBS += -L$(XGBOOST_LIB_PATH) -lxgboost 
@@ -314,7 +320,7 @@ endif
 
 ##########################################################################
 
-all: submake-libpgport submake-schemapg libgstrace submake-libalarmclient gaussdb $(POSTGRES_IMP)
+all: submake-libpgport submake-schemapg libgstrace submake-libalarmclient submake-strncoll gaussdb $(POSTGRES_IMP)
 
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)

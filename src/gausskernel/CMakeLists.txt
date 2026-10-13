@@ -305,6 +305,10 @@ set(gaussdb_LINK_DIRS "")
 message("******${gaussdb_server_lib}******")
 set(gaussdb_DEPEND_LIST config_static pgport_srv_static alarmclient_static plpgsql_static pq_static)
 set(gaussdb_LINK_LIBS libconfig.a libpgport_srv.a libalarmclient.a libpq.a libplpgsql.a -l${SECURE_C_CHECK} -lonnxruntime -ltokenizers)
+# libstrncoll.so: LGPL-licensed custom strncoll() (dynamically linked so users
+# can replace it independently).  Built from src/common/backend/utils/adt.
+list(APPEND gaussdb_LINK_LIBS strncoll)
+list(APPEND gaussdb_DEPEND_LIST strncoll)
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
         list(APPEND gaussdb_LINK_LIBS ${gaussdb_server_lib} libhotpatchclient.a)

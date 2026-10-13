@@ -839,7 +839,16 @@ static List* switch_arg_items(Node* funExpr, Const* cnst, Oid* eqlOprOid, Oid* i
             volatile bool functionCallFailed = false;
             PG_TRY();
             {
-                constValue = OidFunctionCall1(funcId, ((Const*)cnst)->constvalue);
+                /*
+                 * Fix stack-buffer-overflow for 2-argument cast functions
+                 * (e.g. numbertoset(numeric, oid) -> anyset, pronargs=2).
+                 * OidFunctionCall1 allocates LOCAL_FCINFO(fcinfo, 1) on the
+                 * stack; reading PG_GETARG_OID(1) overflows the frame.
+                 */
+                if (get_func_nargs(funcId) == 2)
+                    constValue = OidFunctionCall2(funcId, ((Const*)cnst)->constvalue, ObjectIdGetDatum(argType));
+                else
+                    constValue = OidFunctionCall1(funcId, ((Const*)cnst)->constvalue);
             }
             PG_CATCH();
             {
