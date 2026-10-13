@@ -18521,6 +18521,34 @@ static void setPrimaryNotnull(Oid relid, IndexStmt *stmt, AlteredTableInfo* tab)
 }
 
 /*
+ * Index rebuilding changes its OID even when the storage can be reused.
+ * Restore CLUSTER ON after the replacement indexes have been created.
+ */
+static void ATQueueClusteredIndexRestore(Oid indexOid, Relation rel, AlteredTableInfo* tab)
+{
+    /* Ustore does not support CLUSTER; do not restore legacy markers. */
+    if (rel->rd_tam_ops == TableAmUstore) {
+        return;
+    }
+
+    HeapTuple indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
+    if (!HeapTupleIsValid(indexTuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", indexOid)));
+    }
+    bool isClustered = ((Form_pg_index)GETSTRUCT(indexTuple))->indisclustered;
+    ReleaseSysCache(indexTuple);
+    if (!isClustered) {
+        return;
+    }
+
+    AlterTableCmd* cmd = makeNode(AlterTableCmd);
+    cmd->subtype = AT_ClusterOn;
+    cmd->name = get_rel_name(indexOid);
+    tab->subcmds[AT_PASS_OLD_CONSTR] = lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
+}
+
+/*
  * Attach each generated command to the proper place in the work queue.
  * Note this could result in creation of entirely new work-queue entries.
  *
@@ -18558,6 +18586,7 @@ static void AttachEachCommandInQueue(
                 newcmd->subtype = AT_ReAddIndex;
                 newcmd->def = (Node*)stmt;
                 tab->subcmds[AT_PASS_OLD_INDEX] = lappend(tab->subcmds[AT_PASS_OLD_INDEX], newcmd);
+                ATQueueClusteredIndexRestore(oldId, rel, tab);
                 break;
             }
             case T_AlterTableStmt: {
@@ -18588,6 +18617,7 @@ static void AttachEachCommandInQueue(
 
                             cmd->subtype = AT_ReAddIndex;
                             tab->subcmds[AT_PASS_OLD_INDEX] = lappend(tab->subcmds[AT_PASS_OLD_INDEX], cmd);
+                            ATQueueClusteredIndexRestore(oldIndexId, rel, tab);
 
                             if (tab->is_first_after) {
                                 setPrimaryNotnull(rel->rd_id, (IndexStmt*)cmd->def, tab);
