@@ -8,23 +8,23 @@ This document describes how to use the Go language to call the openGauss vector 
 
 ## Installing the SDK
 
-Developers can run the following command to install the Go SDK from the [official repository](http://gitcode.com/opengauss/openGauss-connector-go-pq), and import the package into the project.
+Developers can run the following command to install the Go SDK from the [official repository](http://atomgit.com/opengauss/openGauss-connector-go-pq), and import the package into the project.
 
 ```
 Install SDK
-go get gitcode.com/opengauss/openGauss-connector-go-pq@master
+go get atomgit.com/opengauss/openGauss-connector-go-pq@master
 
 Import package to the project
 import (
  "database/sql"
 
- _ "gitcode.com/opengauss/openGauss-connector-go-pq"
+ _ "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 
 ```
 
 >[!NOTE]Note <br>
->Currently, gitcode does not support `go get`. Please refer to the usage guide below for manual installation.
+>Currently, atomgit does not support `go get`. Please refer to the usage guide below for manual installation.
 >
 ## Basic Operations
 >
@@ -159,7 +159,7 @@ func ExecuteMultiSearch(conninfo string, query string, args [][]interface{}, sca
 
 ```go
 import (
-    "gitcode.com/opengauss/openGauss-connector-go-pq"
+    "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 conninfo := "host=localhost port=5432 user=test password=yourpassword dbname=testdb"
 scanParams := map[string]interface{}{
@@ -187,7 +187,7 @@ cat << 'EOL' > setup_opengauss_go.sh
 # Set the project name and driver information.
 PROJECT_NAME="opengauss-go"
 MODULE_NAME="opengauss"
-DRIVER_MODULE_PATH="gitcode.com/opengauss/openGauss-connector-go-pq"
+DRIVER_MODULE_PATH="atomgit.com/opengauss/openGauss-connector-go-pq"
 DRIVER_REPO_URL="https://$DRIVER_MODULE_PATH.git"
 DRIVER_VERSION="v1.0.7"
 
@@ -244,7 +244,7 @@ import (
     "log"
     "database/sql"
 
-    _ "gitcode.com/opengauss/openGauss-connector-go-pq"
+    _ "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 
 /*
@@ -293,4 +293,4 @@ func main(){
 }
 ```
 
-[More operation examples](https://gitcode.com/opengauss/openGauss-connector-go-pq)
+[More operation examples](https://atomgit.com/opengauss/openGauss-connector-go-pq)

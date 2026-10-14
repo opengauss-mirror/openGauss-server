@@ -408,7 +408,7 @@ def build_rag():
 ```python
 rag = build_rag()
 
-urls = ["https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"]
+urls = ["https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"]
 
 rag.load(urls)
 ```
@@ -599,8 +599,8 @@ $ curl -X POST http://localhost:3000/ingest \
   -d '{
     "request": {
       "sources": [
-        "https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md",
-        "https://gitcode.com/opengauss/docs/blob/master/docs/zh/datavec/index.md"
+        "https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md",
+        "https://atomgit.com/opengauss/docs/blob/master/docs/zh/datavec/index.md"
       ],
       "table_name": "bentoml_rag"
     }
@@ -672,7 +672,7 @@ ingest_result = client.call(
     "ingest",
     request={
         "sources": [
-            "https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md",
+            "https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md",
         ],
         "table_name": "bentoml_rag",
     },

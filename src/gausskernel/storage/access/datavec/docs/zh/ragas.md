@@ -318,12 +318,12 @@ rag = RAG(openai_client=openai_client, opengauss_client=opengauss_client)
 
 ## 测试 RAG 管道
 
-本文以 [Markdown](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md) 文件作为源文件进行操作演示。
+本文以 [Markdown](https://atomgit.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md) 文件作为源文件进行操作演示。
 
 将 Markdown 文件加载到 RAG 管道中。
 
 ```python
-urls = ["https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"]
+urls = ["https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"]
 
 rag.load(urls)
 ```

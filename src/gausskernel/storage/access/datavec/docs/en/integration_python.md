@@ -17,7 +17,7 @@ If the database is installed using the OM tool, Python 3.6 to 3.10 is recommende
   Note that the psycopg2 package installed here is from PyPI and does not include the multi-vector query feature. To use the multi-vector query feature, refer to the offline installation.
 
 - Offline Installation<br>
-  1) Download the psycopg2 package adapted for openGauss. Download link: [gitcode official website](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2).<br>
+  1) Download the psycopg2 package adapted for openGauss. Download link: [atomgit official website](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2).<br>
   2) Go to the root directory of openGauss-connector-python-psycopg2 and run
 
   ```bash
@@ -219,4 +219,4 @@ close_connection(conn, cursor)
 
 The openGauss Python SDK also provides advanced multimodal retrieval capabilities, including vector retrieval, BM25 full-text retrieval, hybrid retrieval, and AI model integration (Embedding, Rerank, Chat). For a detailed usage guide, see [Python SDK Multimodal Retrieval Guide](./multimodal_retrieval_python_sdk.md).
 
-[More operation examples](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)
+[More operation examples](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)

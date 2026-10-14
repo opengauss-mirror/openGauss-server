@@ -913,13 +913,13 @@ Fastcheck用于快速执行回归测试。运行前需要先准备openGauss源�
 
 ## 文档
 
-更多安装指南、教程和API请参考[用户文档](https://gitcode.com/opengauss/docs)。
+更多安装指南、教程和API请参考[用户文档](https://atomgit.com/opengauss/docs)。
 
 ## 社区
 
 ### 治理
 
-查看openGauss是如何实现开放[治理](https://gitcode.com/opengauss/community/blob/master/governance.md)。
+查看openGauss是如何实现开放[治理](https://atomgit.com/opengauss/community/blob/master/governance.md)。
 
 ### 交流
 

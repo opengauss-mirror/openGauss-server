@@ -25,7 +25,7 @@ The openGauss Python SDK extends the `psycopg2` driver with multimodal retrieval
 
 ### 2.2 Installing the SDK
 
-Refer to the [openGauss](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2/blob/master/README.md) official documentation to install the `psycopg2` driver.
+Refer to the [openGauss](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2/blob/master/README.md) official documentation to install the `psycopg2` driver.
 
 ### 2.3 Installing Optional Dependencies
 
@@ -860,4 +860,4 @@ It depends on the embedding model used. Common dimensions:
 
 When `fallback_to_rrf=True` (enabled by default), if reranking fails, the system automatically falls back to the RRF strategy, ensuring retrieval service availability.
 
-[More examples and source code reference](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)
+[More examples and source code reference](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)

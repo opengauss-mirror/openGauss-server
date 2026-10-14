@@ -11,7 +11,7 @@
 ## 1. 安装 CLI
 
 ```bash
-git clone --branch dev https://gitcode.com/opengauss/oGMemory.git
+git clone --branch dev https://atomgit.com/opengauss/oGMemory.git
 cd oGMemory
 python3 -m venv .venv
 source .venv/bin/activate

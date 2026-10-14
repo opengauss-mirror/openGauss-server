@@ -20,7 +20,7 @@ Enabling Ultimate RTO On-Demand Recovery reduces the database unavailability win
 
 When the Ultimate RTO On-Demand Recovery switch is enabled, the system constructs only the metadata essential for recovery during the failure recovery phase, without performing actual replay. The database then immediately opens to accept connections, reducing RTO. Background log replay continues after the database is open, and user queries trigger on-demand replay to ensure data consistency (results match the state prior to the failure).
 
-This feature introduces two new states in the `Cluster Status` field of the `control file`: **`in on-demand build`** and **`in on-demand redo`** (see [pg_controldata](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/pg_controldata.md)). When a failover occurs with this feature enabled, the new primary first sets `Cluster Status` to **`in on-demand build`**, entering the on-demand build construction phase. During this phase, the cluster is constructing the metadata required for replay and cannot accept connections. Once construction is complete, the status changes to **`in on-demand redo`**, entering the on-demand replay phase. The database can now accept connections while background log replay continues until completion. As an emergency escape mechanism, if the primary exits before completing either phase, the new primary will fall back to the standard Ultimate RTO recovery mode.
+This feature introduces two new states in the `Cluster Status` field of the `control file`: **`in on-demand build`** and **`in on-demand redo`** (see [pg_controldata](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/pg_controldata.md)). When a failover occurs with this feature enabled, the new primary first sets `Cluster Status` to **`in on-demand build`**, entering the on-demand build construction phase. During this phase, the cluster is constructing the metadata required for replay and cannot accept connections. Once construction is complete, the status changes to **`in on-demand redo`**, entering the on-demand replay phase. The database can now accept connections while background log replay continues until completion. As an emergency escape mechanism, if the primary exits before completing either phase, the new primary will fall back to the standard Ultimate RTO recovery mode.
 
 ## Enhancements
 
@@ -50,7 +50,7 @@ This feature introduces two new states in the `Cluster Status` field of the `con
 - **Autovacuum is disabled** during the on-demand redo phase.
 - Real-time build capability takes effect **only** during standby failover scenarios.
 - Ultimate RTO On-Demand Recovery performance may fluctuate based on disk array environmental conditions.
-- This feature consumes significant memory. It is recommended **only for systems with ample memory and strict RTO requirements**. For other systems, the standard Ultimate RTO Recovery is advised (see [Ultimate RTO](https://gitcode.com/opengauss/docs/blob/master/docs/en/characteristic_description/ultimate_rto.md)).
+- This feature consumes significant memory. It is recommended **only for systems with ample memory and strict RTO requirements**. For other systems, the standard Ultimate RTO Recovery is advised (see [Ultimate RTO](https://atomgit.com/opengauss/docs/blob/master/docs/en/characteristic_description/ultimate_rto.md)).
 - For guidance on selecting the recovery mode in resource pooling, refer to [Resource Pooling HA System Configuration](resource_pooling_ha_system_configuration.md).
 
 ## Dependencies

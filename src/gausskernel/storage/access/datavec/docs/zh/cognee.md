@@ -199,7 +199,7 @@ await prune.prune_system(metadata=True)
 
 **（5）预处理文档**
 
-本文使用 [DataVec向量数据库](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
+本文使用 [DataVec向量数据库](https://atomgit.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md)作为实例文档，使用 `# ` 进行简单的分块处理。
 
 ```python
 import random
@@ -207,7 +207,7 @@ import string
 import urllib.request
 from typing import List
 
-url="https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
+url="https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
 
 all_chunks: List[str] = []
 
@@ -354,7 +354,7 @@ async def main() -> None:
 
     await clear_existing_data()
 
-    url = "https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
+    url = "https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
     chunks = fetch_markdown_chunks(url)
     await ingest_chunks(chunks)
 

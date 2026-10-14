@@ -25,7 +25,7 @@ openGauss Python SDK 在 psycopg2 驱动基础上扩展了多模检索能力，�
 
 ### 2.2 安装 SDK
 
-参考 [openGauss](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2/blob/master/README.md) 官方文档安装 psycopg2 驱动：
+参考 [openGauss](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2/blob/master/README.md) 官方文档安装 psycopg2 驱动：
 
 ### 2.3 安装可选依赖
 
@@ -862,4 +862,4 @@ model = create_model("my_provider", api_key="xxx")
 
 若业务已有 OpenSearch DSL（`indices.create` / `search` / `knn_search`），可改用连接器中的兼容层，见 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。无 OpenSearch 包袱时，优先使用本文的 `MultiRetrieverClient`。
 
-[更多示例和源码参考](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)
+[更多示例和源码参考](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)

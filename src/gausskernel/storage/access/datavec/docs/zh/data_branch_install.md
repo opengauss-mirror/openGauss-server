@@ -51,7 +51,7 @@ mv openGauss-third_party_binarylibs_openEuler_2203_arm 3rd_og
 拉取 `neon_release_9129` 分支源码及子模块：
 
 ```bash
-git clone --recursive -b neon_release_9129 https://gitcode.com/opengauss/neon.git
+git clone --recursive -b neon_release_9129 https://atomgit.com/opengauss/neon.git
 cd neon
 git submodule update --init --recursive
 ```

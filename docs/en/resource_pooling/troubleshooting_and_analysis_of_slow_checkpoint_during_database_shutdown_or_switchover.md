@@ -49,7 +49,7 @@ Whether stopping the database or performing a primary-standby switchover, the ch
 
 ## Information Collection
 
-1. **Identifying Where It Is Stuck**: For checkpoint stalls during database shutdown, the first step is to determine which phase it is stuck in. Apart from the keyword messages in the run log mentioned above, the fastest method is to print the database process stack. You can use `gstack <PID_of_gaussdb_process>` or refer to the [Built-in Stack Tool](https://gitcode.com/opengauss/docs/blob/master/docs/en/characteristic_description/built_in_stack_tool.md).
+1. **Identifying Where It Is Stuck**: For checkpoint stalls during database shutdown, the first step is to determine which phase it is stuck in. Apart from the keyword messages in the run log mentioned above, the fastest method is to print the database process stack. You can use `gstack <PID_of_gaussdb_process>` or refer to the [Built-in Stack Tool](https://atomgit.com/opengauss/docs/blob/master/docs/en/characteristic_description/built_in_stack_tool.md).
 
 2. **Database Run Logs**: Collect the logs under `$GAUSSLOG/pg_log` from the time of the incident. It is recommended to go back far enough to include the logs of the last successful checkpoint during normal operation.
 

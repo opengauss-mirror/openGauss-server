@@ -26,7 +26,7 @@
     1） 可以从开源社区下载openGauss-connector-jdbc源码
 
     ```bash
-    git clone https://gitcode.com/opengauss/openGauss-connector-jdbc.git
+    git clone https://atomgit.com/opengauss/openGauss-connector-jdbc.git
     ```
 
     切换到代码目录运行`sh build.sh`,成功编译后会出现两个jar包，分别是opengauss-jdbc-${version}.jar与postgresql.jar（在output目录下）
@@ -250,5 +250,5 @@ public static void main(String[] args) {
     }
 ```
 
-[更多操作示例参考](https://gitcode.com/opengauss/openGauss-connector-jdbc)
+[更多操作示例参考](https://atomgit.com/opengauss/openGauss-connector-jdbc)
 [java常用示例](https://docs.opengauss.org/zh/docs/latest/getting_started/java.html)

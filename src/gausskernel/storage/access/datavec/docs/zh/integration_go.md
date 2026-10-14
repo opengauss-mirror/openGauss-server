@@ -8,23 +8,23 @@
 
 ## 安装SDK
 
-开发者可以运行以下命令安装Go SDK[官方仓库](http://gitcode.com/opengauss/openGauss-connector-go-pq)，并在项目中导入该包。
+开发者可以运行以下命令安装Go SDK[官方仓库](http://atomgit.com/opengauss/openGauss-connector-go-pq)，并在项目中导入该包。
 
 ```
 安装SDK
-go get gitcode.com/opengauss/openGauss-connector-go-pq@master
+go get atomgit.com/opengauss/openGauss-connector-go-pq@master
 
 在项目中导入该包
 import (
  "database/sql"
 
- _ "gitcode.com/opengauss/openGauss-connector-go-pq"
+ _ "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 
 ```
 
 >[!NOTE]说明 <br>
->目前 gitcode 不支持 go get，请参考下方用例指导手动安装。
+>目前 atomgit 不支持 go get，请参考下方用例指导手动安装。
 >
 ## 基本操作
 >
@@ -159,7 +159,7 @@ func ExecuteMultiSearch(conninfo string, query string, args [][]interface{}, sca
 
 ```go
 import (
-    "gitcode.com/opengauss/openGauss-connector-go-pq"
+    "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 conninfo := "host=localhost port=5432 user=test password=yourpassword dbname=testdb"
 scanParams := map[string]interface{}{
@@ -187,7 +187,7 @@ cat << 'EOL' > setup_opengauss_go.sh
 # 设置项目名称和驱动信息
 PROJECT_NAME="opengauss-go"
 MODULE_NAME="opengauss"
-DRIVER_MODULE_PATH="gitcode.com/opengauss/openGauss-connector-go-pq"
+DRIVER_MODULE_PATH="atomgit.com/opengauss/openGauss-connector-go-pq"
 DRIVER_REPO_URL="https://$DRIVER_MODULE_PATH.git"
 DRIVER_VERSION="v1.0.7"
 
@@ -244,7 +244,7 @@ import (
     "log"
     "database/sql"
 
-    _ "gitcode.com/opengauss/openGauss-connector-go-pq"
+    _ "atomgit.com/opengauss/openGauss-connector-go-pq"
 )
 
 /*
@@ -293,4 +293,4 @@ func main(){
 }
 ```
 
-[更多操作示例参考](https://gitcode.com/opengauss/openGauss-connector-go-pq)
+[更多操作示例参考](https://atomgit.com/opengauss/openGauss-connector-go-pq)

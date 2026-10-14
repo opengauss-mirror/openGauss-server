@@ -27,7 +27,7 @@ The aforementioned logs indicate that the issue is caused by insufficient system
 
 ## Root Cause
 
-Insufficient system semaphores prevent the database from meeting the minimum semaphore requirements, leading to cluster startup or restart failure. For specific kernel semaphore parameter requirements, refer to Table 2 (Operating System Parameters) in [gs_checkos](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_checkos.md).
+Insufficient system semaphores prevent the database from meeting the minimum semaphore requirements, leading to cluster startup or restart failure. For specific kernel semaphore parameter requirements, refer to Table 2 (Operating System Parameters) in [gs_checkos](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_checkos.md).
 
 ## Solution
 

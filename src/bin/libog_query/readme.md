@@ -16,11 +16,11 @@
 
 - openGauss源码路径：
 
-> https://gitcode.com/opengauss/openGauss-server
+> https://atomgit.com/opengauss/openGauss-server
 
 - openGauss插件仓路径：
 
-> https://gitcode.com/opengauss/Plugin
+> https://atomgit.com/opengauss/Plugin
 
 1. 方式一：直接编译
 

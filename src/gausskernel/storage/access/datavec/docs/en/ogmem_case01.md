@@ -91,8 +91,8 @@ The example run command is as follows:
 
 The test script is as follows:
 
-- [`run_eval_small.sh`](https://gitcode.com/weixin_44204324/locomo-eval-kit/blob/main/scripts/run_eval_small.sh)
-- [`locomo-eval-kit`](https://gitcode.com/weixin_44204324/locomo-eval-kit)
+- [`run_eval_small.sh`](https://atomgit.com/weixin_44204324/locomo-eval-kit/blob/main/scripts/run_eval_small.sh)
+- [`locomo-eval-kit`](https://atomgit.com/weixin_44204324/locomo-eval-kit)
 
 ## Output Example
 

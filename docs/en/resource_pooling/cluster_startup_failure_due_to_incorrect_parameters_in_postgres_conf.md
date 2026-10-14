@@ -60,7 +60,7 @@ Issues regarding other non-compliant parameters manifest similarly, with specifi
 
 ## Root Cause
 
-The cluster fails to start or restart due to abnormal parameter configurations within the system configuration file `postgresql.conf`. For detailed parameter descriptions, refer to [GUC Parameter Usage](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/guc_parameter_usage.md).
+The cluster fails to start or restart due to abnormal parameter configurations within the system configuration file `postgresql.conf`. For detailed parameter descriptions, refer to [GUC Parameter Usage](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_reference/guc_parameter_usage.md).
 
 ## Solution
 

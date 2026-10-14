@@ -20,9 +20,9 @@ By querying DMS resource statistics functions, administrators can collect runtim
 
 DMS resource statistics functions include:
 
-- **Reform Process Status Information**: Query using the `query_node_reform_info_from_dms` function. For detailed function descriptions, refer to [Resource Pooling Functions](https://gitcode.com/opengauss/docs/blob/master/docs/en/sql_reference/resource_pooling_function.md).
-- **Page and Lock Information**: Query using the `query_all_drc_info` function. For detailed function descriptions, refer to [Resource Pooling Functions](https://gitcode.com/opengauss/docs/blob/master/docs/en/sql_reference/resource_pooling_function.md).
-- **Command Word Wait Information**: Query using the `get_instr_wait_event` function. Originally designed for general database wait event statistics, this feature adds DMS command word content. For detailed function descriptions, refer to [Statistics Information Functions](https://gitcode.com/opengauss/docs/blob/master/docs/en/sql_reference/statistics_information_functions.md).
+- **Reform Process Status Information**: Query using the `query_node_reform_info_from_dms` function. For detailed function descriptions, refer to [Resource Pooling Functions](https://atomgit.com/opengauss/docs/blob/master/docs/en/sql_reference/resource_pooling_function.md).
+- **Page and Lock Information**: Query using the `query_all_drc_info` function. For detailed function descriptions, refer to [Resource Pooling Functions](https://atomgit.com/opengauss/docs/blob/master/docs/en/sql_reference/resource_pooling_function.md).
+- **Command Word Wait Information**: Query using the `get_instr_wait_event` function. Originally designed for general database wait event statistics, this feature adds DMS command word content. For detailed function descriptions, refer to [Statistics Information Functions](https://atomgit.com/opengauss/docs/blob/master/docs/en/sql_reference/statistics_information_functions.md).
 
 ## Enhancements<a name="section1340684315478"></a>
 

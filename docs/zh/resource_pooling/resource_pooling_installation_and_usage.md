@@ -116,7 +116,7 @@
 **获取安装包<a name="zh-cn_topic_0000002082250312_section186941117112519"></a>**
 
 - 请通过openGauss社区获取HCOM安装包。
-- HCOM4DB的so已包含在openGauss安装包中。如果需要自行编译，可以从[Gitee](https://gitcode.com/opengauss/hcom4db)获取源码。
+- HCOM4DB的so已包含在openGauss安装包中。如果需要自行编译，可以从[Gitee](https://atomgit.com/opengauss/hcom4db)获取源码。
 
 **环境要求<a name="zh-cn_topic_0000002082250312_section14726153115253"></a>**
 

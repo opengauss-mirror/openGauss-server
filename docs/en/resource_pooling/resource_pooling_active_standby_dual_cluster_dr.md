@@ -86,9 +86,9 @@ During normal operation, after the standby cluster host replays its local XLogs,
 This feature supports two deployment modes:
 
 1. **Network-based streaming replication mode**:  
-   [Resource Pooling Network Dual-Cluster Deployment](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_administration_guide/resource_pooling_network_dual_cluster_deployent.md)
+   [Resource Pooling Network Dual-Cluster Deployment](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_administration_guide/resource_pooling_network_dual_cluster_deployent.md)
 2. **DORADO storage synchronous replication mode**:  
-   [Resource Pooling DORADO Dual-Cluster Deployment](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_administration_guide/resource_pooling_dorado_dual_cluster_deployment.md)
+   [Resource Pooling DORADO Dual-Cluster Deployment](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_administration_guide/resource_pooling_dorado_dual_cluster_deployment.md)
 
 ## Application Scenarios
 

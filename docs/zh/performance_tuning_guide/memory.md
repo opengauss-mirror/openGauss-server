@@ -63,7 +63,7 @@ KiB Swap:  8242172 total,  8242172 free,        0 used. 13366219+avail Mem
     sh openGauss-server/src/bin/scripts/run_drop_cache.sh
     ```
 
-    其中，openGauss-server为仓库代码，下载地址:[https://gitcode.com/opengauss/openGauss-server.git](https://gitcode.com/opengauss/openGauss-server.git)
+    其中，openGauss-server为仓库代码，下载地址:[https://atomgit.com/opengauss/openGauss-server.git](https://atomgit.com/opengauss/openGauss-server.git)
 
 3. 若用户内存占用过高，需查看执行计划，重点分析以下内容。
 

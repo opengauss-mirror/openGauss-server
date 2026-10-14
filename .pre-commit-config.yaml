@@ -8,7 +8,7 @@ exclude: '^(doc/|docs/|docs-lite/|build/|contrib/|docker/|third_party/|src/test/
 
 repos:
   # 1. Basic hygiene checks
-  - repo: https://gitcode.com/pre-commit/pre-commit-hooks
+  - repo: https://atomgit.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
       # 只检查 cpp
@@ -38,7 +38,7 @@ repos:
        
 
   # 2. Spell checking
-  # - repo: https://gitcode.com/gh_mirrors/co/codespell
+  # - repo: https://atomgit.com/gh_mirrors/co/codespell
   #   rev: v2.4.1
   #   hooks:
   #     - id: codespell

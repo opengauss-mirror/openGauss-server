@@ -91,8 +91,8 @@ Judge 自动评分
 
 测试脚本可参考：
 
-- [`run_eval_small.sh`](https://gitcode.com/weixin_44204324/locomo-eval-kit/blob/main/scripts/run_eval_small.sh)
-- [`locomo-eval-kit`](https://gitcode.com/weixin_44204324/locomo-eval-kit)
+- [`run_eval_small.sh`](https://atomgit.com/weixin_44204324/locomo-eval-kit/blob/main/scripts/run_eval_small.sh)
+- [`locomo-eval-kit`](https://atomgit.com/weixin_44204324/locomo-eval-kit)
 
 ## 结果示例
 

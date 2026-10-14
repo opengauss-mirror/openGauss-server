@@ -143,7 +143,7 @@ print(rows)
 以 openGauss 部分语料数据作为私域知识，下载文件：
 
 ```python
-[test@localhost ~]$ wget https://gitcode.com/opengauss/website/raw/v2/app/zh/faq/index.md
+[test@localhost ~]$ wget https://atomgit.com/opengauss/website/raw/v2/app/zh/faq/index.md
 ```
 
 对语料进行预处理：

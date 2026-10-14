@@ -53,7 +53,7 @@ If you are using a different CPU architecture, download the openGauss binarylibs
 Pull the source code and submodules of the `neon_release_9129` branch:
 
 ```bash
-git clone --recursive -b neon_release_9129 https://gitcode.com/opengauss/neon.git
+git clone --recursive -b neon_release_9129 https://atomgit.com/opengauss/neon.git
 cd neon
 git submodule update --init --recursive
 ```

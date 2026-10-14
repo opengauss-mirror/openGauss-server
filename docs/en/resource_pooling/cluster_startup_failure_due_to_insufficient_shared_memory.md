@@ -54,7 +54,7 @@ However, if the deployment is in a developer environment, this issue may also ar
 
 ## Root Cause
 
-Insufficient system shared memory prevents the database from meeting the minimum shared memory requirements, leading to cluster startup or restart failure. For specific shared memory size requirements, refer to Table 2 (Operating System Parameters) in [gs_checkos](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_checkos.md).
+Insufficient system shared memory prevents the database from meeting the minimum shared memory requirements, leading to cluster startup or restart failure. For specific shared memory size requirements, refer to Table 2 (Operating System Parameters) in [gs_checkos](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_checkos.md).
 
 ## Solution
 

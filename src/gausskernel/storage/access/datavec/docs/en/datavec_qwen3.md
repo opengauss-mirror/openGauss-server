@@ -151,7 +151,7 @@ At this point, the RAG knowledge base built around the Qwen3 model and the openG
 
 Qwen3 model: <https://ollama.com/library/qwen3>
 
-openGauss project repository: <https://gitcode.com/opengauss/openGauss-server>
+openGauss project repository: <https://atomgit.com/opengauss/openGauss-server>
 
 Kunpeng RAG solution: <https://www.hikunpeng.com/document/detail/zh/kunpengrag/bestpractice/kunpengrag_21_0001.html>
 

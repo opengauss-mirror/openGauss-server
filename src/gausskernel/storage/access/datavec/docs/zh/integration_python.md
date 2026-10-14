@@ -17,7 +17,7 @@
   注意这里安装的是pypi上的psycopg2的包，不包含多向量查询的特性。如果要使用多向量查询的特性，参考离线安装。
 
 - 离线安装<br>
-  1）下载适配好openGauss的psycopg2包，下载链接：[gitcode官网](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)。<br>
+  1）下载适配好openGauss的psycopg2包，下载链接：[atomgit官网](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)。<br>
   2）进入openGauss-connector-python-psycopg2根目录，执行
 
   ```bash
@@ -221,4 +221,4 @@ openGauss Python SDK 还提供了高级多模检索能力，包括向量检索�
 
 若业务已使用 OpenSearch 风格的索引/文档/搜索 API，可使用连接器中的兼容层，将 DSL 转换为 openGauss SQL。该接口不是 `opensearch-py` 的零修改替换，安装与限制见 [Python SDK OpenSearch 适配](./opensearch_python_sdk.md)。
 
-[更多操作示例参考](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)
+[更多操作示例参考](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)

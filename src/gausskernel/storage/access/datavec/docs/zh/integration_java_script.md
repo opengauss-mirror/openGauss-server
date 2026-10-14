@@ -4,7 +4,7 @@
 
 ## 环境准备
 
- - 下载源码[openGauss-connector-nodejs](https://gitcode.com/opengauss/openGauss-connector-nodejs)
+ - 下载源码[openGauss-connector-nodejs](https://atomgit.com/opengauss/openGauss-connector-nodejs)
 
 ```bash
 npm install & npm run build

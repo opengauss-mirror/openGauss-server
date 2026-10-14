@@ -71,7 +71,7 @@ rm -rf .pre-commit-venv
 
 ### 2. 首次运行较慢
 
-`install-hooks` 会从 gitcode 镜像拉取钩子仓库并构建 darker 等环境，属正常现象。
+`install-hooks` 会从 atomgit 镜像拉取钩子仓库并构建 darker 等环境，属正常现象。
 
 
 ### 3. Windows

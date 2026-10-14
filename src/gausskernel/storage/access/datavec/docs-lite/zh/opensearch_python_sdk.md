@@ -8,7 +8,7 @@
 
 ## 1. 概述
 
-兼容层位于 [openGauss-connector-python-psycopg2](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2) 的 `opensearch_sdk/` 目录，主入口为 `opensearch_sdk.OpenGauss`。它把 OpenSearch 风格的 `indices.create`、`index`、`search`、`knn_search` 等调用转换成 openGauss SQL，并在需要时走 BM25、HNSW/IVF 向量索引和混合检索。
+兼容层位于 [openGauss-connector-python-psycopg2](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2) 的 `opensearch_sdk/` 目录，主入口为 `opensearch_sdk.OpenGauss`。它把 OpenSearch 风格的 `indices.create`、`index`、`search`、`knn_search` 等调用转换成 openGauss SQL，并在需要时走 BM25、HNSW/IVF 向量索引和混合检索。
 
 ### 1.1 和现有文档的关系
 
@@ -76,7 +76,7 @@ from psycopg2.extras import execute_multi_search
 兼容层尚未发布到 PyPI，需从连接器源码安装。`pip install .` 必须在 **`opensearch_sdk` 子目录**执行，而不是连接器仓库根目录。
 
 ```bash
-git clone https://gitcode.com/opengauss/openGauss-connector-python-psycopg2.git
+git clone https://atomgit.com/opengauss/openGauss-connector-python-psycopg2.git
 cd openGauss-connector-python-psycopg2/opensearch_sdk
 pip install . --no-deps
 ```
@@ -333,7 +333,7 @@ results = client.multi.hybrid_search(
 
 ### 8.1 连接器仓已记录的限制
 
-以下三条来自连接器仓 [KNOWN_ISSUES.md](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2/blob/master/opensearch_sdk/opensearch_sdk/KNOWN_ISSUES.md)，该文档含根因分析、备选方案和验证方法。
+以下三条来自连接器仓 [KNOWN_ISSUES.md](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2/blob/master/opensearch_sdk/opensearch_sdk/KNOWN_ISSUES.md)，该文档含根因分析、备选方案和验证方法。
 
 | 限制 | 现象 | 建议 |
 | --- | --- | --- |
@@ -370,4 +370,4 @@ results = client.multi.hybrid_search(
 
 更多开发说明见 `opensearch_sdk/doc/developer/`。源码与 Issue 跟踪：
 
-[openGauss-connector-python-psycopg2](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)
+[openGauss-connector-python-psycopg2](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)

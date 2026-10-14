@@ -20,7 +20,7 @@ The shark extension is compiled together with the kernel. You need to manually c
 
 ### Compile and Install
 
-1. [Compile and install openGauss](https://gitcode.com/opengauss/openGauss-server#%E7%BC%96%E8%AF%91).
+1. [Compile and install openGauss](https://atomgit.com/opengauss/openGauss-server#%E7%BC%96%E8%AF%91).
 
 2. Create the D-compatible database and create the extension.
 
