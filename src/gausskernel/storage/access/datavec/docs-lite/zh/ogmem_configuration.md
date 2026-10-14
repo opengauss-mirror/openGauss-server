@@ -80,7 +80,7 @@ export OGMEM_EMBEDDING_API_KEY='替换为Embedding密钥'
 | `vector_db.connection_string` | 向量索引的连接，可以与 SQL 存储共用；不能把任意 PostgreSQL 当作 openGauss 向量库 |
 | `memory.after_turn_threshold` | 待处理内容达到设定的 token 数时触发自动抽取；token 是模型计量文本的单位，不等同于字数或轮次数，也不是全局写入开关 |
 
-SQL 存储不需要 AGFS。需要 Chroma 或 AGFS 时，按 [完整 YAML 参考](https://gitcode.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) 配置对应后端及依赖。
+SQL 存储不需要 AGFS。需要 Chroma 或 AGFS 时，按 [完整 YAML 参考](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) 配置对应后端及依赖。
 
 ### 配置优先级
 
@@ -196,6 +196,6 @@ openclaw config get plugins.slots.contextEngine
 
 ## 完整参考
 
-- [YAML 字段](https://gitcode.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml)
-- [服务环境变量](https://gitcode.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md)
-- [OpenClaw 插件配置与环境变量](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
+- [YAML 字段](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml)
+- [服务环境变量](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md)
+- [OpenClaw 插件配置与环境变量](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)

@@ -21,7 +21,7 @@ The openGauss database supports the graph database engine through plugins. In th
 
 ### Compile and Install
 
-AGE source code address: <https://gitcode.com/opengauss/Plugin/tree/master/contrib/age>
+AGE source code address: <https://atomgit.com/opengauss/Plugin/tree/master/contrib/age>
 
 #### Method 1 (Install Together with openGauss)
 

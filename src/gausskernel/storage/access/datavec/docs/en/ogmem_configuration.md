@@ -2,7 +2,7 @@
 
 This guide describes how to generate configuration files, where to generate them, and what the core content is, based on the installation mode.
 
-For details about the complete fields, see [config/ogmem.reference.yaml](https://gitcode.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) and [OGMEMORY_ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md).
+For details about the complete fields, see [config/ogmem.reference.yaml](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) and [OGMEMORY_ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md).
 
 ## 1. Configuration Entry
 
@@ -268,7 +268,7 @@ vector_db:
 
 ## 6. Main Environment Variables
 
-Generally, the YAML file is preferred. Environment variables are suitable for temporary overwriting, container deployment, or CI. For details, see [OGMEMORY_ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md).
+Generally, the YAML file is preferred. Environment variables are suitable for temporary overwriting, container deployment, or CI. For details, see [OGMEMORY_ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md).
 
 | Variable | Default Value | Description |
 | --- | --- | --- |
@@ -308,7 +308,7 @@ curl http://127.0.0.1:8090/api/v1/health
 
 | Document | Description |
 | --- | --- |
-| [config/ogmem.reference.yaml](https://gitcode.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) | Complete YAML template. |
-| [OGMEMORY_ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md) | Description of complete environment variables |
-| [deploy/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/deploy/README.md) | Docker integrated deployment |
-| [openclaw_context_engine_plugin/ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md) | OpenClaw plugin variables |
+| [config/ogmem.reference.yaml](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) | Complete YAML template. |
+| [OGMEMORY_ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md) | Description of complete environment variables |
+| [deploy/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/deploy/README.md) | Docker integrated deployment |
+| [openclaw_context_engine_plugin/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md) | OpenClaw plugin variables |

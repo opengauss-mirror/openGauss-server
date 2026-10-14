@@ -29,7 +29,7 @@ MCP适配openGauss数据库让AI智能体能够通过标准化协议安全、高
 
 ### 获取openGauss_mcp_server源码
 
-访问链接 <https://gitcode.com/opengauss/mcp-opengauss> 获取openGauss_mcp_server源码，当前版本为（0.1.0）。
+访问链接 <https://atomgit.com/opengauss/mcp-opengauss> 获取openGauss_mcp_server源码，当前版本为（0.1.0）。
 
 ### 配置参数
 

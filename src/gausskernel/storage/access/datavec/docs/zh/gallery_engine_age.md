@@ -21,7 +21,7 @@ openGauss数据库使用插件的方式支持图数据库引擎，在openGauss�
 
 ### 编译安装
 
-age源码地址：<https://gitcode.com/opengauss/Plugin/tree/master/contrib/age>
+age源码地址：<https://atomgit.com/opengauss/Plugin/tree/master/contrib/age>
 
 #### 方式一（同openGauss一起安装）
 

@@ -25,7 +25,7 @@ None.
 - Archiving parameters can only be enabled on the **primary node**.
 - Archiving cannot be enabled when `wal_level` is set to `minimal`.
 - The system does **not** validate whether archived XLOG files are still required. If the archive destination disk becomes full, archiving will halt until sufficient free space (>1 GB, as XLOG segments in resource pooling are fixed at 1 GB) is available. Users must manually manage and clean up archived XLOG files.
-- In resource pooling mode, the `archive_command` parameter **must** be configured as `dsscmd cp`. Only basic file copy operations are supported, and **relative paths are not permitted** for file path arguments. For details, see [dsscmd](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/dsscmd.md).
+- In resource pooling mode, the `archive_command` parameter **must** be configured as `dsscmd cp`. Only basic file copy operations are supported, and **relative paths are not permitted** for file path arguments. For details, see [dsscmd](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/dsscmd.md).
 
 ## Dependencies
 
@@ -47,6 +47,6 @@ During PITR recovery, the primary node utilizes the continuously archived XLOG f
 
 ## Usage Guide
 
-Configuration of the `archive_command` parameter differs from traditional primary-standby deployments; all other archiving parameters follow the same restrictions as traditional deployments. For general archiving configuration, see [Archiving](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/archiving.md).
+Configuration of the `archive_command` parameter differs from traditional primary-standby deployments; all other archiving parameters follow the same restrictions as traditional deployments. For general archiving configuration, see [Archiving](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_reference/archiving.md).
 
-For PITR recovery procedures, refer to the [gs_probackup](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_probackup.md) usage guide.
+For PITR recovery procedures, refer to the [gs_probackup](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_probackup.md) usage guide.

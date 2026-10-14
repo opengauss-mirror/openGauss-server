@@ -24,7 +24,7 @@ Recommended environment:
 ### 2. Obtaining the Project Source Code
 
 ```bash
-git clone --branch dev https://gitcode.com/opengauss/oGMemory.git
+git clone --branch dev https://atomgit.com/opengauss/oGMemory.git
 cd oGMemory
 ```
 
@@ -159,8 +159,8 @@ To stop the OpenClaw or Claude Code process, stop them using the corresponding t
 
 For more variables of the OpenClaw local plugin, see:
 
-- [openclaw_context_engine_plugin/ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
-- [openclaw_context_engine_plugin/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/README.md)
+- [openclaw_context_engine_plugin/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
+- [openclaw_context_engine_plugin/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/README.md)
 
 ## 5. Method C: Docker-Based Integrated Deployment
 
@@ -200,7 +200,7 @@ docker logs openclaw_ogmem -f
 docker logs opengauss -f
 ```
 
-For details about complete deployment variables, restrictions on ARM64 images, multi-tenant deployment, and troubleshooting, see [deploy/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/deploy/README.md).
+For details about complete deployment variables, restrictions on ARM64 images, multi-tenant deployment, and troubleshooting, see [deploy/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/deploy/README.md).
 
 ## 6. Verifying the Service
 

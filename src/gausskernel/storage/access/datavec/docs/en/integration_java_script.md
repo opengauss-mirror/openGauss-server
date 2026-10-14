@@ -4,7 +4,7 @@ This document describes how to use JavaScript to connect to the openGauss vector
 
 ## Environment Preparation
 
- - Download the source code [openGauss-connector-nodejs](https://gitcode.com/opengauss/openGauss-connector-nodejs)
+ - Download the source code [openGauss-connector-nodejs](https://atomgit.com/opengauss/openGauss-connector-nodejs)
 
 ```bash
 npm install & npm run build

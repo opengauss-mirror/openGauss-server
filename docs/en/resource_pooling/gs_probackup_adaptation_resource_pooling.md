@@ -64,7 +64,7 @@ Building upon these backup foundations, openGauss implements three advanced func
 
 ## Usage Guide
 
-Refer to the [gs_probackup Tool](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_probackup.md) usage guide.
+Refer to the [gs_probackup Tool](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_probackup.md) usage guide.
 
 ## Application Scenarios
 

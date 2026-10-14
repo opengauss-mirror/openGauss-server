@@ -26,7 +26,7 @@ The aforementioned logs indicate that the database failed to allocate the config
 
 ## Root Cause
 
-Insufficient system memory prevents the database from reserving the required memory during startup, leading to cluster startup or restart failure. For specific memory requirements, refer to Table 1 (Hardware Environment Requirements) in [Preparing the Hardware and Software Installation Environment](https://gitcode.com/opengauss/docs/blob/master/docs/en/getting_started/preparing_for_installation.md).
+Insufficient system memory prevents the database from reserving the required memory during startup, leading to cluster startup or restart failure. For specific memory requirements, refer to Table 1 (Hardware Environment Requirements) in [Preparing the Hardware and Software Installation Environment](https://atomgit.com/opengauss/docs/blob/master/docs/en/getting_started/preparing_for_installation.md).
 
 ## Solution
 

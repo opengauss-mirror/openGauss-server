@@ -18,7 +18,7 @@ shark插件随内核一同编译，需要手动创建该插件，步骤如下：
     
 ### 编译安装
 
-1. [编译安装openGauss](https://gitcode.com/opengauss/openGauss-server#%E7%BC%96%E8%AF%91)。
+1. [编译安装openGauss](https://atomgit.com/opengauss/openGauss-server#%E7%BC%96%E8%AF%91)。
 
 2. 创建D库并执行创建。
 

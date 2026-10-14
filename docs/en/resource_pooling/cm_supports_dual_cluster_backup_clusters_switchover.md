@@ -40,7 +40,7 @@ Upon successful completion, the new primary standby node actively establishes a 
 
 ## Usage Guide<a name="section8445461564354"></a>
 
-The command syntax aligns with single-cluster switchover operations. For reference, see [cm_ctl Tool Reference](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/cm_ctl.md).
+The command syntax aligns with single-cluster switchover operations. For reference, see [cm_ctl Tool Reference](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/cm_ctl.md).
 
 ## Usage Scenarios<a name="section8445461564132"></a>
 

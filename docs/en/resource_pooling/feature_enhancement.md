@@ -43,7 +43,7 @@ This feature depends on the resource pool architecture.
 
 - The message processing capacity of the DSS thread pool can be controlled by adjusting the DSS server parameters `IO_THREADS` and `WORK_THREADS`.
 - The DSS black box log is enabled by default. To disable it, configure the DSS server parameter `_LOG_LEVEL=0`. This change takes effect after the DSS server restarts.
-For configuration parameter details, refer to [dssserver](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/dssserver.md).
+For configuration parameter details, refer to [dssserver](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/dssserver.md).
 
 ## Application Scenarios<a name="section8406643144716"></a>
 

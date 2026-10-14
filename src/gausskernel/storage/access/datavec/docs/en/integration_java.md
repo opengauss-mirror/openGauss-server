@@ -26,7 +26,7 @@ This document describes how to use the Java language to access the openGauss vec
     1) You can download the openGauss-connector-jdbc source code from the open source community
 
     ```bash
-    git clone https://gitcode.com/opengauss/openGauss-connector-jdbc.git
+    git clone https://atomgit.com/opengauss/openGauss-connector-jdbc.git
     ```
 
     Switch to the code directory and run `sh build.sh`. After successful compilation, two jar packages will be generated, namely opengauss-jdbc-${version}.jar and postgresql.jar (in the output directory)
@@ -250,5 +250,5 @@ public static void main(String[] args) {
     }
 ```
 
-[More operation examples](https://gitcode.com/opengauss/openGauss-connector-jdbc)
+[More operation examples](https://atomgit.com/opengauss/openGauss-connector-jdbc)
 [Common Java examples](https://docs.opengauss.org/en/docs/latest/getting_started/java.html)

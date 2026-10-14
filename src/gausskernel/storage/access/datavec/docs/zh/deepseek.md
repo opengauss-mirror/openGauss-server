@@ -100,7 +100,7 @@ $ uv pip install openai psycopg2-binary tqdm fastembed
 
 ## 将文件分块处理
 
-本文以 [Markdown](https://gitcode.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md) 文件作为源文件进行操作演示。
+本文以 [Markdown](https://atomgit.com/opengauss/openGauss-server/blob/master/src/gausskernel/storage/access/datavec/docs/zh/datavec_overview.md) 文件作为源文件进行操作演示。
 
 此处以 “#” 为分隔符进行简单的分块处理。
 
@@ -138,7 +138,7 @@ def chunk_source(urls: List[str]) -> List[str]:
 
 ```python
 urls = [
-    "https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
+    "https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
 ]
 
 chunk_texts = chunk_source(urls)
@@ -875,7 +875,7 @@ def rag(cursor, table_name: str, question: str, top_k: int = 5) -> str:
 
 if __name__ == "__main__":
     urls = [
-        "https://raw.gitcode.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
+        "https://raw.atomgit.com/opengauss/docs/raw/master/docs/zh/datavec/datavec_overview.md"
     ]
     table_name = TABLE_NAME
 

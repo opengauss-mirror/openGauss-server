@@ -42,4 +42,4 @@ gs_collector leverages built-in openGauss tools and OS utilities to collect vari
 
 ## Usage Guide<a name="section8406643144716"></a>
 
-For details, refer to [gs_collector](https://gitcode.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_collector.md).
+For details, refer to [gs_collector](https://atomgit.com/opengauss/docs/blob/master/docs/en/tool_and_commandreference/gs_collector.md).

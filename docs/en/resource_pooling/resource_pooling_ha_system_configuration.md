@@ -47,7 +47,7 @@ A larger REDO GAP implies more logs to replay during recovery, resulting in a lo
 *   Increase `pagewriter_thread_num`.
 *   Decrease `incremental_checkpoint_timeout`.
 
-For more details, see [Background Writer](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/background_writer.md) and [Checkpoints](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/checkpoints.md).
+For more details, see [Background Writer](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_reference/background_writer.md) and [Checkpoints](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_reference/checkpoints.md).
 
 ## Recovery Mode Selection
 

@@ -17,7 +17,7 @@
   注意这里安装的是pypi上的psycopg2的包，不包含多向量查询的特性。如果要使用多向量查询的特性，参考离线安装。
 
 - 离线安装<br>
-  1）下载适配好openGauss的psycopg2包，下载链接：[gitcode官网](https://gitcode.com/opengauss/openGauss-connector-python-psycopg2)。<br>
+  1）下载适配好openGauss的psycopg2包，下载链接：[atomgit官网](https://atomgit.com/opengauss/openGauss-connector-python-psycopg2)。<br>
   2）进入openGauss-connector-python-psycopg2根目录，执行
 
   ```bash

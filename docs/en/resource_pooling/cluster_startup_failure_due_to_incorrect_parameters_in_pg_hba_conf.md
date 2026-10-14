@@ -67,7 +67,7 @@ The startup process fails with a 10-minute timeout. Executing `cm_ctl query -Cvi
 
 ## Root Cause
 
-Incorrect parameter configurations within the system configuration file `pg_hba.conf` prevent the cluster from starting or restarting. For detailed parameter descriptions, refer to [Configuration File Reference](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_administration_guide/configuration_file_reference.md).
+Incorrect parameter configurations within the system configuration file `pg_hba.conf` prevent the cluster from starting or restarting. For detailed parameter descriptions, refer to [Configuration File Reference](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_administration_guide/configuration_file_reference.md).
 
 ## Solution
 

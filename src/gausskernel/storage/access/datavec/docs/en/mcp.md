@@ -29,7 +29,7 @@ By adapting MCP to the openGauss database, AI agents can securely and efficientl
 
 ### Obtain the openGauss_mcp_server Source Code
 
-Visit <https://gitcode.com/opengauss/mcp-opengauss> to obtain the openGauss_mcp_server source code. The current version is (0.1.0).
+Visit <https://atomgit.com/opengauss/mcp-opengauss> to obtain the openGauss_mcp_server source code. The current version is (0.1.0).
 
 ### Configure Parameters
 

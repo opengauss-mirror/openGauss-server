@@ -127,7 +127,7 @@ The resource pooling feature provides real-time consistent read capabilities on 
 #### Obtaining the Installation Package<a name="zh-cn_topic_0000002082250312_section186941117112519"></a>
 
 - Obtain the HCOM installation package from the openGauss community.
-- The `libhcom4db.so` library is included in the standard openGauss installation package. To compile it manually, obtain the source code from [Gitee](https://gitcode.com/opengauss/hcom4db).
+- The `libhcom4db.so` library is included in the standard openGauss installation package. To compile it manually, obtain the source code from [Gitee](https://atomgit.com/opengauss/hcom4db).
 
 #### Environment Requirements<a name="zh-cn_topic_0000002082250312_section14726153115253"></a>
 

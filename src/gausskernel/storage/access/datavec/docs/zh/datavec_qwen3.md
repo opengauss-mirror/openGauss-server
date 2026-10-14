@@ -155,7 +155,7 @@ LLM将首先从知识库内获取与问题相关上下文，在此基础上进�
 
 Qwen3模型：<https://ollama.com/library/qwen3>
 
-openGauss项目仓库：<https://gitcode.com/opengauss/openGauss-server>
+openGauss项目仓库：<https://atomgit.com/opengauss/openGauss-server>
 
 鲲鹏社区RAG解决方案：<https://www.hikunpeng.com/document/detail/zh/kunpengrag/bestpractice/kunpengrag_21_0001.html>
 

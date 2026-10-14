@@ -35,7 +35,7 @@ To use asynchronous vectorization mode, enable the parameter in `postgresql.conf
 enable_async_ogai = on
 ```
 
-For details about all OGAI Grand Unified Configuration (GUC) parameters, see [OGAI Parameters](https://gitcode.com/opengauss/docs/blob/master/docs/en/database_reference/ogai_parameters.md).
+For details about all OGAI Grand Unified Configuration (GUC) parameters, see [OGAI Parameters](https://atomgit.com/opengauss/docs/blob/master/docs/en/database_reference/ogai_parameters.md).
 
 ## System Tables
 

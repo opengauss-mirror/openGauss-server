@@ -143,7 +143,7 @@ Using basic openGauss corpus data as an example, build a basic intelligent datab
 Use some openGauss corpus data as private knowledge and download the file:
 
 ```python
-[test@localhost ~]$ wget https://gitcode.com/opengauss/website/raw/v2/app/zh/faq/index.md
+[test@localhost ~]$ wget https://atomgit.com/opengauss/website/raw/v2/app/zh/faq/index.md
 ```
 
 Preprocess the corpus:
