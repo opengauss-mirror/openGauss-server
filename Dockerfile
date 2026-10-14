@@ -6,7 +6,7 @@
 #    /opt/initdb.sh /opt/smoke-server.sh /opt/gsql.sh)
 #   不含代码与 binarylibs, 由容器运行时拉取(合规要求)
 #   脚本默认指向 master 分支，测试其他分支请修改对应配置
-# 前提: aarch64 + 磁盘>=30GB + docker 权限/seccomp + 本机可访问 atomgit.com 与 opengauss OBS
+# 前提: aarch64 + 磁盘>=30GB + docker 权限/seccomp + 本机可访问 gitcode.com 与 opengauss OBS
 # ============================================================
 #
 # # 注: 严格遵守以下 7 步指令操作。

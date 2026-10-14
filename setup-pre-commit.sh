@@ -17,7 +17,7 @@
 #   PIP_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple bash setup-pre-commit.sh
 #
 # 前提：
-#   - 能访问 atomgit.com；
+#   - 能访问 gitcode.com；
 #   - 本机有 python>=3.10（用于运行 pre-commit 工具本身）；
 #   - 本机已安装 clang-format, clang-tidy（LLVM 工具链），推荐版本 18 或 17。
 # =============================================================================
