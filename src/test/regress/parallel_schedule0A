@@ -552,3 +552,5 @@ test: pg_indexes_verbose wdr_enhance
 # test global sequence cache (keep separate: both use tab_record_parall_result)
 #test: session_sequence_cache
 #test: global_sequence_cache
+
+test: union_predpushforce_1

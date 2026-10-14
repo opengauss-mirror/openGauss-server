@@ -19,8 +19,12 @@
 #include <math.h>
 
 #include "access/sysattr.h"
+#include "access/skey.h"
+#include "catalog/heap.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_index.h"
 #include "catalog/pg_partition.h"
 #include "catalog/pg_partition_fn.h"
 #include "foreign/fdwapi.h"
@@ -108,6 +112,19 @@ static bool qual_is_pushdown_safe(PlannerInfo* info, Query* subquery, Index rti,
 static void subquery_push_qual(Query* subquery, RangeTblEntry* rte, Index rti, Node* qual, int levelsup = 0);
 static void recurse_push_qual(Node* setOp, Query* topquery, RangeTblEntry* rte, Index rti, Node* qual, int levelsup);
 static void remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel);
+static bool predpush_has_explicit_hint(PlannerInfo *root);
+static Relids choose_auto_predpush_candidates(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte,
+                                              bool* unsafeColumns);
+static bool predpush_source_rel_supported(RelOptInfo *rel);
+static bool predpush_has_lateral_dependency(PlannerInfo* root, Relids sources, Relids target);
+static bool predpush_clause_other_relid(RelOptInfo *rel, RestrictInfo *ri, int *other_relid);
+static Bitmapset* predpush_subquery_index_attrs(Query* query, Bitmapset* attrs);
+static Bitmapset* predpush_setop_index_attrs(Query* query, Node* setOp, Bitmapset* attrs);
+static Var* predpush_output_var(Query* query, int member);
+static Bitmapset* predpush_relation_index_attrs(Oid relid, Bitmapset* attrs);
+static RelOptInfo* predpush_append_parent(PlannerInfo* root, RelOptInfo* rel);
+static bool predpush_is_union_all_append(PlannerInfo* root, RelOptInfo* rel);
+static Relids predpush_append_index_candidates(PlannerInfo* root, RelOptInfo* rel);
 
 static void try_add_partiterator(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void add_upperop_for_vecscan_expr(PlannerInfo* root, RelOptInfo* rel, List* quals);
@@ -1790,6 +1807,9 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
         set_dummy_rel_pathlist(rel);
     }
 
+    bms_free_ext(rel->predpush_candidates);
+    rel->predpush_candidates_valid = false;
+
     pfree_ext(parent_attrsizes);
 }
 
@@ -1847,18 +1867,38 @@ static bool judge_path_parameterizable(PlannerInfo* root, Path* path)
  * moved-down quals.  To make them match up, we can try to increase the
  * parameterization of lesser-parameterized paths.
  */
-static void build_append_rel_path(PlannerInfo* root, RelOptInfo* rel,
+static Path* build_append_rel_path(PlannerInfo* root, RelOptInfo* rel,
                                     List* all_child_outers, List* all_child_uppers,
-                                    List* live_childrels)
+                                    List* live_childrels, bool check_indexes,
+                                    Relids indexed_candidates)
 {
     ListCell *l = NULL;
     List *subpaths = NIL;
     bool subpaths_valid = true;
     Path* append_path = NULL;
+    Path* forced_path = NULL;
 
-    foreach (l, all_child_outers) {
+    List* candidate_outers = list_copy(all_child_outers);
+    if (check_indexes && !bms_is_empty(indexed_candidates)) {
+        bool found = false;
+        foreach (l, candidate_outers) {
+            if (bms_equal((Relids)lfirst(l), indexed_candidates)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            candidate_outers = lappend(candidate_outers, bms_copy(indexed_candidates));
+        }
+    }
+
+    foreach (l, candidate_outers) {
         Relids required_outer = (Relids)lfirst(l);
         ListCell* lcr = NULL;
+
+        if (check_indexes && !bms_is_subset(required_outer, indexed_candidates)) {
+            continue;
+        }
 
         /* Select the child paths for an Append with this parameterization */
         subpaths = NIL;
@@ -1899,10 +1939,17 @@ static void build_append_rel_path(PlannerInfo* root, RelOptInfo* rel,
         if (subpaths_valid) {
             append_path = (Path*)create_append_path(root, rel, subpaths, required_outer);
             if (append_path != NULL) {
-                add_path(root, rel, append_path);
+                if (check_indexes && !bms_is_empty(indexed_candidates) &&
+                    bms_equal(required_outer, indexed_candidates)) {
+                    forced_path = append_path;
+                } else {
+                    add_path(root, rel, append_path);
+                }
             }
         }
     }
+
+    list_free(candidate_outers);
 
     foreach (l, all_child_uppers) {
         Bitmapset* required_upper = (Bitmapset*) lfirst(l);
@@ -1965,7 +2012,7 @@ static void build_append_rel_path(PlannerInfo* root, RelOptInfo* rel,
         }
     }
 
-    return;
+    return forced_path;
 }
 
 /*
@@ -1974,6 +2021,8 @@ static void build_append_rel_path(PlannerInfo* root, RelOptInfo* rel,
  */
 static void set_append_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte)
 {
+    bool check_indexes = predpush_is_union_all_append(root, rel);
+    Relids indexed_candidates = check_indexes ? predpush_append_index_candidates(root, rel) : NULL;
     Index parentRTindex = rti;
     List* live_childrels = NIL;
     List* subpaths = NIL;
@@ -2173,7 +2222,27 @@ static void set_append_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rt
     }
 
     /* Build Append paths for each parameterization seen among the child rels. */
-    build_append_rel_path(root, rel, all_child_outers, all_child_uppers, live_childrels);
+    Path* forced_path = build_append_rel_path(root, rel, all_child_outers, all_child_uppers, live_childrels,
+                                               check_indexes, indexed_candidates);
+
+    if (forced_path != NULL) {
+        if (!predpush_has_lateral_dependency(root, indexed_candidates, rel->relids)) {
+            list_free(rel->pathlist);
+            rel->pathlist = list_make1(forced_path);
+            list_free(rel->ppilist);
+            rel->ppilist = forced_path->param_info != NULL ? list_make1(forced_path->param_info) : NIL;
+            rel->lateral_relids = bms_add_members(rel->lateral_relids, indexed_candidates);
+            int source = -1;
+            while ((source = bms_next_member(indexed_candidates, source)) >= 0) {
+                Relids source_relids = bms_make_singleton(source);
+                add_lateral_info(root, source_relids, rel->relids);
+                bms_free(source_relids);
+            }
+        } else {
+            add_path(root, rel, forced_path);
+        }
+    }
+    bms_free(indexed_candidates);
 
     /* Select cheapest paths */
     set_cheapest(rel);
@@ -2777,7 +2846,22 @@ static bool predpush_subquery(PlannerInfo* root, RelOptInfo* rel, Index rti,
     Relids candidates = predpush_candidates(root, rti);
 
     if (ENABLE_PRED_PUSH_FORCE(root) && candidates == NULL) {
-        return false;
+        if (!predpush_has_explicit_hint(root)) {
+            RelOptInfo* parent = predpush_append_parent(root, rel);
+            if (parent != NULL) {
+                if (!parent->predpush_candidates_valid) {
+                    parent->predpush_candidates = predpush_append_index_candidates(root, parent);
+                    parent->predpush_candidates_valid = true;
+                }
+                candidates = parent->predpush_candidates;
+            } else {
+                candidates = choose_auto_predpush_candidates(root, rel, rte, unsafeColumns);
+            }
+        }
+
+        if (candidates == NULL) {
+            return false;
+        }
     }
 
     candidate_restricts = extract_predpush_equivclause(root, candidates, rel, rti);
@@ -2883,6 +2967,317 @@ static bool predpush_subquery(PlannerInfo* root, RelOptInfo* rel, Index rti,
         }
     }
     return predpush;
+}
+
+static bool predpush_has_explicit_hint(PlannerInfo *root)
+{
+    HintState *hstate = root->parse->hintState;
+    if (hstate == NULL || hstate->predpush_hint == NULL) {
+        return false;
+    }
+
+    return true;
+}
+
+static Relids choose_auto_predpush_candidates(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte,
+                                              bool* unsafeColumns)
+{
+    if (rte->rtekind != RTE_SUBQUERY) {
+        return NULL;
+    }
+
+    Bitmapset** candidate_attrs = (Bitmapset**)palloc0(root->simple_rel_array_size * sizeof(Bitmapset*));
+    Bitmapset* combined_push_attrs = NULL;
+    Relids selected = NULL;
+
+    for (int i = 1; i < root->simple_rel_array_size; i++) {
+        RelOptInfo* other_rel = root->simple_rel_array[i];
+        if (!predpush_source_rel_supported(other_rel) || other_rel == rel ||
+            predpush_has_lateral_dependency(root, other_rel->relids, rel->relids)) {
+            continue;
+        }
+
+        Relids candidate = bms_make_singleton(i);
+        List* candidate_restricts = extract_predpush_equivclause(root, candidate, rel, rel->relid);
+        bms_free(candidate);
+        ListCell* lc = NULL;
+        foreach (lc, rel->joininfo) {
+            RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
+            int other_relid = 0;
+            if (!ri->can_join || !isEqualExpr((Node*)ri->clause) ||
+                !predpush_clause_other_relid(rel, ri, &other_relid) || other_relid != i) {
+                continue;
+            }
+            Relids current_and_outer = bms_add_member(bms_copy(rel->relids), other_relid);
+            bool movable = join_clause_is_movable_into(ri, rel->relids, current_and_outer);
+            bms_free(current_and_outer);
+            if (movable) {
+                candidate_restricts = lappend(candidate_restricts, ri);
+            }
+        }
+
+        foreach (lc, candidate_restricts) {
+            RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
+            if (can_push_qual_into_subquery(root, ri, rte, rel->relid, (Node*)ri->clause, unsafeColumns) &&
+                !check_func((Node*)ri->clause)) {
+                pull_varattnos((Node*)ri->clause, rel->relid, &candidate_attrs[i]);
+            }
+        }
+        list_free(candidate_restricts);
+        combined_push_attrs = bms_add_members(combined_push_attrs, candidate_attrs[i]);
+    }
+
+    Bitmapset* matched = predpush_subquery_index_attrs(rte->subquery, combined_push_attrs);
+    for (int i = 1; i < root->simple_rel_array_size; i++) {
+        if (bms_overlap(candidate_attrs[i], matched)) {
+            selected = bms_add_member(selected, i);
+        }
+        bms_free(candidate_attrs[i]);
+    }
+    pfree(candidate_attrs);
+    bms_free(combined_push_attrs);
+    bms_free(matched);
+    return selected;
+}
+
+static bool predpush_source_rel_supported(RelOptInfo *rel)
+{
+    return rel != NULL && rel->reloptkind == RELOPT_BASEREL && rel->rtekind == RTE_RELATION &&
+        bms_num_members(rel->relids) == 1;
+}
+
+static bool predpush_has_lateral_dependency(PlannerInfo* root, Relids sources, Relids target)
+{
+    Relids dependencies = bms_copy(sources);
+    int previous_size;
+    do {
+        previous_size = bms_num_members(dependencies);
+        ListCell* lc = NULL;
+        foreach (lc, root->lateral_info_list) {
+            LateralJoinInfo* info = (LateralJoinInfo*)lfirst(lc);
+            if (bms_overlap(dependencies, info->lateral_rhs)) {
+                dependencies = bms_add_members(dependencies, info->lateral_lhs);
+            }
+        }
+    } while (!bms_overlap(dependencies, target) && previous_size != bms_num_members(dependencies));
+    bool found = bms_overlap(dependencies, target);
+    bms_free(dependencies);
+    return found;
+}
+
+static bool predpush_clause_other_relid(RelOptInfo *rel, RestrictInfo *ri, int *other_relid)
+{
+    *other_relid = 0;
+
+    if (bms_equal(ri->left_relids, rel->relids)) {
+        if (bms_num_members(ri->right_relids) != 1) {
+            return false;
+        }
+        *other_relid = bms_singleton_member(ri->right_relids);
+        return true;
+    }
+
+    if (bms_equal(ri->right_relids, rel->relids)) {
+        if (bms_num_members(ri->left_relids) != 1) {
+            return false;
+        }
+        *other_relid = bms_singleton_member(ri->left_relids);
+        return true;
+    }
+
+    return false;
+}
+
+static Bitmapset* predpush_subquery_index_attrs(Query* query, Bitmapset* attrs)
+{
+    if (query == NULL || attrs == NULL) {
+        return NULL;
+    }
+
+    check_stack_depth();
+
+    if (query->setOperations != NULL) {
+        return predpush_setop_index_attrs(query, query->setOperations, attrs);
+    }
+
+    int nrtes = list_length(query->rtable);
+    Bitmapset** mapped = (Bitmapset**)palloc0((nrtes + 1) * sizeof(Bitmapset*));
+    Bitmapset** matched = (Bitmapset**)palloc0((nrtes + 1) * sizeof(Bitmapset*));
+    Bitmapset* result = NULL;
+    int member = -1;
+
+    while ((member = bms_next_member(attrs, member)) >= 0) {
+        Var* var = predpush_output_var(query, member);
+        if (var != NULL) {
+            mapped[var->varno] = bms_add_member(mapped[var->varno],
+                var->varattno - FirstLowInvalidHeapAttributeNumber);
+        }
+    }
+    for (int i = 1; i <= nrtes; i++) {
+        if (mapped[i] == NULL) {
+            continue;
+        }
+        RangeTblEntry* rte = rt_fetch(i, query->rtable);
+        if (rte->rtekind == RTE_SUBQUERY) {
+            matched[i] = predpush_subquery_index_attrs(rte->subquery, mapped[i]);
+        } else if (rte->rtekind == RTE_RELATION) {
+            matched[i] = predpush_relation_index_attrs(rte->relid, mapped[i]);
+        }
+    }
+
+    member = -1;
+    while ((member = bms_next_member(attrs, member)) >= 0) {
+        Var* var = predpush_output_var(query, member);
+        if (var != NULL && bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber,
+                                        matched[var->varno])) {
+            result = bms_add_member(result, member);
+        }
+    }
+    for (int i = 1; i <= nrtes; i++) {
+        bms_free(mapped[i]);
+        bms_free(matched[i]);
+    }
+    pfree(mapped);
+    pfree(matched);
+    return result;
+}
+
+static Bitmapset* predpush_setop_index_attrs(Query* query, Node* setOp, Bitmapset* attrs)
+{
+    if (setOp == NULL) {
+        return NULL;
+    }
+
+    check_stack_depth();
+
+    if (IsA(setOp, RangeTblRef)) {
+        RangeTblRef* rtr = (RangeTblRef*)setOp;
+        RangeTblEntry* rte = rt_fetch(rtr->rtindex, query->rtable);
+        return rte->rtekind == RTE_SUBQUERY ?
+            predpush_subquery_index_attrs(rte->subquery, attrs) : NULL;
+    }
+
+    if (IsA(setOp, SetOperationStmt)) {
+        SetOperationStmt* op = (SetOperationStmt*)setOp;
+        if (op->op != SETOP_UNION) {
+            return NULL;
+        }
+        Bitmapset* left = predpush_setop_index_attrs(query, op->larg, attrs);
+        Bitmapset* right = predpush_setop_index_attrs(query, op->rarg, attrs);
+        left = bms_add_members(left, right);
+        bms_free(right);
+        return left;
+    }
+
+    return NULL;
+}
+
+static Var* predpush_output_var(Query* query, int member)
+{
+    int resno = member + FirstLowInvalidHeapAttributeNumber;
+    if (resno <= 0) {
+        return NULL;
+    }
+    TargetEntry* tle = get_tle_by_resno(query->targetList, resno);
+    if (tle == NULL || tle->resjunk) {
+        return NULL;
+    }
+    Node* expr = (Node*)tle->expr;
+    while (expr != NULL && IsA(expr, RelabelType)) {
+        expr = (Node*)((RelabelType*)expr)->arg;
+    }
+    if (expr == NULL || !IsA(expr, Var)) {
+        return NULL;
+    }
+    Var* var = (Var*)expr;
+    return var->varlevelsup == 0 && var->varattno > 0 ? var : NULL;
+}
+
+static Bitmapset* predpush_relation_index_attrs(Oid relid, Bitmapset* attrs)
+{
+    Bitmapset* matched = NULL;
+    Relation relation = relation_open(relid, AccessShareLock);
+    List* indexoids = RelationGetIndexList(relation);
+    ListCell* ic = NULL;
+
+    foreach (ic, indexoids) {
+        Relation index = index_open(lfirst_oid(ic), AccessShareLock);
+        Form_pg_index index_form = index->rd_index;
+
+        if (IndexIsValid(index_form) &&
+            GetIndexVisibleStateByTuple(index->rd_indextuple) &&
+            GetIndexEnableStateByTuple(index->rd_indextuple) &&
+            OID_IS_BTREE(index->rd_rel->relam) && RelationGetIndexPredicate(index) == NIL) {
+            for (int k = 0; k < IndexRelationGetNumberOfKeyAttributes(index); k++) {
+                int key_attno = index_form->indkey.values[k];
+                if (key_attno <= 0) {
+                    break;
+                }
+                int member = key_attno - FirstLowInvalidHeapAttributeNumber;
+                if (bms_is_member(member, attrs)) {
+                    matched = bms_add_member(matched, member);
+                } else {
+                    break;
+                }
+            }
+        }
+        index_close(index, AccessShareLock);
+    }
+
+    list_free(indexoids);
+    relation_close(relation, AccessShareLock);
+    return matched;
+}
+
+static RelOptInfo* predpush_append_parent(PlannerInfo* root, RelOptInfo* rel)
+{
+    RelOptInfo* result = NULL;
+    while (rel->reloptkind == RELOPT_OTHER_MEMBER_REL) {
+        RelOptInfo* parent = NULL;
+        ListCell* lc = NULL;
+        foreach (lc, root->append_rel_list) {
+            AppendRelInfo* appinfo = (AppendRelInfo*)lfirst(lc);
+            if (appinfo->child_relid == rel->relid) {
+                parent = root->simple_rel_array[appinfo->parent_relid];
+                break;
+            }
+        }
+        if (parent == NULL) {
+            break;
+        }
+        if (predpush_is_union_all_append(root, parent)) {
+            result = parent;
+        }
+        rel = parent;
+    }
+    return result;
+}
+
+static bool predpush_is_union_all_append(PlannerInfo* root, RelOptInfo* rel)
+{
+    if (root == NULL || !ENABLE_PRED_PUSH_FORCE(root) || predpush_has_explicit_hint(root) || rel == NULL ||
+        rel->relid <= 0 || rel->relid >= root->simple_rel_array_size) {
+        return false;
+    }
+
+    RangeTblEntry* rte = root->simple_rte_array[rel->relid];
+    return rte != NULL && rte->inh && rte->rtekind == RTE_SUBQUERY &&
+        rte->subquery != NULL && rte->subquery->setOperations != NULL &&
+        bms_is_empty(rel->lateral_relids);
+}
+
+static Relids predpush_append_index_candidates(PlannerInfo* root, RelOptInfo* rel)
+{
+    RangeTblEntry* rte = root->simple_rte_array[rel->relid];
+    Query* subquery = rte->subquery;
+    bool* unsafeColumns = (bool*)palloc0((list_length(subquery->targetList) + 1) * sizeof(bool));
+    Relids candidates = NULL;
+
+    if (subquery_is_pushdown_safe(subquery, subquery, unsafeColumns)) {
+        candidates = choose_auto_predpush_candidates(root, rel, rte, unsafeColumns);
+    }
+    pfree(unsafeColumns);
+    return candidates;
 }
 
 static bool judge_predpush_subquery(PlannerInfo* root, bool safe_pushdown, RelOptInfo* rel,

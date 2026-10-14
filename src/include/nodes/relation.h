@@ -894,6 +894,9 @@ typedef struct RelOptInfo {
 
     List* partial_pathlist;   /* partial Paths */
     int cursorDop;
+
+    bool predpush_candidates_valid;
+    Relids predpush_candidates;
 } RelOptInfo;
 
 /*
