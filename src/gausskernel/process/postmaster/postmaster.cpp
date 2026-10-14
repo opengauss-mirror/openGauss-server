@@ -8145,6 +8145,15 @@ static void reaper(SIGNAL_ARGS)
 
             if (EXIT_STATUS_0(exitstatus)) {
                 ereport(LOG, (errmsg("WALproposer exited gracefully")));
+            } else if (EXIT_STATUS_1(exitstatus)) {
+                /*
+                 * WALproposer uses FATAL to restart itself when adopting a new
+                 * Safekeeper membership configuration.  As with a regular
+                 * backend FATAL, exit status 1 is expected and must not bring
+                 * down the postmaster.  The main loop starts a new WALproposer
+                 * after WALproposerPID has been cleared above.
+                 */
+                ereport(LOG, (errmsg("WALproposer exited with status 1; restarting")));
             } else {
                 HandleChildCrash(pid, exitstatus, _("WALproposer process"));
             }
