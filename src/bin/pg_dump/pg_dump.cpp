@@ -312,6 +312,8 @@ const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
 const uint32 SUBSCRIPTION_VERSION = 92580;
 const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
+/* Streaming subscriptions were added in this catalog/version. */
+const uint32 SUBSCRIPTION_STREAMING_VERSION_NUM = 93165;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 const uint32 EVENT_VERSION = 92844;
 const uint32 EVENT_TRIGGER_VERSION_NUM = 92845;
@@ -5442,6 +5444,7 @@ void getSubscriptions(Archive *fout)
     int i_subpublications;
     int i_subbinary;
     int i_submatchddlowner;
+    int iSubstreaming;
     int i;
     int ntups;
 
@@ -5475,6 +5478,12 @@ void getSubscriptions(Archive *fout)
         appendPQExpBuffer(query, ", true AS submatchddlowner\n");
     }
 
+    if (GetVersionNum(fout) >= SUBSCRIPTION_STREAMING_VERSION_NUM) {
+        appendPQExpBuffer(query, ", s.substreaming\n");
+    } else {
+        appendPQExpBuffer(query, ", false AS substreaming\n");
+    }
+
     appendPQExpBuffer(query, "FROM pg_catalog.pg_subscription s "
         "WHERE s.subdbid = (SELECT oid FROM pg_catalog.pg_database"
         "                   WHERE datname = current_database())");
@@ -5498,6 +5507,7 @@ void getSubscriptions(Archive *fout)
     i_subpublications = PQfnumber(res, "subpublications");
     i_subbinary = PQfnumber(res, "subbinary");
     i_submatchddlowner = PQfnumber(res, "submatchddlowner");
+    iSubstreaming = PQfnumber(res, "substreaming");
 
     subinfo = (SubscriptionInfo *)pg_malloc(ntups * sizeof(SubscriptionInfo));
 
@@ -5518,6 +5528,7 @@ void getSubscriptions(Archive *fout)
         subinfo[i].subpublications = gs_strdup(PQgetvalue(res, i, i_subpublications));
         subinfo[i].subbinary = gs_strdup(PQgetvalue(res, i, i_subbinary));
         subinfo[i].submatchddlowner = gs_strdup(PQgetvalue(res, i, i_submatchddlowner));
+        subinfo[i].substreaming = gs_strdup(PQgetvalue(res, i, iSubstreaming));
 
         if (strlen(subinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of subscription \"%s\" appears to be invalid\n", subinfo[i].dobj.name);
@@ -5590,6 +5601,10 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
 
     if (strcmp(subinfo->submatchddlowner, "f") == 0) {
         appendPQExpBuffer(query, ", matchddlowner = false");
+    }
+
+    if (strcmp(subinfo->substreaming, "t") == 0) {
+        appendPQExpBuffer(query, ", streaming = true");
     }
 
     if (strcmp(subinfo->subsynccommit, "off") != 0) {

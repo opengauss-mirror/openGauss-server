@@ -4,6 +4,7 @@ pub_switchover
 types
 constraints
 binary
+streaming
 diff_schema
 generated
 rewrite

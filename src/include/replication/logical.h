@@ -160,6 +160,7 @@ typedef struct {
     int max_reorderbuffer_in_memory;
     List *tableWhiteList;
     bool include_originid;
+    bool enable_streaming;
 } PluginTestDecodingData;
 
 typedef struct ParallelLogicalDecodingContext {
