@@ -279,7 +279,8 @@ pgFileGetCRC(const char *file_path, bool use_crc32c, bool missing_ok)
     INIT_FILE_CRC32(use_crc32c, crc);
 
     /* open file in binary read mode, decrypting when it belongs to a backup */
-    fp = EncFopen(file_path, PG_BINARY_R);
+    fp = is_dss_file(file_path) ? fopen(file_path, PG_BINARY_R) :
+                                  EncFopen(file_path, PG_BINARY_R);
     if (fp == NULL)
     {
         if (is_file_delete(errno))

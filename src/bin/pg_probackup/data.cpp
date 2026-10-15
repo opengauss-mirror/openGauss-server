@@ -2557,7 +2557,7 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     else
     {
         /* open source file for read */
-        in = EncFopen(from_fullpath, PG_BINARY_R);
+        in = fopen(from_fullpath, PG_BINARY_R);
         if (in == NULL)
         {
             /* maybe deleted, it's not error in case of backup */
@@ -2764,7 +2764,7 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
     char    curr_page[BLCKSZ];
     bool    is_valid = true;
 
-    in = EncFopen(from_fullpath, PG_BINARY_R);
+    in = fopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
     {
         /*
@@ -3291,7 +3291,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         /* force compress page if file is compressed file */
         calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
     }
-    in = EncFopen(from_fullpath, PG_BINARY_R);
+    in = fopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
     {
         /*
