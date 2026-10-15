@@ -1,0 +1,322 @@
+CREATE SCHEMA IF NOT EXISTS union_predpushforce_6;
+SET search_path=union_predpushforce_6;
+DROP TABLE IF EXISTS pp_a,pp_b,pp_f,pp_gap,pp_y,pp_noidx,pp_incl,pp_reorder;
+NOTICE:  table "pp_a" does not exist, skipping
+NOTICE:  table "pp_b" does not exist, skipping
+NOTICE:  table "pp_f" does not exist, skipping
+NOTICE:  table "pp_gap" does not exist, skipping
+NOTICE:  table "pp_y" does not exist, skipping
+NOTICE:  table "pp_noidx" does not exist, skipping
+NOTICE:  table "pp_incl" does not exist, skipping
+NOTICE:  table "pp_reorder" does not exist, skipping
+CREATE TABLE pp_a(id int, k int);
+CREATE TABLE pp_b(id int, k int);
+INSERT INTO pp_a VALUES(1,2),(2,3);
+INSERT INTO pp_b VALUES(1,4),(2,5);
+CREATE TABLE pp_f(col1 int,col2 int,col3 int,amount int);
+INSERT INTO pp_f SELECT 1+g%100,1+(g/100)%10,1+(g/1000)%5,g%97 FROM generate_series(1,5000) g;
+CREATE INDEX pp_f_idx ON pp_f(col1,col2);
+CREATE TABLE pp_gap AS SELECT * FROM pp_f;
+CREATE INDEX pp_gap_idx ON pp_gap(col1,col2,col3);
+CREATE TABLE pp_y AS SELECT * FROM pp_f;
+CREATE INDEX pp_y_idx ON pp_y(col2);
+CREATE TABLE pp_noidx AS SELECT * FROM pp_f;
+CREATE TABLE pp_incl (LIKE pp_f) WITH (storage_type=ustore);
+INSERT INTO pp_incl SELECT * FROM pp_f;
+CREATE INDEX pp_incl_idx ON pp_incl USING ubtree(col1) INCLUDE(col3);
+CREATE TABLE pp_reorder(col2 int,col1 int,col3 int,amount int);
+INSERT INTO pp_reorder SELECT col2,col1,col3,amount FROM pp_f;
+CREATE INDEX pp_reorder_idx ON pp_reorder(col1,col2);
+ANALYZE pp_reorder;
+ANALYZE pp_a; ANALYZE pp_b; ANALYZE pp_f; ANALYZE pp_gap;
+ANALYZE pp_y; ANALYZE pp_noidx; ANALYZE pp_incl;
+SELECT 'col2_then_col1';
+    ?column?    
+----------------
+ col2_then_col1
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f GROUP BY col1,col2,col3) v ON v.col2=a.k AND v.col1=b.k ORDER BY a.id,b.id,v.total;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Bitmap Heap Scan on pp_f
+                     Recheck Cond: ((col1 = b.k) AND (col2 = a.k))
+                     ->  Bitmap Index Scan on pp_f_idx
+                           Index Cond: ((col1 = b.k) AND (col2 = a.k))
+(13 rows)
+
+SELECT 'col1_then_col2';
+    ?column?    
+----------------
+ col1_then_col2
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_b b CROSS JOIN pp_a a LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f GROUP BY col1,col2,col3) v ON v.col2=a.k AND v.col1=b.k ORDER BY a.id,b.id,v.total;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_b b
+               ->  Materialize
+                     ->  Seq Scan on pp_a a
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Bitmap Heap Scan on pp_f
+                     Recheck Cond: ((col1 = b.k) AND (col2 = a.k))
+                     ->  Bitmap Index Scan on pp_f_idx
+                           Index Cond: ((col1 = b.k) AND (col2 = a.k))
+(13 rows)
+
+SELECT 'only_col1_keep_a';
+     ?column?     
+------------------
+ only_col1_keep_a
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         Join Filter: (pp_f.col3 = b.k)
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Seq Scan on pp_f
+                     Filter: (col1 = a.k)
+(12 rows)
+
+SELECT 'no_prefix_keep_none';
+      ?column?       
+---------------------
+ no_prefix_keep_none
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f GROUP BY col1,col2,col3) v ON v.col2=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Hash Right Join
+         Hash Cond: ((pp_f.col2 = a.k) AND (pp_f.col3 = b.k))
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Seq Scan on pp_f
+         ->  Hash
+               ->  Nested Loop
+                     ->  Seq Scan on pp_a a
+                     ->  Materialize
+                           ->  Seq Scan on pp_b b
+(12 rows)
+
+SELECT 'prefix_gap_keep_a';
+     ?column?      
+-------------------
+ prefix_gap_keep_a
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_gap GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_gap.amount))
+   ->  Nested Loop Left Join
+         Join Filter: (pp_gap.col3 = b.k)
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_gap.col1, pp_gap.col2, pp_gap.col3
+               ->  Seq Scan on pp_gap
+                     Filter: (col1 = a.k)
+(12 rows)
+
+SELECT 'local_constant_does_not_fill_prefix';
+              ?column?               
+-------------------------------------
+ local_constant_does_not_fill_prefix
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f WHERE col1=42 GROUP BY col1,col2,col3) v ON v.col2=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, v.total
+   ->  Hash Left Join
+         Hash Cond: ((a.k = v.col2) AND (b.k = v.col3))
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  Hash
+               ->  Subquery Scan on v
+                     ->  HashAggregate
+                           Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+                           ->  Bitmap Heap Scan on pp_f
+                                 Recheck Cond: (col1 = 42)
+                                 ->  Bitmap Index Scan on pp_f_idx
+                                       Index Cond: (col1 = 42)
+(16 rows)
+
+SELECT 'KNOWN_LIMIT_union_swapped_outputs';
+             ?column?              
+-----------------------------------
+ KNOWN_LIMIT_union_swapped_outputs
+(1 row)
+
+EXPLAIN SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col2 col1,col1 col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_f) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+ERROR:  could not devise a query plan for the given query
+SELECT 'union_physical_column_mapping';
+           ?column?            
+-------------------------------
+ union_physical_column_mapping
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col1,col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_reorder) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Append
+                     ->  Bitmap Heap Scan on pp_f
+                           Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                           ->  Bitmap Index Scan on pp_f_idx
+                                 Index Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Bitmap Heap Scan on pp_reorder
+                           Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                           ->  Bitmap Index Scan on pp_reorder_idx
+                                 Index Cond: ((col1 = a.k) AND (col2 = b.k))
+(18 rows)
+
+SELECT 'union_complementary_prefixes';
+           ?column?           
+------------------------------
+ union_complementary_prefixes
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT * FROM pp_f UNION ALL SELECT * FROM pp_y) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Append
+                     ->  Bitmap Heap Scan on pp_f
+                           Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                           ->  Bitmap Index Scan on pp_f_idx
+                                 Index Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Seq Scan on pp_y
+                           Filter: ((col1 = a.k) AND (col2 = b.k))
+(16 rows)
+
+SELECT 'union_unindexed_branch';
+        ?column?        
+------------------------
+ union_unindexed_branch
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT * FROM pp_f UNION ALL SELECT * FROM pp_noidx) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Append
+                     ->  Bitmap Heap Scan on pp_f
+                           Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                           ->  Bitmap Index Scan on pp_f_idx
+                                 Index Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Seq Scan on pp_noidx
+                           Filter: ((col1 = a.k) AND (col2 = b.k))
+(16 rows)
+
+SELECT 'include_column_not_key';
+        ?column?        
+------------------------
+ include_column_not_key
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_incl GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_incl.amount))
+   ->  Nested Loop Left Join
+         Join Filter: (pp_incl.col3 = b.k)
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_incl.col1, pp_incl.col2, pp_incl.col3
+               ->  Seq Scan on pp_incl
+                     Filter: (col1 = a.k)
+(12 rows)
+
+SELECT 'explicit_hint_unchanged';
+        ?column?         
+-------------------------
+ explicit_hint_unchanged
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) predpush(a b) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM pp_f GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col3=b.k ORDER BY a.id,b.id,v.total;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: pp_f.col1, pp_f.col2, pp_f.col3
+               ->  Seq Scan on pp_f
+                     Filter: ((col1 = a.k) AND (col3 = b.k))
+(11 rows)
+
+DROP SCHEMA union_predpushforce_6 CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table pp_a
+drop cascades to table pp_b
+drop cascades to table pp_f
+drop cascades to table pp_gap
+drop cascades to table pp_y
+drop cascades to table pp_noidx
+drop cascades to table pp_incl
+drop cascades to table pp_reorder

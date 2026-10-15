@@ -152,6 +152,208 @@ AND tx_flag IN (1, 2, 5)
 )
 );
 
+drop index idx_addr_segm_id_state1;
+drop index idx_addr_segm_id_state2;
+
+-- should not push down, table not specified, but no index
+set rewrite_rule = 'predpushforce';
+EXPLAIN (COSTS OFF)
+SELECT *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND (
+stateflag = 0
+AND int_id IN (
+SELECT int_id
+FROM tx_record_registry r
+WHERE r.tx_id = '1089155245382361088'
+AND tx_flag IN (1, 2, 5)
+)
+);
+
+-- Push into both branches when only A has a matching prefix index.
+CREATE INDEX idx_addr_segm_id_state1 ON addr_segm_a(int_id, stateflag);
+set rewrite_rule = 'predpushforce';
+EXPLAIN (COSTS OFF)
+SELECT *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND (
+stateflag = 0
+AND int_id IN (
+SELECT int_id
+FROM tx_record_registry r
+WHERE r.tx_id = '1089155245382361088'
+AND tx_flag IN (1, 2, 5)
+)
+);
+
+
+-- Push into both branches when only B has a matching prefix index.
+drop index idx_addr_segm_id_state1;
+CREATE INDEX idx_addr_segm_id_state2 ON addr_segm_b(int_id, stateflag);
+set rewrite_rule = 'predpushforce';
+EXPLAIN (COSTS OFF)
+SELECT *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND (
+stateflag = 0
+AND int_id IN (
+SELECT int_id
+FROM tx_record_registry r
+WHERE r.tx_id = '1089155245382361088'
+AND tx_flag IN (1, 2, 5)
+)
+);
+
+-- Push into both branches when both have a matching prefix index.
+CREATE INDEX idx_addr_segm_id_state1 ON addr_segm_a(int_id, stateflag);
+set rewrite_rule = 'predpushforce';
+EXPLAIN (COSTS OFF)
+SELECT *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND (
+stateflag = 0
+AND int_id IN (
+SELECT int_id
+FROM tx_record_registry r
+WHERE r.tx_id = '1089155245382361088'
+AND tx_flag IN (1, 2, 5)
+)
+);
+
+DROP TABLE IF EXISTS tx_record_registry2;
+CREATE TABLE tx_record_registry2 (
+    int_id BIGINT,
+    tx_id VARCHAR(50),
+    tx_flag INT
+);
+CREATE INDEX idx_tx_registry2_tx_id ON tx_record_registry2(tx_id, tx_flag);
+
+INSERT INTO tx_record_registry2 VALUES
+(1089160340628635648, '2009155245382361099', 3),
+(1089160470784761856, '2009155245382361099', 4),
+(1111111111111111111, '2009155245382361099', 3),
+(2999999999999999999, 'other_tx_id2', 3);
+
+ANALYZE tx_record_registry2;
+
+EXPLAIN (COSTS OFF)
+SELECT /*+set(rewrite_rule predpushforce) predpush(r1 r2)*/ *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND stateflag = 0
+AND (
+    int_id IN (
+        SELECT int_id
+        FROM tx_record_registry r1
+        WHERE r1.tx_id = '1089155245382361088'
+        AND r1.tx_flag IN (1, 2, 5)
+    )
+    AND
+    int_id IN (
+        SELECT int_id
+        FROM tx_record_registry2 r2
+        WHERE r2.tx_id = '2009155245382361099'
+        AND r2.tx_flag IN (3, 4)
+    )
+);
+
+EXPLAIN (COSTS OFF)
+SELECT /*+set(rewrite_rule predpushforce)*/ *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND stateflag = 0
+AND (
+    int_id IN (
+        SELECT int_id
+        FROM tx_record_registry r1
+        WHERE r1.tx_id = '1089155245382361088'
+        AND r1.tx_flag IN (1, 2, 5)
+    )
+    AND
+    int_id IN (
+        SELECT int_id
+        FROM tx_record_registry2 r2
+        WHERE r2.tx_id = '2009155245382361099'
+        AND r2.tx_flag IN (3, 4)
+    )
+);
+
+set rewrite_rule = 'predpushforce';
+EXPLAIN (COSTS OFF)
+SELECT *
+FROM V_ADDR_SEGM_UNIQUE_NEW T
+WHERE 1 = 1
+AND (
+stateflag = 0
+AND int_id IN (
+SELECT int_id
+FROM tx_record_registry r1
+WHERE r1.tx_id = '1089155245382361088'
+AND r1.tx_flag IN (1, 2, 5)
+)
+AND
+int_id IN (
+SELECT int_id
+FROM tx_record_registry2 r2
+WHERE r2.tx_id = '2009155245382361099'
+AND r2.tx_flag IN (3, 4)
+)
+);
+
+CREATE TABLE tx_record_registry_multi (
+    int_id BIGINT,
+    tx_id VARCHAR(50),
+    tx_flag INT
+);
+
+CREATE INDEX idx_tx_registry_multi_tx
+ON tx_record_registry_multi(tx_id, tx_flag);
+
+INSERT INTO tx_record_registry_multi VALUES
+(1089160340628635648, '2009155245382361099', 3),
+(1089160470784761856, '2009155245382361099', 4),
+(1111111111111111111, '2009155245382361099', 3),
+(2999999999999999999, 'other_tx_id2', 3);
+
+ANALYZE tx_record_registry;
+ANALYZE tx_record_registry_multi;
+ANALYZE addr_segm_a;
+ANALYZE addr_segm_b;
+
+SET rewrite_rule = 'none';
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) predpush(r1 r2) */
+       t.*
+FROM V_ADDR_SEGM_UNIQUE_NEW t
+JOIN tx_record_registry r1
+  ON t.int_id = r1.int_id
+JOIN tx_record_registry_multi r2
+  ON t.int_id = r2.int_id
+WHERE t.stateflag = 0
+  AND r1.tx_id = '1089155245382361088'
+  AND r1.tx_flag IN (1, 2, 5)
+  AND r2.tx_id = '2009155245382361099'
+  AND r2.tx_flag IN (3, 4);
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce)*/
+       t.*
+FROM V_ADDR_SEGM_UNIQUE_NEW t
+JOIN tx_record_registry r1
+  ON t.int_id = r1.int_id
+JOIN tx_record_registry_multi r2
+  ON t.int_id = r2.int_id
+WHERE t.stateflag = 0
+  AND r1.tx_id = '1089155245382361088'
+  AND r1.tx_flag IN (1, 2, 5)
+  AND r2.tx_id = '2009155245382361099'
+  AND r2.tx_flag IN (3, 4);
+
 -- case 2
 CREATE TABLE test01 (
 object_id INT,

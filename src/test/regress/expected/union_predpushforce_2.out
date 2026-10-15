@@ -1,0 +1,152 @@
+DROP TABLE IF EXISTS settle_history,settle_current,channels,merchants;
+NOTICE:  table "settle_history" does not exist, skipping
+NOTICE:  table "settle_current" does not exist, skipping
+NOTICE:  table "channels" does not exist, skipping
+NOTICE:  table "merchants" does not exist, skipping
+CREATE TABLE merchants (
+    merchant_id   NUMBER(18)    NOT NULL,
+    merchant_name VARCHAR2(128) NOT NULL,
+    m_category    VARCHAR2(32)  NOT NULL,
+    CONSTRAINT pk_merchants PRIMARY KEY (merchant_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_merchants" for table "merchants"
+CREATE INDEX idx_m_cat ON merchants (m_category, merchant_id);
+CREATE TABLE channels (
+    channel_id    NUMBER(18)    NOT NULL,
+    channel_name  VARCHAR2(64)  NOT NULL,
+    channel_type  VARCHAR2(32)  NOT NULL,
+    CONSTRAINT pk_channels PRIMARY KEY (channel_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_channels" for table "channels"
+CREATE INDEX idx_c_type ON channels (channel_type, channel_id);
+CREATE TABLE settle_current (
+    settle_id     NUMBER(18)    NOT NULL,
+    merchant_id   NUMBER(18)    NOT NULL,
+    channel_id    NUMBER(18)    NOT NULL,
+    settle_amount NUMBER(12, 2) NOT NULL,
+    settle_date   DATE          NOT NULL,
+    CONSTRAINT pk_settle_cur PRIMARY KEY (settle_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_settle_cur" for table "settle_current"
+CREATE INDEX idx_set_cur_comp ON settle_current (merchant_id, channel_id, settle_amount);
+CREATE TABLE settle_history (
+    settle_id     NUMBER(18)    NOT NULL,
+    merchant_id   NUMBER(18)    NOT NULL,
+    channel_id    NUMBER(18)    NOT NULL,
+    settle_amount NUMBER(12, 2) NOT NULL,
+    settle_date   DATE          NOT NULL,
+    CONSTRAINT pk_settle_his PRIMARY KEY (settle_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_settle_his" for table "settle_history"
+CREATE INDEX idx_set_his_comp ON settle_history (merchant_id, channel_id, settle_amount);
+INSERT INTO merchants (merchant_id, merchant_name, m_category)
+SELECT
+    id,
+    '商户_' || lpad(id::text, 4, '0'),
+    CASE
+        WHEN id <= 50 THEN 'RETAIL'
+        WHEN id <= 200 THEN 'CATERING'
+        WHEN id <= 350 THEN 'ENTERTAINMENT'
+        ELSE 'OTHER'
+    END
+FROM generate_series(1, 500) AS id;
+INSERT INTO channels (channel_id, channel_name, channel_type)
+VALUES
+    (1, '微信数币立减专区', 'PROMOTION'),
+    (2, '银联跨行大促补贴', 'PROMOTION');
+INSERT INTO channels (channel_id, channel_name, channel_type)
+SELECT
+    id + 2,
+    '日常常规支付渠道_' || id::text,
+    'STANDARD'
+FROM generate_series(1, 8) AS id;
+INSERT INTO settle_current (settle_id, merchant_id, channel_id, settle_amount, settle_date)
+SELECT
+    id,
+    floor(random() * 500 + 1)::bigint,
+    floor(random() * 10 + 1)::bigint,
+    round((random() * 4990 + 10)::numeric, 2),
+    now() - random() * INTERVAL '90 days'
+FROM generate_series(1, 5000) AS id;
+INSERT INTO settle_history (settle_id, merchant_id, channel_id, settle_amount, settle_date)
+SELECT
+    500000 + id,
+    floor(random() * 500 + 1)::bigint,
+    floor(random() * 10 + 1)::bigint,
+    round((random() * 7995 + 5)::numeric, 2),
+    now() - ((random() * 1004 + 91) || ' days')::interval
+FROM generate_series(1, 10000) AS id;
+ANALYZE merchants;
+ANALYZE channels;
+ANALYZE settle_current;
+ANALYZE settle_history;
+select count(*) from merchants;
+ count 
+-------
+   500
+(1 row)
+
+select count(*) from channels;
+ count 
+-------
+    10
+(1 row)
+
+select count(*) from settle_current;
+ count 
+-------
+  5000
+(1 row)
+
+select count(*) from settle_history;
+ count 
+-------
+ 10000
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+set(rewrite_rule predpushforce)*/
+    m.merchant_id,
+    m.merchant_name,
+    c.channel_id,
+    c.channel_name,
+    COALESCE(vs.total_settle_amt, 0) AS total_settle_amt
+FROM merchants m
+JOIN channels c
+    ON m.m_category = 'RETAIL' AND c.channel_type = 'PROMOTION'
+LEFT JOIN (
+    SELECT
+        merchant_id,
+        channel_id,
+        SUM(settle_amount) AS total_settle_amt
+    FROM (
+        SELECT merchant_id, channel_id, settle_amount FROM settle_current
+        UNION ALL
+        SELECT merchant_id, channel_id, settle_amount FROM settle_history
+    ) t
+    GROUP BY merchant_id, channel_id
+) vs ON m.merchant_id = vs.merchant_id
+    AND c.channel_id  = vs.channel_id
+ORDER BY m.merchant_id, c.channel_id;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: m.merchant_id, c.channel_id
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on merchants m
+                     Filter: ((m_category)::text = 'RETAIL'::text)
+               ->  Materialize
+                     ->  Seq Scan on channels c
+                           Filter: ((channel_type)::text = 'PROMOTION'::text)
+         ->  GroupAggregate
+               Group By Key: settle_current.merchant_id, settle_current.channel_id
+               ->  Append
+                     ->  Index Only Scan using idx_set_cur_comp on settle_current
+                           Index Cond: ((merchant_id = m.merchant_id) AND (channel_id = c.channel_id))
+                     ->  Bitmap Heap Scan on settle_history
+                           Recheck Cond: ((m.merchant_id = merchant_id) AND (c.channel_id = channel_id))
+                           ->  Bitmap Index Scan on idx_set_his_comp
+                                 Index Cond: ((m.merchant_id = merchant_id) AND (c.channel_id = channel_id))
+(18 rows)
+
