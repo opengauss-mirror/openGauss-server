@@ -33,6 +33,24 @@ DROP TABLE IF EXISTS t_partition_local CASCADE;
 NOTICE:  table "t_partition_local" does not exist, skipping
 DROP TABLE IF EXISTS t_partition_gpi CASCADE;
 NOTICE:  table "t_partition_gpi" does not exist, skipping
+DROP TABLE IF EXISTS t_coll CASCADE;
+NOTICE:  table "t_coll" does not exist, skipping
+DROP TABLE IF EXISTS t_multiidx CASCADE;
+NOTICE:  table "t_multiidx" does not exist, skipping
+DROP TABLE IF EXISTS t_include CASCADE;
+NOTICE:  table "t_include" does not exist, skipping
+DROP TABLE IF EXISTS t_ps_idx CASCADE;
+NOTICE:  table "t_ps_idx" does not exist, skipping
+DROP TABLE IF EXISTS t_ps_nn CASCADE;
+NOTICE:  table "t_ps_nn" does not exist, skipping
+DROP TABLE IF EXISTS t_ps_con CASCADE;
+NOTICE:  table "t_ps_con" does not exist, skipping
+DROP TABLE IF EXISTS t_empty CASCADE;
+NOTICE:  table "t_empty" does not exist, skipping
+DROP TABLE IF EXISTS t_single CASCADE;
+NOTICE:  table "t_single" does not exist, skipping
+DROP TABLE IF EXISTS t_multi CASCADE;
+NOTICE:  table "t_multi" does not exist, skipping
 -- [正向 T1] 单列主键覆盖 → 应消除 DISTINCT
 CREATE TABLE t_pk(k int PRIMARY KEY, v text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_pk_pkey" for table "t_pk"
@@ -262,6 +280,261 @@ SELECT count(*) AS correct_count FROM (SELECT DISTINCT k, v FROM t_partition_gpi
             20
 (1 row)
 
+-- ==================================================================
+-- 补充回归一: 等值语义 (索引 opfamily/collation 必须与 DISTINCT 等值语义匹配)
+-- ==================================================================
+-- [负向 N9] 唯一索引 collation 与 DISTINCT 表达式 collation 不匹配 → 应保留 DISTINCT
+CREATE TABLE t_coll(k text NOT NULL);
+CREATE UNIQUE INDEX t_coll_en ON t_coll(k COLLATE "en_US.utf8");
+INSERT INTO t_coll SELECT 'k' || g FROM generate_series(1, 4) g;
+EXPLAIN (COSTS OFF) SELECT DISTINCT k FROM t_coll;
+        QUERY PLAN        
+--------------------------
+ HashAggregate
+   Group By Key: k
+   ->  Seq Scan on t_coll
+(3 rows)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k FROM t_coll) s;
+ correct_count 
+---------------
+             4
+(1 row)
+
+-- ==================================================================
+-- 补充回归二: 多索引遍历与 INCLUDE 列
+-- ==================================================================
+-- [正向 T5] 首个唯一索引可空不合格, 继续遍历命中后续合格唯一索引 → 应消除 DISTINCT
+CREATE TABLE t_multiidx(a int UNIQUE, k text NOT NULL UNIQUE);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_multiidx_a_key" for table "t_multiidx"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_multiidx_k_key" for table "t_multiidx"
+INSERT INTO t_multiidx VALUES (NULL, 'x'), (1, 'y'), (2, 'z');
+EXPLAIN (COSTS OFF) SELECT DISTINCT k FROM t_multiidx;
+       QUERY PLAN       
+------------------------
+ Seq Scan on t_multiidx
+(1 row)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k FROM t_multiidx) s;
+ correct_count 
+---------------
+             3
+(1 row)
+
+-- [正向 T6] ubtree 唯一索引键列覆盖 → 应消除 DISTINCT (INCLUDE 列不参与唯一性证明)
+CREATE TABLE t_include(k int NOT NULL, v text) WITH (STORAGE_TYPE = USTORE);
+CREATE UNIQUE INDEX t_include_u ON t_include USING ubtree(k) INCLUDE(v);
+INSERT INTO t_include SELECT g, 'v' || g FROM generate_series(1, 5) g;
+EXPLAIN (COSTS OFF) SELECT DISTINCT k, v FROM t_include;
+      QUERY PLAN       
+-----------------------
+ Seq Scan on t_include
+(1 row)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k, v FROM t_include) s;
+ correct_count 
+---------------
+             5
+(1 row)
+
+-- [负向 N10] DISTINCT 列只是 INCLUDE 列而非键列 → 应保留 DISTINCT
+EXPLAIN (COSTS OFF) SELECT DISTINCT v FROM t_include;
+         QUERY PLAN          
+-----------------------------
+ HashAggregate
+   Group By Key: v
+   ->  Seq Scan on t_include
+(3 rows)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT v FROM t_include) s;
+ correct_count 
+---------------
+             5
+(1 row)
+
+-- ==================================================================
+-- 补充回归三: 排序与访问路径
+-- ==================================================================
+-- [正向 T7] 消除 DISTINCT 后仍须满足 ORDER BY 排序要求
+EXPLAIN (COSTS OFF) SELECT DISTINCT k, v FROM t_pk ORDER BY k DESC;
+       QUERY PLAN       
+------------------------
+ Sort
+   Sort Key: k DESC
+   ->  Seq Scan on t_pk
+(3 rows)
+
+SELECT DISTINCT k, v FROM t_pk ORDER BY k DESC;
+ k | v  
+---+----
+ 5 | v5
+ 4 | v4
+ 3 | v3
+ 2 | v2
+ 1 | v1
+(5 rows)
+
+-- [负向路径 N11] 关闭 HashAgg 后负向场景退化为 Sort + Unique, 结果仍正确
+SET enable_hashagg = off;
+EXPLAIN (COSTS OFF) SELECT DISTINCT k FROM t_nokey;
+           QUERY PLAN            
+---------------------------------
+ Unique
+   ->  Sort
+         Sort Key: k
+         ->  Seq Scan on t_nokey
+(4 rows)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k FROM t_nokey) s;
+ correct_count 
+---------------
+             3
+(1 row)
+
+RESET enable_hashagg;
+-- ==================================================================
+-- 补充回归四: DDL 与预编译语句缓存 (DDL 后必须按新元数据重新规划)
+-- ==================================================================
+-- [正向 T8] DROP INDEX 后重新规划 → DISTINCT 恢复, 重复行正确去重
+CREATE TABLE t_ps_idx(k int NOT NULL, v text);
+CREATE UNIQUE INDEX t_ps_idx_u ON t_ps_idx(k);
+INSERT INTO t_ps_idx VALUES (1, 'a'), (2, 'b');
+PREPARE ps_idx AS SELECT DISTINCT k FROM t_ps_idx;
+EXPLAIN (COSTS OFF) EXECUTE ps_idx;
+      QUERY PLAN      
+----------------------
+ Seq Scan on t_ps_idx
+(1 row)
+
+DROP INDEX t_ps_idx_u;
+INSERT INTO t_ps_idx VALUES (1, 'dup');
+EXPLAIN (COSTS OFF) EXECUTE ps_idx;
+         QUERY PLAN         
+----------------------------
+ HashAggregate
+   Group By Key: k
+   ->  Seq Scan on t_ps_idx
+(3 rows)
+
+EXECUTE ps_idx;
+ k 
+---
+ 1
+ 2
+(2 rows)
+
+-- [负向 N12] 删除 NOT NULL 后唯一性证明不再成立 → 重新规划保留 DISTINCT
+CREATE TABLE t_ps_nn(k int NOT NULL, v text);
+CREATE UNIQUE INDEX t_ps_nn_u ON t_ps_nn(k);
+INSERT INTO t_ps_nn VALUES (1, 'a'), (2, 'b');
+PREPARE ps_nn AS SELECT DISTINCT k FROM t_ps_nn;
+EXPLAIN (COSTS OFF) EXECUTE ps_nn;
+     QUERY PLAN      
+---------------------
+ Seq Scan on t_ps_nn
+(1 row)
+
+ALTER TABLE t_ps_nn ALTER COLUMN k DROP NOT NULL;
+EXPLAIN (COSTS OFF) EXECUTE ps_nn;
+        QUERY PLAN         
+---------------------------
+ HashAggregate
+   Group By Key: k
+   ->  Seq Scan on t_ps_nn
+(3 rows)
+
+EXECUTE ps_nn;
+ k 
+---
+ 1
+ 2
+(2 rows)
+
+-- [负向 N13] 删除唯一约束后重新规划, 后续写入的重复行必须被 DISTINCT 正确去重
+CREATE TABLE t_ps_con(k int NOT NULL, v text, CONSTRAINT t_ps_con_u UNIQUE(k));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_ps_con_u" for table "t_ps_con"
+INSERT INTO t_ps_con VALUES (1, 'a'), (2, 'b');
+PREPARE ps_con AS SELECT DISTINCT k FROM t_ps_con;
+EXPLAIN (COSTS OFF) EXECUTE ps_con;
+      QUERY PLAN      
+----------------------
+ Seq Scan on t_ps_con
+(1 row)
+
+ALTER TABLE t_ps_con DROP CONSTRAINT t_ps_con_u;
+INSERT INTO t_ps_con VALUES (1, 'dup'), (1, 'dup2');
+EXPLAIN (COSTS OFF) EXECUTE ps_con;
+         QUERY PLAN         
+----------------------------
+ HashAggregate
+   Group By Key: k
+   ->  Seq Scan on t_ps_con
+(3 rows)
+
+EXECUTE ps_con;
+ k 
+---
+ 1
+ 2
+(2 rows)
+
+-- ==================================================================
+-- 补充回归五: 空表与单行表 (结果正确性只能来自元数据证明, 与行数无关)
+-- ==================================================================
+-- [正向 T9] 空表 + 主键: 按元数据消除 DISTINCT, 不依赖行数
+CREATE TABLE t_empty(k int PRIMARY KEY, v text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_empty_pkey" for table "t_empty"
+EXPLAIN (COSTS OFF) SELECT DISTINCT k, v FROM t_empty;
+     QUERY PLAN      
+---------------------
+ Seq Scan on t_empty
+(1 row)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k, v FROM t_empty) s;
+ correct_count 
+---------------
+             0
+(1 row)
+
+-- [负向 N14] 单行表无唯一键: 行数为 1 也不能消除 DISTINCT
+CREATE TABLE t_single(k int, v text);
+INSERT INTO t_single VALUES (1, 'only');
+EXPLAIN (COSTS OFF) SELECT DISTINCT k, v FROM t_single;
+         QUERY PLAN         
+----------------------------
+ HashAggregate
+   Group By Key: k, v
+   ->  Seq Scan on t_single
+(3 rows)
+
+SELECT count(*) AS correct_count FROM (SELECT DISTINCT k, v FROM t_single) s;
+ correct_count 
+---------------
+             1
+(1 row)
+
+-- ==================================================================
+-- 补充回归六: 多重集语义 (EXCEPT ALL 双向均无差异)
+-- ==================================================================
+CREATE TABLE t_multi(k int PRIMARY KEY, v text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_multi_pkey" for table "t_multi"
+INSERT INTO t_multi VALUES (1, 'a'), (2, 'a'), (3, 'b'), (4, 'c'), (5, 'c');
+SELECT count(*) AS diff_forward FROM (
+    SELECT k, v FROM t_multi EXCEPT ALL SELECT DISTINCT k, v FROM t_multi
+) s;
+ diff_forward 
+--------------
+            0
+(1 row)
+
+SELECT count(*) AS diff_backward FROM (
+    SELECT DISTINCT k, v FROM t_multi EXCEPT ALL SELECT k, v FROM t_multi
+) s;
+ diff_backward 
+---------------
+             0
+(1 row)
+
 -- [B库正向] B-format 主键覆盖 -> 应消除 DISTINCT
 CREATE DATABASE distinct_opt_b DBCOMPATIBILITY 'B';
 \c distinct_opt_b
@@ -331,3 +604,13 @@ DROP TABLE IF EXISTS t_expr CASCADE;
 DROP TABLE IF EXISTS t_nokey CASCADE;
 DROP TABLE IF EXISTS t_partition_local CASCADE;
 DROP TABLE IF EXISTS t_partition_gpi CASCADE;
+DROP TABLE IF EXISTS t_coll CASCADE;
+DROP TABLE IF EXISTS t_multiidx CASCADE;
+DROP TABLE IF EXISTS t_include CASCADE;
+DROP TABLE IF EXISTS t_ps_idx CASCADE;
+DROP TABLE IF EXISTS t_ps_nn CASCADE;
+DROP TABLE IF EXISTS t_ps_con CASCADE;
+DROP TABLE IF EXISTS t_empty CASCADE;
+DROP TABLE IF EXISTS t_single CASCADE;
+DROP TABLE IF EXISTS t_multi CASCADE;
+DEALLOCATE ALL;
