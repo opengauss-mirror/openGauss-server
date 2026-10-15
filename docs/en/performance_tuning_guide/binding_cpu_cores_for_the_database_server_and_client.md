@@ -10,9 +10,9 @@
     numa_distribute_mode = 'all'
     thread_pool_attr = '464,4,(cpubind:1-27,32-59,64-91,96-123)'
     xloginsert_locks = 16
-    wal_writer_cpu=0
+    walwriter_cpu_bind=0
     wal_file_init_num = 20
-    xlog_idle_flushes_before_sleep = 500000000
+    walwriter_sleep_threshold = 50000
     pagewriter_sleep = 10ms
     ```
 
