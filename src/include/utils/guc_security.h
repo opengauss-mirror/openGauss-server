@@ -13,6 +13,7 @@
 #ifndef GUC_SECURIT_H
 #define GUC_SECURIT_H
 
+extern bool ValidatePasswordLenConfig(bool isError = false);
 extern void InitSecurityConfigureNames();
 extern const int MAX_PASSWORD_LENGTH;
 

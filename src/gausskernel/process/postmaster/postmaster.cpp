@@ -225,6 +225,7 @@
 #include "threadpool/threadpool.h"
 #include "utils/guc.h"
 #include "utils/guc_storage.h"
+#include "utils/guc_security.h"
 #include "utils/guc_tables.h"
 #include "utils/mmpool.h"
 #include "utils/pg_locale.h"
@@ -3861,14 +3862,9 @@ static void CheckShareStorageConfigConflicts(void)
     }
 }
 
-static void CheckPasswordLenConfigConflics(void)
+static void CheckPasswordLenConfigConflicts(void)
 {
-    if (u_sess->attr.attr_security.Password_min_length > u_sess->attr.attr_security.Password_max_length) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                           errmsg("password_min_length (%d) should be no more than password_max_length (%d).",
-                                   u_sess->attr.attr_security.Password_min_length,
-                                   u_sess->attr.attr_security.Password_max_length)));
-    }
+    (void)ValidatePasswordLenConfig(true);
 }
 
 /*
@@ -3926,7 +3922,7 @@ static void CheckGUCConflicts(void)
     }
     CheckExtremeRtoGUCConflicts();
     CheckShareStorageConfigConflicts();
-    CheckPasswordLenConfigConflics();
+    CheckPasswordLenConfigConflicts();
 #if ((defined(USE_SSL)) && (defined(USE_TASSL)))
     CheckSSLConflict();
 #endif

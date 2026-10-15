@@ -157,10 +157,18 @@ const int MAX_PASSWORD_NOTICE_TIME = 999;
 const int MAX_PASSWORD_ASSIGNED_CHARACTER = 999;
 /* max length of password */
 const int MAX_PASSWORD_LENGTH = 999;
+/* minimum number of character categories required by the password policy */
+const int MIN_PASSWORD_CHARACTER_CATEGORIES = 3;
 
 static bool check_ssl(bool* newval, void** extra, GucSource source);
 /* Database Security: Support password complexity */
 static bool check_int_parameter(int* newval, void** extra, GucSource source);
+static bool check_password_min_length(int* newval, void** extra, GucSource source);
+static bool check_password_max_length(int* newval, void** extra, GucSource source);
+static bool check_password_min_uppercase(int* newval, void** extra, GucSource source);
+static bool check_password_min_lowercase(int* newval, void** extra, GucSource source);
+static bool check_password_min_digital(int* newval, void** extra, GucSource source);
+static bool check_password_min_special(int* newval, void** extra, GucSource source);
 static bool check_ssl_ciphers(char** newval, void** extra, GucSource source);
 
 static void InitSecurityConfigureNamesBool();
@@ -578,7 +586,7 @@ static void InitSecurityConfigureNamesInt()
             0,
             0,
             MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
+            check_password_min_uppercase,
             NULL,
             NULL},
 
@@ -593,7 +601,7 @@ static void InitSecurityConfigureNamesInt()
             0,
             0,
             MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
+            check_password_min_lowercase,
             NULL,
             NULL},
 
@@ -608,7 +616,7 @@ static void InitSecurityConfigureNamesInt()
             0,
             0,
             MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
+            check_password_min_digital,
             NULL,
             NULL},
 
@@ -623,7 +631,7 @@ static void InitSecurityConfigureNamesInt()
             0,
             0,
             MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
+            check_password_min_special,
             NULL,
             NULL},
 
@@ -638,7 +646,7 @@ static void InitSecurityConfigureNamesInt()
             8,
             6,
             MAX_PASSWORD_LENGTH,
-            check_int_parameter,
+            check_password_min_length,
             NULL,
             NULL},
 
@@ -653,7 +661,7 @@ static void InitSecurityConfigureNamesInt()
             32,
             6,
             MAX_PASSWORD_LENGTH,
-            check_int_parameter,
+            check_password_max_length,
             NULL,
             NULL},
 
@@ -1394,6 +1402,108 @@ static bool check_int_parameter(int* newval, void** extra, GucSource source)
     } else {
         return false;
     }
+}
+
+bool ValidatePasswordLenConfig(bool isError)
+{
+    int minLength = u_sess->attr.attr_security.Password_min_length;
+    int maxLength = u_sess->attr.attr_security.Password_max_length;
+    int minUpper = u_sess->attr.attr_security.Password_min_upper;
+    int minLower = u_sess->attr.attr_security.Password_min_lower;
+    int minDigital = u_sess->attr.attr_security.Password_min_digital;
+    int minSpecial = u_sess->attr.attr_security.Password_min_special;
+    if (minLength > maxLength) {
+        if (isError) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("password_min_length (%d) should be no more than password_max_length (%d).",
+                    minLength, maxLength)));
+        } else {
+            GUC_check_errmsg("password_min_length (%d) should be no more than password_max_length (%d).",
+                minLength, maxLength);
+        }
+        return false;
+    }
+
+    int required = minUpper + minLower + minDigital + minSpecial;
+    int requiredKinds = (minUpper > 0 ? 1 : 0) + (minLower > 0 ? 1 : 0) +
+        (minDigital > 0 ? 1 : 0) + (minSpecial > 0 ? 1 : 0);
+    required += Max(0, MIN_PASSWORD_CHARACTER_CATEGORIES - requiredKinds);
+    if (required > maxLength) {
+        if (isError) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("password character requirements need at least %d characters, "
+                    "exceeding password_max_length (%d).", required, maxLength),
+                errdetail("password_min_uppercase = %d, password_min_lowercase = %d, "
+                    "password_min_digital = %d, password_min_special = %d; "
+                    "password_policy = 1 also requires at least three character categories.",
+                    minUpper, minLower, minDigital, minSpecial),
+                errhint("Increase password_max_length or reduce the minimum character counts.")));
+        } else {
+            GUC_check_errmsg("password character requirements need at least %d characters, "
+                "exceeding password_max_length (%d).", required, maxLength);
+            GUC_check_errdetail("password_min_uppercase = %d, password_min_lowercase = %d, "
+                "password_min_digital = %d, password_min_special = %d; "
+                "password_policy = 1 also requires at least three character categories.",
+                minUpper, minLower, minDigital, minSpecial);
+            GUC_check_errhint("Increase password_max_length or reduce the minimum character counts.");
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool check_password_min_length(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_min_length;
+    u_sess->attr.attr_security.Password_min_length = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_min_length = oldValue;
+    return result;
+}
+
+static bool check_password_max_length(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_max_length;
+    u_sess->attr.attr_security.Password_max_length = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_max_length = oldValue;
+    return result;
+}
+
+static bool check_password_min_uppercase(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_min_upper;
+    u_sess->attr.attr_security.Password_min_upper = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_min_upper = oldValue;
+    return result;
+}
+
+static bool check_password_min_lowercase(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_min_lower;
+    u_sess->attr.attr_security.Password_min_lower = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_min_lower = oldValue;
+    return result;
+}
+
+static bool check_password_min_digital(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_min_digital;
+    u_sess->attr.attr_security.Password_min_digital = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_min_digital = oldValue;
+    return result;
+}
+
+static bool check_password_min_special(int* newval, void** extra, GucSource source)
+{
+    int oldValue = u_sess->attr.attr_security.Password_min_special;
+    u_sess->attr.attr_security.Password_min_special = *newval;
+    bool result = ValidatePasswordLenConfig();
+    u_sess->attr.attr_security.Password_min_special = oldValue;
+    return result;
 }
 
 static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
