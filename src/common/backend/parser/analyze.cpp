@@ -3495,41 +3495,23 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
     list_free_ext(aStarList);
     list_free_ext(targetList);
 
-    char* sbrPos = NULL;
-    if (DB_IS_CMPT(D_FORMAT) &&
-        (sbrPos = strstr(u_sess->attr.attr_sql.d_format_behavior_compat_string, "enable_sbr_identifier")) != NULL) {
-        char* start = u_sess->attr.attr_sql.d_format_behavior_compat_string;
-        int len = strlen(u_sess->attr.attr_sql.d_format_behavior_compat_string);
-        char* end = start + len;
-        int sbrLen = strlen("enable_sbr_identifier");
-        int newLen = (len - sbrLen - 1);
-        if (newLen <= 0) {
-            SetConfigOption("d_format_behavior_compat_options", "", PGC_USERSET, PGC_S_SESSION);
-        } else {
-            int prefixLen = (int)(sbrPos - start);
-            char* tail = sbrPos + sbrLen;
-            if (*tail == ',') {
-                tail++;
-            } else if (prefixLen > 0 && *(sbrPos - 1) == ',') {
-                prefixLen--;
-            }
-            int tailLen = (int)strlen(tail);
-            int allocLen = prefixLen + tailLen + 1;
-            char* target = (char*)palloc0(allocLen);
-            if (prefixLen > 0) {
-                errno_t rc = strncpy_s(target, allocLen, start, prefixLen);
-                securec_check(rc, "\0", "\0");
-            }
-            if (tailLen > 0) {
-                errno_t rc = strcat_s(target, allocLen, tail);
-                securec_check(rc, "\0", "\0");
-            }
-            SetConfigOption("d_format_behavior_compat_options", target, PGC_USERSET, PGC_S_SESSION);
-            pfree(target);
+    if (ENABLE_SBR_IDENTIFIER) {
+        /*
+         * The generated SQL can contain ARRAY[...] in D mode. Disable bracket
+         * identifiers only for this internal parse, without changing the GUC.
+         */
+        u_sess->utils_cxt.d_format_behavior_compat_flags &= ~D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER;
+        PG_TRY();
+        {
+            parsetree_list = pg_parse_query(union_all_sql.data);
         }
-
-        parsetree_list = pg_parse_query(union_all_sql.data);
-        SetConfigOption("d_format_behavior_compat_options", NULL, PGC_USERSET, PGC_S_SESSION);
+        PG_CATCH();
+        {
+            u_sess->utils_cxt.d_format_behavior_compat_flags |= D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
+        u_sess->utils_cxt.d_format_behavior_compat_flags |= D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER;
     } else {
         parsetree_list = pg_parse_query(union_all_sql.data);
     }
