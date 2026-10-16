@@ -360,7 +360,9 @@ static const int UPGRADE_GRAY_OBSERVE_STAGE_ROLLBACK = 4;
 static const int UPGRADE_FINASH = 5;
 static _stringlist* loadlanguage = NULL;
 static _stringlist* loadextension = NULL;
-static int max_connections = 0;
+/* Schedule files put at most 20 tests in one group. Stay at that limit so a
+ * group is one wave; a lower cap runs the rest serially and inflates runtime. */
+static int max_connections = 20;
 static char* encoding = NULL;
 static _stringlist* schedulelist = NULL;
 static int upgrade_cn_num = 1;
@@ -4315,7 +4317,7 @@ static bool results_differ(const char* testname, const char* resultsfile, const 
  *
  * Note: it's OK to scribble on the pids array, but not on the names array
  */
-static void wait_for_tests(PID_TYPE* pids, int* statuses, char** names, int num_tests)
+static void wait_for_tests(PID_TYPE* pids, int* statuses, char** names, int num_tests, int timer_base)
 {
     int tests_left;
     int i;
@@ -4396,7 +4398,7 @@ static void wait_for_tests(PID_TYPE* pids, int* statuses, char** names, int num_
                     status(" %s", names[i]);
                 }
                 tests_left--;
-                REGR_STOP_TIMER_TEMP(i);
+                REGR_STOP_TIMER_TEMP(timer_base + i);
                 break;
             }
         }
@@ -4985,7 +4987,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 }
             }
 
-            wait_for_tests(pids, statuses, NULL, 1);
+            wait_for_tests(pids, statuses, NULL, 1, 0);
             REGR_STOP_TIMER_TEMP(0);
             REGR_PRINT_ONEGROUP_ELAPSED_TIME;
             /* status line is finished below */
@@ -4997,13 +4999,13 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
             do {
                 while (i < num_tests) {
                     if (i - oldest >= max_connections) {
-                        wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+                        wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest, oldest);
                         oldest = i;
                     }
 
                     makeNestedDirectory(tests[i]);
 
-                    REGR_START_TIMER;
+                    REGR_START_TIMER_TEMP(i);
 
                     /* Invoke the single test file */
                     if (!ss_standby_read) {
@@ -5048,7 +5050,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 status(_("parallel group (%d tests, in groups of %d): "), num_tests, max_connections);
             }
 
-            wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+            wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest, oldest);
             status_end();
 
             g_uiCurLineBufIdx = 0;
@@ -5104,7 +5106,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 status(_("parallel group (%d tests)(%d/%d): "), num_tests, ++done_test_lines, all_test_lines);
             }
 
-            wait_for_tests(pids, statuses, tests, num_tests);
+            wait_for_tests(pids, statuses, tests, num_tests, 0);
             REGR_PRINT_ONEGROUP_ELAPSED_TIME;
             status_end();
 
@@ -5136,7 +5138,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                     pids[0] = (tfunc)(tests[0], &resultfiles[0], &expectfiles[0], &tags[0], true);
                 }
 
-                wait_for_tests(pids, statuses, NULL, 1);
+                wait_for_tests(pids, statuses, NULL, 1, 0);
                 REGR_STOP_TIMER_TEMP(0);
                 REGR_PRINT_ONEGROUP_ELAPSED_TIME;
                 /* status line is finished below */
@@ -5148,13 +5150,13 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 do {
                     while (i < num_tests) {
                         if (i - oldest >= max_connections) {
-                            wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+                            wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest, oldest);
                             oldest = i;
                         }
 
                         makeNestedDirectory(tests[i]);
 
-                        REGR_START_TIMER;
+                        REGR_START_TIMER_TEMP(i);
 
                         /* Invoke the single test file */
                         pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], true);
@@ -5195,7 +5197,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                     status(_("parallel group (%d tests, in groups of %d): "), num_tests, max_connections);
                 }
 
-                wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+                wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest, oldest);
                 status_end();
 
                 g_uiCurLineBufIdx = 0;
@@ -5247,7 +5249,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                     status(_("parallel group (%d tests): "), num_tests);
                 }
 
-                wait_for_tests(pids, statuses, tests, num_tests);
+                wait_for_tests(pids, statuses, tests, num_tests, 0);
                 REGR_PRINT_ONEGROUP_ELAPSED_TIME;
                 status_end();
 
@@ -5285,7 +5287,7 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                 /* Check if diff has failed; if yes then collect the diagnosis report*/
                 if (newdiff && dfunc) {
                     pids[0] = dfunc((char*)tests[i]);
-                    wait_for_tests(pids, statuses, NULL, 1);
+                    wait_for_tests(pids, statuses, NULL, 1, 0);
                 }
 
                 if (newdiff && tl) {
@@ -5389,7 +5391,7 @@ static void run_single_test(const char* test, test_function tfunc, diag_function
 
     REGR_START_TIMER;
     pid = (tfunc)(test, &resultfiles, &expectfiles, &tags, use_jdbc_client);
-    wait_for_tests(&pid, &exit_status, NULL, 1);
+    wait_for_tests(&pid, &exit_status, NULL, 1, 0);
     REGR_STOP_TIMER;
 
     /*
@@ -5412,7 +5414,7 @@ static void run_single_test(const char* test, test_function tfunc, diag_function
         /* Check if diff has failed; if yes then collect the diagnosis report*/
         if (newdiff && dfunc) {
             pid = dfunc((char*)test);
-            wait_for_tests(&pid, &exit_status, NULL, 1);
+            wait_for_tests(&pid, &exit_status, NULL, 1, 0);
         }
 
         if (newdiff && tl) {

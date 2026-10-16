@@ -8,7 +8,7 @@ select length(rolpassword) from pg_authid where rolname = 'user1';
 
 --Test CREATE/ALTER USER when password_encryption_type is 1 (sha256 + md5)
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1 -Z coordinator -c "password_encryption_type=1" >/dev/null
-select pg_sleep(5);
+select pg_sleep(1);
 create user user2 with password 'Gauss@123';
 select length(rolpassword) from pg_authid where rolname = 'user2';
 set role user2 password 'Gauss@123';
@@ -21,7 +21,7 @@ select length(rolpassword) from pg_authid where rolname = 'user1';
 
 --Test ALTER USER when password_encryption_type is 3 (sm3)
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1 -Z coordinator -c "password_encryption_type=3" >/dev/null
-select pg_sleep(5);
+select pg_sleep(1);
 create user user3 with password 'Gauss@123';
 select length(rolpassword) from pg_authid where rolname = 'user3';
 set role user3 password 'Gauss@123';
@@ -31,7 +31,7 @@ select length(rolpassword) from pg_authid where rolname = 'user3';
 
 --Test ALTER USER when password_encryption_type is 2 (sha256)
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1 -Z coordinator -c "password_encryption_type=2" >/dev/null
-select pg_sleep(5);
+select pg_sleep(1);
 select length(rolpassword) from pg_authid where rolname = 'user2';
 set role user2 password 'Gauss@123';
 alter user user2 identified by 'Gauss_123' replace 'Gauss@123';
