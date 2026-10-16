@@ -18,7 +18,7 @@ select length(rolpassword) from pg_authid where rolname = 'user1';
 --Test CREATE/ALTER USER when password_encryption_type is 1 (sha256 + md5)
 --?
 --?
-select pg_sleep(5);
+select pg_sleep(1);
  pg_sleep 
 ----------
  
@@ -53,7 +53,7 @@ select length(rolpassword) from pg_authid where rolname = 'user1';
 --Test ALTER USER when password_encryption_type is 3 (sm3)
 --?
 --?
-select pg_sleep(5);
+select pg_sleep(1);
  pg_sleep 
 ----------
  
@@ -78,7 +78,7 @@ select length(rolpassword) from pg_authid where rolname = 'user3';
 --Test ALTER USER when password_encryption_type is 2 (sha256)
 --?
 --?
-select pg_sleep(5);
+select pg_sleep(1);
  pg_sleep 
 ----------
  

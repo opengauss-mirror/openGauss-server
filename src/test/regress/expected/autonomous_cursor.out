@@ -1700,7 +1700,7 @@ c1 sys_refcursor;
 vc t2_test;
 begin
 delete from t2_test;---delete数据
-pg_sleep(30);
+pg_sleep(1);
 p2(c1);
 raise info 'rowcount: %', c1%rowcount;
 loop

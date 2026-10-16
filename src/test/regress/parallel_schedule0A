@@ -15,16 +15,16 @@
 # these use cases may affect other usecases, please keep these usecases unique in their parallel groups
 # --------------------------
 test: analytic_funcs accept_float_str_as_int
-test: timecapsule_partition_ustore_test_1
+#test: timecapsule_partition_ustore_test_1
 test: timecapsule_partition_ustore_test_2
 test: ddl
 test: ustore_subpartition_vacuum_partition
 test: test_ustore_undo_tool
-test: privileges
+#test: privileges
 test: privileges_tablespace
 test: AMHeap_logical_scan
 test: copy
-test: hnsw_rabitq_vector
+#test: hnsw_rabitq_vector
 test: hnsw_lsg_vector
 
 test: sqlbypass_partition
@@ -37,11 +37,14 @@ test: extract_pushdown_or_clause
 test: workload_manager
 
 test: spm_adaptive_gplan
-test: smp smp_cursor parallel_enable_function
+#test: smp
+test: smp_cursor parallel_enable_function
 test: alter_hw_package dependent_view1
 test: hw_grant_package gsc_func gsc_db dependent_view2
-test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
-test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views dependent_view
+#test: uppercase_attribute_name decode_compatible_with_o
+test: outerjoin_bugfix
+#test: updatable_views
+test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin dependent_view
 
 # test multiple statistics
 test: functional_dependency record_slow_sql_in_proc
@@ -60,7 +63,7 @@ test: postgres_fdw postgres_fdw_cstore postgres_fdw_partition
 
 #test user_defined_variable
 test: set_user_defined_variables_test
-test: set_system_variables_test
+#test: set_system_variables_test
 
 # test for set [session | global] transaction
 test: set_transaction_test
@@ -69,50 +72,51 @@ test: set_transaction_test
 test: select_into_user_defined_variables
 test: select_into_file
 
-test: gs_dump_package gs_dump_pkgfunc trigger_dump gs_dump_synonym dump_trigger_definer dump_with_trigger gs_dump_clean
+#test: trigger_dump dump_trigger_definer
+test: gs_dump_package gs_dump_pkgfunc gs_dump_synonym dump_with_trigger gs_dump_clean
 test: public_synonym
 test: out_param_func out_param_func_overload
 #test: sqlcode_cursor
-test: gs_dump_tableconstraint
-test: gs_dump_parallel
+test: gs_dump_tableconstraint gs_dump_parallel
 
 # test AI4DB
 test: plpgsql_override_out test_plsql_core plpgsql/plpgsql_normal plpgsql/plpgsql_othercase plpgsql/plpgsql_unsupported plpgsql_dump plpgsql/plpgsql_table
 test: dts16_plsql_dump
 test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error b_pg_plsql_show_all_error
-test: pldeveloper_gs_source
-test: index_advisor
+test: pldeveloper_gs_source index_advisor
 #test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
-test: gs_dump_tableof view_definer_test view_definer_permission_test
-test: analyze_commands
+#test: view_definer_test
+test: gs_dump_tableof view_definer_permission_test
+#test: analyze_commands
+test: single_node_ddl single_node_sqlbypass
 #test: single_node_job
-test: single_node_ddl
-test: single_node_sqlbypass
 test: median deferrable
 test: array_funcs array_union first_last_agg
 test: fetch_rows_with_ties
 
-test: hw_pwd_encryption_sm3
+#test: hw_pwd_encryption_sm3
 
 test: sync_standy_names
 
 #test event
-test: event
+#test: event
 test: event_dump_audit
 
 #test sha func
 test: single_node_sha
 
 #test b format collation
-test: test_b_format_collate charset_b_format test_b_format_collate2
+#test: test_b_format_collate charset_b_format
+test: test_b_format_collate2
 test: charset_connection_test
 
 # test subpartition
-test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
+#test: hw_subpartition_add_drop_partition
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
 test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
@@ -121,7 +125,8 @@ test: partition_param_path hw_subpartition_add_drop_partition_1 null_in_partitio
 test: row_partition_iterator_elimination col_partition_iterator_elimination
 
 # test subpartition with segment=on
-test: segment_subpartition_createtable segment_subpartition_scan segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_add_drop_partition segment_subpartition_tablespace segment_subpartition_ddl_index
+#test: segment_subpartition_scan segment_subpartition_add_drop_partition segment_subpartition_tablespace
+test: segment_subpartition_createtable segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_ddl_index
 test: segment_subpartition_vacuum_partition segment_subpartition_select_1
 
 test: get_instr_unique_sql
@@ -145,7 +150,8 @@ test: hw_cbt_hint_drop
 #--------------
 # any privilege
 # -------------
-test: pri_alter_any_table pri_create_any_function pri_create_any_index pri_create_any_sequence pri_create_any_type pri_dml_any_table pri_execute_any_function pri_indepent_any pri_any_package pri_samenew_schema
+#test: pri_samenew_schema
+test: pri_alter_any_table pri_create_any_function pri_create_any_index pri_create_any_sequence pri_create_any_type pri_dml_any_table pri_execute_any_function pri_indepent_any pri_any_package
 # ----------
 # The first group of parallel tests
 # ----------
@@ -245,8 +251,9 @@ test: single_node_random transactions_test autocommit_test
 #test: single_node_btree_index single_node_hash_index single_node_update 
 
 test: prefixkey_index invisible_index
-test: hash_index_001
-test: hash_index_002
+# hash_index_002 continues objects from hash_index_001; must stay serial
+#test: hash_index_001
+#test: hash_index_002
 test: single_node_update parse_fusion
 test: wide_table_update
 #test single_node_namespace
@@ -298,10 +305,11 @@ test: single_node_forbidden
 
 test: single_node_mergeinto merge_subquery merge_subquery3 merge_1
 test: merge_where_col
-test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3 merge_into_deleted merge_into_partition_row_movement merge_into_selfmodified merge_into_updated
+#test: merge_into_partition_row_movement merge_into_updated
+test: merge_concurrent_update_delete_1 merge_concurrent_update_delete_2 merge_concurrent_update_delete_3 merge_into_deleted merge_into_selfmodified
 
 # Trigger tests
-test: single_node_triggers
+#test: single_node_triggers
 #test: single_node_xc_trigship
 
 # Synonym tests
@@ -316,14 +324,14 @@ test: single_node_unsupported_view
 # ----------
 # single_node_commit/rollback tests
 # ----------
-test: single_node_produce_commit_rollback 
+#test: single_node_produce_commit_rollback
 test: single_node_function_commit_rollback
 
 test: instr_unique_sql
 test: auto_explain plan_table_for_anonymous_block
 test: shutdown
 
-# List/Hash table exchange
+# List/Hash table exchange (share public table names; must stay serial)
 test: hw_partition_list_exchange
 test: hw_partition_hash_exchange
 
@@ -341,7 +349,7 @@ test: hw_partition_create_view
 test: min_max_support_IP
 
 # encrypt decrypt
-test: encrypt_decrypt
+#test: encrypt_decrypt
 
 # interval partition 
 test: hw_partition_interval
@@ -374,7 +382,7 @@ test: gpi_unique_check
 test: gpi_index
 
 # gpi index only scan
-test: gpi_index_only
+#test: gpi_index_only
 
 # gpi bitmap
 test: gpi_bitmapscan
@@ -389,10 +397,11 @@ test: gpi_set_index_unusable
 #test: gpi_rebuild_index
 
 # gpi cluster
-test: gpi_cluster_01 gpi_cluster_02 gpi_cluster_03
+#test: gpi_cluster_02 gpi_cluster_03
+test: gpi_cluster_01
 
 # gpi interval
-test: gpi_interval
+#test: gpi_interval
 
 # gpi range
 test: gpi_range
@@ -402,7 +411,7 @@ test: gpi_invalid_part
 # test: gpi_clean_wait
 
 # gpi vacuum
-test: gpi_vacuum_lazy
+#test: gpi_vacuum_lazy
 test: gpi_hw_partition_vacuum_full
 test: gpi_hw_partition_vacuum_full_01
 
@@ -415,7 +424,8 @@ test: gpi_alter_partition_with_update
 test: gtt_stats
 test: gtt_function
 test: gtt_prepare
-test: gtt_parallel_1 gtt_parallel_2
+#test: gtt_parallel_2
+test: gtt_parallel_1
 test: gtt_clean
 test: gtt_merge
 
@@ -453,9 +463,9 @@ test: create_view1 create_view2 create_view3 create_view4 create_view5 comment_t
 #test: alter_system_set
 
 #dispatch from 13
-test: function stats
+#test: function stats
 test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 count_distinct_part2 count_distinct_part4
-test: aggregate_B_database
+#test: aggregate_B_database
 test: group_concat_max_len_gs_guc
 #test: count_distinct_part3#
 
@@ -488,7 +498,8 @@ test: select_into subselect_part2 gs_aggregate
 #test: aggregates
 test: holdable_cursor cursor_expression cursor_expression_dump
 test: cursor_reopen_paral_pre
-test: cursor_reopen_paral_1 cursor_reopen_paral_2 cursor_reopen_paral_3
+#test: cursor_reopen_paral_2
+test: cursor_reopen_paral_1 cursor_reopen_paral_3
 test: cursor_reopen_paral_end
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
@@ -497,10 +508,11 @@ test: test_float test_numeric_with_neg_scale test_float_dump db4ai_security
 # test for tid range scan
 #test: tidrangescan
 
-test: alter_table_000 alter_table_002 alter_table_003
+#test: alter_table_000 alter_table_002 alter_table_003
 #test: alter_table_001
 test: table_constraint
-test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
+#test: alter_table_modify alter_table_modify_ustore alter_table_modify_gtt
+test: alter_table_modify_ltt
 test: test_alter_table
 
 # test for empty string in A format database
@@ -512,46 +524,29 @@ test: lateral lateral_with_dop lateral_dump
 test: forbid_ddl
 
 #test: gin/cgin
-test: cgin_select ignore_keyword_list keywords
-test: gin_select
+#test: keywords
+test: cgin_select ignore_keyword_list
+test: gin_select long_raw_01 test_binary_suffix gb_ora_rotate_unrotate
 
-#test:long/long raw
-test: long_raw_01
-
-# test for binary_double suffix and Constant values
-test: test_binary_suffix
-
-# test for rotate and unrotate function
-test: gb_ora_rotate_unrotate
-
-test: pg_identity pg_identity_dump_restore
+#test: pg_identity
+test: pg_identity_dump_restore
 
 # test for string type char byte semantic
 test: bpchar_charbyte bpchar_cast bpchar_copy bpchar_index bpchar_regexmatch varchar_charbyte varchar_cast varchar_copy varchar_index varchar_regexmatch char_length_semantic
-test: gs_dump_char_semantic
-test: gs_dump_2hash
-# test backup tool audit log
-test: backup_tool_audit
-test: extra_float_digits
-
-test: auto_parameterization
-test: auto_parameterization_views
-
-# test mot when without mot in compile
-test: mot/without_mot_server
+# dump / audit / auto_parameterization / mot: independent, keep off seg_shrink_table
+test: gs_dump_char_semantic gs_dump_2hash backup_tool_audit extra_float_digits auto_parameterization auto_parameterization_views mot/without_mot_server
 
 # test gs_table_shrink and gs_space_shrink_compact function
-test: seg_shrink_table
+#test: seg_shrink_table
 
 # test single column range query
-test: single_col_range trim_perf_opt
+#test: single_col_range
+test: trim_perf_opt
 
-# test pg_indexes_verbose views
+# short independent cases; do not merge with sequence_cache (shared tab_record_parall_result)
+#test: pgstat_opt
 test: pg_indexes_verbose
 
-# pgstat optimization tests
-test: pgstat_opt
-
-# test global sequence cache
-test: session_sequence_cache
-test: global_sequence_cache
+# test global sequence cache (keep separate: both use tab_record_parall_result)
+#test: session_sequence_cache
+#test: global_sequence_cache

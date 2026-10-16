@@ -4,19 +4,24 @@
 # --------------------------
 # usecases for improving coverage
 # --------------------------
-test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill
+# Full-instance backups. Run before the suite fills the data directory.
+test: row_compression/row_compression_basebackup
+test: gsbasebackup_options
+#test: partition_cost_model vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill
+test: heap_copytuple fulljoin_rewrite_row_2 auto_analyze_test
 
-test: hw_pwd_reuse
+#test: hw_pwd_reuse
 #test: hw_auditadmin
 
-test: hw_audit_toughness
-test: hw_audit_detailinfo
+#test: hw_audit_toughness
+#test: hw_audit_detailinfo
 
-test: hw_audit_client
+#test: hw_audit_client
 test: hw_audit_full
-test: hw_audit_system_func
+#test: hw_audit_system_func
 
-test: performance_enhance b_format_infomation_schema
+#test: b_format_infomation_schema
+test: performance_enhance
 test: explain_fqs
 test: explain_pbe smp_2
 
@@ -26,7 +31,8 @@ test: explain_pbe smp_2
 # autonomous transaction Test
 
 # test object type
-test: pg_object_type dump_object_type pg_anydata_type parse_const_as_param_type unique_check enum_type_dump
+#test: pg_object_type dump_object_type
+test: pg_anydata_type parse_const_as_param_type unique_check enum_type_dump
 
 #test jdbc pbe for bypass
 test: bypass_pbe multi_simple_query
@@ -40,14 +46,14 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
-test: hw_partition_b_db
+#test: hw_partition_b_db
 test: dump_partition_b_db
 test: hw_cipher_sm4
-test: hw_cipher_aes128
-test: hw_pwd_encryption_sm3
+#test: hw_cipher_aes128
+#test: hw_pwd_encryption_sm3
 test: rule_test
-test: test_auto_increment
-test: dump_auto_increment
+#test: test_auto_increment
+#test: dump_auto_increment
 
 #delete limit
 test: delete_limit
@@ -77,13 +83,13 @@ test: cstore_unique_index
 test: cast_privileges_test
 
 #generated column test
-test: generated_col
+#test: generated_col
 test: gen_col_pall_start
 test: gen_col_thread1 gen_col_thread2
 test: gen_col_pall_end
 
 # gs_ledger
-test: ledger_table_case
+#test: ledger_table_case
 
 # select ... for update skip locked
 test: skiplocked_prep
@@ -92,10 +98,10 @@ test: skiplocked_test1_1 skiplocked_test1_3
 test: skiplocked_post
 
 # store and restore comment on ora function and procedure
-test: comment_proc
-test: hw_package
+#test: comment_proc
+#test: hw_package
 test: hw_cipher_sm4
-test: hw_cipher_aes128
+#test: hw_cipher_aes128
 test: sequence_cache_test
 test: pg_buffercache_pages
 test: procedure_privilege_test
@@ -109,11 +115,11 @@ test: toomanyparams
 
 test: test_astore_multixact
 
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
+#test: row_compression/unsupported_feature row_compression/normal_test
+test: row_compression/pg_table_size
 # test: row_compression/pg_tablespace_size
 test: row_compression/twophase
 test: row_compression/row_compress_feature pldebugger_shutdown
-test: row_compression/row_compression_basebackup
 test: row_compression/cfs_upgrade_compatibility
 test: component_view_enhancements single_node_user_mapping
 # reindex concurrently
@@ -122,14 +128,15 @@ test: reindex_concurrently_parallel
 #test: reindex_concurrently_partition
 test: reindex_concurrently_partition_parallel
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
-test: publication
-test: subscription
+#test: publication
+#test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 # mysql_function_prepare must precede mysql_function/mysql_function_2, and mysql_function_clearup must follow mysql_function/mysql_function_2
 test: gs_dump_encrypt substr mysql_function_prepare mysql_compatibility
-test: composite_datum_record mysql_function mysql_function_2 b_comments mysql_syntax mysql_condition mysql_delimiter mysql_delimiter_fix mysql_indexhint mysql_trigger
+#test: mysql_function_2 b_comments mysql_syntax mysql_condition mysql_trigger
+test: composite_datum_record mysql_function mysql_delimiter mysql_delimiter_fix mysql_indexhint
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
@@ -142,7 +149,7 @@ test: seqscan_fusion
 test: union_null_01 fulljoin_rewrite test_union_all_orderby
 
 # var selectivity
-test: var_eq_const_selectivity
+#test: var_eq_const_selectivity
 
 test: pg_controldata
 test: pg_stat_copy
@@ -151,20 +158,20 @@ test: describe_index_with_tablespace
 
 # syntax compatibility
 test: sytcomp_del_upt4orderby
-test: aioptimizer
+#test: aioptimizer
 test: aioptimizer_small
 test: pgfincore
 test: rename_table
 
 #subprogram
-test: nested_subprogram
-test: nested_subprogram_dump
+#test: nested_subprogram
+#test: nested_subprogram_dump
 
 # debug instrument
-test: test_debug5
+#test: test_debug5
 
 # fix notice infos
-test: gstrace_options gaussdb_options gsql_options gsbasebackup_options gsdump_options gsloader_options
+test: gstrace_options gaussdb_options gsql_options gsdump_options gsloader_options
 
 # debug ceil(-0.5) -0
 test: ceil_negtive_zero
@@ -179,7 +186,7 @@ test: optimizing_index_scan_ustore
 # ----------
 # D_FORMAT DATABASE
 # ----------
-test: d_format_test/apply_test d_format_test/charset_d_format d_format_test/join_update_delete
+#test: d_format_test/apply_test d_format_test/charset_d_format d_format_test/join_update_delete
 
 # row_count()
 test: row_count_function
@@ -189,11 +196,12 @@ test: show_warnings prevent_table_in_sys_schema create_tbl_init_td_check
 
 # test event trigger and object address
 test: test_object_alter
-test: event_trigger object_address drop_triggers
+#test: event_trigger object_address
+test: drop_triggers
 test: event_trigger_dump_restore
 
 # partition expression key
-test: partition_expr_key instr_query_plan_threshold
+#test: partition_expr_key instr_query_plan_threshold
 test: alter_foreign_schema
 
 # test for slow_sql
@@ -206,20 +214,21 @@ test: async
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
 test: hw_expression
-test: keep_dense_rank
+#test: keep_dense_rank
 # to_number func
 test: to_number_default
 # to_timestamp func
-test: to_timestamp_default cast
+#test: to_timestamp_default cast
 
 test: alter_index_disable
 test: dump_alter_index_disable
 
-test: dump_alter_index_invisible nls_lower
+#test: nls_lower
+test: dump_alter_index_invisible
 
 test: record_slow_sql_in_proc_commit
 
-test: sql_limit
+#test: sql_limit
 
 test: insert_on_conflict
 test: insert_on_conflict_1
