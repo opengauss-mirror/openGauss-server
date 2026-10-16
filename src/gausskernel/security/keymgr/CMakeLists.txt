@@ -60,6 +60,9 @@ add_static_libtarget(keymgr
     TGT_libkey_INC
     "${libkey_DEF_OPTIONS}"
     "${libkey_COMPILE_OPTIONS}")
+if(TARGET pq_ce)
+    add_dependencies(pq_ce keymgr_static)
+endif()
 # ld libs
 if("${ENABLE_KT}" STREQUAL "ON")
     add_dependencies(keymgr gs_ktool)
