@@ -8,8 +8,6 @@
     ```
     advance_xlog_file_num = 100
     numa_distribute_mode = 'all'
-    numa_distribute_mode = 'all'
-    thread_pool_attr = '812,4,(cpubind:0-27,32-59,64-91,96-123)'
     thread_pool_attr = '464,4,(cpubind:1-27,32-59,64-91,96-123)'
     xloginsert_locks = 16
     walwriter_cpu_bind=0
