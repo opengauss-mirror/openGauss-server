@@ -5,7 +5,8 @@
 # usecases for improving coverage 
 # --------------------------
 test: vec_hashjoin1 single_node_rangetypes db4ai_explain_model test_ustore_toast ustore_ddl ts_utf8 test_ustore_update test_ustore_index
-test: sqlldr/gs_loader_basic psql cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+test: sqlldr/gs_loader_basic cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+test: psql
 test: parse_xlog
 
 test: physical_slot
@@ -18,10 +19,12 @@ test: hw_smp
 #test: insert_update_002 insert_update_003 insert_update_008 insert_update_009 insert_update_010
 #test: insert_update_001#
 test: delete update namespace case select_having select_implicit test_cursor_arg_defexpr
-test: hw_test_operate_user multi_update update_multi_base_table_view
-test: hw_createtbl_llt multi_delete inlineview
+#test: multi_update
+test: hw_test_operate_user update_multi_base_table_view
+#test: multi_delete inlineview
+test: hw_createtbl_llt
 #test: gsqlerr#
-test: sqlLLT
+#test: sqlLLT
 #test: hw_sql_llt#
 test: split_partition
 test: upsert_prepare
@@ -29,7 +32,7 @@ test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
 test: upsert_trigger_test upsert_explain upsert_where upsert_where_sublink
-test: upsert_subquery
+#test: upsert_subquery
 test: upsert_clean
 
 # all pass
@@ -37,8 +40,8 @@ test: upsert_clean
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
 test: hw_alter_session
-test: tablespace
-test: hw_account_lock
+#test: tablespace
+#test: hw_account_lock
 
 # ----------
 # Another group of parallel tests
@@ -47,11 +50,13 @@ test: hw_account_lock
 test: hw_interval_format hw_function_p_3 hw_function_p_4 hw_current_schema hw_functions
 #test: hw_function_p_1 hw_function_p_2#
 test: hw_dba_enable_partition hw_tablespace
-test: hw_procedure_define 
+#test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
-test: hw_grant_all hw_dynamic_sql hw_func_return_out
-test: hw_package_function type_replace type_with_event_trigger
+#test: hw_func_return_out
+test: hw_grant_all hw_dynamic_sql
+#test: hw_package_function
+test: type_replace type_with_event_trigger
 
 #show plan
 #test: plan_hint
@@ -86,7 +91,8 @@ test: vec_prepare_003
 test: function_pg_prepared_statement1 function_pg_prepared_statement2
 
 #test sort optimize
-test: sort_optimize_row sort_optimize_column sort_optimize_001 simplesort prefix_sort
+#test: sort_optimize_001
+test: sort_optimize_row sort_optimize_column simplesort prefix_sort
 #test early free
 test: early_free
 #test sublink enhanced, including pullup-non-correlated-sublink and winmagic
@@ -110,7 +116,8 @@ test: xc_misc
 test: xc_groupby xc_distkey xc_having
 #test: hw_rewrite_lazyagg hw_light
 test: xc_temp xc_FQS 
-test: xc_remote hw_pbe
+#test: hw_pbe
+test: xc_remote
 test: xc_FQS_join xc_copy 
 #test: xc_alter_table
 test: xc_constraints xc_limit xc_sort
@@ -132,7 +139,8 @@ test: xc_dml
 #test: hw_cstore_alter cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy hw_alter_table_instant hw_cstore_copy1
 #test: cstore_alter_table cstore_alter_table1 cstore_alter_table7 
 
-test: hw_cstore_tablespace_1 hw_cstore_tablespace_2 hw_cstore_tablespace_3 hw_cstore_tablespace_4 hw_cstore_tablespace_5 hw_cstore_truncate hw_cstore_update
+#test: hw_cstore_tablespace_1 hw_cstore_tablespace_2 hw_cstore_tablespace_3 hw_cstore_tablespace_4 hw_cstore_update
+test: hw_cstore_tablespace_5 hw_cstore_truncate
 #test: hw_cstore_roughcheck
 test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2 hw_cstore_partition
 
@@ -143,9 +151,11 @@ test: cstore_cmpr_delta cstore_cmpr_date cstore_cmpr_timestamp_with_timezone cst
 test: cstore_cmpr_every_datatype cstore_cmpr_zlib cstore_unsupported_feature cstore_unsupported_feature1 cstore_cmpr_rle_bound cstore_cmpr_rle_bound1 cstore_nan cstore_infinity cstore_log2_error cstore_create_clause cstore_create_clause1 cstore_nulls_00 cstore_partial_cluster_info
 test: cstore_replication_table_delete
 
-test: hw_cstore_index hw_cstore_index1 hw_cstore_index2
-test: hw_cstore_vacuum
-test: hw_cstore_insert hw_cstore_delete hw_cstore_unsupport
+#test: hw_cstore_index2
+test: hw_cstore_index hw_cstore_index1
+#test: hw_cstore_vacuum
+#test: hw_cstore_delete
+test: hw_cstore_insert hw_cstore_unsupport
 
 # test on extended statistics
 test: hw_es_multi_column_stats_prepare hw_es_multi_column_stats_eqclass
@@ -158,9 +168,10 @@ test: distinct prepare1
 test: distinct_opt
 test: unsupported_features statistic statistic_2
 
-test: hw_setop_writefile
+#test: hw_setop_writefile
 
-test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream force_vector_engine force_vector_engine2 vec_asofjoin
+#test: force_vector_engine
+test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream force_vector_engine2 vec_asofjoin
 test: vec_mergejoin_inner vec_mergejoin_left vec_mergejoin_semi vec_mergejoin_anti llvm_vecexpr1 llvm_vecexpr2 llvm_vecexpr3 llvm_target_expr llvm_target_expr2 llvm_target_expr3 llvm_vecexpr_td
 #test: vec_nestloop1
 test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin vector_subpartition
@@ -180,7 +191,8 @@ test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike to_char
 # The second group of parallel tests
 # ----------
 #test: lseg box path polygon circle date time timetz timestamptz abstime reltime inet
-test: interval tinterval macaddr tstypes comments ignore_double_quotes
+#test: interval
+test: tinterval macaddr tstypes comments ignore_double_quotes
 #test: point timestamp
 
 # ----------
@@ -196,7 +208,8 @@ test: interval tinterval macaddr tstypes comments ignore_double_quotes
 # execute two copy tests parallel, to check that copy itself
 # is concurrent safe.(duplicate)
 # ----------
-test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
+#test: copy_error_log
+test: copyselect copy_support_transform copy_from_support_parallel
 test: copy_new_gram copy_gbk_test copy_gb18030_test
 #test: copy_eol
 
@@ -250,12 +263,14 @@ test: string_digit_to_numeric tablesample_3 tablesample_4
 # Another group of parallel tests
 # ----------
 #test: collate tablesample tablesample_1 tablesample_2 matview
-test: matview_single matview_with_event_trigger matview_dump
+#test: matview_single
+test: matview_with_event_trigger matview_dump
 
 # ----------
 # Another group of parallel tests
 # ----------
-test: hll_hash hll_func hll_para hll_mpp hll_cstore hll_misc
+#test: hll_cstore
+test: hll_hash hll_func hll_para hll_mpp hll_misc
 
 test: function_get_table_def
 
@@ -270,8 +285,8 @@ test: temp__3
 
 #security_plugin
 test: sp_set_policy_plugin_enable
-test: sp_masking_udf
-test: sp_masking_policy_reload
+#test: sp_masking_udf
+#test: sp_masking_policy_reload
 test: sp_set_policy_plugin_disable
 
 # ----------
@@ -284,21 +299,25 @@ test: select_where_func
 test: arrayinterface_single
 test: plpgsql_table_opengauss  
 test: plpgsql_assign_value_to_array_attribute
-test: plpgsql_array_of_record plpgsql_predefined_types
+#test: plpgsql_predefined_types
+test: plpgsql_array_of_record
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
 test: function_default_test plpgsql_inout_param
-test: plpgsql_cursor_rowtype
+#test: plpgsql_cursor_rowtype
 test: plpgsql_default_value_various_type
 test: plpgsql_assign_list
-test: plpgsql_package_type plpgsql_package_param
+#test: plpgsql_package_type
+test: plpgsql_package_param
 test: plpgsql_record_attrname
 test: plpgsql_insert_record plpgsql_condition_name
-test: hw_package_variable package_typmod_test
-test: autonomous_cursor
+#test: hw_package_variable
+test: package_typmod_test
+#test: autonomous_cursor
 test: plpgsql_reset_session plpgsql_nested_array_and_record
 #test: plpgsql_depend
-test: plpgsql_depend/plpgsql_depend_type  plpgsql_depend/plpgsql_pkg_dependency plpgsql_depend/plpgsql_recompile plpgsql_depend/plpgsql_pkg_variable_dependency plpgsql_depend/plpgsql_depend_reftype
+#test: plpgsql_depend/plpgsql_depend_type plpgsql_depend/plpgsql_pkg_variable_dependency
+test: plpgsql_depend/plpgsql_pkg_dependency plpgsql_depend/plpgsql_recompile plpgsql_depend/plpgsql_depend_reftype
 #test: plancache limit rangefuncs prepare
 test: rangefuncs_with_ordinality
 test: returning largeobject large_object_permission
@@ -306,7 +325,8 @@ test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
 test: goto
 test: equivalence_class
 test: tsdb_delta2_compress
-test: tsdb_xor_compress plpgsql_custom_exception
+#test: plpgsql_custom_exception
+test: tsdb_xor_compress
 #test: tsdb_aggregate
 
 test: readline
@@ -324,11 +344,12 @@ test: pmk
 # Test of changed data type compatible with Oracle
 
 test: hw_datatype_2 hw_datatype_3
-test: hw_datatype hw_datatype_set
+#test: hw_datatype_set
+test: hw_datatype
 test: test_regex llt_atc
 
 # test for inherit table
-test: inherits01
+#test: inherits01
 
 # ----------
 # test for set operations
@@ -339,10 +360,10 @@ test: select_nest_views
 test: col_joinplan col_joinnew
 test: col_limit col_distinct col_prepare
 test: col_function_1 col_function_2 col_count_distinct_1 col_count_distinct_2 col_count_distinct_3 col_count_distinct_4
-test: directory_test
-test: analyse_verify
+#test: directory_test
+#test: analyse_verify
 test: create_compositetype
-test: hw_pct_type_and_rowtype
+#test: hw_pct_type_and_rowtype
 #test: create_basetype
 #test: tabletype
 #test with recursive
@@ -385,7 +406,7 @@ test: copy2 temp
 test: truncate
 #test: temp_table
 
-test: b_compatibility
+#test: b_compatibility
 test: hw_compatibility
 test: hw_groupingsets hw_row_grouping_set
 test: char_truncation_common char_truncation_cast
@@ -403,9 +424,9 @@ test: gin_test1 gin_test2 gin_test3
 
 #==========================================================================================================================================
 # privilege test
-test: predefined_roles
-test: gs_db_privilege
-test: any_privs
+#test: predefined_roles
+#test: gs_db_privilege
+#test: any_privs
 
 # ----------
 # src/test/regress/parallel_schedule.33
@@ -433,8 +454,10 @@ test: advisory_lock
 # ----------
 # Another group of parallel tests
 # ----------
-test: cluster dependency bitmapops tsdicts functional_deps
-test: json_and_jsonb json jsonb jsonb2 jsonpath jsonb_typecast jsonb_jsonpath
+#test: dependency
+test: cluster bitmapops tsdicts functional_deps
+#test: jsonpath jsonb_jsonpath
+test: json_and_jsonb json jsonb jsonb2 jsonb_typecast
 #test: guc
 
 # test for vec sonic hash

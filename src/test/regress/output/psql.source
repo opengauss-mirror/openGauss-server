@@ -550,7 +550,7 @@ drop table test_d_command_part2;
 \! echo "\d                                                                                                                     " >> @abs_bindir@/gsql_parser.sql
 \! echo "--test parse comment                                                                                                   " >> @abs_bindir@/gsql_parser.sql
 \! echo "--create table comment(coment varchar(20));                                                                            " >> @abs_bindir@/gsql_parser.sql
-\! @abs_bindir@/gsql -p @portstring@ -f @abs_bindir@/gsql_parser.sql -g                                                         >> @abs_bindir@/gsql_parser.out
+\! @abs_bindir@/gsql -p @portstring@ -f @abs_bindir@/gsql_parser.sql -g                                                         >> @abs_bindir@/gsql_parser.out 2>&1
 --9)test verbosity and filename on parallel
 \! echo "\set VERBOSITY verbose                                                                                                 " >> @abs_bindir@/gsql_parallel.sql
 \! echo "\parallel on 2                                                                                                         " >> @abs_bindir@/gsql_parallel.sql

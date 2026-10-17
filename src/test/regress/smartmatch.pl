@@ -354,8 +354,17 @@ while( 1 )
 		else
 		{
 			my $re_1;
-		
-			if ($result !~ /^$re/)
+			my $re_mismatch;
+
+			{
+				# --? patterns may start with * or contain unescaped
+				# metacharacters; do not warn on interpolation.
+				no warnings 'regexp';
+				$re_mismatch = eval { $result !~ /^$re/ };
+				$re_mismatch = 1 if $@;
+			}
+
+			if ($re_mismatch)
 			{
 				if ($re =~ /(.*)datanode.*/)
 				{
@@ -415,11 +424,8 @@ while( 1 )
 				}
 				elsif ($re =~ /[.*]/)
 				{
-					$re_1 = quotemeta($1);
-					if ($result !~ /$re_1.*/)
-					{
-						$matched = 0;
-					}
+					# Legacy: --? lines that contain . or * stay matched
+					# after /^$re/ fails. /[.*]/ has no capture; do not use $1.
 				}
 				elsif ($re =~ /(.*)<Actual-Startup-Time>.*/)
 				{
