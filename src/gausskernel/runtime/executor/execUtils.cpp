@@ -2003,7 +2003,7 @@ static void UpdateAutoIncrement(Relation rel, Tuple tuple, EState* estate)
         }
     }
 
-    if (estate->first_autoinc != 0 && u_sess->cmd_cxt.last_insert_id != estate->first_autoinc) {
+    if (estate->first_autoinc != 0) {
         u_sess->cmd_cxt.last_insert_id = estate->first_autoinc;
         u_sess->cmd_cxt.last_autoinc_value = estate->first_autoinc;
     }
