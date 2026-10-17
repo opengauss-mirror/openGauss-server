@@ -33,6 +33,7 @@ DROP FUNCTION IF EXISTS dbe_perf.get_global_wait_events() CASCADE;
 DO $$
 DECLARE
     dolphin_view_definition text;
+    dolphin_view_stub text;
 BEGIN
     -- Return one NULL row when this database has no Dolphin member view.
     SELECT pg_catalog.max(pg_catalog.pg_get_viewdef(c.oid))
@@ -52,15 +53,20 @@ BEGIN
        AND e.extname = 'dolphin';
 
     IF dolphin_view_definition IS NOT NULL THEN
+        -- Follow 93_097: preserve the existing column names, types and order.
+        SELECT 'CREATE OR REPLACE VIEW performance_schema.events_waits_summary_global_by_event_name AS SELECT ' ||
+               pg_catalog.string_agg(
+                   'NULL::' || pg_catalog.format_type(a.atttypid, a.atttypmod) ||
+                   ' AS ' || pg_catalog.quote_ident(a.attname),
+                   ', ' ORDER BY a.attnum) || ' WHERE false'
+          INTO dolphin_view_stub
+          FROM pg_catalog.pg_attribute a
+         WHERE a.attrelid = 'performance_schema.events_waits_summary_global_by_event_name'::regclass
+           AND a.attnum > 0
+           AND NOT a.attisdropped;
+
         -- Remove the query dependency without dropping the extension member.
-        CREATE OR REPLACE VIEW performance_schema.events_waits_summary_global_by_event_name AS
-        SELECT NULL::text AS event_name,
-               NULL::bigint AS count_star,
-               NULL::bigint AS sum_timer_wait,
-               NULL::bigint AS min_timer_wait,
-               NULL::bigint AS avg_timer_wait,
-               NULL::bigint AS max_timer_wait
-         WHERE false;
+        EXECUTE dolphin_view_stub;
     END IF;
 
     DROP VIEW IF EXISTS dbe_perf.wait_events CASCADE;
