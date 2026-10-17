@@ -1,0 +1,351 @@
+DROP SCHEMA IF EXISTS union_predpushforce_9 CASCADE;
+NOTICE:  schema "union_predpushforce_9" does not exist, skipping
+CREATE SCHEMA union_predpushforce_9;
+SET search_path = union_predpushforce_9;
+SET rewrite_rule = 'none';
+CREATE TABLE src_a (id integer, k integer);
+CREATE TABLE src_b (id integer, k integer);
+CREATE TABLE fact_a (col1 integer, col2 integer, amount integer);
+CREATE TABLE fact_b (col1 integer, col2 integer, amount integer);
+INSERT INTO src_a VALUES (1, 2), (2, 3);
+INSERT INTO src_b VALUES (1, 4), (2, 5);
+INSERT INTO fact_a
+SELECT g % 100 + 1, (g / 100) % 10 + 1, 1
+FROM generate_series(0, 4999) g;
+INSERT INTO fact_b SELECT * FROM fact_a;
+ANALYZE src_a;
+ANALYZE src_b;
+ANALYZE fact_a;
+ANALYZE fact_b;
+CREATE VIEW v_all AS
+WITH keep_native_union AS (SELECT 1 AS marker)
+SELECT col1, col2, amount FROM fact_a
+UNION ALL
+SELECT col1, col2, amount FROM fact_b
+ORDER BY col1, col2, amount;
+CREATE VIEW v_distinct AS
+SELECT col1, col2, amount FROM fact_a
+UNION
+SELECT col1, col2, amount FROM fact_b
+ORDER BY col1, col2, amount;
+CREATE VIEW v_all_fixed AS
+WITH keep_native_union AS (SELECT 1 AS marker)
+SELECT col1, col2, amount FROM fact_a WHERE col1 = 7
+UNION ALL
+SELECT col1, col2, amount FROM fact_b WHERE col1 = 7
+ORDER BY col1, col2, amount;
+CREATE TEMP TABLE baseline_all AS
+SELECT a.id AS a_id, b.id AS b_id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+CREATE TEMP TABLE baseline_distinct AS
+SELECT a.id AS a_id, b.id AS b_id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_distinct v ON v.col1 = a.k AND v.col2 = b.k;
+CREATE INDEX fact_a_prefix ON fact_a (col1, col2);
+SELECT 'CASE 01_all_first_branch_head_then_tail';
+                ?column?                 
+-----------------------------------------
+ CASE 01_all_first_branch_head_then_tail
+(1 row)
+
+-- Both a and b contribute to fact_a's prefix; fact_b has no index.
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  Result
+         ->  Append
+               ->  Bitmap Heap Scan on fact_a
+                     Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Bitmap Index Scan on fact_a_prefix
+                           Index Cond: ((col1 = a.k) AND (col2 = b.k))
+               ->  Seq Scan on fact_b
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+(13 rows)
+
+SELECT 'CASE 02_all_first_branch_tail_then_head';
+                ?column?                 
+-----------------------------------------
+ CASE 02_all_first_branch_tail_then_head
+(1 row)
+
+-- a alone supplies only col2. Do not discard it before b supplies col1.
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col2 = a.k AND v.col1 = b.k;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  Result
+         ->  Append
+               ->  Bitmap Heap Scan on fact_a
+                     Recheck Cond: ((col1 = b.k) AND (col2 = a.k))
+                     ->  Bitmap Index Scan on fact_a_prefix
+                           Index Cond: ((col1 = b.k) AND (col2 = a.k))
+               ->  Seq Scan on fact_b
+                     Filter: ((col2 = a.k) AND (col1 = b.k))
+(13 rows)
+
+DROP INDEX fact_a_prefix;
+CREATE INDEX fact_b_prefix ON fact_b (col1, col2);
+SELECT 'CASE 03_all_only_second_branch_matches';
+                ?column?                
+----------------------------------------
+ CASE 03_all_only_second_branch_matches
+(1 row)
+
+-- Empty matches in the first branch must not reject the second branch's match.
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+               ->  Bitmap Heap Scan on fact_b
+                     Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Bitmap Index Scan on fact_b_prefix
+                           Index Cond: ((col1 = a.k) AND (col2 = b.k))
+(13 rows)
+
+CREATE TEMP TABLE actual_all AS
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id AS a_id, b.id AS b_id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+SELECT 'CASE 04_only_second_key_rejected';
+             ?column?             
+----------------------------------
+ CASE 04_only_second_key_rejected
+(1 row)
+
+-- The only proposed condition addresses col2; no candidate fills col1.
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, v.col1, v.col2, v.amount
+FROM src_a a
+LEFT JOIN v_all v ON v.col2 = a.k;
+              QUERY PLAN              
+--------------------------------------
+ Hash Right Join
+   Hash Cond: (fact_a.col2 = a.k)
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+               ->  Seq Scan on fact_b
+   ->  Hash
+         ->  Seq Scan on src_a a
+(8 rows)
+
+SELECT 'CASE 05_fixed_first_key_does_not_complete_candidate_prefix';
+                          ?column?                          
+------------------------------------------------------------
+ CASE 05_fixed_first_key_does_not_complete_candidate_prefix
+(1 row)
+
+-- Existing col1=7 may still use the index as a STATIC scan condition.
+-- It must not admit the new col2=a.k predicate under the candidate-only rule.
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, v.col1, v.col2, v.amount
+FROM src_a a
+LEFT JOIN v_all_fixed v ON v.col2 = a.k;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: (fact_a.col2 = a.k)
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+                     Filter: (col1 = 7)
+               ->  Bitmap Heap Scan on fact_b
+                     Recheck Cond: (col1 = 7)
+                     ->  Bitmap Index Scan on fact_b_prefix
+                           Index Cond: (col1 = 7)
+   ->  Hash
+         ->  Seq Scan on src_a a
+(12 rows)
+
+SELECT 'CASE 06_union_distinct_only_second_branch_matches';
+                     ?column?                      
+---------------------------------------------------
+ CASE 06_union_distinct_only_second_branch_matches
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_distinct v ON v.col1 = a.k AND v.col2 = b.k;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  HashAggregate
+         Group By Key: fact_a.col1, fact_a.col2, fact_a.amount
+         ->  Append
+               ->  Seq Scan on fact_a
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+               ->  Bitmap Heap Scan on fact_b
+                     Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                     ->  Bitmap Index Scan on fact_b_prefix
+                           Index Cond: ((col1 = a.k) AND (col2 = b.k))
+(14 rows)
+
+CREATE TEMP TABLE actual_distinct AS
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id AS a_id, b.id AS b_id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_distinct v ON v.col1 = a.k AND v.col2 = b.k;
+-- Also execute SELECT directly, so the result checks are not limited to CTAS.
+SELECT /*+ set(rewrite_rule predpushforce) */ 'direct_all' AS diagnostic,
+       COUNT(*) AS result_rows, SUM(v.amount) AS total
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+ diagnostic | result_rows | total 
+------------+-------------+-------
+ direct_all |          40 |    40
+(1 row)
+
+SELECT /*+ set(rewrite_rule predpushforce) */ 'direct_distinct' AS diagnostic,
+       COUNT(*) AS result_rows, SUM(v.amount) AS total
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_distinct v ON v.col1 = a.k AND v.col2 = b.k;
+   diagnostic    | result_rows | total 
+-----------------+-------------+-------
+ direct_distinct |           4 |     4
+(1 row)
+
+DROP INDEX fact_b_prefix;
+SELECT 'CASE 07_no_index_auto_force';
+          ?column?           
+-----------------------------
+ CASE 07_no_index_auto_force
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: ((fact_a.col1 = a.k) AND (fact_a.col2 = b.k))
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+               ->  Seq Scan on fact_b
+   ->  Hash
+         ->  Nested Loop
+               ->  Seq Scan on src_a a
+               ->  Materialize
+                     ->  Seq Scan on src_b b
+(11 rows)
+
+SELECT 'CASE 08_no_index_rewrite_none';
+           ?column?            
+-------------------------------
+ CASE 08_no_index_rewrite_none
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule none) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: ((fact_a.col1 = a.k) AND (fact_a.col2 = b.k))
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+               ->  Seq Scan on fact_b
+   ->  Hash
+         ->  Nested Loop
+               ->  Seq Scan on src_a a
+               ->  Materialize
+                     ->  Seq Scan on src_b b
+(11 rows)
+
+SET rewrite_rule = 'predpush';
+SELECT 'CASE 09_no_index_nonforce_predpush';
+              ?column?              
+------------------------------------
+ CASE 09_no_index_nonforce_predpush
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+               ->  Seq Scan on fact_b
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+(11 rows)
+
+SET rewrite_rule = 'none';
+SELECT 'CASE 10_no_index_explicit_force_hint';
+               ?column?               
+--------------------------------------
+ CASE 10_no_index_explicit_force_hint
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ set(rewrite_rule predpushforce) predpush(a b) */ a.id, b.id, v.col1, v.col2, v.amount
+FROM src_a a CROSS JOIN src_b b
+LEFT JOIN v_all v ON v.col1 = a.k AND v.col2 = b.k;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Nested Loop
+         ->  Seq Scan on src_a a
+         ->  Materialize
+               ->  Seq Scan on src_b b
+   ->  Result
+         ->  Append
+               ->  Seq Scan on fact_a
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+               ->  Seq Scan on fact_b
+                     Filter: ((col1 = a.k) AND (col2 = b.k))
+(11 rows)
+
+RESET rewrite_rule;
+RESET search_path;
+DROP SCHEMA union_predpushforce_9 CASCADE;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table union_predpushforce_9.src_a
+drop cascades to table union_predpushforce_9.src_b
+drop cascades to table union_predpushforce_9.fact_a
+drop cascades to table union_predpushforce_9.fact_b
+drop cascades to view union_predpushforce_9.v_all
+drop cascades to view union_predpushforce_9.v_distinct
+drop cascades to view union_predpushforce_9.v_all_fixed

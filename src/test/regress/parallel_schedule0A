@@ -554,3 +554,11 @@ test: pg_indexes_verbose wdr_enhance
 #test: global_sequence_cache
 
 test: union_predpushforce_1
+test: union_predpushforce_2
+test: union_predpushforce_3
+test: union_predpushforce_4
+test: union_predpushforce_5
+test: union_predpushforce_6
+test: union_predpushforce_7
+test: union_predpushforce_8
+test: union_predpushforce_9
