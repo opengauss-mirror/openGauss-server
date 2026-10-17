@@ -505,4 +505,71 @@ drop table rownum;
 drop table pivot;
 drop table unpivot;
 
+-- NOT ROTATE must preserve session compatibility settings (#8516).
+CREATE TABLE rotate_guc_orders(year int, store int, internet int);
+INSERT INTO rotate_guc_orders VALUES (2026, 1, 1);
+
+-- Preserve both the option string and comparison semantics after internal parsing.
+SET d_format_behavior_compat_options = 'enable_sbr_identifier,disable_target_alias';
+SELECT store = internet FROM rotate_guc_orders;
+SELECT count(*) FROM (
+    SELECT * FROM rotate_guc_orders WHERE year IN (2026, 2027)
+) q NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+SELECT store = internet FROM rotate_guc_orders;
+SELECT [store] FROM rotate_guc_orders;
+
+-- Whitespace and option ordering must not produce an invalid temporary value.
+SET d_format_behavior_compat_options = 'disable_target_alias, enable_sbr_identifier';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+
+-- ALL also enables bracket identifiers, including when reparsing ARRAY[...].
+SET d_format_behavior_compat_options = 'ALL';
+SELECT count(*) FROM (
+    SELECT * FROM rotate_guc_orders WHERE year IN (2026, 2027)
+) q NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+SELECT [store] FROM rotate_guc_orders;
+
+-- Settings with bracket identifiers disabled must also remain unchanged.
+SET d_format_behavior_compat_options = 'disable_target_alias';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+SET d_format_behavior_compat_options = '';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+
+-- PREPARE performs analysis without executing the query.
+SET d_format_behavior_compat_options = 'enable_sbr_identifier,disable_target_alias';
+PREPARE rotate_guc_plan AS SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+EXECUTE rotate_guc_plan;
+DEALLOCATE rotate_guc_plan;
+
+-- Preserve SET LOCAL inside the transaction and the session value after COMMIT.
+BEGIN;
+SET LOCAL d_format_behavior_compat_options = 'enable_sbr_identifier';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+COMMIT;
+SHOW d_format_behavior_compat_options;
+
+DROP TABLE rotate_guc_orders;
+RESET d_format_behavior_compat_options;
+
 drop schema shark_rotate_test_part2 cascade;

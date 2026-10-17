@@ -742,14 +742,13 @@ create table product_column (id int, name varchar(20), value int) with (orientat
 insert into product_column values(1,'a',10),(2,'b',20),(3,'c',30),(4,'a',40),(5,'b',50),(6,'c',60);
 set d_format_behavior_compat_options ='enable_sbr_identifier'; 
 explain(costs off) SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
-                   QUERY PLAN                    
--------------------------------------------------
+                QUERY PLAN                 
+-------------------------------------------
  HashAggregate
    Group By Key: product_column.id
-   ->  Result
-         ->  Row Adapter
-               ->  CStore Scan on product_column
-(5 rows)
+   ->  Row Adapter
+         ->  CStore Scan on product_column
+(4 rows)
 
 explain(costs off) SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt ) AS pivoted_data not rotate ( value FOR name IN ([a], [b], [c]) ) AS unpvt;
                                                                                   QUERY PLAN                                                                                  
@@ -760,24 +759,21 @@ explain(costs off) SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM (
                ->  HashAggregate
                      Group By Key: shark_rotate_test_part2.product_column.id
                      Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'a'::text)) IS NOT NULL)
-                     ->  Result
-                           ->  Row Adapter
-                                 ->  CStore Scan on product_column
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
          ->  Subquery Scan on pvt
                ->  HashAggregate
                      Group By Key: shark_rotate_test_part2.product_column.id
                      Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'b'::text)) IS NOT NULL)
-                     ->  Result
-                           ->  Row Adapter
-                                 ->  CStore Scan on product_column
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
          ->  Subquery Scan on pvt
                ->  HashAggregate
                      Group By Key: shark_rotate_test_part2.product_column.id
                      Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'c'::text)) IS NOT NULL)
-                     ->  Result
-                           ->  Row Adapter
-                                 ->  CStore Scan on product_column
-(23 rows)
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
+(20 rows)
 
 SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
  id | a  | b  | c  
@@ -1210,6 +1206,160 @@ drop table body;
 drop table rownum;
 drop table pivot;
 drop table unpivot;
+-- NOT ROTATE must preserve session compatibility settings (#8516).
+CREATE TABLE rotate_guc_orders(year int, store int, internet int);
+INSERT INTO rotate_guc_orders VALUES (2026, 1, 1);
+-- Preserve both the option string and comparison semantics after internal parsing.
+SET d_format_behavior_compat_options = 'enable_sbr_identifier,disable_target_alias';
+SELECT store = internet FROM rotate_guc_orders;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT count(*) FROM (
+    SELECT * FROM rotate_guc_orders WHERE year IN (2026, 2027)
+) q NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+      d_format_behavior_compat_options      
+--------------------------------------------
+ enable_sbr_identifier,disable_target_alias
+(1 row)
+
+SELECT store = internet FROM rotate_guc_orders;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT [store] FROM rotate_guc_orders;
+ store 
+-------
+     1
+(1 row)
+
+-- Whitespace and option ordering must not produce an invalid temporary value.
+SET d_format_behavior_compat_options = 'disable_target_alias, enable_sbr_identifier';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+      d_format_behavior_compat_options       
+---------------------------------------------
+ disable_target_alias, enable_sbr_identifier
+(1 row)
+
+-- ALL also enables bracket identifiers, including when reparsing ARRAY[...].
+SET d_format_behavior_compat_options = 'ALL';
+SELECT count(*) FROM (
+    SELECT * FROM rotate_guc_orders WHERE year IN (2026, 2027)
+) q NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ ALL
+(1 row)
+
+SELECT [store] FROM rotate_guc_orders;
+ store 
+-------
+     1
+(1 row)
+
+-- Settings with bracket identifiers disabled must also remain unchanged.
+SET d_format_behavior_compat_options = 'disable_target_alias';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ disable_target_alias
+(1 row)
+
+SET d_format_behavior_compat_options = '';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
+-- PREPARE performs analysis without executing the query.
+SET d_format_behavior_compat_options = 'enable_sbr_identifier,disable_target_alias';
+PREPARE rotate_guc_plan AS SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+SHOW d_format_behavior_compat_options;
+      d_format_behavior_compat_options      
+--------------------------------------------
+ enable_sbr_identifier,disable_target_alias
+(1 row)
+
+EXECUTE rotate_guc_plan;
+ count 
+-------
+     2
+(1 row)
+
+DEALLOCATE rotate_guc_plan;
+-- Preserve SET LOCAL inside the transaction and the session value after COMMIT.
+BEGIN;
+SET LOCAL d_format_behavior_compat_options = 'enable_sbr_identifier';
+SELECT count(*) FROM rotate_guc_orders NOT ROTATE (
+    yearly_total FOR order_mode IN (store AS 'direct', internet AS 'online')
+);
+ count 
+-------
+     2
+(1 row)
+
+SHOW d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ enable_sbr_identifier
+(1 row)
+
+COMMIT;
+SHOW d_format_behavior_compat_options;
+      d_format_behavior_compat_options      
+--------------------------------------------
+ enable_sbr_identifier,disable_target_alias
+(1 row)
+
+DROP TABLE rotate_guc_orders;
+RESET d_format_behavior_compat_options;
 drop schema shark_rotate_test_part2 cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function proc1(character)
