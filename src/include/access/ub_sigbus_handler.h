@@ -30,8 +30,17 @@ extern thread_local volatile sig_atomic_t ub_sigbus_jump_active;
 #if defined(__aarch64__)
 extern int register_sigbus_handler(void);
 
-#define UB_ESB_BARRIER()    asm volatile("esb" ::: "memory")
+static inline void UbEsbBarrier(void)
+{
+#ifdef __ARM_LSE
+    asm volatile("esb" ::: "memory");
 #else
-#define UB_ESB_BARRIER()  ((void)0)
+    /* hint #12 is the same encoding as esb (0xd503219f); the assembler accepts it
+     * under the armv8-a baseline, and it executes as a NOP on CPUs without RAS. */
+    asm volatile("hint #12" ::: "memory");
+#endif
+}
+#else
+static inline void UbEsbBarrier(void) {}
 #endif
 #endif /* UB_SIGBUS_HANDLER_H */
