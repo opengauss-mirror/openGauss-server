@@ -93,6 +93,7 @@ struct ObjectAddresses {
 	ObjectAddressExtra *extras;      /* => palloc'd array, or NULL if not used */
 	int			numrefs; /* current number of references */
 	int			maxrefs; /* current size of palloc'd array(s) */
+    bool keepViewTriggers; /* deletion policy; false for ordinary dependency scans */
 };
 
 /*
