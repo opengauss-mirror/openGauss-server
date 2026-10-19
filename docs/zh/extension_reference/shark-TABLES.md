@@ -45,7 +45,7 @@
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>对象类型描述。固定返回 USER_TABLE</td>
         </tr>
         <tr>
