@@ -28,6 +28,16 @@ max\_process\_memory – shared memory \( 包括shared\_buffers \) – cstore\_b
 
 参数work\_mem可以判断执行作业可下盘算子是否已使用内存量触发下盘点。当前可下盘算子有六类（向量化及非向量化共10种）：Hash\(VecHashJoin\)、Agg\(VecAgg\)、Sort\(VecSort\)、Material\(VecMaterial\)、SetOp\(VecSetOp\)、WindowAgg\(VecWindowAgg\)。该参数设置通常是一个权衡，即要保证并发的吞吐量，又要保证单查询作业的性能，故需要根据实际执行情况（结合Explain Performance输出）进行调优。
 
+### Buffer引用计数优化<a name="section_group_buffer_ref_count"></a>
+
+在多NUMA节点的ARM64服务器上，高并发访问共享Buffer时，Pin/Unpin操作对全局引用计数器的更新可能产生缓存行竞争。可以通过`enable_group_ref_cnt`开启按线程池组划分的Buffer引用计数，减少跨NUMA节点的缓存行竞争。该参数为布尔型，默认值为`off`，属于POSTMASTER类型参数，修改后需要重启数据库。
+
+**使用前提：**
+
+- 数据库编译和运行环境支持NUMA，且存在多个NUMA节点。
+- 已开启`enable_thread_pool`，并通过`thread_pool_attr`配置有效的NUMA分组和CPU绑核。线程池组数应与参与绑核的NUMA节点数一致，且每个NUMA节点均有可用CPU；不能使用`nobind`。
+- 未启用ADIO和DSS。
+
  ### Jemalloc内存管理<a name="zh-cn_topic_0237121495_zh-cn_topic_0073253552_zh-cn_topic_0062863366_section14594953151022"></a>
  
  openGauss使用Jemalloc提供高效的内存分配和管理，以此减少内存碎片和锁竞争。它具有以下几个技术优势：
