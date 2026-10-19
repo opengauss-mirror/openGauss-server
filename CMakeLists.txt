@@ -113,7 +113,7 @@ install(DIRECTORY ${CMAKE_BINARY_DIR}/pg_plugin DESTINATION lib/postgresql)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/libsimsearch DESTINATION lib)
 
 if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
-    install(CODE "execute_process(COMMAND bash cmake.sh ${ENABLE_LITE_MODE} ${ENABLE_MOT} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
+    install(CODE "execute_process(COMMAND bash cmake.sh ${ENABLE_LITE_MODE} ${ENABLE_MOT} ${ENABLE_BLCKSZ_4K} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
         DESTINATION share/postgresql/extension/
     )
