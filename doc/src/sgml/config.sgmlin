@@ -1300,6 +1300,37 @@ SET ENABLE_SEQSCAN TO OFF;
        </para>
 
        <para>
+        Library name resolution works together with
+        <xref linkend="guc-dynamic-library-path">. Names without a
+        directory component, such as <filename>a.so</filename> and
+        <filename>b.so</filename>, are searched for in the configured
+        directories in order. If the search path is empty and a library
+        file cannot be located, the server fails to start. Names containing
+        a directory component, such as an absolute path or
+        <filename>$libdir/a</filename>, are resolved directly without
+        using the search path.
+       </para>
+
+       <para>
+        For example, on Unix, if the preloaded libraries
+        <filename>a.so</filename> and <filename>b.so</filename> are in
+        <filename>/opt/myplugins</filename>, configure:
+<programlisting>
+dynamic_library_path = '/opt/myplugins:$libdir'
+shared_preload_libraries = 'a.so,b.so'
+</programlisting>
+       </para>
+
+       <para>
+        Before applying the configuration, ensure that all effective
+        preload entries, including libraries preloaded by default in
+        the current version, can be located, accessed, and loaded by the
+        server. Setting <varname>dynamic_library_path</varname> to an
+        empty string does not clear the preload list or ignore loading
+        failures.
+       </para>
+
+       <para>
 <!## PG>
         <productname>PostgreSQL</productname> procedural language
 <!## end>
@@ -5665,6 +5696,47 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
         The default value for this parameter is
         <literal>'$libdir'</literal>. If the value is set to an empty
         string, the automatic path search is turned off.
+       </para>
+
+       <para>
+        When configuring <varname>shared_preload_libraries</varname>,
+        set <varname>dynamic_library_path</varname> according to how the
+        library names are specified:
+       </para>
+
+       <itemizedlist>
+        <listitem>
+         <para>
+          For names without a directory component, such as
+          <filename>a.so</filename> and <filename>b.so</filename>, the
+          search path must include the directories containing the library
+          files. Use <literal>$libdir</literal> to refer to the standard
+          module installation directory.
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          An empty search path disables lookup through this parameter and
+          does not implicitly fall back to <literal>$libdir</literal>.
+          If a preloaded library cannot be resolved to a loadable file,
+          the server fails to start. An empty string is a valid parameter
+          value, but it does not guarantee successful startup with an
+          arbitrary preload list.
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          An absolute path or a name with a directory component, such as
+          <filename>$libdir/a</filename>, is resolved directly without
+          using this search path. An empty search path does not prohibit
+          loading through an explicit path. The file must still exist,
+          be accessible, and be compatible with the server.
+         </para>
+        </listitem>
+       </itemizedlist>
+
+       <para>
+        For details, see <xref linkend="guc-shared-preload-libraries">.
        </para>
 
        <para>
