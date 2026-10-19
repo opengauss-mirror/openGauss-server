@@ -1444,7 +1444,7 @@ void UBCLogBufferInit(UBCLogBuffer *buf)
             securec_check_c(rc, "\0", "\0");
             offset += chunk;
         }
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1472,7 +1472,7 @@ void UBCLogBufferSetSlot(UBCLogBuffer *buf, TransactionId xid, CLogXidStatus sta
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         buf->slots[slot_idx].store(slot_val, std::memory_order_release);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1499,7 +1499,7 @@ void UBCLogShmemInit(void)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         offset = ctrl->clog_offset.load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
@@ -1540,7 +1540,7 @@ bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status)
     if (ub_fault_rc == 0) {
         ub_sigbus_jump_active = 1;
         slot_val = ubCLogBuf->slots[slot_idx].load(std::memory_order_acquire);
-        UB_ESB_BARRIER();
+        UbEsbBarrier();
         ub_sigbus_jump_active = 0;
     } else {
         ub_sigbus_jump_active = 0;
