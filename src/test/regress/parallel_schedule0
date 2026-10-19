@@ -89,6 +89,7 @@ test: out_param_func
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
 test: gs_dump_2hash
+test: gs_dump_collate_default
 
 # test AI4DB
 test: plpgsql_override_out

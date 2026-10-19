@@ -20964,6 +20964,115 @@ static void DumpMatviewSchema(
     PQclear(schemares);
 }
 
+static inline bool IsCollateIdentChar(unsigned char c)
+{
+    return isalnum(c) || c == '_' || c == '$' || IS_HIGHBIT_SET(c);
+}
+
+/*
+ * Parse one (possibly double-quoted) identifier starting at expr[pos].
+ * Returns the position right after it, or -1 if there is no valid identifier.
+ */
+static int SkipCollateIdentifier(const char* expr, int pos)
+{
+    if (expr[pos] == '"') {
+        pos++;
+        while (expr[pos] != '\0') {
+            if (expr[pos] == '"') {
+                if (expr[pos + 1] != '"') {
+                    return pos + 1;
+                }
+                pos++;
+            }
+            pos++;
+        }
+        return -1;
+    }
+
+    int start = pos;
+    while (IsCollateIdentChar((unsigned char)expr[pos])) {
+        pos++;
+    }
+    return (pos > start) ? pos : -1;
+}
+
+/*
+ * Find a trailing, top-level " COLLATE <collation>" clause in a deparsed
+ * default expression and return its offset, or -1 if there is none.
+ *
+ * String literals, quoted identifiers and parenthesized sub-expressions are
+ * skipped, so text such as 'A COLLATE B' inside a literal is never taken as a
+ * collation clause.  The clause must also be the last element of the
+ * expression; anything other than a (schema-qualified) collation name after
+ * COLLATE means it is not the trailing clause we want to drop.
+ */
+static int FindTrailingCollateClause(const char* expr)
+{
+    static const char collateKw[] = " COLLATE ";
+    const int collateKwLen = (int)strlen(collateKw);
+    int depth = 0;
+    int candidate = -1;
+    int i = 0;
+
+    while (expr[i] != '\0') {
+        char c = expr[i];
+
+        if (c == '\'') {
+            /* E'...' literals produced by the deparser may contain backslash escapes */
+            bool escapeString = (i > 0 && (expr[i - 1] == 'E' || expr[i - 1] == 'e') &&
+                                 (i == 1 || !IsCollateIdentChar((unsigned char)expr[i - 2])));
+            i++;
+            while (expr[i] != '\0') {
+                if (escapeString && expr[i] == '\\' && expr[i + 1] != '\0') {
+                    i += 2;
+                    continue;
+                }
+                if (expr[i] == '\'') {
+                    if (expr[i + 1] == '\'') {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i++;
+            }
+            if (expr[i] == '\0') {
+                return -1;
+            }
+            i++;
+            continue;
+        }
+
+        if (c == '"') {
+            int next = SkipCollateIdentifier(expr, i);
+            if (next < 0) {
+                return -1;
+            }
+            i = next;
+            continue;
+        }
+
+        if (c == '(') {
+            depth++;
+        } else if (c == ')') {
+            depth--;
+        } else if (depth == 0 && strncmp(expr + i, collateKw, collateKwLen) == 0) {
+            candidate = i;
+        }
+        i++;
+    }
+
+    if (candidate < 0) {
+        return -1;
+    }
+
+    int pos = SkipCollateIdentifier(expr, candidate + collateKwLen);
+    if (pos > 0 && expr[pos] == '.') {
+        pos = SkipCollateIdentifier(expr, pos + 1);
+    }
+    return (pos > 0 && expr[pos] == '\0') ? candidate : -1;
+}
+
 /*
  * dumpTableSchema
  *	  write the declaration (not data) of one user-defined table or view
@@ -21380,13 +21489,13 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
 
                     /* If column-level COLLATE was already emitted, strip trailing COLLATE from default expr */
                     if (OidIsValid(tbinfo->attcollation[j]) && findCollationByOid(tbinfo->attcollation[j]) != NULL) {
-                        char *collate_pos = strstr(default_value, " COLLATE ");
-                        if (collate_pos != NULL) {
-                            size_t prefix_len = (size_t)(collate_pos - default_value);
-                            stripped_default = (char *)pg_malloc(prefix_len + 1);
-                            errno_t rc = strncpy_s(stripped_default, prefix_len + 1, default_value, prefix_len);
+                        int collatePos = FindTrailingCollateClause(default_value);
+                        if (collatePos >= 0) {
+                            size_t prefixLen = (size_t)collatePos;
+                            stripped_default = (char *)pg_malloc(prefixLen + 1);
+                            errno_t rc = strncpy_s(stripped_default, prefixLen + 1, default_value, prefixLen);
                             securec_check_c(rc, "\0", "\0");
-                            stripped_default[prefix_len] = '\0';
+                            stripped_default[prefixLen] = '\0';
                             default_value = stripped_default;
                         }
                     }
