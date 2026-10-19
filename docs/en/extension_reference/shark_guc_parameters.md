@@ -186,9 +186,9 @@ CREATE TABLE
 openGauss=# insert into t_identity_0013(name) values('zhangsan');
 INSERT 0 1
 openGauss=# insert into t_identity_0013(id, name) values(100, 'wangwu');
-ERROR:  Cannot insert identity column "id"
-LINE 1: insert into t_identity_0013(id, name) values(100, 'wangwu');
-                                    ^
+ERROR:  cannot insert a non-DEFAULT value into column "id"
+DETAIL:  Column "id" is an identity column defined as "IDENTITY".
+HINT:  Use OVERRIDING SYSTEM VALUE to override, Or turn on "identity_insert".
 openGauss=# set identity_insert=on;
 SET
 openGauss=# insert into t_identity_0013(id, name) values(100, 'wangwu');
