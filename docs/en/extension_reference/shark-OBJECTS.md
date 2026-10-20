@@ -62,7 +62,7 @@ All user-defined objects within the schema scope.
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>            Object type description. Currently supported types:<br>
             AGGREGATE_FUNCTION<br>
             CHECK_CONSTRAINT<br>

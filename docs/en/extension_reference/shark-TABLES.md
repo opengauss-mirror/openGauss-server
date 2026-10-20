@@ -47,7 +47,7 @@ User-defined tables in all schemas.
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>Object type description. Always USER_TABLE.</td>
         </tr>
         <tr>

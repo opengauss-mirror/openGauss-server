@@ -15,12 +15,12 @@ DATABASES视图返回数据库的信息。
     <tbody>
         <tr>
             <td>name</td>
-            <td>name</td>
+            <td>character varying(128)</td>
             <td>数据库名称</td>
         </tr>
         <tr>
             <td>database_id</td>
-            <td>int</td>
+            <td>oid</td>
             <td>数据库 ID</td>
         </tr>
         <tr>
@@ -299,7 +299,7 @@ DATABASES视图返回数据库的信息。
             <td>返回0</td>
         </tr>
         <tr>
-            <td>nais_honor_broker_priority_onme</td>
+            <td>is_honor_broker_priority_on</td>
             <td>bit</td>
             <td>返回0</td>
         </tr>
@@ -444,11 +444,6 @@ DATABASES视图返回数据库的信息。
             <td>返回0</td>
         </tr>
         <tr>
-            <td>is_data_retention_on</td>
-            <td>bit</td>
-            <td>返回0</td>
-        </tr>
-        <tr>
             <td>is_ledger_on</td>
             <td>bit</td>
             <td>返回0</td>
@@ -459,17 +454,7 @@ DATABASES视图返回数据库的信息。
             <td>返回0</td>
         </tr>
         <tr>
-            <td>is_event_stream_enabled</td>
-            <td>bit</td>
-            <td>返回0</td>
-        </tr>
-        <tr>
             <td>is_vorder_enabled</td>
-            <td>bit</td>
-            <td>返回0</td>
-        </tr>
-        <tr>
-            <td>is_optimized_locking_on</td>
             <td>bit</td>
             <td>返回0</td>
         </tr>

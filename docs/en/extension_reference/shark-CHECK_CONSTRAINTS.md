@@ -27,7 +27,7 @@ Returns information about CHECK constraints.
         </tr>
         <tr>
             <td>principal_id</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>OID of the object owner, the value is always NULL</td>
         </tr>
         <tr>

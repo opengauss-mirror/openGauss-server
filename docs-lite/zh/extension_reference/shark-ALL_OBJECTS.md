@@ -61,7 +61,7 @@
         </tr>
         <tr>
             <td><strong>type_desc</strong></td>
-            <td><strong>nvarchar(60)</strong></td>
+            <td><strong>nvarchar2(max)</strong></td>
             <td>
             对象类型描述。当前支持类型：<br/>
             AGGREGATE_FUNCTION<br/>
@@ -169,7 +169,7 @@
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>
             对象类型描述。当前支持类型：<br/>
             AGGREGATE_FUNCTION<br/>

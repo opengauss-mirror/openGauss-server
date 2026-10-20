@@ -47,7 +47,7 @@ All stored procedures
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>Returns SQL_STORED_PROCEDURE</td>
         </tr>
         <tr>

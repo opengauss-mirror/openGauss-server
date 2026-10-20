@@ -128,7 +128,7 @@ SYSOBJECTS视图返回数据库中创建的每个对象（例如表、视图、�
         </tr>
         <tr>
             <td>refdate</td>
-            <td>timestamp</td>
+            <td>timestamp(3) without time zone</td>
             <td>返回固定值NULL</td>
         </tr>
         <tr>

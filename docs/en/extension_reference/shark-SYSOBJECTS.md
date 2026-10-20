@@ -130,7 +130,7 @@ Returns every object created in the database (for example, tables, views, indexe
         </tr>
         <tr>
             <td>refdate</td>
-            <td>timestamp</td>
+            <td>timestamp(3) without time zone</td>
             <td>Returns the fixed value NULL.</td>
         </tr>
         <tr>

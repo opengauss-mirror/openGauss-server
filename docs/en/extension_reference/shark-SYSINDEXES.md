@@ -92,17 +92,17 @@ Contains one index and one table in one row in the current database. This view d
         </tr>
         <tr>
             <td>xmaxlen</td>
-            <td>smallint</td>
+            <td>integer</td>
             <td>Maximum row size. Returns 0.</td>
         </tr>
         <tr>
             <td>maxirow</td>
-            <td>smallint</td>
+            <td>integer</td>
             <td>Returns NULL.</td>
         </tr>
         <tr>
             <td>OrigFillFactor</td>
-            <td>tinyint</td>
+            <td>integer</td>
             <td>Original fill factor used during index creation. </td>
         </tr>
         <tr>
@@ -147,7 +147,7 @@ Contains one index and one table in one row in the current database. This view d
         </tr>
         <tr>
             <td>statblob</td>
-            <td>blob</td>
+            <td>bytea</td>
             <td>Binary large object (BLOB) of statistics.<br>Returns NULL.</td>
         </tr>
         <tr>

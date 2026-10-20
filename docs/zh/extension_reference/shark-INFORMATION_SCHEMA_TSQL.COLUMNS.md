@@ -45,12 +45,12 @@ COLUMNS视图返回数据库中的列信息。
         </tr>
         <tr>
             <td>IS_NULLABLE</td>
-            <td>varchar(3)</td>
+            <td>character varying(3)</td>
             <td>列的为空性。 如果列允许 NULL，则该列将返回 YES。 否则，返回 NO。</td>
         </tr>
         <tr>
             <td>DATA_TYPE</td>
-            <td>nvarchar(128)</td>
+            <td>character varying(128)</td>
             <td>系统提供的数据类型</td>
         </tr>
         <tr>

@@ -918,32 +918,32 @@ set search_path to sys_view_test_02;
  check_clause       | nvarchar2(4000) | 
 
 \d information_schema_tsql.columns
-               View "information_schema_tsql.columns"
-          Column          |             Type             | Modifiers 
---------------------------+------------------------------+-----------
- table_catalog            | nvarchar2(128)               | 
- table_schema             | nvarchar2(128)               | 
- table_name               | nvarchar2(128)               | 
- column_name              | nvarchar2(128)               | 
- ordinal_position         | integer                      | 
- column_default           | nvarchar2(4000)              | 
- is_nullable              | information_schema.yes_or_no | 
- data_type                | character varying(128)       | 
- character_maximum_length | integer                      | 
- character_octet_length   | integer                      | 
- numeric_precision        | tinyint                      | 
- numeric_precision_radix  | smallint                     | 
- numeric_scale            | integer                      | 
- datetime_precision       | smallint                     | 
- character_set_catalog    | nvarchar2(128)               | 
- character_set_schema     | nvarchar2(128)               | 
- character_set_name       | nvarchar2(128)               | 
- collation_catalog        | nvarchar2(128)               | 
- collation_schema         | nvarchar2(128)               | 
- collation_name           | nvarchar2(128)               | 
- domain_catalog           | nvarchar2(128)               | 
- domain_schema            | nvarchar2(128)               | 
- domain_name              | nvarchar2(128)               | 
+            View "information_schema_tsql.columns"
+          Column          |          Type          | Modifiers 
+--------------------------+------------------------+-----------
+ table_catalog            | nvarchar2(128)         | 
+ table_schema             | nvarchar2(128)         | 
+ table_name               | nvarchar2(128)         | 
+ column_name              | nvarchar2(128)         | 
+ ordinal_position         | integer                | 
+ column_default           | nvarchar2(4000)        | 
+ is_nullable              | character varying(3)   | 
+ data_type                | character varying(128) | 
+ character_maximum_length | integer                | 
+ character_octet_length   | integer                | 
+ numeric_precision        | tinyint                | 
+ numeric_precision_radix  | smallint               | 
+ numeric_scale            | integer                | 
+ datetime_precision       | smallint               | 
+ character_set_catalog    | nvarchar2(128)         | 
+ character_set_schema     | nvarchar2(128)         | 
+ character_set_name       | nvarchar2(128)         | 
+ collation_catalog        | nvarchar2(128)         | 
+ collation_schema         | nvarchar2(128)         | 
+ collation_name           | nvarchar2(128)         | 
+ domain_catalog           | nvarchar2(128)         | 
+ domain_schema            | nvarchar2(128)         | 
+ domain_name              | nvarchar2(128)         | 
 
 \d information_schema_tsql.tables
        View "information_schema_tsql.tables"
@@ -966,21 +966,21 @@ set search_path to sys_view_test_02;
  is_updatable    | character varying(3) | 
 
 \d sys.sysdatabases
-              View "sys.sysdatabases"
-  Column  |            Type             | Modifiers 
-----------+-----------------------------+-----------
- name     | name                        | 
- dbid     | oid                         | 
- sid      | oid                         | 
- mode     | smallint                    | 
- status   | integer                     | 
- status2  | integer                     | 
- crdate   | timestamp without time zone | 
- reserved | timestamp without time zone | 
- category | integer                     | 
- cmplevel | tinyint                     | 
- filename | nvarchar2(260)              | 
- version  | smallint                    | 
+               View "sys.sysdatabases"
+  Column   |            Type             | Modifiers 
+-----------+-----------------------------+-----------
+ name      | name                        | 
+ dbid      | oid                         | 
+ sid       | oid                         | 
+ mode      | smallint                    | 
+ status    | integer                     | 
+ status2   | integer                     | 
+ crdate    | timestamp without time zone | 
+ reserved  | timestamp without time zone | 
+ category  | integer                     | 
+ cmptlevel | tinyint                     | 
+ filename  | nvarchar2(260)              | 
+ version   | smallint                    | 
 
 \d sys.schemas
          View "sys.schemas"
@@ -1028,7 +1028,7 @@ set search_path to sys_view_test_02;
  collation_name                             | name                        | 
  user_access                                | tinyint                     | 
  user_access_desc                           | nvarchar2(60)               | 
- is_read_onliy                              | bit(1)                      | 
+ is_read_only                               | bit(1)                      | 
  is_auto_close_on                           | bit(1)                      | 
  is_auto_shrink_on                          | bit(1)                      | 
  state                                      | tinyint                     | 
@@ -1107,7 +1107,7 @@ set search_path to sys_view_test_02;
  is_memory_optimized_enabled                | bit(1)                      | 
  is_ledger_on                               | bit(1)                      | 
  is_change_feed_enabled                     | bit(1)                      | 
- is_vorder_enable                           | bit(1)                      | 
+ is_vorder_enabled                          | bit(1)                      | 
 
 -- prepare data
 CREATE TABLE employees (
@@ -1168,11 +1168,11 @@ where s.nspname = 'sys_view_test_02';
  sys_view_test_02 | high_salary_employees | SELECT employees.name, employees.age, employees.salary FROM employees WHERE ((employees.age >= 18) AND (employees.salary > (5000)::numeric)); | NONE         | YES
 (1 row)
 
-select sid, mode, status, status2, crdate, reserved, category, cmplevel, filename, version
+select sid, mode, status, status2, crdate, reserved, category, cmptlevel, filename, version
 from sys.sysdatabases where name = current_database();
- sid | mode | status | status2 |          crdate          |         reserved         | category | cmplevel | filename | version 
------+------+--------+---------+--------------------------+--------------------------+----------+----------+----------+---------
-  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+ sid | mode | status | status2 |          crdate          |         reserved         | category | cmptlevel | filename | version 
+-----+------+--------+---------+--------------------------+--------------------------+----------+-----------+----------+---------
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0         |          |        
 (1 row)
 
 select name, schema_id, principal_id
@@ -1211,9 +1211,9 @@ from sys.sysusers where uid >1000 and uid < 10000;
 
 select *
 from sys.databases where database_id = 1;
-   name    | database_id | source_database_id | owner_sid | create_date | compatibility_level | collation_name | user_access | user_access_desc | is_read_onliy | is_auto_close_on | is_auto_shrink_on | state | state_desc | is_in_standby | is_cleanly_shutdown | is_supplemental_logging_enabled | snapshot_isolation_state | snapshot_isolation_state_desc | is_read_committed_snapshot_on | recovery_model | recovery_model_desc | page_verify_option | page_verify_option_desc | is_auto_create_stats_on | is_auto_create_stats_incremental_on | is_auto_update_stats_on | is_auto_update_stats_async_on | is_ansi_null_default_on | is_ansi_nulls_on | is_ansi_padding_on | is_ansi_warnings_on | is_arithabort_on | is_concat_null_yields_null_on | is_numeric_roundabort_on | is_quoted_identifier_on | is_recursive_triggers_on | is_cursor_close_on_commit_on | is_local_cursor_default | is_fulltext_enabled | is_trustworthy_on | is_db_chaining_on | is_parameterization_forced | is_master_key_encrypted_by_server | is_query_store_on | is_published | is_subscribed | is_merge_published | is_distributor | is_sync_with_backup | service_broker_guid | is_broker_enabled | log_reuse_wait | log_reuse_wait_desc | is_date_correlation_on | is_cdc_enabled | is_encrypted | is_honor_broker_priority_on | replica_id | group_database_id | resource_pool_id | default_language_lcid | default_language_name | default_fulltext_language_lcid | default_fulltext_language_name | is_nested_triggers_on | is_transform_noise_words_on | two_digit_year_cutoff | containment | containment_desc | target_recovery_time_in_seconds | delayed_durability | delayed_durability_desc | is_memory_optimized_elevate_to_snapshot_on | is_federation_member | is_remote_data_archive_enabled | is_mixed_page_allocation_on | is_temporal_history_retention_enabled | catalog_collation_type | catalog_collation_type_desc | physical_database_name | is_result_set_caching_on | is_accelerated_database_recovery_on | is_tempdb_spill_to_remote_store | is_stale_page_detection_on | is_memory_optimized_enabled | is_ledger_on | is_change_feed_enabled | is_vorder_enable 
------------+-------------+--------------------+-----------+-------------+---------------------+----------------+-------------+------------------+---------------+------------------+-------------------+-------+------------+---------------+---------------------+---------------------------------+--------------------------+-------------------------------+-------------------------------+----------------+---------------------+--------------------+-------------------------+-------------------------+-------------------------------------+-------------------------+-------------------------------+-------------------------+------------------+--------------------+---------------------+------------------+-------------------------------+--------------------------+-------------------------+--------------------------+------------------------------+-------------------------+---------------------+-------------------+-------------------+----------------------------+-----------------------------------+-------------------+--------------+---------------+--------------------+----------------+---------------------+---------------------+-------------------+----------------+---------------------+------------------------+----------------+--------------+-----------------------------+------------+-------------------+------------------+-----------------------+-----------------------+--------------------------------+--------------------------------+-----------------------+-----------------------------+-----------------------+-------------+------------------+---------------------------------+--------------------+-------------------------+--------------------------------------------+----------------------+--------------------------------+-----------------------------+---------------------------------------+------------------------+-----------------------------+------------------------+--------------------------+-------------------------------------+---------------------------------+----------------------------+-----------------------------+--------------+------------------------+------------------
- template1 |           1 |                    |        10 |             |                     | UTF8           | 0           | MULTI_USER       | 0             | 0                | 0                 | 0     | ONLINE     | 0             | 0                   | 0                               | 1                        | ON                            | 1                             | 1              | FULL                | 0                  |                         | 1                       | 0                                   | 0                       | 0                             | 1                       | 1                | 0                  | 0                   | 1                | 1                             | 0                        | 1                       | 0                        | 0                            | 0                       | 0                   | 0                 | 0                 | 0                          | 0                                 | 0                 | 0            | 0             | 0                  | 0              | 0                   |                     | 0                 | 0              | NOTHING             | 0                      | 0              | 0            | 0                           |            |                   |                  |                       |                       |                                |                                |                       |                             |                       | 0           | NONE             |                               0 |                  0 |                         | 0                                          | 0                    | 0                              | 0                           | 0                                     | 0                      | Not Applicable              |                        | 0                        | 0                                   | 0                               | 0                          | 0                           | 0            | 0                      | 0
+   name    | database_id | source_database_id | owner_sid | create_date | compatibility_level | collation_name | user_access | user_access_desc | is_read_only | is_auto_close_on | is_auto_shrink_on | state | state_desc | is_in_standby | is_cleanly_shutdown | is_supplemental_logging_enabled | snapshot_isolation_state | snapshot_isolation_state_desc | is_read_committed_snapshot_on | recovery_model | recovery_model_desc | page_verify_option | page_verify_option_desc | is_auto_create_stats_on | is_auto_create_stats_incremental_on | is_auto_update_stats_on | is_auto_update_stats_async_on | is_ansi_null_default_on | is_ansi_nulls_on | is_ansi_padding_on | is_ansi_warnings_on | is_arithabort_on | is_concat_null_yields_null_on | is_numeric_roundabort_on | is_quoted_identifier_on | is_recursive_triggers_on | is_cursor_close_on_commit_on | is_local_cursor_default | is_fulltext_enabled | is_trustworthy_on | is_db_chaining_on | is_parameterization_forced | is_master_key_encrypted_by_server | is_query_store_on | is_published | is_subscribed | is_merge_published | is_distributor | is_sync_with_backup | service_broker_guid | is_broker_enabled | log_reuse_wait | log_reuse_wait_desc | is_date_correlation_on | is_cdc_enabled | is_encrypted | is_honor_broker_priority_on | replica_id | group_database_id | resource_pool_id | default_language_lcid | default_language_name | default_fulltext_language_lcid | default_fulltext_language_name | is_nested_triggers_on | is_transform_noise_words_on | two_digit_year_cutoff | containment | containment_desc | target_recovery_time_in_seconds | delayed_durability | delayed_durability_desc | is_memory_optimized_elevate_to_snapshot_on | is_federation_member | is_remote_data_archive_enabled | is_mixed_page_allocation_on | is_temporal_history_retention_enabled | catalog_collation_type | catalog_collation_type_desc | physical_database_name | is_result_set_caching_on | is_accelerated_database_recovery_on | is_tempdb_spill_to_remote_store | is_stale_page_detection_on | is_memory_optimized_enabled | is_ledger_on | is_change_feed_enabled | is_vorder_enabled 
+-----------+-------------+--------------------+-----------+-------------+---------------------+----------------+-------------+------------------+--------------+------------------+-------------------+-------+------------+---------------+---------------------+---------------------------------+--------------------------+-------------------------------+-------------------------------+----------------+---------------------+--------------------+-------------------------+-------------------------+-------------------------------------+-------------------------+-------------------------------+-------------------------+------------------+--------------------+---------------------+------------------+-------------------------------+--------------------------+-------------------------+--------------------------+------------------------------+-------------------------+---------------------+-------------------+-------------------+----------------------------+-----------------------------------+-------------------+--------------+---------------+--------------------+----------------+---------------------+---------------------+-------------------+----------------+---------------------+------------------------+----------------+--------------+-----------------------------+------------+-------------------+------------------+-----------------------+-----------------------+--------------------------------+--------------------------------+-----------------------+-----------------------------+-----------------------+-------------+------------------+---------------------------------+--------------------+-------------------------+--------------------------------------------+----------------------+--------------------------------+-----------------------------+---------------------------------------+------------------------+-----------------------------+------------------------+--------------------------+-------------------------------------+---------------------------------+----------------------------+-----------------------------+--------------+------------------------+-------------------
+ template1 |           1 |                    |        10 |             |                     | UTF8           | 0           | MULTI_USER       | 0            | 0                | 0                 | 0     | ONLINE     | 0             | 0                   | 0                               | 1                        | ON                            | 1                             | 1              | FULL                | 0                  |                         | 1                       | 0                                   | 0                       | 0                             | 1                       | 1                | 0                  | 0                   | 1                | 1                             | 0                        | 1                       | 0                        | 0                            | 0                       | 0                   | 0                 | 0                 | 0                          | 0                                 | 0                 | 0            | 0             | 0                  | 0              | 0                   |                     | 0                 | 0              | NOTHING             | 0                      | 0              | 0            | 0                           |            |                   |                  |                       |                       |                                |                                |                       |                             |                       | 0           | NONE             |                               0 |                  0 |                         | 0                                          | 0                    | 0                              | 0                           | 0                                     | 0                      | Not Applicable              |                        | 0                        | 0                                   | 0                               | 0                          | 0                           | 0            | 0                      | 0
 (1 row)
 
 \d sys.server_principals
@@ -1225,12 +1225,12 @@ from sys.databases where database_id = 1;
  sid                   | varbinary(85)               | 
  type                  | character(1)                | 
  type_desc             | nvarchar2(60)               | 
- is_disbaled           | integer                     | 
+ is_disabled           | integer                     | 
  create_date           | timestamp without time zone | 
  modify_date           | timestamp without time zone | 
  default_database_name | name                        | 
  default_language_name | name                        | 
- creadential_id        | integer                     | 
+ credential_id         | integer                     | 
  owning_principal_id   | integer                     | 
  is_fixed_role         | integer                     | 
 

@@ -42,12 +42,12 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>lastwaittype</td>
-            <td>nchar(32)</td>
+            <td>character(32)</td>
             <td>String indicating the name of the last or current wait type. Always NULL.</td>
         </tr>
         <tr>
             <td>waitresource</td>
-            <td>nchar(256)</td>
+            <td>character(256)</td>
             <td>Textual representation of the lock resource. Always NULL.</td>
         </tr>
         <tr>
@@ -62,7 +62,7 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>cpu</td>
-            <td>int</td>
+            <td>integer</td>
             <td>Cumulative CPU time of the session. Always 0.</td>
         </tr>
         <tr>
@@ -72,7 +72,7 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>memusage</td>
-            <td>int</td>
+            <td>integer</td>
             <td>Number of pages in the procedure cache currently allocated to this session. Always 0.</td>
         </tr>
         <tr>
@@ -97,7 +97,7 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>status</td>
-            <td>nchar(30)</td>
+            <td>character(30)</td>
             <td>Session status. The value can be:<br>
             `active`: The backend is executing a query.<br>
             `idle`: The backend is waiting for a new client command.<br>
@@ -114,17 +114,17 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>hostname</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>Host name of the client.</td>
         </tr>
         <tr>
             <td>program_name</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>Name of the application.</td>
         </tr>
         <tr>
             <td>hostprocess</td>
-            <td>nchar(10)</td>
+            <td>character(10)</td>
             <td>ID of the client process. Always NULL.</td>
         </tr>
         <tr>
@@ -134,27 +134,27 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>nt_domain</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>Windows domain of the client. Always NULL.</td>
         </tr>
         <tr>
             <td>nt_username</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>Windows user name of the client. Always NULL.</td>
         </tr>
         <tr>
             <td>net_address</td>
-            <td>nchar(12)</td>
+            <td>character(12)</td>
             <td>Unique identifier assigned to the network adapter on each user workstation. Always NULL.</td>
         </tr>
         <tr>
             <td>net_library</td>
-            <td>nchar(12)</td>
+            <td>character(12)</td>
             <td>Column that stores the client network library. Always NULL.</td>
         </tr>
         <tr>
             <td>loginame</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>Username.</td>
         </tr>
         <tr>
@@ -169,12 +169,12 @@ Returns information about database sessions.
         </tr>
         <tr>
             <td>stmt_start</td>
-            <td>int</td>
+            <td>integer</td>
             <td>Start offset of the current SQL statement for the given sql_handle. Always 0.</td>
         </tr>
         <tr>
             <td>stmt_end</td>
-            <td>int</td>
+            <td>integer</td>
             <td>End offset of the current SQL statement for the given sql_handle. Always 0.</td>
         </tr>
         <tr>

@@ -62,7 +62,7 @@ Returns information about system objects. In D database, information_schema, pg_
         </tr>
         <tr>
             <td>type_desc</td>
-            <td>nvarchar(60)</td>
+            <td>nvarchar2(max)</td>
             <td>Object type description. Supported types:<br>
             AGGREGATE_FUNCTION<br>
             CHECK_CONSTRAINT<br>

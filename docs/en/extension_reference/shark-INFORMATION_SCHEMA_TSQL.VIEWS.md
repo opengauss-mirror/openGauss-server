@@ -42,7 +42,7 @@ The VIEWS view returns view information in the database.
         </tr>
          <tr>
             <td>IS_UPDATABLE</td>
-            <td>varchar(2)</td>
+            <td>character varying(3)</td>
             <td>Specifies whether the view is updatable. 1=TRUE, 0=FALSE</td>
         </tr>
     </tbody>

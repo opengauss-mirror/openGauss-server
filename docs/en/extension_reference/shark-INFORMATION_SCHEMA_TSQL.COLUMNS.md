@@ -47,12 +47,12 @@ The COLUMNS view returns column information in the database.
         </tr>
         <tr>
             <td>IS_NULLABLE</td>
-            <td>varchar(3)</td>
+            <td>character varying(3)</td>
             <td>Nullability of the column. If the column allows NULL, this column returns YES. Otherwise, it returns NO.</td>
         </tr>
         <tr>
             <td>DATA_TYPE</td>
-            <td>nvarchar(128)</td>
+            <td>character varying(128)</td>
             <td>System-supplied data type</td>
         </tr>
         <tr>
