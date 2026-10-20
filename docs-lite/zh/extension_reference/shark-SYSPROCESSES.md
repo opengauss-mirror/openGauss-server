@@ -40,12 +40,12 @@
         </tr>
         <tr>
             <td>lastwaittype</td>
-            <td>nchar(32)</td>
+            <td>character(32)</td>
             <td>指示上次或当前等待类型名称的字符串，取值恒为NULL</td>
         </tr>
         <tr>
             <td>waitresource</td>
-            <td>nchar(256)</td>
+            <td>character(256)</td>
             <td>锁资源的文本化表示法，取值恒为NULL</td>
         </tr>
         <tr>
@@ -60,7 +60,7 @@
         </tr>
         <tr>
             <td>cpu</td>
-            <td>int</td>
+            <td>integer</td>
             <td>会话累计的CPU时间，取值恒为0</td>
         </tr>
         <tr>
@@ -70,7 +70,7 @@
         </tr>
         <tr>
             <td>memusage</td>
-            <td>int</td>
+            <td>integer</td>
             <td>当前为此会话分配的过程缓存中的页数，取值恒为0</td>
         </tr>
         <tr>
@@ -95,7 +95,7 @@
         </tr>
         <tr>
             <td>status</td>
-            <td>nchar(30)</td>
+            <td>character(30)</td>
             <td>会话的状态，取值如下：<br/>
             active：后台正在执行一个查询<br/>
             idle：后台正在等待一个新的客户端命令<br/>
@@ -112,17 +112,17 @@
         </tr>
         <tr>
             <td>hostname</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>客户端的主机名</td>
         </tr>
         <tr>
             <td>program_name</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>应用程序的名称</td>
         </tr>
         <tr>
             <td>hostprocess</td>
-            <td>nchar(10)</td>
+            <td>character(10)</td>
             <td>客户端进程id，取值恒为NULL</td>
         </tr>
         <tr>
@@ -132,27 +132,27 @@
         </tr>
         <tr>
             <td>nt_domain</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>客户端的windows域，取值恒为NULL</td>
         </tr>
         <tr>
             <td>nt_username</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>客户端的windows用户名，取值恒为NULL</td>
         </tr>
         <tr>
             <td>net_address</td>
-            <td>nchar(12)</td>
+            <td>character(12)</td>
             <td>为每个用户工作站上的网络适配器分配的唯一标识符，取值恒为NULL</td>
         </tr>
         <tr>
             <td>net_library</td>
-            <td>nchar(12)</td>
+            <td>character(12)</td>
             <td>用于存储客户端网络库的列，取值恒为NULL</td>
         </tr>
         <tr>
             <td>loginame</td>
-            <td>nchar(128)</td>
+            <td>character(128)</td>
             <td>用户名</td>
         </tr>
         <tr>
@@ -167,12 +167,12 @@
         </tr>
         <tr>
             <td>stmt_start</td>
-            <td>int</td>
+            <td>integer</td>
             <td>所指定sql_handle的当前SQL语句的起始偏移量，取值恒为0</td>
         </tr>
         <tr>
             <td>stmt_end</td>
-            <td>int</td>
+            <td>integer</td>
             <td>所指定sql_handle的当前SQL语句的结束偏移量，取值恒为0</td>
         </tr>
         <tr>

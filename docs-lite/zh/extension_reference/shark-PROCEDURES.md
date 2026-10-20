@@ -45,7 +45,7 @@
         </tr>
         <tr>
             <td><strong>type_desc</strong></td>
-            <td><strong>nvarchar(60)</strong></td>
+            <td><strong>nvarchar2(max)</strong></td>
             <td>返回 SQL_STORED_PROCEDURE</td>
         </tr>
         <tr>

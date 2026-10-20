@@ -50,7 +50,7 @@ COLUMNS视图返回数据库中的列信息。
         </tr>
         <tr>
             <td>DATA_TYPE</td>
-            <td>nvarchar(128)</td>
+            <td>character varying(128)</td>
             <td>系统提供的数据类型</td>
         </tr>
         <tr>

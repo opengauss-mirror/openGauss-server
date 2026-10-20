@@ -35,7 +35,7 @@ SYSCOLUMNS视图为每个表和视图中的每列返回一行，并为数据库�
         </tr>
         <tr>
             <td>xusertype</td>
-            <td>smallint</td>
+            <td>oid</td>
             <td>类型 ID</td>
         </tr>
         <tr>
@@ -80,12 +80,12 @@ SYSCOLUMNS视图为每个表和视图中的每列返回一行，并为数据库�
         </tr>
         <tr>
             <td>cdefault</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>此列的默认值的 ID。</td>
         </tr>
         <tr>
             <td>domain</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>此列的规则或 CHECK 约束的 ID。</td>
         </tr>
         <tr>
