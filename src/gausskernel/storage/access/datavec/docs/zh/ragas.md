@@ -96,7 +96,7 @@ $ uv pip install openai pandas psycopg2-binary ragas tqdm
 
 ## 构建 RAG 管道
 
-定义使用 openGauss 作为向量存储、OpenAI 作为 LLM 的 RAG 类：该类包含 `load` 方法（将文本数据加载到 Milvus）、`retrieve` 方法（检索与给定问题最相似的文本数据）和 `answer` 方法（使用检索到的知识回答给定问题）。
+定义使用 openGauss 作为向量存储、OpenAI 作为 LLM 的 RAG 类：该类包含 `load` 方法（将数据加载到 openGauss）、`retrieve` 方法（检索与给定问题最相似的文本数据）和 `answer` 方法（使用检索到的知识回答给定问题）。
 
 ```python
 class OpenGaussClient:
