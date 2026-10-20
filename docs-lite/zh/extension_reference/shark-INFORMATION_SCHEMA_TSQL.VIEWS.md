@@ -40,7 +40,7 @@ VIEWS视图返回数据库中的视图信息。
         </tr>
          <tr>
             <td>IS_UPDATABLE</td>
-            <td>varchar(2)</td>
+            <td>character varying(3)</td>
             <td>指定视图是否可更新。1=TRUE,0=FALSE</td>
         </tr>
     </tbody>

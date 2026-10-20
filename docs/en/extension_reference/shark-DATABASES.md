@@ -17,12 +17,12 @@ The DATABASES view returns database information.
     <tbody>
         <tr>
             <td>name</td>
-            <td>name</td>
+            <td>character varying(128)</td>
             <td>Database name</td>
         </tr>
         <tr>
             <td>database_id</td>
-            <td>int</td>
+            <td>oid</td>
             <td>Database ID</td>
         </tr>
         <tr>
@@ -301,7 +301,7 @@ The DATABASES view returns database information.
             <td>Returns 0</td>
         </tr>
         <tr>
-            <td>nais_honor_broker_priority_onme</td>
+            <td>is_honor_broker_priority_on</td>
             <td>bit</td>
             <td>Returns 0</td>
         </tr>
@@ -446,11 +446,6 @@ The DATABASES view returns database information.
             <td>Returns 0</td>
         </tr>
         <tr>
-            <td>is_data_retention_on</td>
-            <td>bit</td>
-            <td>Returns 0</td>
-        </tr>
-        <tr>
             <td>is_ledger_on</td>
             <td>bit</td>
             <td>Returns 0</td>
@@ -461,17 +456,7 @@ The DATABASES view returns database information.
             <td>Returns 0</td>
         </tr>
         <tr>
-            <td>is_event_stream_enabled</td>
-            <td>bit</td>
-            <td>Returns 0</td>
-        </tr>
-        <tr>
             <td>is_vorder_enabled</td>
-            <td>bit</td>
-            <td>Returns 0</td>
-        </tr>
-        <tr>
-            <td>is_optimized_locking_on</td>
             <td>bit</td>
             <td>Returns 0</td>
         </tr>

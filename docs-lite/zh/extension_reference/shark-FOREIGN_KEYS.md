@@ -25,7 +25,7 @@
         </tr>
         <tr>
             <td>principal_id</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>对象owner的oid，取值恒为NULL</td>
         </tr>
         <tr>

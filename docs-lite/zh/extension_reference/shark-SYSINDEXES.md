@@ -90,17 +90,17 @@ SYSINDEXES视图为当前数据库中的每个索引和表各对应一行。此�
         </tr>
         <tr>
             <td>xmaxlen</td>
-            <td>smallint</td>
+            <td>integer</td>
             <td>行的最大大小。返回 0</td>
         </tr>
         <tr>
             <td>maxirow</td>
-            <td>smallint</td>
+            <td>integer</td>
             <td>返回 NULL</td>
         </tr>
         <tr>
             <td>OrigFillFactor</td>
-            <td>tinyint</td>
+            <td>integer</td>
             <td>创建索引时使用的初始填充因子值。 </td>
         </tr>
         <tr>
@@ -145,7 +145,7 @@ SYSINDEXES视图为当前数据库中的每个索引和表各对应一行。此�
         </tr>
         <tr>
             <td>statblob</td>
-            <td>blob</td>
+            <td>bytea</td>
             <td>统计信息二进制大型对象 (BLOB)。<br> 返回 NULL。</td>
         </tr>
         <tr>

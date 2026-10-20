@@ -32,12 +32,12 @@ Returns information about users in the database.
         </tr>
         <tr>
             <td>sid</td>
-            <td>varbinary(85)</td>
+            <td>bytea</td>
             <td>Returns NULL.</td>
         </tr>
         <tr>
             <td>roles</td>
-            <td>varbinary(2048)</td>
+            <td>bytea</td>
             <td>For reference only. Not supported. Future compatibility is not guaranteed. Returns NULL.</td>
         </tr>
         <tr>
@@ -57,7 +57,7 @@ Returns information about users in the database.
         </tr>
         <tr>
             <td>password</td>
-            <td>varbinary(256)</td>
+            <td>bytea</td>
             <td>For reference only. Not supported. Future compatibility is not guaranteed. Returns NULL.</td>
         </tr>
         <tr>

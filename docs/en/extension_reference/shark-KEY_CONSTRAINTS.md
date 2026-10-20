@@ -27,7 +27,7 @@ Returns information about primary keys and unique constraints.
         </tr>
         <tr>
             <td>principal_id</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>OID of the object owner. The value is always NULL.</td>
         </tr>
         <tr>

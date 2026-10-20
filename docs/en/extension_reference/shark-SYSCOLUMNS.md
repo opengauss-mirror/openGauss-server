@@ -37,7 +37,7 @@ The SYSCOLUMNS view returns one row for each column in every table and view, and
         </tr>
         <tr>
             <td>xusertype</td>
-            <td>smallint</td>
+            <td>oid</td>
             <td>Type ID</td>
         </tr>
         <tr>
@@ -82,12 +82,12 @@ The SYSCOLUMNS view returns one row for each column in every table and view, and
         </tr>
         <tr>
             <td>cdefault</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>ID of the default value for this column.</td>
         </tr>
         <tr>
             <td>domain</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>ID of the rule or CHECK constraint for this column.</td>
         </tr>
         <tr>

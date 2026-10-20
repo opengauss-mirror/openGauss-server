@@ -30,12 +30,12 @@ SYSUSERS视图返回数据库中的用户信息。
         </tr>
         <tr>
             <td>sid</td>
-            <td>varbinary(85)</td>
+            <td>bytea</td>
             <td>返回NULL</td>
         </tr>
         <tr>
             <td>roles</td>
-            <td>varbinary(2048)</td>
+            <td>bytea</td>
             <td>标识为仅供参考。 不支持。 不保证以后的兼容性。返回NULL</td>
         </tr>
         <tr>
@@ -55,7 +55,7 @@ SYSUSERS视图返回数据库中的用户信息。
         </tr>
         <tr>
             <td>password</td>
-            <td>varbinary(256)</td>
+            <td>bytea</td>
             <td>标识为仅供参考。 不支持。 不保证以后的兼容性。返回NULL</td>
         </tr>
         <tr>

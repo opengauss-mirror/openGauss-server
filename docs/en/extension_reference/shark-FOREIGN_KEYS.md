@@ -27,7 +27,7 @@ Returns information related to foreign key constraints.
         </tr>
         <tr>
             <td>principal_id</td>
-            <td>oid</td>
+            <td>integer</td>
             <td>OID of the object owner, always NULL</td>
         </tr>
         <tr>
