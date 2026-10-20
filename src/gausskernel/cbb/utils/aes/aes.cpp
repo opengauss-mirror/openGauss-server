@@ -270,6 +270,50 @@ void initDecryptInfo(DecryptInfo* pDecryptInfo)
     pDecryptInfo->moduleHmacCtx = NULL;
     pDecryptInfo->moduleSessionCtx = NULL;
 }
+
+/*
+ * Reset the per-file decrypt state (salt, derived key and pending chunk
+ * buffer) for soft AES128 files. Each encrypted file carries its own 16-byte
+ * salt in its header, so when several -f files are processed in one gsql
+ * process, the next file must re-read its own salt and re-derive the key
+ * instead of reusing the previous file's, otherwise its decryption fails.
+ * The user key, encryptInclude mark and crypto-module contexts are kept.
+ */
+void ResetDecryptSaltInfo(DecryptInfo* pDecryptInfo)
+{
+    errno_t errorno = EOK;
+
+    pDecryptInfo->randget = false;
+    errorno = memset_s(pDecryptInfo->rand, RANDOM_LEN + 1, '\0', RANDOM_LEN + 1);
+    if (errorno != EOK) {
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    /* clean the derived key for security */
+    errorno = memset_s(pDecryptInfo->g_decrypt_key, RANDOM_LEN, '\0', RANDOM_LEN);
+    if (errorno != EOK) {
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    /* drop any pending chunk state left by the previous file */
+    pDecryptInfo->isCurrLineProcess = false;
+    if (pDecryptInfo->decryptChunk != NULL) {
+        errorno = memset_s(pDecryptInfo->decryptChunk, pDecryptInfo->decryptChunkLen,
+            '\0', pDecryptInfo->decryptChunkLen);
+        if (errorno != EOK) {
+            securec_check_c(errorno, "\0", "\0");
+        }
+        free(pDecryptInfo->decryptChunk);
+        pDecryptInfo->decryptChunk = NULL;
+    }
+    pDecryptInfo->decryptChunkLen = 0;
+    pDecryptInfo->decryptChunkPos = 0;
+
+    if (pDecryptInfo->decryptBuff != NULL) {
+        free(pDecryptInfo->decryptBuff);
+        pDecryptInfo->decryptBuff = NULL;
+    }
+}
 static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
 {
     int nread = 0;
