@@ -8,7 +8,7 @@
 \! @abs_bindir@/gs_basebackup -h localhost -p -D @abs_srcdir@/tmp_check/bktempdir1/
 \! @abs_bindir@/gs_basebackup -h localhost -D @abs_srcdir@/tmp_check/bktempdir2/ -p
 \! @abs_bindir@/gs_basebackup -h localhost -p @portstring@d -D @abs_srcdir@/tmp_check/bktempdir3/
-\! @abs_bindir@/gs_basebackup -hlocalhost -p@portstring@ -D @abs_srcdir@/tmp_check/bktempdir4/ 2>&1 |grep successfully
+\! @abs_bindir@/gs_basebackup -h 127.0.0.1 -p@portstring@ -c fast -D @abs_srcdir@/tmp_check/bktempdir4/ >/dev/null 2>&1; echo $?
 
 --post
 \! rm -rf @abs_srcdir@/tmp_check/bktempdir1/

@@ -10,6 +10,10 @@
 # usecases for improving coverage 
 # --------------------------
 # these use cases may affect other usecases, please keep these usecases unique in their parallel groups
+# Full-instance backups. Run before the suite fills the data directory, and use
+# -c fast (see gs_basebackup.sh / gsbasebackup_options) so they stay under 60s.
+test: row_compression/row_compression_basebackup
+test: gsbasebackup_options
 test: ai_vector
 test: hnsw_rabitq_vector
 test: hnsw_lsg_vector
@@ -1109,7 +1113,7 @@ test: rename_table test_plsql_core alter_sequence_001 alter_seq_max_in_txn
 test: test_debug5
 
 # fix notice infos
-test: gstrace_options gaussdb_options gsql_options gsbasebackup_options gsdump_options gsloader_options
+test: gstrace_options gaussdb_options gsql_options gsdump_options gsloader_options
 
 # debug ceil(-0.5) -0
 test: ceil_negtive_zero

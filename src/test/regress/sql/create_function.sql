@@ -9,7 +9,9 @@ begin
 commit;
 end;
 /
-DROP SYNONYM proc_test;
+SET client_min_messages TO WARNING;
+DROP SYNONYM IF EXISTS proc_test;
+RESET client_min_messages;
 create or replace procedure proc_test
 IMMUTABLE
 is

@@ -10,8 +10,8 @@ gs_basebackup: The option '-p' need a parameter.
 gs_basebackup: The option '-p' need a parameter.
 \! @abs_bindir@/gs_basebackup -h localhost -p @portstring@d -D @abs_srcdir@/tmp_check/bktempdir3/
 invalid port number "@portstring@d"
-\! @abs_bindir@/gs_basebackup -hlocalhost -p@portstring@ -D @abs_srcdir@/tmp_check/bktempdir4/ 2>&1 |grep successfully
---?.*gs_basebackup: base backup successfully
+\! @abs_bindir@/gs_basebackup -h 127.0.0.1 -p@portstring@ -c fast -D @abs_srcdir@/tmp_check/bktempdir4/ >/dev/null 2>&1; echo $?
+0
 --post
 \! rm -rf @abs_srcdir@/tmp_check/bktempdir1/
 \! rm -rf @abs_srcdir@/tmp_check/bktempdir2/
