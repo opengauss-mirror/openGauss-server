@@ -189,6 +189,8 @@ sections:
         href: ./opengauss_eulercopilot.md
       - label: openGauss + Ragflow 从部署到集成
         href: ./opengauss_ragflow.md
+      - label: openGauss + MindsDB 轻松为数据库实现AI赋能
+        href: ./opengauss_mindsdb.md       
   - label: 图数据库引擎
     sections:
       - label: 快速开始

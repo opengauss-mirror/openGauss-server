@@ -153,6 +153,8 @@ sections:
         href: ./opengauss_eulercopilot.md
       - label: "openGauss + RAGFlow: From Deployment to Integration"
         href: ./opengauss_ragflow.md
+      - label: "Easily Empower Databases with AI Using openGauss + MindsDB"
+        href: ./opengauss_mindsdb.md
   - label: Graph Database Engine
     sections:
       - label: Quick Start
