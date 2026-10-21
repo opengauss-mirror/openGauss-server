@@ -1,67 +1,55 @@
-label: 其他插件参考
+label: Other Extension Reference
 isManual: true
 sections:
-  - label: NDPPlugin Extension
-    sections:
-      - label: NDPPlugin
-        href: ./ndpplugin.md       
-      - label: LibSmartScan
-        href: ./libsmartscan.md
-  - label: gms_stats Extension
-    href: ./gms_stats.md 
-  - label: gms_output Extension
-    href: ./gms_output.md
-  - label: gms_xmldom Extension
-    href: ./gms_xmldom.md  
-  - label: gms_xmlgen Extension
-    href: ./gms_xmlgen.md
-  - label: gms_xmlparser Extension
-    href: ./gms_xmlparser.md
-  - label: gms_profiler Extension
-    href: ./gms_profiler.md
-  - label: gms_i18n Extension
-    href: ./gms_i18n.md     
-  - label: gms_sql Extension
-    href: ./gms_sql.md
-  - label: gms_tcp Extension
-    href: ./gms_tcp.md                    
-  - label: gms_compress Extension
-    href: ./gms_compress.md
-  - label: gms_inaddr Extension
-    href: ./gms_inaddr.md
-  - label: gms_utility Extension
-    href: ./gms_utility.md
-  - label: gms_raw Extension
-    href: ./gms_raw.md
-  - label: gms_match Extension
-    href: ./gms_match.md          
-  - label: gms_assert Extension
+  - label: gms_assert
     href: ./gms_assert.md
+  - label: gms_compress
+    href: ./gms_compress.md
+  - label: gms_i18n
+    href: ./gms_i18n.md
+  - label: gms_inaddr
+    href: ./gms_inaddr.md
+  - label: gms_match
+    href: ./gms_match.md
+  - label: gms_output Overview
+    href: ./gms_output.md
+  - label: gms_profiler
+    href: ./gms_profiler.md
+  - label: gms_raw
+    href: ./gms_raw.md
+  - label: gms_sql
+    href: ./gms_sql.md
+  - label: gms_stats
+    href: ./gms_stats.md
+  - label: gms_tcp
+    href: ./gms_tcp.md
+  - label: gms_utility
+    href: ./gms_utility.md
   - label: shark Extension
     href: ./shark.md
-  - label: shark语法介绍
+  - label: shark Syntax Introduction
     sections:
-      - label: 关键字
+      - label: Keywords
         href: ./shark_keywords.md
-      - label: 数据类型
-        sections:
-          - label: 字符类型
+      - label: Data Type
+        sections:   
+          - label: Character Types
             href: ./shark_character_types.md
-          - label: sql_variant类型
+          - label: sql_variant Type
             href: ./shark_sql_variant_types.md
-          - label: varbinary类型
+          - label: varbinary Type
             href: ./shark_varbinary_types.md
-      - label: 函数和操作符
+      - label: Functions and Operators
         sections:
-          - label: 系统信息函数
+          - label: shark - System Information Functions
             href: ./shark_system_information_functions.md
-          - label: 系统常用函数
+          - label: shark-System Common Functions
             href: ./shark_system_common_functions.md
-          - label: 操作符
+          - label: Operators
             href: ./shark_operators.md
-      - label: SQL语法
+      - label: SQL Tutorials
         sections:
-          - label: GUC参数说明
+          - label: GUC Parameter Description
             href: ./shark_guc_parameters.md
           - label: CREATE INDEX
             href: ./shark-CREATE-INDEX.md
@@ -101,19 +89,17 @@ sections:
             href: ./shark-DROP-TRIGGER.md         
           - label: XACT_ABORT
             href: ./shark_xact_abort.md
-          - label: ALIAS
-            href: ./shark_ALIAS.md
-      - label: 事务
+      - label: Transactions
         sections: 
-          - label: 管理事务
+          - label: Managing_Transactions
             href: ./shark_managing_transactions.md
-      - label: 不支持语法
+      - label: Unsupported Syntax
         href: ./shark_unsupported_syntax.md
-      - label: 存储过程
+      - label: Stored Procedure
         sections: 
-          - label: 基本语句
+          - label: Basic statements
             href: ./shark_stored_procedure_sqlreference.md
-      - label: 系统视图
+      - label: System Views
         sections: 
           - label: ALL_COLUMNS
             href: ./shark-ALL_COLUMNS.md
@@ -197,6 +183,7 @@ sections:
     href: ./gms_lob.md
   - label: gms_debug Extension
     href: ./gms_debug.md
+  - label: gms_xmlparser Extension
+    href: ./gms_xmlparser.md
   - label: wal2json Extension
     href: ./wal2json.md           
-                                  
