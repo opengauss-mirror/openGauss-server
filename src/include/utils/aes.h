@@ -85,6 +85,7 @@ typedef struct decrypt_struct {
 } DecryptInfo;
 
 extern void initDecryptInfo(DecryptInfo* pDecryptInfo);
+extern void ResetDecryptSaltInfo(DecryptInfo* pDecryptInfo);
 extern char* getLineFromAesEncryptFile(FILE* source, DecryptInfo* pDecryptInfo);
 extern bool writeFileAfterEncryption(
     FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* rand,

@@ -1859,6 +1859,18 @@ static int ProcessActionFile(struct adhoc_opts options,
     if (!isparseonly)
         fprintf(stdout, "total time: %lld  ms\n", (long long int)total_time);
 
+    /*
+     * Database Security: Data importing/dumping support AES128.
+     * Each soft AES128 encrypted file has its own salt in its header, so after
+     * one -f file is done, reset the salt state to make the next -f file in
+     * the same process re-read its own salt and re-derive the key instead of
+     * decrypting with the previous file's key. Crypto-module files take the
+     * salt from the command line and are not affected.
+     */
+    if (pset.decryptInfo.encryptInclude && pset.decryptInfo.moduleKeyCtx == NULL) {
+        ResetDecryptSaltInfo(&pset.decryptInfo);
+    }
+
     return successResult;
 }
 
