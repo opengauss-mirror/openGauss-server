@@ -384,6 +384,8 @@ typedef struct knl_u_optimizer_context {
     int op_work_mem;
 
     MemoryContext ft_context;
+    /* Stable context for allocations that may outlive one GEQO evaluation. */
+    MemoryContext mmgr_geqo_backup_context;
 
     struct Distribution* in_redistribution_group_distribution;
 
@@ -1724,6 +1726,7 @@ typedef struct knl_u_plpgsql_context {
     bool isCreatePkgFunction;
     bool has_invalid_pkg;
     bool has_invalid_func;
+    List* nestedCompileInvalidPackageList;
     bool has_error;
     bool is_pipelined; /* for readonly ereport */
     bool is_exec_autonomous;

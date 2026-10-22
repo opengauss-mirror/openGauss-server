@@ -1,0 +1,96 @@
+-- PR 9678: array parsing, repeated GEQO planning and invalidated PL/pgSQL plans.
+SET client_min_messages = warning;
+CREATE SCHEMA plpgsql_array_geqo;
+SET current_schema = plpgsql_array_geqo;
+-- DTS21: preserve the original malformed UTF8 checks.
+SELECT E'{\302}'::text[] IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x7d
+SELECT E'{"\302"}'::text[] IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x22
+SELECT format('%s', ARRAY[E'\302 '::text]) IS NOT NULL;
+ERROR:  invalid byte sequence for encoding "UTF8": 0xc2 0x20
+-- Complete multibyte characters must retain their original round-trip behavior.
+SELECT ARRAY['中文', '表', '😀']::text[]::text::text[] = ARRAY['中文', '表', '😀'] AS utf8_round_trip;
+ utf8_round_trip 
+-----------------
+ t
+(1 row)
+
+SELECT '{{"中文","表"},{"字","符"}}'::text[][]::text::text[][] = ARRAY[['中文','表'],['字','符']] AS utf8_nested_array;
+ utf8_nested_array 
+-------------------
+ t
+(1 row)
+
+-- DTS22: own fixture keeps the test independent of the join/tenk1 schedule.
+CREATE TABLE geqo_input (id integer);
+INSERT INTO geqo_input SELECT generate_series(1, 8);
+ANALYZE geqo_input;
+BEGIN;
+SET LOCAL geqo = on;
+SET LOCAL geqo_threshold = 2;
+DO $$
+DECLARE
+    i integer;
+    joined_count bigint;
+BEGIN
+    FOR i IN 1..5 LOOP
+        EXECUTE 'SELECT count(*) FROM geqo_input a
+                 JOIN geqo_input b ON a.id = b.id
+                 JOIN geqo_input c ON b.id = c.id
+                 JOIN geqo_input d ON c.id = d.id
+                 WHERE a.id <= 3' INTO joined_count;
+        IF joined_count <> 3 THEN
+            RAISE EXCEPTION 'unexpected repeated GEQO result: %', joined_count;
+        END IF;
+    END LOOP;
+END;
+$$;
+ROLLBACK;
+-- DTS23: exercise the shared PL/pgSQL plan invalidation/reprepare path in 6.0.
+CREATE TABLE pl_cache_input (id integer);
+INSERT INTO pl_cache_input VALUES (11);
+CREATE FUNCTION pl_cache_read() RETURNS integer AS $$
+DECLARE
+    value integer;
+BEGIN
+    SELECT id INTO value FROM pl_cache_input;
+    RETURN value;
+END;
+$$ LANGUAGE plpgsql;
+SELECT pl_cache_read();
+ pl_cache_read 
+---------------
+            11
+(1 row)
+
+DROP TABLE pl_cache_input;
+CREATE TABLE pl_cache_input (id integer);
+INSERT INTO pl_cache_input VALUES (23);
+SELECT pl_cache_read();
+ pl_cache_read 
+---------------
+            23
+(1 row)
+
+BEGIN;
+ALTER TABLE pl_cache_input ADD COLUMN extra integer;
+SELECT pl_cache_read();
+ pl_cache_read 
+---------------
+            23
+(1 row)
+
+ROLLBACK;
+SELECT pl_cache_read();
+ pl_cache_read 
+---------------
+            23
+(1 row)
+
+DROP FUNCTION pl_cache_read();
+DROP TABLE pl_cache_input;
+DROP TABLE geqo_input;
+RESET current_schema;
+DROP SCHEMA plpgsql_array_geqo;
+RESET client_min_messages;
