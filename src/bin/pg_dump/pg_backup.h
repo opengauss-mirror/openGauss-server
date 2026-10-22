@@ -116,6 +116,8 @@ struct Archive {
 typedef int (*DataDumperPtr)(Archive* AH, void* userArg);
 typedef void (*SetupWorkerPtr) (Archive *AH);
 
+enum { RESTRICT_KEY_OPTION = 25 };
+
 typedef struct _restoreOptions {
     int createDB;           /* Issue commands to create the database */
     int noOwner;            /* Don't try to match original object owner */
@@ -174,6 +176,7 @@ typedef struct _restoreOptions {
 #endif
     bool* idWanted; /* array showing which dump IDs to emit */
     bool set_session; /* is start set session */
+    char* restrictKey; /* protects generated scripts, never sent to a server */
 } RestoreOptions;
 
 typedef struct {

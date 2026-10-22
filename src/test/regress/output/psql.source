@@ -22,6 +22,11 @@ General
   \h(\help) [NAME]              help on syntax of SQL commands, * for all commands
   \parallel [on [num]|off] toggle status of execute (currently off)
   \q                     quit gsql
+  \restrict RESTRICT_KEY
+                         enter restricted mode with provided key;
+                         only \unrestrict is allowed in this mode
+  \unrestrict RESTRICT_KEY
+                         exit restricted mode if key matches
 
 Query Buffer
   \e [FILE] [LINE]       edit the query buffer (or file) with external editor

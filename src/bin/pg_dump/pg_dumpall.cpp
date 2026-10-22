@@ -127,6 +127,7 @@ static int include_alter_table = 0;
 static FILE* OPF;
 static char* filename = NULL;
 static char* filepath = NULL;
+static char* g_restrictKey = NULL;
 
 static bool data_only = false;
 static bool schema_only = false;
@@ -254,6 +255,7 @@ int main(int argc, char* argv[])
         {"include-templatedb", no_argument, NULL, 11},
         {"parallel-jobs", required_argument, NULL, 12},
         {"pipeline", no_argument, NULL, 13},
+        {"restrict-key", required_argument, NULL, RESTRICT_KEY_OPTION},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -487,7 +489,6 @@ int main(int argc, char* argv[])
         res = PQexec(conn, query->data);
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
             fprintf(stderr, _("%s: query failed: %s"), progname, PQerrorMessage(conn));
-            printf(_("%s: query failed: %s"), progname, PQerrorMessage(conn));
 
             /* Clear password related memory to avoid leaks when core. */
             char* pqpass = PQpass(conn);
@@ -532,6 +533,9 @@ int main(int argc, char* argv[])
     if ('\0' != init_rand[0]) {
         dumpall_printf(OPF, "%s", init_rand);
     }
+
+    /* Block source-controlled meta-commands before emitting any server content. */
+    dumpall_printf(OPF, "\\restrict %s\n\n", g_restrictKey);
 
     dumpall_printf(OPF, "--\n-- openGauss database cluster dump\n--\n\n");
     if (verbose)
@@ -657,6 +661,7 @@ static void free_dumpall()
     GS_FREE(encrypt_key);
     GS_FREE(parallel_jobs);
     GS_FREE(filename);
+    GS_FREE(g_restrictKey);
 }
 
 /**
@@ -827,6 +832,9 @@ static void do_dumpall(PGconn* conn)
         }
 #endif
     }
+
+    /* Each child gs_dump manages restricted mode for its own output. */
+    dumpall_printf(OPF, "\\unrestrict %s\n\n", g_restrictKey);
 
     if (!globals_only && !roles_only && !tablespaces_only)
         dumpDatabases(conn);
@@ -1076,6 +1084,17 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
                 is_pipeline = true;
                 break;
 
+            case RESTRICT_KEY_OPTION:
+                if (!ValidRestrictKey(optarg)) {
+                    write_stderr(_("%s: invalid restrict key: must contain only alphanumeric characters\n"), progname);
+                    exit_nicely(1);
+                }
+                GS_FREE(g_restrictKey);
+                g_restrictKey = gs_strdup(optarg);
+                appendPQExpBuffer(pgdumpopts, " --restrict-key ");
+                doShellQuoting(pgdumpopts, g_restrictKey);
+                break;
+
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -1094,6 +1113,19 @@ static void validate_dumpall_options(char** argv)
 {
     // log output redirect
     init_log((char*)PROG_NAME);
+
+    /* Do not pass an automatically generated key to child gs_dump processes. */
+    if (g_restrictKey == NULL) {
+        g_restrictKey = GenerateRestrictKey();
+    }
+    if (g_restrictKey == NULL) {
+        write_stderr(_("%s: could not generate restrict key\n"), progname);
+        exit_nicely(1);
+    }
+    if (!ValidRestrictKey(g_restrictKey)) {
+        write_stderr(_("%s: invalid restrict key: must contain only alphanumeric characters\n"), progname);
+        exit_nicely(1);
+    }
 
     /* Make sure the user hasn't specified a mix of globals-only options */
     if (globals_only && roles_only) {
@@ -1253,6 +1285,7 @@ void help(void)
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
     printf(_("  --include-alter-table                       dump the table delete column\n"));
     printf(_("  --quote-all-identifiers                     quote all identifiers, even if not key words\n"));
+    printf(_("  --restrict-key=RESTRICT_KEY                 use provided string as gsql \\restrict key\n"));
     printf(_("  --dont-overwrite-file                       do not overwrite the existing file\n"));
     printf(_("  --use-set-session-authorization             use SET SESSION AUTHORIZATION commands instead of\n"
              "                                              ALTER OWNER commands to set ownership\n"));
@@ -2859,7 +2892,10 @@ static void dumpDatabases(PGconn* conn)
             if (verbose)
                 write_stderr(_("%s: dumping database \"%s\"...\n"), progname, dbname);
 
-            dumpall_printf(OPF, "\\connect %s\n\n", fmtId(dbname));
+            PQExpBuffer connectbuf = createPQExpBuffer();
+            appendPsqlMetaConnect(connectbuf, dbname);
+            dumpall_printf(OPF, "%s\n", connectbuf->data);
+            destroyPQExpBuffer(connectbuf);
 
             if (filename != NULL)
                 fclose(OPF);
