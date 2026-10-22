@@ -159,8 +159,8 @@ To stop the OpenClaw or Claude Code process, stop them using the corresponding t
 
 For more variables of the OpenClaw local plugin, see:
 
-- [openclaw_context_engine_plugin/ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
-- [openclaw_context_engine_plugin/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/README.md)
+- [openclaw/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/ENV.md)
+- [openclaw/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/README.md)
 
 ## 5. Method C: Docker-Based Integrated Deployment
 

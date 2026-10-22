@@ -59,7 +59,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 /usr/bin/ollama
 ```
 
-注：arm 架构的下载地址为 <https://ollama.com/download/ollama-linux-arm64.tgz>
+注：arm 架构的下载地址为 <https://github.com/ollama/ollama/releases/download/v0.33.3/ollama-linux-arm64.tar.zst>
 
 安装成功后，我们可以启动 ollama 服务：
 

@@ -311,4 +311,4 @@ curl http://127.0.0.1:8090/api/v1/health
 | [config/ogmem.reference.yaml](https://gitcode.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) | 完整 YAML 模板 |
 | [OGMEMORY_ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md) | 完整环境变量说明 |
 | [deploy/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/deploy/README.md) | Docker 一体化部署 |
-| [openclaw_context_engine_plugin/ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md) | OpenClaw 插件变量 |
+| [openclaw/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/ENV.md) | OpenClaw 插件变量 |

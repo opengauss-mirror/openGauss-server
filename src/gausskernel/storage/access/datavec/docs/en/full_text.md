@@ -1,0 +1,3 @@
+# Full-Text Search Index
+
+A full-text search index is built on the text content of a dataset to support fast and flexible queries that return documents containing specific keywords or phrases, and to sort the returned document set by relevance. openGauss currently supports two types of full-text indexes: GIN index and BM25 index. The BM25 index uses the BM25 algorithm for relevance scoring and performs fast pruning search based on the DAAT MaxScore algorithm, reducing query response time by tens or even hundreds of times compared with the GIN index. It helps you quickly obtain the documents most relevant to the search terms and improves the performance of Retrieval-Augmented Generation (RAG) systems.

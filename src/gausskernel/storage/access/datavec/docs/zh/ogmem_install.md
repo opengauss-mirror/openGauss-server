@@ -159,8 +159,8 @@ OpenClaw 或 Claude Code 进程请按各自工具的方式停止。
 
 OpenClaw 本地插件的更多变量见：
 
-- [openclaw_context_engine_plugin/ENV.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
-- [openclaw_context_engine_plugin/README.md](https://gitcode.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/README.md)
+- [openclaw/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/ENV.md)
+- [openclaw/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/README.md)
 
 ## 五、方式 C：Docker 一体化部署
 
