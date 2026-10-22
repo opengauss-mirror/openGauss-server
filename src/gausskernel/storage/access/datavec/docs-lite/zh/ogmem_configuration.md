@@ -198,4 +198,4 @@ openclaw config get plugins.slots.contextEngine
 
 - [YAML 字段](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml)
 - [服务环境变量](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md)
-- [OpenClaw 插件配置与环境变量](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md)
+- [OpenClaw 插件配置与环境变量](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/ENV.md)

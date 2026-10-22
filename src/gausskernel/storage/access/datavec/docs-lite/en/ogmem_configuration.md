@@ -311,4 +311,4 @@ curl http://127.0.0.1:8090/api/v1/health
 | [config/ogmem.reference.yaml](https://atomgit.com/opengauss/oGMemory/blob/dev/config/ogmem.reference.yaml) | Complete YAML template. |
 | [OGMEMORY_ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/docs/OGMEMORY_ENV.md) | Description of complete environment variables |
 | [deploy/README.md](https://atomgit.com/opengauss/oGMemory/blob/dev/deploy/README.md) | Docker integrated deployment |
-| [openclaw_context_engine_plugin/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/openclaw_context_engine_plugin/ENV.md) | OpenClaw plugin variables |
+| [openclaw/ENV.md](https://atomgit.com/opengauss/oGMemory/blob/dev/plugins/openclaw/ENV.md) | OpenClaw plugin variables |
