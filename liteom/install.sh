@@ -764,6 +764,8 @@ function config_db()
             sed -i "/.*host\\s*all\\s*${user}\\s*${remoteips[${index}]}\/${mask_length}\\s*trust/d" ${data_path}/pg_hba.conf
             echo "host    all             ${user}             ${remoteips[${index}]}/${mask_length}            trust" | tee -a ${data_path}/pg_hba.conf
             log "echo host    all             ${user}             ${remoteips[${index}]}/${mask_length}            trust | tee -a ${data_path}/pg_hba.conf"
+			echo "host    replication             ${user}             ${remoteips[${index}]}/${mask_length}            trust" | tee -a ${data_path}/pg_hba.conf
+            log "echo host    replication             ${user}             ${remoteips[${index}]}/${mask_length}            trust | tee -a ${data_path}/pg_hba.conf"
             index=$[ $index + 1 ]
         done
     fi
