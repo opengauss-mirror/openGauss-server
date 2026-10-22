@@ -1,0 +1,28 @@
+-- PR 9695 / DTS24: keep Start With internal columns through projections.
+CREATE SCHEMA startwith_window_backport;
+SET current_schema = startwith_window_backport;
+CREATE TABLE test_for_sysfunc_under_ops(a int, b int, c int);
+INSERT INTO test_for_sysfunc_under_ops VALUES (1,1,1),(1,2,1),(2,3,1),(3,4,1),(1,4,1);
+SELECT _root FROM (
+    SELECT connect_by_root(a) _root, level,
+           max(level) OVER (PARTITION BY 1) mlv
+    FROM test_for_sysfunc_under_ops t1
+    START WITH t1.a = t1.b
+    CONNECT BY NOCYCLE PRIOR b = a
+) WHERE level = mlv;
+
+-- Use columns 11 and 12 to exercise complete array_col_ suffix mapping.
+CREATE TABLE sw_wide(id int, parent_id int, c3 int, c4 int, c5 int, c6 int,
+                     c7 int, c8 int, c9 int, c10 int, c11 text, c12 text);
+INSERT INTO sw_wide VALUES
+    (1,0,0,0,0,0,0,0,0,0,'root','r'),
+    (2,1,0,0,0,0,0,0,0,0,'leaf','l');
+SELECT id, connect_by_root(c11) AS root_name, sys_connect_by_path(c12,'/') AS node_path
+FROM sw_wide
+START WITH parent_id = 0
+CONNECT BY PRIOR id = parent_id
+ORDER BY id;
+DROP TABLE sw_wide;
+DROP TABLE test_for_sysfunc_under_ops;
+RESET current_schema;
+DROP SCHEMA startwith_window_backport;

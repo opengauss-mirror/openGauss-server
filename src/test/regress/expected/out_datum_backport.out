@@ -1,0 +1,71 @@
+-- PR 9695 / DTS25: valid OUT row datums across normal call paths.
+CREATE SCHEMA out_datum_backport;
+SET current_schema = out_datum_backport;
+SET behavior_compat_options = 'proc_outparam_override';
+CREATE FUNCTION out_one(i IN integer, o OUT integer) RETURNS integer AS $$
+BEGIN
+    o := i + 1;
+    RETURN i * 10;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION out_two(i IN integer, o1 OUT integer, o2 OUT text) RETURNS integer AS $$
+BEGIN
+    o1 := i + 2;
+    o2 := 'value-' || i::text;
+    RETURN i * 100;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION out_inout(i IN integer, io INOUT integer) RETURNS integer AS $$
+BEGIN
+    io := io + i;
+    RETURN io * 10;
+END;
+$$ LANGUAGE plpgsql;
+DO $$
+DECLARE
+    result integer;
+    out_value integer;
+    out_text text;
+    inout_value integer := 8;
+    idx integer;
+BEGIN
+    result := out_one(4, out_value);
+    IF result IS DISTINCT FROM 40 OR out_value IS DISTINCT FROM 5 THEN
+        RAISE EXCEPTION 'positional OUT mismatch';
+    END IF;
+    PERFORM out_one(5, out_value);
+    IF out_value IS DISTINCT FROM 6 THEN
+        RAISE EXCEPTION 'PERFORM OUT mismatch';
+    END IF;
+    result := out_one(i => 6, o => out_value);
+    IF result IS DISTINCT FROM 60 OR out_value IS DISTINCT FROM 7 THEN
+        RAISE EXCEPTION 'named OUT mismatch';
+    END IF;
+    result := out_two(7, out_value, out_text);
+    IF result IS DISTINCT FROM 700 OR out_value IS DISTINCT FROM 9 OR out_text IS DISTINCT FROM 'value-7' THEN
+        RAISE EXCEPTION 'multiple OUT mismatch';
+    END IF;
+    result := out_inout(i => 2, io => inout_value);
+    IF result IS DISTINCT FROM 100 OR inout_value IS DISTINCT FROM 10 THEN
+        RAISE EXCEPTION 'INOUT mismatch';
+    END IF;
+    FOR idx IN 1..3 LOOP
+        result := out_one(idx, out_value);
+        IF result IS DISTINCT FROM idx * 10 OR out_value IS DISTINCT FROM idx + 1 THEN
+            RAISE EXCEPTION 'cached OUT expression mismatch';
+        END IF;
+    END LOOP;
+END;
+$$;
+SELECT 'out_parameter_paths_ok' AS result;
+         result         
+------------------------
+ out_parameter_paths_ok
+(1 row)
+
+DROP FUNCTION out_inout;
+DROP FUNCTION out_two;
+DROP FUNCTION out_one;
+RESET behavior_compat_options;
+RESET current_schema;
+DROP SCHEMA out_datum_backport;
