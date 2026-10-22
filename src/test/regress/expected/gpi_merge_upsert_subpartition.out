@@ -5,6 +5,7 @@
 --
 \o /dev/null
 drop table if exists issue_8420_subpartition_t cascade;
+NOTICE:  table "issue_8420_subpartition_t" does not exist, skipping
 create table issue_8420_subpartition_t
 (
     a date not null,
@@ -31,12 +32,11 @@ partition by range (a) subpartition by range (b)
     )
 )
 enable row movement;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "issue_8420_subpartition_t_pkey" for table "issue_8420_subpartition_t"
 insert into issue_8420_subpartition_t values ('2021-01-10', 1, 'initial');
 insert into issue_8420_subpartition_t values ('2021-01-10', 1, 'initial')
     on duplicate key update c = 'upsert';
 copy issue_8420_subpartition_t (a, b, c) from stdin;
-2021-02-10	2	copy_row
-\.
 update issue_8420_subpartition_t
 set a = '2021-03-10'
 where c = 'copy_row';

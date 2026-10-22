@@ -85,11 +85,9 @@ order by a;
 
 -- Exercise the other write paths whose callers now receive the opened OID.
 copy issue_8420_interval_part_t (a, b, c) from stdin;
-COPY 1
 update issue_8420_interval_part_t
 set a = '2024-02-15 17:00:00'
 where a = '2024-01-15 17:00:00';
-UPDATE 1
 select to_char(a, 'YYYY-MM-DD HH24:MI:SS') as a, b, c
 from issue_8420_interval_part_t
 where c = 'copy_row';
