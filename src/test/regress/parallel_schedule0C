@@ -208,3 +208,7 @@ test: enable_expr_fusion_flatten
 
 # PR 9678: array, GEQO and PL/pgSQL plan-cache backport
 test: plpgsql_array_geqo
+
+# PR 9664: holdable cursor and autonomous package state
+test: cursor_hold_backport
+test: autonomous_package_backport
