@@ -73,6 +73,9 @@ static void pg_decode_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *tx
     int nrelations, Relation relations[], ReorderBufferChange *change);
 static void pg_decode_change(
     LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation rel, ReorderBufferChange* change);
+static void pg_decode_change_internal(
+    LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation,
+    ReorderBufferChange* change, TransactionId stream_xid);
 static bool pg_decode_filter(LogicalDecodingContext* ctx, RepOriginId origin_id);
 static void pg_decode_ddl(LogicalDecodingContext *ctx,
                           ReorderBufferTXN *txn, XLogRecPtr message_lsn,
@@ -298,7 +301,8 @@ static void pg_decode_stream_abort(LogicalDecodingContext* ctx, ReorderBufferTXN
         return;
     }
     OutputPluginPrepareWrite(ctx, true);
-    appendStringInfo(ctx->out, "{\"type\":\"stream_abort\",\"xid\":%lu}", txn->xid);
+    appendStringInfo(ctx->out, "{\"type\":\"stream_abort\",\"xid\":%lu,\"topxid\":%lu}",
+        txn->xid, toptxn->xid);
     OutputPluginWrite(ctx, true);
 }
 
@@ -329,7 +333,8 @@ static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTX
         OutputPluginWrite(ctx, true);
         txndata->streamStarted = true;
     }
-    pg_decode_change(ctx, txn, rel, change);
+    Assert(change->txn != NULL);
+    pg_decode_change_internal(ctx, txn, rel, change, change->txn->xid);
 }
 
 /* PREPARE callback */
@@ -503,6 +508,13 @@ static void pg_decode_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *tx
 static void pg_decode_change(
     LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change)
 {
+    pg_decode_change_internal(ctx, txn, relation, change, InvalidTransactionId);
+}
+
+static void pg_decode_change_internal(
+    LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation,
+    ReorderBufferChange* change, TransactionId stream_xid)
+{
     PluginTestDecodingData* data = NULL;
     Form_pg_class class_form;
     TupleDesc tupdesc;
@@ -540,6 +552,12 @@ static void pg_decode_change(
     OutputPluginPrepareWrite(ctx, true);
 
     cJSON* root = cJSON_CreateObject();
+    if (TransactionIdIsValid(stream_xid)) {
+        /* Keep the full transaction ID without JSON floating-point conversion. */
+        char* xid = psprintf("%lu", stream_xid);
+        cJSON_AddItemToObject(root, "xid", cJSON_CreateString(xid));
+        pfree(xid);
+    }
     cJSON* table_name = cJSON_CreateString(quote_qualified_identifier(schema, table));
     cJSON_AddItemToObject(root, "table_name", table_name);
 

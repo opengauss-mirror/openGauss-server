@@ -65,6 +65,9 @@ static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTX
                                    ReorderBufferChange* change);
 static void pg_decode_change(
     LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation rel, ReorderBufferChange* change);
+static void pg_decode_change_internal(
+    LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation,
+    ReorderBufferChange* change, TransactionId stream_xid);
 static bool pg_decode_filter(LogicalDecodingContext* ctx, RepOriginId origin_id);
 static void pg_decode_truncate(LogicalDecodingContext *ctx,
                                ReorderBufferTXN *txn,
@@ -331,7 +334,7 @@ static void pg_decode_stream_abort(LogicalDecodingContext* ctx, ReorderBufferTXN
         return;
     }
     OutputPluginPrepareWrite(ctx, true);
-    appendStringInfo(ctx->out, "-- STREAM ABORT xid=%lu", txn->xid);
+    appendStringInfo(ctx->out, "-- STREAM ABORT xid=%lu topxid=%lu", txn->xid, toptxn->xid);
     OutputPluginWrite(ctx, true);
 }
 
@@ -362,7 +365,8 @@ static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTX
         OutputPluginWrite(ctx, true);
         txndata->streamStarted = true;
     }
-    pg_decode_change(ctx, txn, rel, change);
+    Assert(change->txn != NULL);
+    pg_decode_change_internal(ctx, txn, rel, change, change->txn->xid);
 }
 
 static bool pg_decode_filter(LogicalDecodingContext* ctx, RepOriginId origin_id)
@@ -577,6 +581,13 @@ static void TupleHandler(Relation relation, StringInfo s, TupleDesc tupdesc, Reo
 static void pg_decode_change(
     LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change)
 {
+    pg_decode_change_internal(ctx, txn, relation, change, InvalidTransactionId);
+}
+
+static void pg_decode_change_internal(
+    LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation,
+    ReorderBufferChange* change, TransactionId stream_xid)
+{
     Form_pg_class class_form = NULL;
     TupleDesc tupdesc = NULL;
     TestDecodingData* data = (TestDecodingData*)ctx->output_plugin_private;
@@ -602,6 +613,9 @@ static void pg_decode_change(
         table = NameStr(class_form->relname);
 
     OutputPluginPrepareWrite(ctx, true);
+    if (TransactionIdIsValid(stream_xid)) {
+        appendStringInfo(ctx->out, "-- STREAM CHANGE xid=%lu\n", stream_xid);
+    }
 
     switch (change->action) {
         case REORDER_BUFFER_CHANGE_INSERT:
