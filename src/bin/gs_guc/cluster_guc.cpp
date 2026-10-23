@@ -4901,9 +4901,9 @@ static bool CheckStringValueForSecurity(const char* paraname, const char* value)
     };
 
     for (int i = 0; dangerCharacters[i].token != NULL; i++) {
-        /* ustore_attr uses semicolons to separate internal key-value options. */
+        /* ustore_attr and ssl_ciphers use semicolons to separate internal options. */
         if (strcmp(dangerCharacters[i].token, ";") == 0 && paraname != NULL &&
-            pg_strcasecmp(paraname, "ustore_attr") == 0) {
+            (pg_strcasecmp(paraname, "ustore_attr") == 0 || pg_strcasecmp(paraname, "ssl_ciphers") == 0)) {
             continue;
         }
         if (strstr(value, dangerCharacters[i].token) != NULL) {
