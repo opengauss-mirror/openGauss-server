@@ -173,6 +173,7 @@ int main(int argc, char** argv)
         {"with-salt", required_argument, NULL, 9},
         {"with-module-params", required_argument, NULL, 10},
         {"with-decryption", required_argument, NULL, 11},
+        {"restrict-key", required_argument, NULL, RESTRICT_KEY_OPTION},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -468,6 +469,7 @@ static void free_restoreopts(RestoreOptions* opts)
         opts->tocFile = NULL;
         free(opts->pgport);
         opts->pgport = NULL;
+        GS_FREE(opts->restrictKey);
 
         if (opts->idWanted != NULL) {
             free(opts->idWanted);
@@ -516,6 +518,9 @@ static void validate_restore_options(char** argv, RestoreOptions* opts)
             write_stderr(_("%s: options -d/--dbname and -f/--file cannot be used together\n"), progname);
             write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
             exit_nicely(1);
+        }
+        if (opts->restrictKey != NULL) {
+            exit_horribly(NULL, "options -d/--dbname and --restrict-key cannot be used together\n");
         }
         opts->useDB = 1;
     }
@@ -767,6 +772,10 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
                 decrypt_mode = gs_strdup(optarg);
                 is_encrypt = true;
                 break;
+            case RESTRICT_KEY_OPTION:
+                GS_FREE(opts->restrictKey);
+                opts->restrictKey = gs_strdup(optarg);
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -831,6 +840,7 @@ void usage(const char* pchProgname)
     printf(_("  --no-subscriptions                    do not restore subscriptions\n"));
 #endif
     printf(_("  --no-tablespaces                      do not restore tablespace assignments\n"));
+    printf(_("  --restrict-key=RESTRICT_KEY           use provided string as gsql \\restrict key\n"));
     printf(_("  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"));
     printf(_("  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"
              "                                        ALTER OWNER commands to set ownership\n"));

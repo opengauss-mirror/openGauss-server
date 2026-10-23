@@ -87,11 +87,15 @@ typedef struct {
     TAR_MEMBER* FH;
     int isSpecialScript;
     TAR_MEMBER* scriptTH;
+    FILE* scriptData; /* INSERT data is buffered for per-table restricted scripts. */
+    char* scriptDataName;
 } lclContext;
 
 typedef struct {
     TAR_MEMBER* TH;
     char* filename;
+    pgoff_t scriptDataOffset;
+    pgoff_t scriptDataLength;
 } lclTocEntry;
 
 /* translator: this is a module name */
@@ -583,7 +587,35 @@ static size_t tarWrite(const void* buf, size_t len, TAR_MEMBER* th)
 
 static size_t _WriteData(ArchiveHandle* AH, const void* data, size_t dLen)
 {
+    lclContext* ctx = (lclContext*)AH->formatData;
     lclTocEntry* tctx = (lclTocEntry*)AH->currToc->formatData;
+
+    if (AH->currToc->copyStmt == NULL && strcmp(AH->currToc->desc, "BLOBS") != 0) {
+        if (ctx->scriptData == NULL) {
+            TAR_MEMBER* tmp = tarOpen(AH, "restore-inserts", 'w');
+            ctx->scriptData = tmp->tmpFH;
+#ifndef WIN32
+            if (unlink(tmp->tmpFile) != 0) {
+                exit_horribly(modulename, "could not unlink temporary script data: %s\n", gs_strerror(errno));
+            }
+            free(tmp->tmpFile);
+#else
+            ctx->scriptDataName = tmp->tmpFile;
+#endif
+            free(tmp->targetFile);
+            free(tmp);
+        }
+        if (tctx->scriptDataLength == 0) {
+            tctx->scriptDataOffset = ftello(ctx->scriptData);
+            if (tctx->scriptDataOffset < 0) {
+                exit_horribly(modulename, "could not seek temporary script data: %s\n", gs_strerror(errno));
+            }
+        }
+        if (fwrite(data, 1, dLen, ctx->scriptData) != dLen) {
+            exit_horribly(modulename, "could not write temporary script data: %s\n", gs_strerror(errno));
+        }
+        tctx->scriptDataLength += dLen;
+    }
 
     dLen = tarWrite(data, dLen, tctx->TH);
 
@@ -626,6 +658,42 @@ static void _PrintFileData(ArchiveHandle* AH, const char* filename, RestoreOptio
     tarClose(AH, th);
 }
 
+/* Each included script establishes its own restriction before any
+ * source data. Separate members avoid an aggregate tar size limit. */
+static void PrintRestrictedInsertScript(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt)
+{
+    lclContext* ctx = (lclContext*)AH->formatData;
+    lclTocEntry* tctx = (lclTocEntry*)te->formatData;
+    char buf[4096];
+    char scriptname[64];
+    int nRet = snprintf_s(scriptname, sizeof(scriptname), sizeof(scriptname) - 1,
+        "restore-%d.sql", te->dumpId);
+    if (nRet < 0) {
+        exit_horribly(modulename, "could not generate restore script file name\n");
+    }
+    securec_check_ss_c(nRet, "\0", "\0");
+    TAR_MEMBER* script = tarOpen(AH, scriptname, 'w');
+    (void)tarPrintf(AH, script, "\\restrict %s\n\n", ropt->restrictKey);
+    pgoff_t remaining = tctx->scriptDataLength;
+    if (ctx->scriptData == NULL ||
+        fseeko(ctx->scriptData, tctx->scriptDataOffset, SEEK_SET) != 0) {
+        exit_horribly(modulename, "could not seek temporary script data: %s\n", gs_strerror(errno));
+    }
+    while (remaining > 0) {
+        size_t count = fread(buf, 1, Min((pgoff_t)sizeof(buf), remaining), ctx->scriptData);
+        if (count == 0) {
+            exit_horribly(modulename, "could not read temporary script data\n");
+        }
+        (void)tarWrite(buf, count, script);
+        remaining -= count;
+    }
+    (void)tarPrintf(AH, script, "\n\\unrestrict %s\n", ropt->restrictKey);
+    tarClose(AH, script);
+    (void)ahprintf(AH, "\\unrestrict %s\n", ropt->restrictKey);
+    (void)ahprintf(AH, "\\i $$PATH$$/%s\n", scriptname);
+    (void)ahprintf(AH, "\\restrict %s\n\n", ropt->restrictKey);
+}
+
 /*
  * Print data for a given TOC entry
  */
@@ -664,8 +732,9 @@ static void _PrintTocData(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt)
             /* ... and insert modified FROM */
             (void)ahprintf(AH, " FROM '$$PATH$$/%s';\n\n", tctx->filename);
         } else {
-            /* --inserts mode, no worries, just include the data file */
-            (void)ahprintf(AH, "\\i $$PATH$$/%s\n\n", tctx->filename);
+            if (tctx->scriptDataLength > 0) {
+                PrintRestrictedInsertScript(AH, te, ropt);
+            }
         }
 
         return;
@@ -824,6 +893,7 @@ static void _CloseArchive(ArchiveHandle* AH)
         ropt->compression = 0;
         ropt->superuser = NULL;
         ropt->suppressDumpWarnings = true;
+        ropt->restrictKey = NULL;
 
         savRopt = AH->ropt;
         AH->ropt = ropt;
@@ -838,6 +908,8 @@ static void _CloseArchive(ArchiveHandle* AH)
                 free(AH->ropt->dbname);
                 AH->ropt->dbname = NULL;
             }
+            free(AH->ropt->restrictKey);
+            AH->ropt->restrictKey = NULL;
             free(AH->ropt);
             AH->ropt = NULL;
         }
@@ -846,6 +918,17 @@ static void _CloseArchive(ArchiveHandle* AH)
         AH->publicArc.verbose = savVerbose;
 
         tarClose(AH, th);
+        if (ctx->scriptData != NULL) {
+            if (fclose(ctx->scriptData) != 0) {
+                exit_horribly(modulename, "could not close temporary script data: %s\n", gs_strerror(errno));
+            }
+            ctx->scriptData = NULL;
+        }
+        if (ctx->scriptDataName != NULL) {
+            (void)remove(ctx->scriptDataName);
+            free(ctx->scriptDataName);
+            ctx->scriptDataName = NULL;
+        }
 
         ctx->isSpecialScript = 0;
 
