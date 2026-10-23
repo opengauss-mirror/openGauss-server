@@ -29,12 +29,12 @@ add_subdirectory(jdbc_client)
 function(add_func_target_withargs_fastcheck _name _cmdargs)
 if(CMAKE_GENERATOR STREQUAL "Ninja")
     separate_arguments(cmd_args UNIX_COMMAND "${_cmdargs}")
-    add_custom_target(${_name} ${CMAKE_CURRENT_SOURCE_DIR}/single_check.sh --cmd-withargs ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} ${3RD_PATH} ${CMAKE_INSTALL_PREFIX} ${cmd_args} ${ENABLE_MEMORY_CHECK} ${CMAKE_MAKE_PROGRAM} ${SUPPORT_HOTPATCH} ${openGauss} c=\$$\(c\) d=\$$\(d\) n=\$$\(n\) p=\$$\(p\) s=\$$\(s\) runtest=\$$\(runtest\) part=\$$\(part\) MAXCONNOPT=\$$\(MAXCONNOPT\) keep_last_data=\$$\(keep_last_data\) level=\$$\(level\) hdfshostname=\$$\(hdfshostname\) OUTPUT_FILE ${CMAKE_BINARY_DIR}/${_name}.log
+    add_custom_target(${_name} ${CMAKE_CURRENT_SOURCE_DIR}/single_check.sh --cmd-withargs ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} ${3RD_PATH} ${CMAKE_INSTALL_PREFIX} ${cmd_args} ${ENABLE_MEMORY_CHECK} ${CMAKE_MAKE_PROGRAM} ${SUPPORT_HOTPATCH} ${openGauss} c=\$$\(c\) d=\$$\(d\) n=\$$\(n\) p=\$$\(p\) s=\$$\(s\) runtest=\$$\(runtest\) part=\$$\(PART\) MAXCONNOPT=\$$\(MAXCONNOPT\) keep_last_data=\$$\(keep_last_data\) level=\$$\(level\) hdfshostname=\$$\(hdfshostname\) OUTPUT_FILE ${CMAKE_BINARY_DIR}/${_name}.log
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 else()
     separate_arguments(cmd_args UNIX_COMMAND "${_cmdargs}")
-    add_custom_target(${_name} ${CMAKE_CURRENT_SOURCE_DIR}/single_check.sh --cmd-withargs ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} ${3RD_PATH} ${CMAKE_INSTALL_PREFIX} ${cmd_args} ${ENABLE_MEMORY_CHECK} ${CMAKE_MAKE_PROGRAM} ${SUPPORT_HOTPATCH} ${openGauss} c=\$\(c\) d=\$\(d\) n=\$\(n\) p=\$\(p\) s=\$\(s\) runtest=\$\(runtest\) part=\$\(part\) MAXCONNOPT=\$\(MAXCONNOPT\) keep_last_data=\$\(keep_last_data\) level=\$\(level\) hdfshostname=\$\(hdfshostname\) OUTPUT_FILE ${CMAKE_BINARY_DIR}/${_name}.log
+    add_custom_target(${_name} ${CMAKE_CURRENT_SOURCE_DIR}/single_check.sh --cmd-withargs ${PROJECT_TRUNK_DIR} ${CMAKE_BINARY_DIR} ${3RD_PATH} ${CMAKE_INSTALL_PREFIX} ${cmd_args} ${ENABLE_MEMORY_CHECK} ${CMAKE_MAKE_PROGRAM} ${SUPPORT_HOTPATCH} ${openGauss} c=\$\(c\) d=\$\(d\) n=\$\(n\) p=\$\(p\) s=\$\(s\) runtest=\$\(runtest\) part=\$\(PART\) MAXCONNOPT=\$\(MAXCONNOPT\) keep_last_data=\$\(keep_last_data\) level=\$\(level\) hdfshostname=\$\(hdfshostname\) OUTPUT_FILE ${CMAKE_BINARY_DIR}/${_name}.log
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
@@ -66,6 +66,7 @@ add_func_target_withargs_fastcheck(hacheck_single_standby_read hacheck_single_st
 add_func_target_withargs_fastcheck(decodecheck_single decodecheck_single)
 add_func_target_withargs_fastcheck(upgradecheck_single upgradecheck_single)
 add_func_target_withargs_fastcheck(hacheck_ss_all hacheck_ss_all)
+add_func_target_withargs_fastcheck(fastcheck_anomaly_single fastcheck_anomaly_single)
 
 function(add_func_target_withargs_gocheck _name _cmdargs)
     separate_arguments(cmd_args UNIX_COMMAND "${_cmdargs}")
