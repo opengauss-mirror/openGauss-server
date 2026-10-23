@@ -955,6 +955,7 @@ bool check_certificate_signature_algrithm(const SSL_CTX* SSL_context)
         EVP_PKEY *pub_key = NULL;
         pub_key = X509_get_pubkey(pCert);
         pub_length = EVP_PKEY_size(pub_key);
+        EVP_PKEY_free(pub_key);
         /* Get the signature algorithm CID from the certificate. */
         switch (nid) {
             case NID_md5WithRSA:
