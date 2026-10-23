@@ -93,6 +93,9 @@ static void clear_sensitive_memory(char* strings, bool freeflag);
 
 extern void check_env_value(const char* input_env_value);
 
+static bool g_restricted = false;
+static char* g_restrictKey = NULL;
+
 /* ----------
  * HandleSlashCmds:
  *
@@ -120,10 +123,17 @@ backslashResult HandleSlashCmds(PsqlScanState scan_state, PQExpBuffer query_buf)
     psql_assert(scan_state);
 
     /* Parse off the command name */
+    /* Reject restricted commands before any argument scanning can have side effects. */
     cmd = psql_scan_slash_command(scan_state);
-
-    /* And try to execute it */
-    status = exec_command(cmd, scan_state, query_buf);
+    if (cmd == NULL) {
+        psql_error("could not get backslash command\n");
+        status = PSQL_CMD_ERROR;
+    } else if (g_restricted && strcmp(cmd, "unrestrict") != 0) {
+        psql_error("backslash commands are restricted; only \\unrestrict is allowed\n");
+        status = PSQL_CMD_ERROR;
+    } else {
+        status = exec_command(cmd, scan_state, query_buf);
+    }
 
     if (status == PSQL_CMD_UNKNOWN) {
         if (pset.cur_cmd_interactive) {
@@ -143,7 +153,7 @@ backslashResult HandleSlashCmds(PsqlScanState scan_state, PQExpBuffer query_buf)
             arg = NULL;
         }
     } else {
-        /* silently throw away rest of line after an erroneous command */
+        /* Discard the entire rest of the line without expanding backticks or variables. */
         while ((arg = psql_scan_slash_option(scan_state, OT_WHOLE_LINE, NULL, false)) != NULL) {
             free(arg);
             arg = NULL;
@@ -1000,6 +1010,23 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
             puts(_("Query buffer reset (cleared)."));
     }
 
+    else if (strcmp(cmd, "restrict") == 0) {
+        psql_assert(!g_restricted);
+
+        /* HandleSlashCmds rejects this command before scanning when restricted. */
+        char* opt = psql_scan_slash_option(scan_state, OT_NORMAL, NULL, true);
+
+        if (opt == NULL || opt[0] == '\0') {
+            psql_error("\\%s: missing required argument\n", cmd);
+            success = false;
+        } else {
+            g_restrictKey = pg_strdup(opt);
+            g_restricted = true;
+        }
+        free(opt);
+        opt = NULL;
+    }
+
     /* \set -- generalized set variable/option command */
     else if (strcmp(cmd, "set") == 0) {
         char* opt0 = psql_scan_slash_option(scan_state, OT_NORMAL, NULL, false);
@@ -1241,6 +1268,37 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                 puts(_("Timing is on."));
             else
                 puts(_("Timing is off."));
+        }
+        free(opt);
+        opt = NULL;
+    }
+
+    else if (strcmp(cmd, "unrestrict") == 0) {
+        /* Never expand backticks or variables while checking an untrusted key. */
+        char* opt = psql_scan_slash_option(scan_state, OT_WHOLE_LINE, NULL, true);
+
+        if (opt != NULL) {
+            size_t len = strlen(opt);
+
+            while (len > 0 && (opt[len - 1] == ';' ||
+                (isascii((unsigned char)opt[len - 1]) && isspace((unsigned char)opt[len - 1])))) {
+                opt[--len] = '\0';
+            }
+        }
+
+        if (opt == NULL || opt[0] == '\0') {
+            psql_error("\\%s: missing required argument\n", cmd);
+            success = false;
+        } else if (!g_restricted) {
+            psql_error("\\%s: not currently in restricted mode\n", cmd);
+            success = false;
+        } else if (strcmp(opt, g_restrictKey) == 0) {
+            free(g_restrictKey);
+            g_restrictKey = NULL;
+            g_restricted = false;
+        } else {
+            psql_error("\\%s: wrong key\n", cmd);
+            success = false;
         }
         free(opt);
         opt = NULL;
@@ -1574,8 +1632,12 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
                 pset.connInfo.values_free[3] = true;
             }
             /* Clear the memory of sensitive data like password. */
-            clear_sensitive_memory(password, TRUE);
-            password = NULL;
+            if (password != NULL) {
+                rc = memset_s(password, strlen(password), 0, strlen(password));
+                check_memset_s(rc);
+                free(password);
+                password = NULL;
+            }
             clear_sensitive_memory(PQpass(n_conn), FALSE);
             break;
         }
@@ -1592,8 +1654,12 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
         }
 
         /* Clear the memory of sensitive data like password. */
-        clear_sensitive_memory(password, TRUE);
-        password = NULL;
+        if (password != NULL) {
+            rc = memset_s(password, strlen(password), 0, strlen(password));
+            check_memset_s(rc);
+            free(password);
+            password = NULL;
+        }
         clear_sensitive_memory(PQpass(n_conn), FALSE);
 
         /*

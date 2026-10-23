@@ -96,6 +96,9 @@ extern const char *gdatcompatibility;
 extern char* binary_upgrade_oldowner;
 extern char* binary_upgrade_newowner;
 
+extern char* GenerateRestrictKey(void);
+extern bool ValidRestrictKey(const char* key);
+extern void appendPsqlMetaConnect(PQExpBuffer buf, const char* database);
 extern void init_parallel_dump_utils(void);
 extern const char* fmtId(const char* identifier);
 extern const char* fmtBUserHostId(const char* name);
@@ -116,7 +119,7 @@ extern void buildShSecLabelQuery(PGconn* conn, const char* catalog_name, uint32 
 extern void emitShSecLabels(PGconn* conn, PGresult* res, PQExpBuffer buffer, const char* target, const char* objname);
 extern void set_dump_section(const char* arg, int* dumpSections);
 extern void write_msg(const char* modulename, const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
-extern void vwrite_msg(const char* modulename, const char* fmt, va_list ap)
+extern void VwriteMsg(const char* modulename, const char* fmt, va_list ap)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 0)));
 extern void exit_horribly(const char* modulename, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3), noreturn));
