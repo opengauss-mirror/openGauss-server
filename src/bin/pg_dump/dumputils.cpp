@@ -16,6 +16,7 @@
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <openssl/rand.h>
 #include "dumputils.h"
 #include "dumpmem.h"
 #include "pgtime.h"
@@ -66,6 +67,54 @@ static bool parallel_init_done = false;
 static DWORD tls_index;
 static DWORD mainThreadId;
 #endif
+
+static const char RESTRICT_CHARS[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+char* GenerateRestrictKey(void)
+{
+    unsigned char randomBytes[64];
+    if (RAND_bytes(randomBytes, sizeof(randomBytes)) != 1) {
+        return NULL;
+    }
+
+    char* key = (char*)pg_malloc(sizeof(randomBytes));
+    for (size_t i = 0; i < sizeof(randomBytes) - 1; i++) {
+        key[i] = RESTRICT_CHARS[randomBytes[i] % (sizeof(RESTRICT_CHARS) - 1)];
+    }
+    key[sizeof(randomBytes) - 1] = '\0';
+    return key;
+}
+
+bool ValidRestrictKey(const char* key)
+{
+    return key != NULL && key[0] != '\0' && strspn(key, RESTRICT_CHARS) == strlen(key);
+}
+
+/* This command is emitted outside restricted mode. Percent-encode every byte
+ * of the database name in a URI so the old gsql scanner only sees ASCII, even
+ * with an unsafe client encoding. No encoding command or quote folding is
+ * needed, and source-controlled bytes cannot become slash-command syntax. */
+void appendPsqlMetaConnect(PQExpBuffer buf, const char* database)
+{
+    if (database == NULL) {
+        appendPQExpBufferStr(buf, "\\connect -\n");
+        return;
+    }
+    if (strpbrk(database, "\r\n") != NULL) {
+        exit_horribly(NULL, "database name contains a newline or carriage return\n");
+    }
+
+    static const char hex[] = "0123456789abcdef";
+    const unsigned int HEX_DIGIT_SHIFT = 4;
+    const unsigned int HEX_DIGIT_MASK = 15;
+    appendPQExpBufferStr(buf, "\\connect \"postgresql:///");
+    for (const unsigned char* p = (const unsigned char*)database; *p != '\0'; p++) {
+        appendPQExpBufferChar(buf, '%');
+        appendPQExpBufferChar(buf, hex[*p >> HEX_DIGIT_SHIFT]);
+        appendPQExpBufferChar(buf, hex[*p & HEX_DIGIT_MASK]);
+    }
+    appendPQExpBufferStr(buf, "\"\n");
+}
 
 void init_parallel_dump_utils(void)
 {
@@ -566,12 +615,14 @@ char* dumpStrdup(const char* string)
 {
     char* result = NULL;
 
-    if (string == NULL)
+    if (string == NULL) {
         exit_horribly(NULL, "cannot duplicate null pointer\n");
+    }
 
     result = strdup(string);
-    if (result == NULL)
+    if (result == NULL) {
         exit_horribly(NULL, "out of memory\n");
+    }
 
     return result;
 }
@@ -658,8 +709,9 @@ bool buildACLCommands(const char* name, const char* subname, const char* type, c
         return true; /* object has default permissions */
 
     /* treat empty-string owner same as NULL */
-    if ((owner != NULL) && *owner == '\0')
+    if ((owner != NULL) && *owner == '\0') {
         owner = NULL;
+    }
 
     if (!parsePGArray(acls, &aclitems, &naclitems)) {
         if (aclitems != NULL) {
@@ -1444,14 +1496,14 @@ void write_msg(const char* modulename, const char* fmt, ...)
     va_list ap;
 
     (void)va_start(ap, fmt);
-    vwrite_msg(modulename, fmt, ap);
+    VwriteMsg(modulename, fmt, ap);
     va_end(ap);
 }
 
 /*
  * As write_msg, but pass a va_list not variable arguments.
  */
-void vwrite_msg(const char* modulename, const char* fmt, va_list ap)
+void VwriteMsg(const char* modulename, const char* fmt, va_list ap)
 {
 #define MAX_ERRBUF_SIZE 2048
     char errbuf[MAX_ERRBUF_SIZE] = {0};
@@ -1459,13 +1511,16 @@ void vwrite_msg(const char* modulename, const char* fmt, va_list ap)
     int nRet = 0;
 
     time_t current_time;
-    struct tm* system = NULL;
+    struct tm localTime = {};
     char current_localtime[30] = {0};
 
     current_time = time(NULL);
-    system = localtime(&current_time);
-    if (NULL != system) {
-        strftime(current_localtime, sizeof(current_localtime), "%Y-%m-%d %H:%M:%S", system);
+#ifdef WIN32
+    if (localtime_s(&localTime, &current_time) == 0) {
+#else
+    if (localtime_r(&current_time, &localTime) != NULL) {
+#endif
+        (void)strftime(current_localtime, sizeof(current_localtime), "%Y-%m-%d %H:%M:%S", &localTime);
     }
 
     if ((NULL != progname) && (NULL != instport)) {
@@ -1514,10 +1569,14 @@ void vwrite_msg(const char* modulename, const char* fmt, va_list ap)
         len += strlen(errbuf);
     }
 
-    // This place just is the message print. So there is't need check the value of vsnprintf_s function return. if
-    // checked, when the message lengtn is over than MAX_ERRBUF_SIZE, will be abnormal exit.
-    (void)vsnprintf_s(errbuf + len, sizeof(errbuf) - (len), sizeof(errbuf) - (len)-1, fmt, ap);
-    if (strlen(errbuf) >= 2044) {
+    nRet = vsnprintf_s(errbuf + len, sizeof(errbuf) - len, sizeof(errbuf) - len - 1, fmt, ap);
+    /* A full buffer is expected truncation; other failures must not abort or
+     * recursively invoke the logger while reporting a formatting error. */
+    if (nRet < 0 && strlen(errbuf) < sizeof(errbuf) - 1) {
+        write_stderr("%s[log message formatting failed]\n", errbuf);
+        return;
+    }
+    if (nRet < 0 || strlen(errbuf) >= 2044) {
         errbuf[MAX_ERRBUF_SIZE - 1] = '\0';
         errbuf[MAX_ERRBUF_SIZE - 2] = '\n';
         errbuf[MAX_ERRBUF_SIZE - 3] = '.';
@@ -1536,7 +1595,7 @@ void exit_horribly(const char* modulename, const char* fmt, ...)
     va_list ap;
 
     (void)va_start(ap, fmt);
-    vwrite_msg(modulename, fmt, ap);
+    VwriteMsg(modulename, fmt, ap);
     va_end(ap);
 
     exit_nicely(1);
@@ -1545,8 +1604,9 @@ void exit_horribly(const char* modulename, const char* fmt, ...)
 /* Register a callback to be run when exit_nicely is invoked. */
 void on_exit_nicely(on_exit_nicely_callback function, void* arg)
 {
-    if (on_exit_nicely_index >= MAX_ON_EXIT_NICELY)
+    if (on_exit_nicely_index >= MAX_ON_EXIT_NICELY) {
         exit_horribly(NULL, "out of on_exit_nicely slots\n");
+    }
     on_exit_nicely_list[on_exit_nicely_index].function = function;
     on_exit_nicely_list[on_exit_nicely_index].arg = arg;
     on_exit_nicely_index++;
@@ -1591,8 +1651,9 @@ bool simple_string_list_member(SimpleStringList* list, const char* val)
 
     for (cell = list->head; cell != NULL; cell = cell->next) {
         /* Use strcmp to prevent the occurrence of subsets */
-        if (strcmp(cell->val, val) == 0)
+        if (strcmp(cell->val, val) == 0) {
             return true;
+        }
     }
 
     return false;
@@ -1603,8 +1664,9 @@ bool simple_oid_list_member(SimpleOidList* list, Oid val)
     SimpleOidListCell* cell = NULL;
 
     for (cell = list->head; cell != NULL; cell = cell->next) {
-        if (cell->val == val)
+        if (cell->val == val) {
             return true;
+        }
     }
     return false;
 }
@@ -1800,8 +1862,9 @@ char* make_absolute_path(const char* path)
 
     if (is_absolute_path(path)) {
         result = strdup(path);
-        if (result == NULL)
+        if (result == NULL) {
             exit_horribly(NULL, "out of memory\n");
+        }
     } else {
 
 #ifndef WIN32_PG_DUMP
