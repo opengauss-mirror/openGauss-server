@@ -21,7 +21,10 @@ load 'age';
 ```
 
 >[!NOTE]说明
->创建使用age插件前需要关闭线程池，设置enable_thread_pool = off<br>
+>
+>AGE仅支持A兼容模式数据库。
+>
+>创建使用age插件前需要关闭线程池，设置enable_thread_pool = off
 >
 ## 1. 图的操作
 
@@ -33,6 +36,12 @@ load 'age';
 
 ```
 SELECT * FROM ag_catalog.create_graph('graph_name');
+```
+
+判断图是否存在：graph_exists(graph_name)，返回agtype布尔值。
+
+```
+SELECT * FROM ag_catalog.graph_exists('graph_name');
 ```
 
 ### 1.2 删除图
@@ -64,6 +73,34 @@ SELECT * FROM ag_catalog.create_vlabel('graph_name','label_name');
 SELECT * FROM ag_catalog.create_elabel('graph_name','label_name');
 ```
 
+### 1.5 子图与图生成
+
+| 函数 | 说明 |
+|:--|:--|
+| create_subgraph(new_graph, from_graph, node_filter, relationship_filter) | 按点、边过滤条件从已有图创建新图，返回点数和边数。过滤条件为Cypher表达式，`'*'` 表示不过滤 |
+| create_complete_graph(graph_name, nodes, edge_label, node_label) | 生成指定点数的图，每对点之间创建一条有向边，共 `nodes*(nodes-1)/2` 条边 |
+| age_create_barbell_graph(graph_name, graph_size, bridge_size, node_label, node_properties, edge_label, edge_properties) | 生成两个完全子图并用一条边相连。当前版本 `bridge_size` 不生成桥接点，点、边属性参数不生效 |
+
+`create_subgraph` 要求源图存在、目标图不存在；过滤表达式分别使用 `n`、`r` 引用点和边，只保留自身及两端点均通过过滤的边。过滤表达式仅传入可信内容。下例假设源图 `graph_name` 已存在。
+
+`age_create_barbell_graph` 要求 `graph_size >= 3`，当前使用 `bridge_size=0`，并指定边标签。图生成函数对已有图重复调用会追加数据。
+
+```
+SELECT * FROM ag_catalog.create_subgraph('sub_graph', 'graph_name', 'n.age > 18', '*');
+```
+
+### 1.6 从CSV文件加载数据
+
+| 函数 | 说明 |
+|:--|:--|
+| load_labels_from_file(graph_name, label_name, file_path, id_field_exists, load_as_agtype, delimiter) | 从CSV加载顶点 |
+| load_edges_from_file(graph_name, label_name, file_path, load_as_agtype, delimiter) | 从CSV加载边 |
+
+- `id_field_exists` 默认为true；设为false时自动生成顶点ID。边CSV引用的是标签内的顶点ID，不是完整graphid。
+- `load_as_agtype` 默认为false，属性按字符串加载；true表示按类型解析。`delimiter` 默认为逗号，必须是单个字符。
+- 文件放在 `$PGDATA/age_load` 下并保证数据库进程可读；传入相对 `.csv` 路径，不能包含 `..` 或符号链接。
+- 文件第一行为表头；边文件前四列为 `start_id,start_vertex_type,end_id,end_vertex_type`，其后为边属性。边标签通过函数参数单独指定。
+
 ## 2. 图的存储
 
 ### 2.1 图
@@ -79,9 +116,12 @@ NOTICE:  graph "new_graph" has been created
 
 (1 row)
 
-SELECT * FROM ag_catalog.ag_graph;
+SELECT graph_object.name, namespace_object.nspname AS namespace
+FROM ag_catalog.ag_graph graph_object
+JOIN pg_catalog.pg_namespace namespace_object
+  ON namespace_object.oid = graph_object.namespaceoid;
 
-   name    | namespace 
+   name    | namespace
 -----------+-----------
  new_graph | new_graph
 (1 row)
@@ -138,13 +178,43 @@ $$) AS (result1 agtype, result2 agtype);
 > 2. SELECT * FROM cypher 不能写成 SELECT cypher
 > 3. 执行语句前需要执行 load 'age' 和 set search_path = ag_catalog
 
+### 3.2 动态Cypher
+
+`age_prepare_cypher(graph_name, cypher_text)` 暂存图名和Cypher文本，供同一会话中后续一次 `cypher(NULL, NULL)` 使用；再次prepare会覆盖尚未使用的内容。示例中的 `graph_name` 需替换为已存在的图。
+
+```
+SELECT * FROM ag_catalog.age_prepare_cypher('graph_name', 'MATCH (n) RETURN n');
+SELECT * FROM cypher(NULL, NULL) AS (n agtype);
+```
+
 ## 数据类型及函数说明
 
 以下对AGE中包含的数据类型、Cypher语法、函数进行简要说明。
 
 ### 1 数据类型
 
-AGE的会创建两种数据类型: graphid 和 agtype。其中graphid代表点和边的唯一id标识符。agtype为AGE的核心数据类型，具体介绍可参考 <https://age.apache.org/age-manual/master/intro/types.html>
+AGE会创建以下数据类型：graphid、agtype、vertex、edge。其中graphid代表点和边的唯一id标识符；agtype为AGE的核心数据类型，具体介绍可参考 <https://age.apache.org/age-manual/master/intro/types.html>；vertex、edge分别表示顶点和边，支持 `=`、`<>` 比较。
+
+1.0.1新增的常用类型转换：
+
+| 源类型 | 目标类型 |
+|:--|:--|
+| vertex、edge | agtype、json、jsonb |
+| agtype | json、jsonb |
+| jsonb | agtype |
+| agtype | vector、halfvec、sparsevec |
+
+1.0.1新增的agtype操作符：
+
+| 操作符 | 说明 |
+|:--|:--|
+| `->`、`->>` | 按键或下标访问，分别返回agtype和text |
+| `#>`、`#>>` | 按路径访问，分别返回agtype和text |
+| `@>>`、`<<@` | 顶层包含、被包含判断 |
+| `=~` | 正则匹配 |
+| \|\| | agtype拼接 |
+
+配置参数 `age.enable_containment` 默认开启，仅系统管理员可修改。开启后，MATCH属性过滤会改写为 `@>` 查询，供优化器考虑使用agtype GIN索引；是否使用索引以执行计划为准。
 
 #### 1.1 Simple DataTypes
 
@@ -268,7 +338,7 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 | 5 | Return create node |创建并返回节点|
 | 6 | Create an edge between two nodes |创建边|
 | 7 | Create an edge and set properties |创建边并赋属性值|
-| 8 | Create a full path |创建一条路经|
+| 8 | Create a full path |创建一条路径|
 
 #### 2.8 SET
 
@@ -293,6 +363,57 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 |2 |Delete all vertices and edges |删除全部节点和边|
 |3 |Delete edges only |删除边|
 |4 |Return a deleted vertex |返回删除的节点|
+
+#### 2.11 MERGE
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |Merge single vertex / edge |不存在则创建，存在则匹配|
+|2 |ON CREATE SET / ON MATCH SET |创建或匹配后分别设置属性|
+
+#### 2.12 OPTIONAL MATCH
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |Optional match |模式不匹配时返回null而不是丢弃行|
+
+#### 2.13 UNWIND
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |Unwind a list |把列表展开为多行|
+|2 |Unwind with range |配合range()生成序列|
+
+#### 2.14 UNION
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |UNION / UNION ALL |合并多个Cypher查询结果|
+
+#### 2.15 CALL
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |CALL function |在Cypher中调用SQL函数|
+|2 |CALL ... YIELD |取出返回列并继续参与后续子句|
+
+#### 2.16 子查询与表达式
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |EXISTS { } |存在性子查询|
+|2 |COUNT { } |计数子查询|
+|3 |List comprehension |列表推导|
+|4 |Map projection |map投影 `n {.name, .age}`|
+|5 |reduce() |列表归约|
+|6 |ANY / ALL / NONE / SINGLE |列表谓词|
+
+列表推导与列表归约示例：
+
+```cypher
+RETURN [x IN [1, 2, 3] WHERE x > 1 | x * 2];
+RETURN reduce(s = 0, x IN [1, 2, 3] | s + x);
+```
 
 ### 3 函数支持
 
@@ -324,7 +445,7 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 |13 |toBoolean |将字符串值转换为布尔值|
 |14 |toFloat |将整数或字符串值转换为浮点数|
 |15 |toInteger |将浮点数或字符串值转换为整数值|
-|15 |coalesce |返回给定表达式列表中的第一个非空值|
+|16 |coalesce |返回给定表达式列表中的第一个非空值|
 
 #### 3.3 List Functions
 
@@ -335,12 +456,16 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 |3 |labels |返回一个包含节点所有标签的字符串表示形式的列表|
 |4 |relationships |返回包含路径中所有关系的列表|
 |5 |nodes |返回包含路径中所有顶点的列表|
+|6 |tail |返回去掉第一个元素后的列表|
+|7 |isEmpty |判断列表、map或字符串是否为空|
+|8 |toStringList / toIntegerList / toFloatList / toBooleanList |把列表中的每个元素转换为对应类型|
+|9 |unnest |把agtype列表展开为多行|
 
 #### 3.4 Numeric Functions
 
 | 序号 | 功能支持 | 说明 |
 |:--------|:---------|:--------|
-|1 |rand |返回一个随机浮点数，范围从 0（含）到 1（不含）；即 [0,1]|
+|1 |rand |返回 [0,1) 范围内的随机浮点数|
 |2 |abs |返回给定数字的绝对值|
 |3 |ceil |返回大于或等于给定数字且等于数学整数的最小浮点数|
 |4 |floor |返回小于或等于给定数字且等于数学整数的最大浮点数|
@@ -377,7 +502,7 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 
 | 序号 | 功能支持 | 说明 |
 |:--------|:---------|:--------|
-|1 |replace |返回一个字符串，其中原始字符串中出现的所有指定字符串都已被另一个（指定的）字符串替换
+|1 |replace |返回一个字符串，其中原始字符串中出现的所有指定字符串都已被另一个（指定的）字符串替换|
 |2 |split |返回根据给定分隔符的匹配项对原始字符串进行拆分后得到的字符串列表|
 |3 |left |返回包含原始字符串最左边指定数量字符的字符串。|
 |4 |right |返回包含原始字符串最右边指定数量字符的字符串。|
@@ -402,3 +527,37 @@ AGE对Cypher语法的支持具体介绍可参考：<https://age.apache.org/age-m
 |7 |count |返回值或记录的数量|
 |8 |avg |返回一组数值的平均值|
 |9 |sum |返回一组数值的总和|
+
+#### 3.9 Path Functions
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |age_shortest_path |返回两点之间的一条最短路径|
+|2 |age_all_shortest_paths |返回两点之间的全部最短路径|
+
+这两个SQL函数返回 `SETOF agtype`，不可达时返回0行；按跳数计算无权最短路径。参数依次为图名、起点、终点，后四项边类型、方向、最小跳数、最大跳数可选。边类型支持字符串或字符串数组；方向为 `in`、`out`、`any`，默认 `any`；最小跳数默认0，最大跳数默认不限制。当最小跳数要求搜索比原始最短距离更长的路径时，不支持多边类型过滤。
+
+下例要求图 `graph_name` 已存在，A、D各匹配到唯一顶点：
+
+```
+SELECT path
+FROM ag_catalog.age_shortest_path(
+    '"graph_name"'::agtype,
+    (SELECT id FROM cypher('graph_name', $$ MATCH (n {name:'A'}) RETURN id(n) $$) AS (id agtype)),
+    (SELECT id FROM cypher('graph_name', $$ MATCH (n {name:'D'}) RETURN id(n) $$) AS (id agtype))
+) AS path;
+```
+
+#### 3.10 Graph Functions
+
+| 序号 | 功能支持 | 说明 |
+|:--------|:---------|:--------|
+|1 |graph_exists |判断图是否存在|
+|2 |create_subgraph |按点、边过滤条件创建子图|
+|3 |create_complete_graph |生成完全图|
+|4 |age_create_barbell_graph |生成两个相连的完全图|
+|5 |age_prepare_cypher |暂存一条Cypher，供后续 `cypher(NULL, NULL)` 执行|
+
+#### 3.11 Upgrade Functions
+
+`age_prepare_pg_upgrade`、`age_pg_upgrade_status`、`age_finish_pg_upgrade`、`age_revert_pg_upgrade_changes` 用于服务器大版本升级时维护AGE图目录，不会在AGE 1.0.0升级到1.0.1时自动调用。默认不向PUBLIC授予EXECUTE权限，管理员可授权给受信任角色。

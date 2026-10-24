@@ -2,18 +2,24 @@
 
 ## 介绍
 
-图数据库由于能够处理数据之前的复杂关系，近年来得到了广泛的应用。与传统关系型数据库不同，图数据库将数据表示为节点、边和属性。节点表示实体，边表示实体之间的关系，属性表示两者的属性。
+图数据库由于能够处理数据之间的复杂关系，近年来得到了广泛的应用。与传统关系型数据库不同，图数据库将数据表示为节点、边和属性。节点表示实体，边表示实体之间的关系，属性表示两者的属性。
 
 Apache AGE是基于PostgreSQL开发的图数据库引擎，AGE的所有组件都运行在PostgreSQL事务缓存层和存储层之上，AGE实现了一个存储引擎同时处理关系型和图数据模型，用户可使用标准的ANSI SQL和图查询语言openCypher对数据进行查询。
 
 Apache AGE在数据库内核的查询解析，查询重写，查询计划，查询执行，数据存储均有涉及，数据存储方面定义了图数据库的存储模型。openGauss在其他方面使用数据库内核的hook点，对Cypher语言进行了支持，实现了同时处理关系型和图数据的能力。
 
 <a name="zh-cn_topic_0243295241_zh-cn_topic_0243253012_fig1128133574113"></a>
-<div style="display:flex;justfy-content:center;">  
+<div style="display:flex;justify-content:center;">
     <img src="figures/doc_img_AGE-think.png">
 </div>
 
-openGauss数据库使用插件的方式支持图数据库引擎，在openGauss数据库中可直接采用创建插件的方式使用Apache AGE的能力。
+openGauss数据库通过扩展支持图数据库引擎，创建AGE扩展后即可使用Apache AGE的能力。
+
+## 使用约束
+
+- AGE仅支持A兼容模式数据库。
+- 不支持线程池模式，`enable_thread_pool = on` 时无法加载AGE。
+- AGE需与对应版本的openGauss内核配套使用。
 
 ## 安装
 
@@ -33,7 +39,7 @@ age源码地址：<https://atomgit.com/opengauss/Plugin/tree/master/contrib/age>
 1. 将age源码 放到openGauss-server的源码 contrib 目录下
 2. 进入 contrib/age 目录,在age的目录下执行 make install
 
-> 此方式适用于openGauss-servery已经使用源码编译安装, 并且源码及编译环境依旧保存，可以使用此方式安装age
+> 此方式适用于openGauss-server已经使用源码编译安装, 并且源码及编译环境依旧保存，可以使用此方式安装age
 
 #### 安装方式三（使用PGXS安装）
 
@@ -76,7 +82,7 @@ make install USE_PGXS=true
 gsql -r
 ```
 
-### 创建插件
+### 创建扩展
 
 - 执行命令
 
@@ -93,13 +99,7 @@ CREATE EXTENSION
 
 - 约束
 
-openGauss安装dolphin插件后，B模式下需要使用如下方式安装AGE插件:
-
-```
-set dolphin.b_compatibility_mode=off;
-create extension age;
-set dolphin.b_compatibility_mode=on;
-```
+需在每个使用AGE的数据库中，由初始用户或SYSADMIN用户创建扩展。
 
 ### 设置查询空间
 
@@ -121,6 +121,10 @@ SET
 ```
 
 ### 加载插件
+
+- 说明
+
+每个新会话执行Cypher前需加载AGE。普通用户使用时，可由管理员在 `shared_preload_libraries` 中配置 `age` 并重启数据库。预加载后无需会话级LOAD，但仍需授予相应对象权限。
 
 - 执行命令
 
