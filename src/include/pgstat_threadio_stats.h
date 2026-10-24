@@ -59,6 +59,24 @@ typedef struct PgStat_ThreadIOStats {
     int64 max_write_time;     /* max single write time */
 } PgStat_ThreadIOStats;
 
+/*
+ * Batch accumulator for file IO statistics reporting. It carries the same
+ * fields as PgStat_MsgFile minus the message header, and is kept per-thread
+ * in t_thrd so that batched reporting (see mdextend) avoids scattered
+ * THR_LOCAL statics. Zero-initialized by knl_thread_init.
+ */
+typedef struct PgStat_FileIoMsgAccum {
+    int64 msg_count; /* operations accumulated in the current batch */
+    int64 sum_page;  /* total blocks in the current batch */
+    int64 sum_time;  /* total IO time (us) */
+    int64 lst_time;  /* last single-op IO time (us) */
+    int64 min_time;  /* min single-op IO time (us) */
+    int64 max_time;  /* max single-op IO time (us) */
+    Oid lst_file;    /* relation file Oid of the current batch */
+    Oid lst_db;      /* database Oid of the current batch */
+    Oid lst_spc;     /* tablespace Oid of the current batch */
+} PgStat_FileIoMsgAccum;
+
 typedef enum ThreadIOContextType {
     IO_CONTEXT_NORMAL,        /* regular single-point read/write */
     IO_CONTEXT_BULKREAD,      /* bulk prefetch, full table scan */

@@ -1713,6 +1713,38 @@ static void ReportWaitLockInfo(const LOCALLOCK *locallock)
 }
 
 /*
+ * ReportWaitLockFailInfo -- report a lock wait that ended without acquiring
+ * the lock (user cancel, lockwait_timeout or deadlock).
+ *
+ * Count the wait in failed_counter only and end the wait event. Never report
+ * it through the plain WAIT_EVENT_END path: that records counter/duration,
+ * which would double count timed-out waits (both failed and acquired) and
+ * record cancelled waits as successes with the failure lost.
+ */
+static void ReportWaitLockFailInfo(const LOCALLOCK *locallock)
+{
+    uint32 wait_event_info = PG_WAIT_LOCK | locallock->tag.lock.locktag_type;
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+
+    pgstat_increment_changecount_before(beentry);
+    if (beentry->st_waitevent == wait_event_info) {
+        if (u_sess->attr.attr_common.enable_instr_track_wait) {
+            UpdateWaitEventFaildStat(&beentry->waitInfo, wait_event_info);
+            if (beentry->waitInfo.event_info.start_time != 0) {
+                beentry->waitInfo.event_info.duration =
+                    GetCurrentTimestamp() - beentry->waitInfo.event_info.start_time;
+            }
+        }
+        beentry->waitInfo.event_info.start_time = 0;
+        beentry->st_waitevent = WAIT_EVENT_END;
+    }
+    pgstat_increment_changecount_after(beentry);
+}
+
+/*
  * WaitOnLock -- wait to acquire a lock
  *
  * Caller must have set t_thrd.proc->heldLocks to reflect locks already held
@@ -1777,7 +1809,6 @@ static void WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner, bool allow_con
              */
             t_thrd.storage_cxt.awaitedLock = NULL;
             LOCK_PRINT("WaitOnLock: aborting on lock", locallock->lock, locallock->tag.mode);
-            pgstat_report_wait_lock_failed(PG_WAIT_LOCK | locallock->tag.lock.locktag_type);
             LWLockRelease(LockHashPartitionLock(locallock->hashcode));
 
             /*
@@ -1792,12 +1823,11 @@ static void WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner, bool allow_con
     {
         /* In this path, awaitedLock remains set until LockErrorCleanup
          *
-         * Report change to non-waiting status
+         * The wait ended without acquiring the lock (user cancel,
+         * lockwait_timeout or deadlock): report a failed wait only, and do
+         * not record it as an acquired wait.
          */
-        if (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT) {
-            pgstat_report_wait_lock_failed(PG_WAIT_LOCK | locallock->tag.lock.locktag_type);
-        }
-        pgstat_report_waitevent(WAIT_EVENT_END);
+        ReportWaitLockFailInfo(locallock);
         pgstat_report_blocksid(&t_thrd, 0);
         if (u_sess->attr.attr_common.update_process_title) {
             set_ps_display(new_status, false);

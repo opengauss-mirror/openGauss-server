@@ -3683,6 +3683,7 @@ typedef struct knl_thrd_context {
     KnlTRackMemCleanerContext rackMemCleanerCxt;
     PgStat_ThreadIOStats local_thread_io_stats[THREAD_IO_OBJECT_MAX][THREAD_IO_CONTEXT_MAX];
     ThreadIOContextType cur_thread_io_context;
+    PgStat_FileIoMsgAccum extend_file_stat_acc;
 } knl_thrd_context;
 
 static_assert(sizeof(knl_thrd_context) <= 60000, "knl_thrd_context exceeds phase-1 size budget");
