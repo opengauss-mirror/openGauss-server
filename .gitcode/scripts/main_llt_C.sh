@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-docker_name=opengauss-llt-C-1.0.0
-docker_image_name=opengauss-llt:1.0.0
+docker_name=opengauss-llt-C-1.0.1
+docker_image_name=opengauss-llt:1.0.1
 dockerfile=dockerfile_llt
 part_type=C
 ## build docker images

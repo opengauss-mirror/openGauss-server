@@ -129,7 +129,7 @@ export CI_REINIT_GIT=1
 remove_ci_containers
 
 # A fork event must not choose the repository that supplies host scripts.
-repo="${GITCODE_REPO:-opengauss/openGauss-server}"
+repo="${GITCODE_REPO:-openGauss/openGauss-server}"
 if [[ ! "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid repository: ${repo}" >&2
   exit 1
@@ -161,10 +161,28 @@ resolve_copy="$(mktemp)"
 checkout_copy="$(mktemp)"
 loader_copy="$(mktemp)"
 launcher_copy="$(mktemp)"
+labels_copy="$(mktemp)"
 patched_script=""
 token_file="${GITCODE_TOKEN_FILE:-}"
+label_token=""
+test_running=0
+# The test process must not see the label token. Keep it in this shell only,
+# and use it when the test is killed before the result job can write a label.
+report_test_timeout() {
+  [[ -n "${label_token}" && -s "${labels_copy}" && -s "${resolve_copy}" ]] || return 0
+  echo "Test timed out or was cancelled; recording a failed pull request label." >&2
+  PR_LABEL_TOKEN="${label_token}" \
+    RESOLVE_SCRIPT="${resolve_copy}" \
+    PIPELINE_UPSTREAM_STATUS=FAILED \
+    GITCODE_TESTS_RAN=no \
+    bash "${labels_copy}" result || true
+}
 cleanup_tmp() {
-  rm -f "${resolve_copy}" "${checkout_copy}" "${loader_copy}" "${launcher_copy}"
+  if [[ "${test_running}" -eq 1 ]]; then
+    test_running=0
+    report_test_timeout || true
+  fi
+  rm -f "${resolve_copy}" "${checkout_copy}" "${loader_copy}" "${launcher_copy}" "${labels_copy}"
   if [[ -n "${patched_script}" ]]; then
     rm -f "${patched_script}"
   fi
@@ -178,9 +196,13 @@ trap cleanup_tmp EXIT
 git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${resolve_copy}"
 git show "FETCH_HEAD:.gitcode/scripts/manual_checkout.sh" > "${checkout_copy}"
 git show "FETCH_HEAD:.gitcode/scripts/load_ci_env.sh" > "${loader_copy}"
+git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${labels_copy}"
 git show "FETCH_HEAD:.gitcode/scripts/${script}" > "${launcher_copy}" || true
 
 RESOLVE_SCRIPT="${resolve_copy}" bash "${checkout_copy}"
+if [[ -n "${token_file}" && -f "${token_file}" ]]; then
+  IFS= read -r label_token < "${token_file}" || true
+fi
 if [[ -n "${token_file}" ]]; then
   rm -f "${token_file}"
   token_file=""
@@ -211,4 +233,13 @@ if [[ -z "${run_script}" ]]; then
 fi
 # The label token was only needed to read the pull request target.
 unset PR_LABEL_TOKEN
+test_running=1
+set +e
 timeout 120m bash "${run_script}"
+rc=$?
+set -e
+test_running=0
+if [[ "${rc}" -eq 124 ]]; then
+  report_test_timeout || true
+fi
+exit "${rc}"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 workspace="$PWD"
 # A fork event must not choose the repository that supplies host scripts.
-repo="${GITCODE_REPO:-opengauss/openGauss-server}"
+repo="${GITCODE_REPO:-openGauss/openGauss-server}"
 if [[ ! "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid repository: ${repo}" >&2
   exit 1
@@ -89,32 +89,47 @@ fi
 git checkout -f --detach "${fetched}"
 git clean -ffdx
 
-# Host scripts stay on the target branch. The container receives the merge
+# Host scripts stay on the target branch. The container receives the tested
 # commit through GITCODE_AFTER_COMMIT_SHA, which older launchers already pass.
-# GitCode may advertise either the GitLab-style or the pull-style ref.
+# GitCode advertises refs/merge-requests/<iid>/head. A /merge ref is used when
+# the remote has one; otherwise the pull request head is what the container can fetch.
 if [[ -n "${GITCODE_PR_IID}" ]]; then
   merge_sha=""
   for merge_ref in \
     "refs/merge-requests/${GITCODE_PR_IID}/merge" \
-    "refs/pull/${GITCODE_PR_IID}/merge"
+    "refs/pull/${GITCODE_PR_IID}/merge" \
+    "refs/merge-requests/${GITCODE_PR_IID}/head" \
+    "refs/pull/${GITCODE_PR_IID}/head"
   do
     merge_dir="$(mktemp -d)"
-    if git -C "${merge_dir}" init -q >/dev/null \
-      && git -C "${merge_dir}" remote add origin "${repo_url}" >/dev/null \
-      && timeout 300 git -C "${merge_dir}" fetch --depth=1 --force origin "${merge_ref}" >/dev/null \
-      && merge_sha="$(git -C "${merge_dir}" rev-parse FETCH_HEAD)"; then
+    # Runner git has no -C. Run inside the temporary directory.
+    merge_sha=""
+    if (
+      cd "${merge_dir}" \
+        && git init -q >/dev/null \
+        && git remote add origin "${repo_url}" >/dev/null \
+        && timeout 300 git fetch --depth=1 --force origin "${merge_ref}" >/dev/null
+    ); then
+      merge_sha="$(cd "${merge_dir}" && git rev-parse FETCH_HEAD)"
+    fi
+    if [[ -n "${merge_sha}" ]]; then
       rm -rf "${merge_dir}"
       GITCODE_MERGE_REF="${merge_ref}"
       GITCODE_AFTER_COMMIT_SHA="${merge_sha}"
       export GITCODE_MERGE_REF GITCODE_AFTER_COMMIT_SHA
       echo "Merge ref ${GITCODE_MERGE_REF} -> ${GITCODE_AFTER_COMMIT_SHA}"
+      case "${GITCODE_MERGE_REF}" in
+        */head)
+          echo "The remote has no merge commit for pull request ${GITCODE_PR_IID}; the container will test the pull request head."
+          ;;
+      esac
       break
     fi
     rm -rf "${merge_dir}"
     merge_sha=""
   done
   if [[ -z "${merge_sha}" ]]; then
-    echo "Cannot fetch refs/merge-requests/${GITCODE_PR_IID}/merge or refs/pull/${GITCODE_PR_IID}/merge; refuse to start the container without the merge commit." >&2
+    echo "Cannot fetch a merge commit or the pull request head for ${GITCODE_PR_IID}; refuse to start the container." >&2
     exit 1
   fi
 fi
