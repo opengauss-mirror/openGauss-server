@@ -125,6 +125,20 @@ parse_event_fields() {
       return read_string(s, pos)
     }
 
+    # issue.number is not the pull request. Some comment payloads put only a
+    # URL inside issue.pull_request; the number is the last path segment.
+    function number_in_pr_url(url,    rest, n) {
+      rest = url
+      sub(/\?.*/, "", rest)
+      sub(/\/$/, "", rest)
+      if (match(rest, /\/(pulls|pull|merge_requests|merge-requests)\/[0-9]+$/)) {
+        n = substr(rest, RSTART, RLENGTH)
+        sub(/.*\//, "", n)
+        return n
+      }
+      return ""
+    }
+
     {
       gsub(/\r/, "")
       json = json $0 "\n"
@@ -218,10 +232,17 @@ parse_event_fields() {
         if (issue_pr > 0) {
           context = 1
           if (iid == "") {
-            # issue.number can be the comment id. The pull request number is inside pull_request.
+            # issue.number can be the comment id. The pull request number is
+            # inside pull_request, or the last segment of its URL.
             iid = field_number(json, issue_pr, "number")
             if (iid == "") {
               iid = field_number(json, issue_pr, "iid")
+            }
+            if (iid == "") {
+              iid = number_in_pr_url(field_string(json, issue_pr, "url"))
+            }
+            if (iid == "") {
+              iid = number_in_pr_url(field_string(json, issue_pr, "html_url"))
             }
           }
           if (target == "") {
@@ -351,7 +372,7 @@ lookup_pr_target() {
   local iid="$1"
   local repo_name url body_file wrapped parsed target line token api_root code err
   # The pull request number belongs to this repository, not the fork.
-  repo_name="${GITCODE_REPO:-opengauss/openGauss-server}"
+  repo_name="${GITCODE_REPO:-openGauss/openGauss-server}"
   if [[ ! "${repo_name}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
     echo "Invalid repository: ${repo_name}" >&2
     return 1

@@ -40,9 +40,13 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
             refs/merge-requests/*) num="${val#refs/merge-requests/}" ;;
             refs/pull/*) num="${val#refs/pull/}" ;;
           esac
-          num="${num%/merge}"
+          case "${num}" in
+            */merge) num="${num%/merge}" ;;
+            */head) num="${num%/head}" ;;
+            *) echo "Invalid merge ref" >&2; exit 1 ;;
+          esac
           case "${val}" in
-            "refs/merge-requests/${num}/merge"|"refs/pull/${num}/merge")
+            "refs/merge-requests/${num}/merge"|"refs/pull/${num}/merge"|"refs/merge-requests/${num}/head"|"refs/pull/${num}/head")
               case "${num}" in
                 ''|*[!0-9]*) echo "Invalid merge ref" >&2; exit 1 ;;
               esac
