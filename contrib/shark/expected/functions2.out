@@ -1,6 +1,33 @@
 create schema functions_test2;
 set search_path = 'functions_test2';
 set d_format_behavior_compat_options = '';
+-- Verify cold-cache lookup, cache misses, and cache hits without statement error recovery.
+set xact_abort on;
+select sys.shark_get_full_year('4', '20', 49) as full_year;
+ full_year 
+-----------
+ 2004
+(1 row)
+
+select sys.shark_get_full_year('49', '20', 49) as full_year;
+ full_year 
+-----------
+ 2049
+(1 row)
+
+select sys.shark_get_full_year('50', '20', 49) as full_year;
+ full_year 
+-----------
+ 1950
+(1 row)
+
+select sys.shark_get_full_year('4', '20', 49) as full_year;
+ full_year 
+-----------
+ 2004
+(1 row)
+
+reset xact_abort;
 select datediff(year, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
  datediff 
 ----------
@@ -658,11 +685,11 @@ CONTEXT:  PL/pgSQL function shark_conv_string_to_datetime2(text,text,numeric) li
 PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
 referenced column: shark_conv_helper_to_date
 SELECT CONVERT(DATE, '3-2-4');
-ERROR:  The style 0 is not supported for conversions from varchar to date.
-DETAIL:  Use of incorrect "style" parameter value during conversion process.
-HINT:  Change "style" parameter to the proper value and try again.
-CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
-referenced column: shark_conv_helper_to_date
+ shark_conv_helper_to_date 
+---------------------------
+ 03-02-2004
+(1 row)
+
 SELECT CONVERT(DATE, '3-12-2024');
  shark_conv_helper_to_date 
 ---------------------------
@@ -676,11 +703,11 @@ SELECT CONVERT(DATE, '11-12-2024');
 (1 row)
 
 SELECT CONVERT(DATE, '3.2.4');
-ERROR:  The style 0 is not supported for conversions from varchar to date.
-DETAIL:  Use of incorrect "style" parameter value during conversion process.
-HINT:  Change "style" parameter to the proper value and try again.
-CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
-referenced column: shark_conv_helper_to_date
+ shark_conv_helper_to_date 
+---------------------------
+ 03-02-2004
+(1 row)
+
 SELECT CONVERT(DATE, '3.12.2024');
  shark_conv_helper_to_date 
 ---------------------------
@@ -694,11 +721,11 @@ SELECT CONVERT(DATE, '11.12.2024');
 (1 row)
 
 SELECT CONVERT(DATE, '3/2/4');
-ERROR:  The style 0 is not supported for conversions from varchar to date.
-DETAIL:  Use of incorrect "style" parameter value during conversion process.
-HINT:  Change "style" parameter to the proper value and try again.
-CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
-referenced column: shark_conv_helper_to_date
+ shark_conv_helper_to_date 
+---------------------------
+ 03-02-2004
+(1 row)
+
 SELECT CONVERT(DATE, '3/12/2024');
  shark_conv_helper_to_date 
 ---------------------------
@@ -784,11 +811,11 @@ SELECT CONVERT(DATE,'1753-01-01');
 (1 row)
 
 SELECT CONVERT(DATE, 'Apr 12,2000');
-ERROR:  The style 0 is not supported for conversions from varchar to date.
-DETAIL:  Use of incorrect "style" parameter value during conversion process.
-HINT:  Change "style" parameter to the proper value and try again.
-CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
-referenced column: shark_conv_helper_to_date
+ shark_conv_helper_to_date 
+---------------------------
+ 04-12-2000
+(1 row)
+
 SELECT CONVERT(TIME, '11 AM');
  shark_conv_helper_to_time 
 ---------------------------

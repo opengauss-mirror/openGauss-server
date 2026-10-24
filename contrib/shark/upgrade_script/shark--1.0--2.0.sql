@@ -3191,9 +3191,10 @@ BEGIN
         v_full_year_res_json := NULL;
     END;
 
-    SELECT result
+    -- Treat an empty cache or a missing entry as a cache miss.
+    SELECT max(result::SMALLINT)
       INTO v_full_year
-      FROM json_to_recordset(v_full_year_res_json, true) AS result_set (param1 SMALLINT,
+      FROM json_to_recordset(COALESCE(v_full_year_res_json, '[]'::JSON), true) AS result_set (param1 SMALLINT,
                                                                     param2 TEXT,
                                                                     param3 NUMERIC,
                                                                     result VARCHAR)
@@ -3224,7 +3225,7 @@ BEGIN
                                                  'result', v_full_year);
         v_full_year_res_json := CASE
                                     WHEN (v_full_year_res_json IS NULL) THEN json_build_array(v_result_param_set)
-                                    ELSE v_full_year_res_json || v_result_param_set
+                                    ELSE (v_full_year_res_json::JSONB || v_result_param_set::JSONB)::JSON
                                  END;
 
         PERFORM set_config('sys.full_year_res_json',
