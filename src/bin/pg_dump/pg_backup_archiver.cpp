@@ -588,7 +588,21 @@ void RestoreArchive(Archive* AHX)
         p = NULL;
     }
 
+    /* Also covers the restore.sql embedded in tar archives. Direct database
+     * restores send SQL through libpq and must never receive meta-commands. */
+    if (!ropt->useDB) {
+        if (ropt->restrictKey == NULL) {
+            ropt->restrictKey = GenerateRestrictKey();
+        }
+        if (!ValidRestrictKey(ropt->restrictKey)) {
+            exit_horribly(modulename, "could not obtain a valid restrict key\n");
+        }
+    }
+
     (void)ahprintf(AH, "--\n-- openGauss database dump\n--\n\n");
+    if (!ropt->useDB) {
+        (void)ahprintf(AH, "\\restrict %s\n\n", ropt->restrictKey);
+    }
 
     if (AH->publicArc.verbose) {
         if (AH->archiveRemoteVersion != NULL) {
@@ -728,6 +742,9 @@ void RestoreArchive(Archive* AHX)
         dumpTimestamp(AH, "Completed on", time(NULL));
 
     (void)ahprintf(AH, "--\n-- openGauss database dump complete\n--\n\n");
+    if (!ropt->useDB) {
+        (void)ahprintf(AH, "\\unrestrict %s\n\n", ropt->restrictKey);
+    }
 
     /*
      * Clean up & we're done.
@@ -1644,7 +1661,7 @@ void ahlog(ArchiveHandle* AH, int level, const char* fmt, ...)
         return;
 
     (void)va_start(ap, fmt);
-    vwrite_msg(NULL, fmt, ap);
+    VwriteMsg(NULL, fmt, ap);
     va_end(ap);
 }
 
@@ -1814,7 +1831,7 @@ void warn_or_exit_horribly(ArchiveHandle* AH, const char* pchmodulename, const c
     AH->lastErrorTE = AH->currentTE;
 
     (void)va_start(ap, fmt);
-    vwrite_msg(pchmodulename, fmt, ap);
+    VwriteMsg(pchmodulename, fmt, ap);
     va_end(ap);
 
     if (AH->publicArc.exit_on_error)
@@ -3143,8 +3160,10 @@ static void _reconnectToDB(ArchiveHandle* AH, const char* dbname)
     } else {
         PQExpBuffer qry = createPQExpBuffer();
 
-        (void)appendPQExpBuffer(qry, "\\connect %s\n\n", dbname != NULL ? fmtId(dbname) : "-");
+        appendPsqlMetaConnect(qry, dbname);
+        (void)ahprintf(AH, "\\unrestrict %s\n", AH->ropt->restrictKey);
         (void)ahprintf(AH, "%s", qry->data);
+        (void)ahprintf(AH, "\\restrict %s\n\n", AH->ropt->restrictKey);
         (void)destroyPQExpBuffer(qry);
     }
 

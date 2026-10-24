@@ -44,6 +44,7 @@
  * print out command line arguments
  */
 #define ON(var) ((var) ? _("on") : _("off"))
+#define RESTRICT_USAGE_ROWS 5
 
 static void HelpTopicSQL(const char* topic, unsigned short int pager);
 
@@ -218,7 +219,7 @@ void slashUsage(unsigned short int pager)
     if (currdb == NULL)
         currdb = "";
 
-    output = PageOutput(USAGE_ROWS, pager);
+    output = PageOutput(USAGE_ROWS + RESTRICT_USAGE_ROWS, pager);
 
     /* if you add/remove a line here, change the row count above */
 
@@ -233,6 +234,11 @@ void slashUsage(unsigned short int pager)
     fprintf(output, _("  \\h(\\help) [NAME]              help on syntax of SQL commands, * for all commands\n"));
     fprintf(output, _("  \\parallel [on [num]|off] toggle status of execute (currently %s)\n"), ON(pset.parallel));
     fprintf(output, _("  \\q                     quit gsql\n"));
+    (void)fprintf(output, _("  \\restrict RESTRICT_KEY\n"
+                            "                         enter restricted mode with provided key;\n"
+                            "                         only \\unrestrict is allowed in this mode\n"));
+    (void)fprintf(output, _("  \\unrestrict RESTRICT_KEY\n"
+                            "                         exit restricted mode if key matches\n"));
     fprintf(output, "\n");
 
     fprintf(output, _("Query Buffer\n"));

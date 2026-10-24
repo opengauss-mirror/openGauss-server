@@ -330,6 +330,7 @@ extern const char* encrypt_salt;
 
 static const char* module_params = NULL;
 static bool gen_key = false;
+static char* g_restrictKey = NULL;
 
 /* subquery used to convert user ID (eg, datdba) to user name */
 static const char* username_subquery;
@@ -739,6 +740,7 @@ int main(int argc, char** argv)
         {"with-module-params", required_argument, NULL, 19},
         {"gen-key", no_argument, NULL, 20},
         {"split-huge-table", no_argument, NULL, 21},
+        {"restrict-key", required_argument, NULL, RESTRICT_KEY_OPTION},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -804,6 +806,17 @@ int main(int argc, char** argv)
     /* archiveFormat specific setup */
     if (archiveFormat == archNull) {
         plainText = 1;
+        if (g_restrictKey == NULL) {
+            g_restrictKey = GenerateRestrictKey();
+        }
+        if (g_restrictKey == NULL) {
+            exit_horribly(NULL, "could not generate restrict key\n");
+        }
+        if (!ValidRestrictKey(g_restrictKey)) {
+            exit_horribly(NULL, "invalid restrict key\n");
+        }
+    } else if (g_restrictKey != NULL) {
+        exit_horribly(NULL, "option --restrict-key can only be used with --format=plain\n");
     }
 
     if (!could_encrypt && is_encrypt) {
@@ -1259,6 +1272,7 @@ int main(int argc, char** argv)
     ropt->use_setsessauth = useSetsessauth;
     ropt->no_subscriptions = no_subscriptions;
     ropt->no_publications = no_publications;
+    ropt->restrictKey = g_restrictKey != NULL ? gs_strdup(g_restrictKey) : NULL;
 
     if (compressLevel == -1)
         ropt->compression = 0;
@@ -1317,6 +1331,7 @@ int main(int argc, char** argv)
     ExecuteSqlStatement(fout, "COMMIT");
 
     /*free the memory allocated for gs_restore options */
+    GS_FREE(ropt->restrictKey);
     free(ropt);
     ropt = NULL;
 
@@ -1391,6 +1406,7 @@ static void free_dump()
     GS_FREE(rolepasswd);
     GS_FREE(encrypt_salt);
     GS_FREE(gdatcompatibility);
+    GS_FREE(g_restrictKey);
 }
 
 /*
@@ -1839,6 +1855,10 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
             case 21:
                 enableSplitTable = true;
                 break;
+            case RESTRICT_KEY_OPTION:
+                GS_FREE(g_restrictKey);
+                g_restrictKey = gs_strdup(optarg);
+                break;
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -2044,6 +2064,7 @@ void help(const char* pchProgname)
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
     printf(_("  --include-alter-table                       dump the table delete column\n"));
     printf(_("  --quote-all-identifiers                     quote all identifiers, even if not key words\n"));
+    printf(_("  --restrict-key=RESTRICT_KEY                 use provided string as gsql \\restrict key\n"));
     printf(_("  --section=SECTION                           dump named section (pre-data, data, or post-data)\n"));
     printf(_("  --serializable-deferrable                   wait until the dump can run without anomalies\n"));
     printf(_("  --dont-overwrite-file                       do not overwrite the existing file in case of plain, tar "
