@@ -10327,6 +10327,9 @@ Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS)
     }
 }
 
+/* max retries of the fileIOStat seqlock read loop before returning best-effort values */
+#define MAX_FILESTAT_SEQLOCK_RETRY 1000
+
 Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;
@@ -10370,7 +10373,14 @@ Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        for (;;) {
+        /*
+         * Bounded seqlock retry: a writer that dies between the two changeCount
+         * increments (or a lost update under concurrency) can freeze changeCount
+         * odd, and an unbounded retry here would spin at 100% CPU forever and hang
+         * the whole snapshot. Bound the loop and fall back to the last read values,
+         * these counters are best-effort statistics anyway.
+         */
+        for (int retry = 0;; retry++) {
             unsigned int save_changecount = g_instance.stat_cxt.fileIOStat->changeCount;
             /* Values available to all callers */
             values[0] = Int64GetDatum(g_instance.stat_cxt.fileIOStat->reads);
@@ -10381,6 +10391,10 @@ Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
                 break;
             /* Make sure we can break out of loop if stuck... */
             CHECK_FOR_INTERRUPTS();
+            if (retry >= MAX_FILESTAT_SEQLOCK_RETRY) {
+                break;
+            }
+            pg_usleep(100L);
         }
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
