@@ -46,7 +46,7 @@ In openGauss standalone or primary/standby cluster scenarios, documents in the d
 
 The specification constraints of BM25 full-text search are as follows:
 
-- Tables: BM25 indexes can be built only on ordinary tables, not on partitioned tables. `astore` and `segment-page` tables are supported, while `ustore` tables, `column-store` tables, and `MOT` tables are not supported.
+- Tables: BM25 indexes can be built on ordinary and partitioned tables. Partitioned tables support only LOCAL indexes; GLOBAL indexes are not supported. LOCAL indexes are currently built serially for each partition and maintain BM25 statistics independently for each partition, so scores from a cross-partition query are not guaranteed to be globally comparable. `astore` and `segment-page` tables are supported, while `ustore` tables, `column-store` tables, and `MOT` tables are not supported.
 - Data types: Only the `text` field type is supported.
 - Only single-column indexes can be built. Multi-column composite indexes are not supported, for example, `create index bm25_index on bm25_table using bm25(col1, col2)`.
 - Only sorting in descending order is supported.

@@ -3095,6 +3095,8 @@ typedef struct PartIteratorState {
     PlanState ps;   /* its first field is NodeTag */
     int currentItr; /* the sequence number for processing partition */
     int subPartCurrentItr; /* the sequence number for processing partition */
+    int64 partitionScanLimit; /* bounded BM25 sort: qualifying rows per partition, or zero */
+    int64 partitionTupleCount;
 } PartIteratorState;
 
 struct VecLimitState : public LimitState {

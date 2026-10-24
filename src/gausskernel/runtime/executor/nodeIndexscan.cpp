@@ -1772,6 +1772,8 @@ static void ExecInitNextPartitionForIndexScan(IndexScanState* node)
     int dop = plan->scan.plan.dop > 1 ? plan->scan.plan.dop : 1;
     node->m_dop = dop;
     node->m_plan_node_id = node->ss.ps.plan->plan_node_id;
+    /* An ordered scan must read the new partition after the previous one ended. */
+    node->iss_ReachedEnd = false;
     /* Initialize scan descriptor. */
     node->iss_ScanDesc = scan_handler_idx_beginscan(node->ss.ss_currentPartition,
         node->iss_CurrentIndexPartition,

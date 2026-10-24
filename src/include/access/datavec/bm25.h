@@ -90,6 +90,8 @@ typedef struct BM25TokenizedDocData {
     uint32 docLength;
 } BM25TokenizedDocData;
 
+struct BM25LocalScanState;
+
 typedef struct BM25ScanOpaqueData {
     uint32 cursor;
     BM25ScanData* candDocs;
@@ -102,6 +104,7 @@ typedef struct BM25ScanOpaqueData {
     MemoryContext scanMcxt;
     uint64 globalDocumentCount;
     uint64 globalTokenCount;
+    BM25LocalScanState* localState;
 } BM25ScanOpaqueData;
 
 typedef BM25ScanOpaqueData *BM25ScanOpaque;
@@ -306,7 +309,7 @@ struct BM25ScanCursor {
 public:
 	BM25ScanCursor() {}
     BM25ScanCursor(Relation indexRel, const BlockNumber postingBlock, float tokenMaxScore, float idfVal,
-        unsigned char* docIdMask)
+        unsigned char* docIdMask, uint32 scanMaxDocId)
         : tokenPostingBlock(postingBlock),
           qTokenMaxScore(tokenMaxScore),
           qTokenIDFVal(idfVal),
@@ -317,6 +320,9 @@ public:
           curDocLength(0.0f),
           index(indexRel),
           docIdfilter(docIdMask),
+          maxDocId(scanMaxDocId),
+          buf(InvalidBuffer),
+          page(NULL),
           useVarBlock(false),
           curPayloadOffset(0)
     {
@@ -325,7 +331,7 @@ public:
         Next(true);
     }
     BM25ScanCursor(Relation indexRel, const ItemPointerData *postingChainHeadArg, float tokenMaxScore, float idfVal,
-        unsigned char* docIdMask)
+        unsigned char* docIdMask, uint32 scanMaxDocId)
         : tokenPostingBlock(InvalidBlockNumber),
           qTokenMaxScore(tokenMaxScore),
           qTokenIDFVal(idfVal),
@@ -336,6 +342,7 @@ public:
           curDocLength(0.0f),
           index(indexRel),
           docIdfilter(docIdMask),
+          maxDocId(scanMaxDocId),
           useVarBlock(true),
           curPayloadOffset(0)
     {
@@ -368,6 +375,7 @@ public:
     float curDocLength; /* number of the token in cur doc */
     Relation index;
     unsigned char* docIdfilter;
+    uint32 maxDocId;
     Buffer buf;
     Page page;
 

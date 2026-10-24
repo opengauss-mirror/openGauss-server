@@ -25,16 +25,73 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/nbtree.h"
+#include "catalog/pg_am.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodePartIterator.h"
 #include "executor/tuptable.h"
 #include "utils/memutils.h"
 #include "nodes/execnodes.h"
 #include "nodes/plannodes.h"
+#include "optimizer/clauses.h"
+#include "parser/parsetree.h"
+#include "utils/lsyscache.h"
+#include "utils/rel.h"
 #include "vecexecutor/vecnodes.h"
 
 static TupleTableSlot* ExecPartIterator(PlanState* state);
 static PlanState* GetPartIteratorScanState(PlanState* node);
+
+/*
+ * A global top N is contained in the union of each partition's top N. Only
+ * apply this to the exact BM25 ordering supplied by the direct child scan.
+ * Count rows after the scan's visibility checks, quals and projection, so
+ * rejected index candidates do not consume the limit.
+ */
+void ExecSetPartIteratorScanLimit(PartIteratorState* node, Sort* sort, int64 limit)
+{
+    node->partitionScanLimit = 0;
+    node->partitionTupleCount = 0;
+    PlanState* child = outerPlanState(node);
+    /* Global avgdl rescoring can reorder candidates across expansion batches. */
+    if (limit <= 0 || sort->numCols != 1 || child == NULL || !IsA(child, IndexScanState) ||
+        u_sess->attr.attr_sql.enable_bm25_global_idf) {
+        return;
+    }
+
+    IndexScanState* scan = (IndexScanState*)child;
+    IndexScan* plan = (IndexScan*)child->plan;
+    if (!scan->ss.isPartTbl || !RelationIsValid(scan->iss_RelationDesc) ||
+        scan->iss_RelationDesc->rd_rel->relam != BM25_AM_OID ||
+        list_length(plan->indexorderbyorig) != 1 || plan->indexorderbyops == NULL ||
+        sort->sortOperators[0] != plan->indexorderbyops[0]) {
+        return;
+    }
+
+    TargetEntry* key = get_tle_by_resno(plan->scan.plan.targetlist, sort->sortColIdx[0]);
+    Oid opfamily;
+    Oid opcintype;
+    int16 strategy;
+    if (key == NULL || !equal(key->expr, linitial(plan->indexorderbyorig)) ||
+        !get_ordering_op_properties(sort->sortOperators[0], &opfamily, &opcintype, &strategy) ||
+        strategy != BTGreaterStrategyNumber) {
+        return;
+    }
+
+    /* Skipping rows must not change later partitions' rownum or side effects. */
+    Node* targetlist = (Node*)plan->scan.plan.targetlist;
+    Node* qual = (Node*)plan->scan.plan.qual;
+    Node* indexqual = (Node*)plan->indexqualorig;
+    if (expression_returns_set(targetlist) || expression_contains_rownum(targetlist) ||
+        expression_contains_rownum(qual) || expression_contains_rownum(indexqual) ||
+        contain_volatile_functions(targetlist) || contain_volatile_functions(qual) ||
+        contain_subplans(targetlist) || contain_subplans(qual)) {
+        return;
+    }
+
+    node->partitionScanLimit = limit;
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -128,6 +185,7 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanSt
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     ParamExecData* param = NULL;
     List *subPartLengthList = NIL;
+    node->partitionTupleCount = 0;
     noden = GetPartIteratorScanState(noden);
     if (IsA(noden, VecToRowState)) {
         subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
@@ -154,6 +212,28 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanSt
 
     /* reset the plan node so that next partition can be scanned */
     ExecReScan(node->ps.lefttree);
+}
+
+static bool IsLastScanPartition(PartIteratorState* node, int partitionScan, PlanState* noden)
+{
+    if (node->currentItr + 1 < partitionScan) {
+        return false;
+    }
+
+    List *subPartLengthList = NIL;
+    if (IsA(noden, VecToRowState)) {
+        subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
+    } else if (IsA(noden, ScanState) || IsA(noden, SeqScanState) || IsA(noden, IndexOnlyScanState) ||
+               IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState) ||
+               IsA(noden, AnnIndexScanState)) {
+        subPartLengthList = ((ScanState *)noden)->subPartLengthList;
+    }
+
+    if (subPartLengthList == NIL) {
+        return true;
+    }
+    int subPartLength = (int)list_nth_int(subPartLengthList, node->currentItr);
+    return node->subPartCurrentItr + 1 >= subPartLength;
 }
 
 /*
@@ -186,37 +266,29 @@ static TupleTableSlot* ExecPartIterator(PlanState* planState)
     if (node->currentItr == -1)
         InitScanPartition(node, partitionScan, noden);
 
-    /* For partition wise join, can not early free left tree's caching memory */
-    state->es_skip_early_free = true;
-    slot = ExecProcNode(node->ps.lefttree);
-    state->es_skip_early_free = orig_early_free;
+    if (node->partitionScanLimit <= 0 || node->partitionTupleCount < node->partitionScanLimit) {
+        /* For partition wise join, can not early free left tree's caching memory */
+        state->es_skip_early_free = true;
+        slot = ExecProcNode(node->ps.lefttree);
+        state->es_skip_early_free = orig_early_free;
 
-    if (!TupIsNull(slot))
-        return slot;
+        if (!TupIsNull(slot)) {
+            if (node->partitionScanLimit > 0) {
+                node->partitionTupleCount++;
+            }
+            return slot;
+        }
+    }
 
     /* switch to next partition until we get a unempty tuple */
     for (;;) {
-        /* minus wrong rownum */
-        node->ps.lefttree->ps_rownum--;
+        /* An exhausted scan increments rownum once without returning a row. */
+        if (node->partitionScanLimit <= 0 || node->partitionTupleCount < node->partitionScanLimit) {
+            node->ps.lefttree->ps_rownum--;
+        }
 
-        if (node->currentItr + 1 >= partitionScan) { /* have scanned all partitions */
-            List *subPartLengthList = NIL;
-            if (IsA(noden, VecToRowState)) {
-                subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
-            } else if (IsA(noden, ScanState) || IsA(noden, SeqScanState) || IsA(noden, IndexOnlyScanState) ||
-                       IsA(noden, IndexScanState) || IsA(noden, BitmapHeapScanState) || IsA(noden, TidScanState) ||
-                       IsA(noden, AnnIndexScanState)) {
-                subPartLengthList = ((ScanState *)noden)->subPartLengthList;
-            }
-
-            if (subPartLengthList != NIL) {
-                int subPartLength = (int)list_nth_int(subPartLengthList, node->currentItr);
-                if (node->subPartCurrentItr + 1 >= subPartLength) {
-                    return NULL;
-                }
-            } else {
-                return NULL;
-            }
+        if (IsLastScanPartition(node, partitionScan, noden)) {
+            return NULL;
         }
 
         /* switch to next partiiton */
@@ -230,8 +302,12 @@ static TupleTableSlot* ExecPartIterator(PlanState* planState)
         slot = ExecProcNode(node->ps.lefttree);
         state->es_skip_early_free = orig_early_free;
 
-        if (!TupIsNull(slot))
+        if (!TupIsNull(slot)) {
+            if (node->partitionScanLimit > 0) {
+                node->partitionTupleCount++;
+            }
             return slot;
+        }
     }
 }
 
@@ -263,6 +339,7 @@ void ExecReScanPartIterator(PartIteratorState* node)
     ParamExecData* param = NULL;
     int subPartParamno = -1;
     ParamExecData* subPartParam = NULL;
+    node->partitionTupleCount = 0;
 
     /* do nothing if there is no partition to scan */
     PlanState* noden = GetPartIteratorScanState((PlanState*)node->ps.lefttree);

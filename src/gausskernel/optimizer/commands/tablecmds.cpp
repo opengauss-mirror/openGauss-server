@@ -29084,6 +29084,19 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd, Alte
         }
     }
 
+    /*
+     * The cloned BM25 indexes were built on an empty temporary heap. Unlike
+     * btree indexes, they cannot be merged by adjusting block offsets, so
+     * rebuild them after copying the heap and applying online DDL changes.
+     */
+    ListCell* clonedIndexCell = NULL;
+    forboth(cell, indexRel_list, clonedIndexCell, clonedIndexRelId_list) {
+        Relation currentIndex = (Relation)lfirst(cell);
+        if (currentIndex->rd_rel->relam == BM25_AM_OID) {
+            reindex_index(lfirst_oid(clonedIndexCell), InvalidOid, false, NULL, false);
+        }
+    }
+
     if (!enableOnlineDDL) {
         /* close temp relation */
         RelationCloseSmgr(tempTableRel);

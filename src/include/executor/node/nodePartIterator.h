@@ -34,5 +34,6 @@ extern void SetPartitionIteratorParamter(PartIteratorState* node, List* subPartL
 extern PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int eflags);
 extern void ExecEndPartIterator(PartIteratorState* node);
 extern void ExecReScanPartIterator(PartIteratorState* node);
+extern void ExecSetPartIteratorScanLimit(PartIteratorState* node, Sort* sort, int64 limit);
 
 #endif /* NODEPARTITERATOR_H */

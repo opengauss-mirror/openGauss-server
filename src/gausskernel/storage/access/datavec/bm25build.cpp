@@ -1271,8 +1271,14 @@ static void BuildBM25Index(BM25BuildState *buildstate, ForkNumber forkNum)
 {
     uint32 parallelWorkers = 0;
 
-    /* Calculate parallel workers */
-    if (buildstate->heap != NULL) {
+    /*
+     * Partition relations are dummy relations backed by pg_partition rather
+     * than standalone pg_class rows.  The parallel worker entry points reopen
+     * relations by OID, so keep local partition index builds serial until the
+     * worker state carries the parent/partition identity.
+     */
+    if (buildstate->heap != NULL && !RelationIsPartition(buildstate->heap) &&
+        !RelationIsPartition(buildstate->index)) {
         parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
     }
 

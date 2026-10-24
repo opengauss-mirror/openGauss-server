@@ -18,6 +18,7 @@
 
 #include "access/tableam.h"
 #include "executor/exec/execdebug.h"
+#include "executor/node/nodePartIterator.h"
 #include "executor/node/nodeSort.h"
 #include "miscadmin.h"
 #include "optimizer/streamplan.h"
@@ -147,6 +148,11 @@ static TupleTableSlot* ExecSort(PlanState* state)
 
         outer_node = outerPlanState(node);
         tup_desc = ExecGetResultType(outer_node);
+
+        if (IsA(outer_node, PartIteratorState)) {
+            ExecSetPartIteratorScanLimit((PartIteratorState*)outer_node, plan_node,
+                node->bounded ? node->bound : 0);
+        }
 
         if (node->datumSort) {
             tuple_sortstate = tuplesort_begin_datum(TupleDescAttr(tup_desc, 0)->atttypid,
