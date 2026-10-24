@@ -22,9 +22,11 @@ You also need to run the `load 'age'` command to ensure that all hooks of the AG
 load 'age';
 ```
 
->[!NOTE]
+> [!NOTE]
 >
->Before creating and using the AGE extension, you need to disable the thread pool and set `enable_thread_pool = off`.
+> AGE supports only databases in A compatibility mode.
+>
+> Before creating and using the AGE extension, you need to disable the thread pool and set `enable_thread_pool = off`.
 >
 
 ## 1. Graph Operations
@@ -37,6 +39,12 @@ To create a graph, use `create_graph(graph_name)`:
 
 ```bash
 SELECT * FROM ag_catalog.create_graph('graph_name');
+```
+
+To check whether a graph exists, use `graph_exists(graph_name)`, which returns an agtype boolean.
+
+```bash
+SELECT * FROM ag_catalog.graph_exists('graph_name');
 ```
 
 ### 1.2 Deleting a Graph
@@ -59,7 +67,7 @@ To create a vertex label in a graph, use `create_vlabel(graph_name, label_name)`
 SELECT * FROM ag_catalog.create_vlabel('graph_name','label_name');
 ```
 
-Whenever a vertex label is created using the `create_vlabel() function`, a corresponding table named `<label_name>` is generated within the namespace `new_graph`. The same behavior applies to `create_elabel()` for creating edge labels. These two functions are not mandatory. if a label table does not already exist when creating vertices or edges via Cypher, it will be created automatically.
+Whenever a vertex label is created using the `create_vlabel()` function, a corresponding table named `<label_name>` is generated within the namespace `new_graph`. The same behavior applies to `create_elabel()` for creating edge labels. These two functions are not mandatory. if a label table does not already exist when creating vertices or edges via Cypher, it will be created automatically.
 
 ### 1.4 Creating Edge Labels in a Graph
 
@@ -69,11 +77,39 @@ To create a graph, use `create_elabel(graph_name, label_name)`.
 SELECT * FROM ag_catalog.create_elabel('graph_name','label_name');
 ```
 
+### 1.5 Subgraphs and Graph Generation
+
+| Function | Description |
+|:--|:--|
+| create_subgraph(new_graph, from_graph, node_filter, relationship_filter) | Create a subgraph from an existing graph and return vertex and edge counts. Filters are Cypher expressions on `n` and `r`; `'*'` means no filter |
+| create_complete_graph(graph_name, nodes, edge_label, node_label) | Create `nodes` vertices with one directed edge per pair, for `nodes*(nodes-1)/2` edges |
+| age_create_barbell_graph(graph_name, graph_size, bridge_size, node_label, node_properties, edge_label, edge_properties) | Create two complete subgraphs connected by one edge. Currently, `bridge_size` adds no bridge vertices and the vertex/edge property arguments have no effect |
+
+For `create_subgraph`, the source graph must exist and the target graph must not exist. An edge is retained only if it and both endpoints pass the filters. Pass only trusted filter expressions. The example assumes the source graph `graph_name` exists.
+
+For `age_create_barbell_graph`, `graph_size` must be at least 3; use `bridge_size=0` and specify an edge label. Graph generation adds data when called again on an existing graph.
+
+```bash
+SELECT * FROM ag_catalog.create_subgraph('sub_graph', 'graph_name', 'n.age > 18', '*');
+```
+
+### 1.6 Loading Data from CSV Files
+
+| Function | Description |
+|:--|:--|
+| load_labels_from_file(graph_name, label_name, file_path, id_field_exists, load_as_agtype, delimiter) | Load vertices from a CSV file |
+| load_edges_from_file(graph_name, label_name, file_path, load_as_agtype, delimiter) | Load edges from a CSV file |
+
+- `id_field_exists` defaults to true. Set it to false to generate vertex IDs automatically. Edge CSV files must reference the vertex IDs within their labels, not full graphids.
+- `load_as_agtype` defaults to false (string properties); true enables typed parsing. `delimiter` defaults to a comma and must be a single character.
+- Place files under `$PGDATA/age_load`, readable by the database process. Supply a relative `.csv` path without `..` components or symbolic links.
+- Both files require a header. The first four edge columns are `start_id,start_vertex_type,end_id,end_vertex_type`; remaining columns are edge properties. The edge label is supplied separately to the function.
+
 ## 2. Graph Storage
 
 ### 2.1 Graph
 
-After a graph is created, the kernel creates a schema with the same name as the graph. Meanwhile, a record is inserted into the `ag_catalog.ag_graph` table, marking the newly created schema aas the storage location for the graph data.
+After a graph is created, the kernel creates a schema with the same name as the graph. Meanwhile, a record is inserted into the `ag_catalog.ag_graph` table, marking the newly created schema as the storage location for the graph data.
 
 ```bash
 SELECT create_graph('new_graph');
@@ -84,9 +120,12 @@ NOTICE:  graph "new_graph" has been created
 
 (1 row)
 
-SELECT * FROM ag_catalog.ag_graph;
+SELECT graph_object.name, namespace_object.nspname AS namespace
+FROM ag_catalog.ag_graph graph_object
+JOIN pg_catalog.pg_namespace namespace_object
+  ON namespace_object.oid = graph_object.namespaceoid;
 
-   name    | namespace 
+   name    | namespace
 -----------+-----------
  new_graph | new_graph
 (1 row)
@@ -124,7 +163,7 @@ SELECT * FROM ag_catalog.ag_label;
 
 ## 3. Cypher Query
 
-Cypher statements cannot be executed directly in the database.Instead, they must be passed as arguments to the `cypher()` function, which then returns a `SETOF records`.
+Cypher statements cannot be executed directly in the database. Instead, they must be passed as arguments to the `cypher()` function, which then returns a `SETOF records`.
 
 ### 3.1 Introduction to cypher()
 
@@ -143,13 +182,43 @@ $$) AS (result1 agtype, result2 agtype);
 > 2. `SELECT * FROM cypher` cannot be written as `SELECT cypher`.
 > 3. Before executing the statement, execute `load 'age'` and `set search_path = ag_catalog`.
 
+### 3.2 Dynamic Cypher
+
+`age_prepare_cypher(graph_name, cypher_text)` stores a graph name and Cypher statement for one subsequent `cypher(NULL, NULL)` call in the same session. Preparing again replaces unconsumed content. Replace `graph_name` below with an existing graph.
+
+```bash
+SELECT * FROM ag_catalog.age_prepare_cypher('graph_name', 'MATCH (n) RETURN n');
+SELECT * FROM cypher(NULL, NULL) AS (n agtype);
+```
+
 ## Data Types and Functions
 
 The following provides a brief description of the data types, Cypher statements, and functions included in AGE.
 
 ### 1 Data Types
 
-AGE creates two data types: `graphid` and `agtype`. `graphid` represents the unique ID identifier for vertices and edges. `agtype` is the core data type of AGE. For more details, refer to <https://age.apache.org/age-manual/master/intro/types.html>.
+AGE creates the following data types: `graphid`, `agtype`, `vertex` and `edge`. `graphid` represents the unique ID identifier for vertices and edges. `agtype` is the core data type of AGE; for more details, refer to <https://age.apache.org/age-manual/master/intro/types.html>. `vertex` and `edge` are standalone vertex/edge types; they can be converted to `agtype`, `json` and `jsonb`, and support `=` and `<>` comparison.
+
+Common casts added in 1.0.1:
+
+| Source type | Target type |
+|:--|:--|
+| vertex, edge | agtype, json, jsonb |
+| agtype | json, jsonb |
+| jsonb | agtype |
+| agtype | vector, halfvec, sparsevec |
+
+New agtype operators in 1.0.1:
+
+| Operator | Description |
+|:--|:--|
+| `->`, `->>` | Access by key or index, returning agtype or text respectively |
+| `#>`, `#>>` | Access by path, returning agtype or text respectively |
+| `@>>`, `<<@` | Top-level containment and contained-by tests |
+| `=~` | Regular expression match |
+| \|\| | agtype concatenation |
+
+`age.enable_containment` defaults to on and can only be changed by a system administrator. It rewrites MATCH property filters as `@>` queries, enabling the optimizer to consider agtype GIN indexes. Index use depends on the execution plan.
 
 #### 1.1 Simple Data Types
 
@@ -299,6 +368,57 @@ For detailed information on AGE's support for Cypher statements, refer to <https
 |3 |Delete edges only |Delete edges|
 |4 |Return a deleted vertex |Return a deleted vertex|
 
+#### 2.11 MERGE
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |Merge single vertex / edge |Create if absent, match if present|
+|2 |ON CREATE SET / ON MATCH SET |Set properties after create or match respectively|
+
+#### 2.12 OPTIONAL MATCH
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |Optional match |Return null instead of dropping the row when the pattern does not match|
+
+#### 2.13 UNWIND
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |Unwind a list |Expand a list into multiple rows|
+|2 |Unwind with range |Generate a sequence together with range()|
+
+#### 2.14 UNION
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |UNION / UNION ALL |Combine the results of multiple Cypher queries|
+
+#### 2.15 CALL
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |CALL function |Call a SQL function from Cypher|
+|2 |CALL ... YIELD |Extract returned columns for use in subsequent clauses|
+
+#### 2.16 Subqueries and Expressions
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |EXISTS { } |Existence subquery|
+|2 |COUNT { } |Counting subquery|
+|3 |List comprehension |Filter and transform a list|
+|4 |Map projection |`n {.name, .age}`|
+|5 |reduce() |Fold a list into a value|
+|6 |ANY / ALL / NONE / SINGLE |List predicates|
+
+List comprehension and reduction examples:
+
+```cypher
+RETURN [x IN [1, 2, 3] WHERE x > 1 | x * 2];
+RETURN reduce(s = 0, x IN [1, 2, 3] | s + x);
+```
+
 ### 3 Functions
 
 Functions primarily involve operations on `agtype` and the generation of expressions. For details, refer to <https://age.apache.org/age-manual/master/functions/predicate_functions.html>.
@@ -329,7 +449,7 @@ Functions primarily involve operations on `agtype` and the generation of express
 |13 |toBoolean |Convert a string value to a boolean value|
 |14 |toFloat |Convert an integer or string value to a floating-point number|
 |15 |toInteger |Convert a floating-point or string value to an integer value|
-|15 |coalesce |Return the first non-null value in the given expression list|
+|16 |coalesce |Return the first non-null value in the given expression list|
 
 #### 3.3 List Functions
 
@@ -340,6 +460,10 @@ Functions primarily involve operations on `agtype` and the generation of express
 |3 |labels |Return a list containing the string representation of all labels of a node|
 |4 |relationships |Return a list containing all relationships in a path|
 |5 |nodes |Return a list containing all vertices in a path|
+|6 |tail |Return the list without its first element|
+|7 |isEmpty |Check whether a list, map or string is empty|
+|8 |toStringList / toIntegerList / toFloatList / toBooleanList |Convert every element of a list to the given type|
+|9 |unnest |Expand an agtype list into multiple rows|
 
 #### 3.4 Numeric Functions
 
@@ -382,7 +506,7 @@ Functions primarily involve operations on `agtype` and the generation of express
 
 | # | Supported Operation | Description |
 |:--------|:---------|:--------|
-|1 |replace |Return returns a string in which all occurrences of a specified string in the original string have been replaced by another (specified) string|
+|1 |replace |Return a string in which all occurrences of a specified string in the original string have been replaced by another specified string|
 |2 |split |Return a list of strings obtained by splitting the original string based on matches of a given delimiter|
 |3 |left |Return a string containing the specified number of leftmost characters of the original string|
 |4 |right |Return a string containing the specified number of rightmost characters of the original string|
@@ -407,3 +531,37 @@ Functions primarily involve operations on `agtype` and the generation of express
 |7 |count |Return the number of values or records|
 |8 |avg |Return the average of a set of numeric values|
 |9 |sum |Return the sum of a set of numeric values|
+
+#### 3.9 Path Functions
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |age_shortest_path |Return one shortest path between two vertices|
+|2 |age_all_shortest_paths |Return all shortest paths between two vertices|
+
+These SQL functions return `SETOF agtype`; unreachable endpoints produce no rows. Paths are unweighted and minimized by hop count. Arguments are graph name, start vertex, end vertex, followed by optional edge types, direction, minimum hops and maximum hops. Edge types accept a string or string array. Direction accepts `in`, `out` or `any` (default). The minimum defaults to 0 and the maximum is unbounded. A multi-type edge filter is not supported when the minimum-hop constraint requires searching beyond the unconstrained shortest distance.
+
+The example assumes that `graph_name` exists and each endpoint query matches exactly one vertex, named A or D.
+
+```bash
+SELECT path
+FROM ag_catalog.age_shortest_path(
+    '"graph_name"'::agtype,
+    (SELECT id FROM cypher('graph_name', $$ MATCH (n {name:'A'}) RETURN id(n) $$) AS (id agtype)),
+    (SELECT id FROM cypher('graph_name', $$ MATCH (n {name:'D'}) RETURN id(n) $$) AS (id agtype))
+) AS path;
+```
+
+#### 3.10 Graph Functions
+
+| No. | Supported Operation | Description |
+|:--------|:---------|:--------|
+|1 |graph_exists |Check whether a graph exists|
+|2 |create_subgraph |Extract a subgraph using vertex/edge filters|
+|3 |create_complete_graph |Generate a complete graph|
+|4 |age_create_barbell_graph |Generate a barbell graph|
+|5 |age_prepare_cypher |Store a Cypher statement for one subsequent `cypher(NULL, NULL)` call|
+
+#### 3.11 Upgrade Functions
+
+`age_prepare_pg_upgrade`, `age_pg_upgrade_status`, `age_finish_pg_upgrade` and `age_revert_pg_upgrade_changes` maintain AGE graph catalogs around a server major-version upgrade. They are not called automatically when AGE is upgraded from 1.0.0 to 1.0.1. EXECUTE is not granted to PUBLIC by default; administrators may grant it to trusted roles.

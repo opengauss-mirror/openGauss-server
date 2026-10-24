@@ -9,11 +9,17 @@ Apache AGE is a graph database engine developed based on PostgreSQL. All compone
 Apache AGE is involved in query parsing, query rewriting, query planning, query execution, and data storage in the database kernel. In terms of data storage, it defines the storage model of the graph database. openGauss uses hook points in the database kernel in other aspects to support the Cypher language, implementing the capability to handle both relational and graph data simultaneously.
 
 <a name="zh-cn_topic_0243295241_zh-cn_topic_0243253012_fig1128133574113"></a>
-<div style="display:flex;justfy-content:center;">  
+<div style="display:flex;justify-content:center;">
     <img src="figures/doc_img_AGE-think.png">
 </div>
 
-The openGauss database supports the graph database engine through plugins. In the openGauss database, you can directly use the Apache AGE capabilities by creating a plugin.
+openGauss provides graph database capabilities through the AGE extension.
+
+## Constraints
+
+- AGE supports only databases in A compatibility mode.
+- Thread pool mode is not supported. AGE cannot be loaded when `enable_thread_pool = on`.
+- Use AGE with a matching openGauss kernel version.
 
 ## Installation
 
@@ -76,7 +82,7 @@ make install USE_PGXS=true
 gsql -r
 ```
 
-### Creat a Plugin
+### Create an Extension
 
 - Execute command
 
@@ -93,13 +99,7 @@ CREATE EXTENSION
 
 - Constraints
 
-After the dolphin plugin is installed in openGauss, install the AGE plugin in B mode as follows:
-
-```
-set dolphin.b_compatibility_mode=off;
-create extension age;
-set dolphin.b_compatibility_mode=on;
-```
+`CREATE EXTENSION age` must be run by the initial user or a user with the SYSADMIN attribute, and it must be created separately in every database that will use AGE.
 
 ### Set the Search Path
 
@@ -121,6 +121,10 @@ SET
 ```
 
 ### Load the Plugin
+
+- NOTE
+
+Load AGE before running Cypher in each new session. For ordinary users, an administrator can add `age` to `shared_preload_libraries` and restart the database. When AGE is preloaded, session-level `LOAD` is unnecessary; object privileges must still be granted.
 
 - Execute command
 
