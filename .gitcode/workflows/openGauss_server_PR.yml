@@ -1,17 +1,15 @@
 name: openGauss_server_PR
 
-# concurrency:
-#   max: 120
-#   exceed_action: QUEUE
-#   enable: true
-#   preemption:
-#     enable: true
-#     events: [mr_id]
-
 on:
   push:
     branches:
       - master
+    # 只改文档或流水线配置时不跑门禁；改到其他目录仍会触发。
+    paths-ignore:
+      - '.gitcode/**'
+      - 'doc/**'
+      - 'docs/**'
+      - 'docs-lite/**'
   pull_request_target:
     # AtomGit 的活动名是 open、update、reopen。opened 和 synchronize 过不了校验。
     types:
@@ -21,6 +19,11 @@ on:
     branches:
       - master
       - '**'
+    paths-ignore:
+      - '.gitcode/**'
+      - 'doc/**'
+      - 'docs/**'
+      - 'docs-lite/**'
   pull_request_comment:
     types:
       - created
@@ -35,6 +38,17 @@ permissions:
   repository: read
   pr: write
   note: write
+
+# 同一 PR 再次触发（新提交、reopen、/retest）时，立刻取消还在跑的上一次门禁。
+# mr_id 抢占只作用于同一个合并请求；不同 PR 仍可并行，最多 5 条。
+concurrency:
+  enable: true
+  max: 100
+  exceed-action: QUEUE
+  preemption:
+    enable: true
+    events:
+      - mr_id
 
 env:
   GITCODE_REPO: openGauss/openGauss-server
@@ -194,6 +208,9 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
           set +e
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" running
           rc=$?
           set -e
@@ -345,6 +362,9 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" running
 
   fail_closed:
@@ -526,6 +546,9 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
           set +e
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
           rc=$?
           set -e
@@ -653,6 +676,9 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
 
   openGauss_server_x86:
@@ -1015,6 +1041,9 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
           set +e
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
           rc=$?
           set -e
@@ -1148,4 +1177,7 @@ jobs:
             git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
           )
+          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
           RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result

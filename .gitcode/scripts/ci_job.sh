@@ -171,6 +171,9 @@ test_running=0
 report_test_timeout() {
   [[ -n "${label_token}" && -s "${labels_copy}" && -s "${resolve_copy}" ]] || return 0
   echo "Test timed out or was cancelled; recording a failed pull request label." >&2
+  # Do not let the workflow token (action-bot) write the failed label.
+  unset ATOMGIT_TOKEN || true
+  unset GITHUB_TOKEN || true
   PR_LABEL_TOKEN="${label_token}" \
     RESOLVE_SCRIPT="${resolve_copy}" \
     PIPELINE_UPSTREAM_STATUS=FAILED \
