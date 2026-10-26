@@ -133,6 +133,8 @@ sections:
             href: ./mcp.md
           - label: Mem0
             href: ./mem0.md
+          - label: 使用CamelAI连接openGauss向量存储
+            href: ./camelai_opengauss_vector_storage.md
       - label:  数据来源
         sections:
           - label: Docling
