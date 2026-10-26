@@ -1900,6 +1900,8 @@ const int NUM_PERCENTILE = 2;
 extern void pgstat_ping(void);
 extern void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus,
     int64 duration, TimestampTz current_time);
+/* Update wait-status timing for nested pgstat_report_waitstatus transitions. */
+extern void pgstat_track_waitstatus_change(WaitState oldwaitstatus, WaitState waitstatus);
 extern void UpdateWaitEventStat(WaitInfo* InstrWaitInfo, uint32 wait_event_info,
     int64 duration, TimestampTz current_time);
 extern void UpdateWaitEventFaildStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info);
@@ -2137,15 +2139,7 @@ static inline WaitState pgstat_report_waitstatus(WaitState waitstatus, bool isOn
         beentry->st_libpq_wait_nodeid = InvalidOid;
     }
 
-    if (u_sess->attr.attr_common.enable_instr_track_wait && (int)waitstatus != (int)STATE_WAIT_UNDEFINED) {
-        beentry->waitInfo.status_info.start_time = GetCurrentTimestamp();
-    } else if (u_sess->attr.attr_common.enable_instr_track_wait &&
-               (uint32)oldwaitstatus != (uint32)STATE_WAIT_UNDEFINED && waitstatus == STATE_WAIT_UNDEFINED) {
-        TimestampTz current_time =  GetCurrentTimestamp();
-        int64 duration = current_time - beentry->waitInfo.status_info.start_time;
-        UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration, current_time);
-        beentry->waitInfo.status_info.start_time = 0;
-    }
+    pgstat_track_waitstatus_change(oldwaitstatus, waitstatus);
 
     pgstat_increment_changecount_after(beentry);
 
