@@ -217,6 +217,77 @@ void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, i
     InstrWaitInfo->status_info.statistics_info[waitstatus].last_updated = current_time;
 }
 
+/*
+ * Nested wait-status timing.
+ *
+ * Previously any non-UNDEFINED transition reset start_time, so nested calls
+ * (e.g. CREATE_INDEX -> SORT_WRITE_FILE -> CREATE_INDEX -> UNDEFINED) only
+ * counted the last segment for the outer status. Keep a thread-local stack of
+ * outer (status, start_time) so restoring an outer status resumes its original
+ * start_time; the outer duration then covers the full nested wall clock.
+ */
+#define WAIT_STATUS_NEST_DEPTH 16
+
+typedef struct WaitStatusNestFrame {
+    WaitState status;
+    int64 start_time;
+} WaitStatusNestFrame;
+
+static __thread int wait_status_nest_depth = 0;
+static __thread WaitStatusNestFrame wait_status_nest_stack[WAIT_STATUS_NEST_DEPTH];
+
+void pgstat_track_waitstatus_change(WaitState oldwaitstatus, WaitState waitstatus)
+{
+    volatile PgBackendStatus* beentry;
+    TimestampTz current_time;
+    int64 duration;
+
+    if (!u_sess->attr.attr_common.enable_instr_track_wait) {
+        return;
+    }
+
+    beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (beentry == NULL) {
+        return;
+    }
+
+    current_time = GetCurrentTimestamp();
+
+    if ((int)waitstatus != (int)STATE_WAIT_UNDEFINED) {
+        if ((uint32)oldwaitstatus != (uint32)STATE_WAIT_UNDEFINED &&
+            (uint32)oldwaitstatus != (uint32)waitstatus) {
+            /* Nested switch: restore outer or enter nested. */
+            if (wait_status_nest_depth > 0 &&
+                wait_status_nest_stack[wait_status_nest_depth - 1].status == waitstatus) {
+                /* Restore outer status: count nested duration, resume outer start_time. */
+                duration = current_time - beentry->waitInfo.status_info.start_time;
+                UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration, current_time);
+                wait_status_nest_depth--;
+                beentry->waitInfo.status_info.start_time =
+                    wait_status_nest_stack[wait_status_nest_depth].start_time;
+            } else {
+                /* Enter nested status: push outer frame, start nested timer. */
+                if (wait_status_nest_depth < WAIT_STATUS_NEST_DEPTH) {
+                    wait_status_nest_stack[wait_status_nest_depth].status = oldwaitstatus;
+                    wait_status_nest_stack[wait_status_nest_depth].start_time =
+                        beentry->waitInfo.status_info.start_time;
+                    wait_status_nest_depth++;
+                }
+                beentry->waitInfo.status_info.start_time = current_time;
+            }
+        } else {
+            /* UNDEFINED -> status */
+            beentry->waitInfo.status_info.start_time = current_time;
+        }
+    } else if ((uint32)oldwaitstatus != (uint32)STATE_WAIT_UNDEFINED) {
+        /* status -> UNDEFINED */
+        duration = current_time - beentry->waitInfo.status_info.start_time;
+        UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration, current_time);
+        wait_status_nest_depth = 0;
+        beentry->waitInfo.status_info.start_time = 0;
+    }
+}
+
 void UpdateWaitEventStat(WaitInfo* instrWaitInfo, uint32 wait_event_info, int64 duration, TimestampTz currentTime)
 {
     uint32 classId = wait_event_info & MASK_CLASS_ID;
