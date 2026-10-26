@@ -3961,6 +3961,41 @@ static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *exclud
         }
 
         /*
+         * Emit the INCLUDE clause for the non-key (covering) columns, if any,
+         * so that the decompiled definition keeps the covering columns and
+         * dump/restore round-trips to an equivalent index.
+         *
+         * Local partitioned indexes require LOCAL (...) before INCLUDE in
+         * CREATE INDEX syntax, so this must follow pg_get_indexdef_partitions.
+         * Skip system attributes (negative attnum): global partition indexes
+         * and cross-bucket indexes carry an internal tableoid / tablebucketid
+         * column in the non-key part, which must not be shown.
+         */
+        if (idxrec->indnatts > indnkeyatts) {
+            bool hasInclude = false;
+
+            for (keyno = indnkeyatts; keyno < idxrec->indnatts; keyno++) {
+                AttrNumber attnum = idxrec->indkey.values[keyno];
+                char* attname = NULL;
+
+                if (attnum < 0) {
+                    continue;
+                }
+                if (!hasInclude) {
+                    appendStringInfoString(&buf, " INCLUDE (");
+                    hasInclude = true;
+                } else {
+                    appendStringInfoString(&buf, ", ");
+                }
+                attname = get_relid_attribute_name(indrelid, attnum);
+                appendStringInfoString(&buf, quote_identifier(attname));
+            }
+            if (hasInclude) {
+                appendStringInfoChar(&buf, ')');
+            }
+        }
+
+        /*
          * If it has options, append "WITH (options)"
          */
         str = flatten_reloptions(indexrelid);

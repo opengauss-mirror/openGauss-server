@@ -319,6 +319,35 @@ ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT spec
 drop index part_comp_key_index;
 drop index expr_part_comp_key_index;
 --
+-- Partial index tests with boolean predicates.  The arbiter's WHERE clause
+-- must be normalized the same way as the index predicate (constant folding,
+-- canonicalization and implicit-AND flattening), so that semantically
+-- identical forms match each other.
+--
+create table boolpredtest (key int4, active boolean);
+create unique index boolpredtest_key_idx on boolpredtest(key) where active = true;
+create unique index boolpredtest_key_not_idx on boolpredtest(key) where active = false;
+-- inference succeeds:
+insert into boolpredtest values (1, true) on conflict (key) where active = true do nothing;
+insert into boolpredtest values (1, true) on conflict (key) where active do update set active = true;
+insert into boolpredtest values (1, false) on conflict (key) where active = false do nothing;
+insert into boolpredtest values (1, false) on conflict (key) where not active do update set active = false;
+-- inference fails:
+insert into boolpredtest values (2, true) on conflict (key) where key < 100 do nothing;
+ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
+drop index boolpredtest_key_not_idx;
+drop index boolpredtest_key_idx;
+-- Same, but with the index predicate written as a bare boolean:
+create unique index boolpredtest_key_idx on boolpredtest(key) where active;
+-- inference succeeds:
+insert into boolpredtest values (2, true) on conflict (key) where active do nothing;
+insert into boolpredtest values (2, true) on conflict (key) where active = true do update set active = false;
+-- inference fails:
+insert into boolpredtest values (3, true) on conflict (key) where active = false do nothing;
+ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification
+drop index boolpredtest_key_idx;
+drop table boolpredtest;
+--
 -- Expression index tests
 --
 create unique index expr_key_index on insertconflicttest(lower(fruit));
