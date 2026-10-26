@@ -997,7 +997,11 @@ if [[ "${action}" == "result" ]]; then
       # Skipped, cancelled, or failed matrices can still leave the platform
       # status as success or completed. A cancelled test must not be labeled success.
       fail_closed_result="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "skipped" || "${fail_closed_result}" == "failure" || "${fail_closed_result}" == "failed" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
+      # proceed=skip: docs/ci-config only; prepare already wrote success.
+      if [[ "${GITCODE_PREPARE_PROCEED:-}" == "skip" ]]; then
+        echo "Only ignored paths changed; keeping success." >&2
+        action="success"
+      elif [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "skipped" || "${fail_closed_result}" == "failure" || "${fail_closed_result}" == "failed" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
         echo "Tests did not run; reporting failure instead of success." >&2
         action="failed"
       else
