@@ -80,11 +80,11 @@
 | 参数名 | 类型/GUC级别 | 默认值 | 取值范围 | 生效方式 | 说明 |
 | --- | --- | --- | --- | --- | --- |
 | enable_ub | bool / PGC_POSTMASTER | false | on/off | 重启生效 | 本特性的总开关。开启后，资源池化节点在启动阶段初始化UB共享域、事务共享内存及四类分区，并在主备事务访问路径上启用"共享内存优先、DMS回退"的加速逻辑。 |
-| ss_init_clog_size | int(kB) / PGC_POSTMASTER | 0MB | 0MB ~ 1GB | 重启生效 | startup_reform场景下CLOG/CSNLOG启动预热窗口上限控制参数。参数越大，切换后热点事务命中率越高，但恢复尾段耗时也越长；参数越小，恢复更快，但冷启动爬坡更明显。 |
+| ss_init_clog_size | int(kB) / PGC_POSTMASTER | 0 | 0 ~ 1GB | 重启生效 | startup_reform场景下CLOG/CSNLOG启动预热窗口上限控制参数。参数越大，切换后热点事务命中率越高，但恢复尾段耗时也越长；参数越小，恢复更快，但冷启动爬坡更明显。 |
 
 ### 配置策略
 
-1. **部署启动**：如果希望使用UB内存加速访问路径，则需要开启enable_ub = on，ss_init_clog_size可自行设置，也可使用默认100MB。
+1. **部署启动**：如果希望使用UB内存加速访问路径，则需要开启enable_ub = on，ss_init_clog_size可自行设置，默认为0。
 2. 初次启动如果发现有残留的未知共享内存存在，为了保险可以使用ubsectl delete memory -t share --name xxx命令将内存清理掉，防止访问到错误的遗留内存块。
 3. 由于**特性约束**中第7点提到的依赖文件限制，在通过gs_install执行脚本安装好集群环境之后，需要检索openGauss目录下的libstdc++.so.6文件，并使用mv或者rm命令将其备份或者直接删除，使得gaussdb自动链接系统库文件。
 4. 由于本特性必须依赖UBS Memory动态库组件，因此系统参数配置中需要添加文件路径的参数，例如ubs_mem_path = '/usr/local/ubs_mem/lib/libubsm_sdk.so'，具体文件路径根据UB安装设置决定。

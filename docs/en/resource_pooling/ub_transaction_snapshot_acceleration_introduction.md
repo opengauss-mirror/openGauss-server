@@ -83,11 +83,11 @@ This feature adopts a layered architecture: **"Local persistence path unchanged,
 | Parameter | Type / GUC Level | Default | Value Range | Effective Mode | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **enable_ub** | bool / PGC_POSTMASTER | false | on / off | Restart | Master switch for this feature. When enabled, resource pooling nodes initialize the UB shared domain, transaction shared memory, and four partitions during startup, and enable the "shared memory first, DMS fallback" acceleration logic in transaction access paths. |
-| **ss_init_clog_size** | int (kB) / PGC_POSTMASTER | 100MB | 1MB–1GB | Restart | Controls the upper limit of the CLOG/CSNLOG pre-warming window during **Startup Reform**. Larger values increase the hot transaction hit rate post-switchover but extend recovery tail-phase duration. Smaller values result in faster recovery but more noticeable cache warm-up ramp-up. |
+| **ss_init_clog_size** | int (kB) / PGC_POSTMASTER | 0 | 0–1GB | Restart | Controls the upper limit of the CLOG/CSNLOG pre-warming window during **Startup Reform**. Larger values increase the hot transaction hit rate post-switchover but extend recovery tail-phase duration. Smaller values result in faster recovery but more noticeable cache warm-up ramp-up. |
 
 ### Configuration Strategy
 
-1.  **Deployment & Startup**: To utilize the UB memory acceleration path, set `enable_ub = on`. `ss_init_clog_size` can be adjusted or left at the default 100MB.
+1.  **Deployment & Startup**: To utilize the UB memory acceleration path, set `enable_ub = on`. `ss_init_clog_size` can be adjusted or left at the default 0.
 2.  **Cleanup**: If unknown residual shared memory blocks are detected during initial startup, it is recommended to clean them manually using `ubsectl delete memory -t share --name xxx` to prevent accessing incorrect legacy memory regions.
 3.  **Library Dependency**: Due to the dependency file restriction mentioned in Constraint 7, after installing the cluster via `gs_install`, locate `libstdc++.so.6` within the openGauss directory. Back it up or remove it using `mv` or `rm` so that `gaussdb` links against the system library automatically.
 4.  **SDK Path**: As this feature depends on the UBS Memory dynamic library, add the library path to the system configuration parameters. For example: `ubs_mem_path = '/usr/local/ubs_mem/lib/libubsm_sdk.so'` (adjust the path based on the actual UBS installation location).
