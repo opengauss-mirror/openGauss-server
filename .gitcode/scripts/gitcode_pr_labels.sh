@@ -2,23 +2,11 @@
 set -euo pipefail
 
 repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-# Prefer the dedicated pull-request token. If that token cannot update the
-# merge request, one write is retried with the workflow token, which has pr:write.
+# Drop platform workflow tokens. Label and comment writes must use
+# PR_LABEL_TOKEN (opengauss-ci-bot) only. Merge rules reject action-bot.
+unset ATOMGIT_TOKEN || true
+unset GITHUB_TOKEN || true
 token="${PR_LABEL_TOKEN:-}"
-LABEL_TOKEN_TRIED_WORKFLOW=no
-
-use_workflow_token() {
-  if [[ "${LABEL_TOKEN_TRIED_WORKFLOW}" == "yes" ]]; then
-    return 1
-  fi
-  if [[ -z "${ATOMGIT_TOKEN:-}" || "${ATOMGIT_TOKEN}" == "${token}" ]]; then
-    return 1
-  fi
-  echo "PR_LABEL_TOKEN cannot update this merge request; retrying with the workflow token." >&2
-  token="${ATOMGIT_TOKEN}"
-  LABEL_TOKEN_TRIED_WORKFLOW=yes
-  return 0
-}
 pr_iid="${GITCODE_PR_IID:-}"
 action="${1:-}"
 
@@ -68,12 +56,6 @@ fi
 if [[ ! "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid repository: ${repo}" >&2
   exit 1
-fi
-
-if [[ -z "${token}" && -n "${ATOMGIT_TOKEN:-}" ]]; then
-  echo "PR_LABEL_TOKEN is empty; using the workflow token." >&2
-  token="${ATOMGIT_TOKEN}"
-  LABEL_TOKEN_TRIED_WORKFLOW=yes
 fi
 
 if [[ -z "${token}" ]]; then
@@ -203,10 +185,6 @@ delete_label() {
       ;;
     401|403)
       rm -f "${body}"
-      if use_workflow_token; then
-        delete_label "${label}" || return 1
-        return 0
-      fi
       echo "Failed to delete label ${label}: HTTP ${code}" >&2
       return 1
       ;;
@@ -256,10 +234,6 @@ ensure_repo_label() {
     401|403)
       show_body "${body}"
       rm -f "${body}"
-      if use_workflow_token; then
-        ensure_repo_label "${label}" || return 1
-        return 0
-      fi
       echo "Cannot create repository label ${label}: HTTP ${code}" >&2
       return 1
       ;;
@@ -306,10 +280,6 @@ add_label() {
     401|403)
       show_body "${body}"
       rm -f "${body}"
-      if use_workflow_token; then
-        add_label "${label}" || return 1
-        return 0
-      fi
       echo "Failed to add label ${label}: HTTP ${code}" >&2
       return 1
       ;;
@@ -1083,14 +1053,7 @@ PY
 }
 
 post_pipeline_started_comment() {
-  local run_id server page_url comment_file code err body encoded method comment_token
-  # The workflow token is action-bot. Gate comments must stay on the ci-bot token,
-  # even after label writes have fallen back to ATOMGIT_TOKEN.
-  comment_token="${PR_LABEL_TOKEN:-}"
-  if [[ -z "${comment_token}" ]]; then
-    echo "PR_LABEL_TOKEN is empty; the start comment was not posted." >&2
-    return 1
-  fi
+  local run_id server page_url comment_file code err body encoded method
   run_id="$(find_actions_run_id)" || {
     echo "Cannot find this actions run; the start comment was not posted." >&2
     return 1
@@ -1121,11 +1084,11 @@ PY
   fi
   err="$(mktemp)"
   body="$(mktemp)"
-  encoded="$(urlencode "${comment_token}")"
+  encoded="$(urlencode "${token}")"
   code="000"
   for method in POST PUT; do
     code="$(curl -sS --max-time 30 -o "${body}" -w '%{http_code}' -X "${method}" \
-      -H "Authorization: Bearer ${comment_token}" \
+      -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json;charset=UTF-8" \
       --data-binary "@${comment_file}" \
       "${api_root}/repos/${repo}/pulls/${pr_iid}/comments?access_token=${encoded}" 2>"${err}")" || code="000"
