@@ -275,6 +275,51 @@ select 0+cast(' -      ' as bigint);
 select 0+cast('       +' as bigint);
 select 0+cast('-       ' as bigint);
 
+-- Date formatting must work with the default D compatibility options.
+SET lc_time = 'C';
+RESET d_format_behavior_compat_options;
+SELECT CONVERT(varchar, timestamp'2012-03-23 00:12:23', 1) AS result;
+SELECT CONVERT(varchar, date'2012-03-23', 101) AS result;
+
+-- The internal function must preserve custom caller options.
+SET d_format_behavior_compat_options = 'enable_sbr_identifier,disable_target_alias';
+SELECT current_setting('d_format_behavior_compat_options') AS caller_options;
+SELECT CONVERT(char(10), date'2012-03-23', 1) AS result;
+SELECT CONVERT(nvarchar(30), timestamp'2012-03-23 00:12:23', 101) AS result;
+SELECT sys.shark_get_timeunit_from_string('12:34:56', 'HOURS') AS hours;
+SELECT CONVERT(smalldatetime, '2012-03-23 00:12:23', 120) AS result;
+SELECT TRY_CONVERT(smalldatetime, '2012-03-23 00:12:23', 120) AS result;
+SELECT CONVERT(timestamptz, '2012-03-23 00:12:23+08:00', 120)
+    AT TIME ZONE 'UTC' AS result;
+SELECT TRY_CONVERT(timestamptz, '2012-03-23 00:12:23+08:00', 120)
+    AT TIME ZONE 'UTC' AS result;
+SELECT TRY_CAST('{one,two}' AS text ARRAY) AS result;
+SELECT TRY_CAST('not-an-array' AS text ARRAY) IS NULL AS cast_failed;
+SELECT TRY_CONVERT(smalldatetime, 'not-a-date', 120) IS NULL AS convert_failed;
+SELECT TRY_CONVERT(timestamptz, 'not-a-date', 120) IS NULL AS convert_failed;
+SELECT current_setting('d_format_behavior_compat_options') AS caller_options;
+SELECT 1 AS [sbr_identifier];
+
+-- Restore the caller options when the protected sys function recovers an error.
+SET xact_abort = off;
+BEGIN;
+SELECT sys.shark_get_lang_metadata_json('invalid-culture');
+SELECT current_setting('d_format_behavior_compat_options') AS caller_options;
+SELECT 1 AS [sbr_identifier];
+ROLLBACK;
+RESET xact_abort;
+
+-- ALL can exclude square-bracket identifiers without enumerating other options.
+SET d_format_behavior_compat_options = 'ALL,-enable_sbr_identifier';
+SELECT current_setting('d_format_behavior_compat_options') AS caller_options;
+SELECT '{one,two}'::text[] AS result;
+SELECT lhs = rhs FROM (SELECT 1 AS lhs, 1 AS rhs) AS t;
+SELECT CONVERT(varchar, timestamp'2012-03-23 00:12:23', 1) AS result;
+SELECT current_setting('d_format_behavior_compat_options') AS caller_options;
+
+RESET d_format_behavior_compat_options;
+RESET lc_time;
+
 reset d_format_behavior_compat_options;
 reset search_path;
 drop schema functions_test2 cascade;

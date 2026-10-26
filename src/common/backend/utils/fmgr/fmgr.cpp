@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/tuptoaster.h"
+#include "access/xact.h"
 #include "access/ustore/knl_utuptoaster.h"
 #include "bulkload/dist_fdw.h"
 #include "catalog/gs_encrypted_proc.h"
@@ -1187,6 +1188,25 @@ PLpgSQL_function* get_security_function(FunctionCallInfo fcinfo)
 }
 
 /*
+ * D-mode exception handling can leave an internal subtransaction active when
+ * a function returns. Restore the function settings without dropping the GUC
+ * nesting level below that required by the active subtransaction.
+ */
+static void RestoreFunctionGUC(bool isCommit, int nestLevel)
+{
+    /* A procedure can already have ended the transaction containing the scope. */
+    if (nestLevel == 0 || nestLevel > u_sess->utils_cxt.GUCNestLevel) {
+        return;
+    }
+    int xactNestLevel = GetCurrentTransactionState()->gucNestLevel;
+
+    AtEOXact_GUC(isCommit, nestLevel);
+    if (xactNestLevel > u_sess->utils_cxt.GUCNestLevel) {
+        u_sess->utils_cxt.GUCNestLevel = xactNestLevel;
+    }
+}
+
+/*
  * Function handler for security-definer/proconfig/plugin-hooked functions.
  * We extract the OID of the actual function and do a fmgr lookup again.
  * Then we fetch the pg_proc row and copy the owner ID and proconfig fields.
@@ -1273,9 +1293,9 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     }
 
     /*
-     * We don't need to restore GUC or userid settings on error, because the
-     * ensuing xact or subxact abort will do that.	The PG_TRY block is only
-     * needed to clean up the flinfo link.
+     * Transaction or subtransaction abort normally restores GUC settings.
+     * D-mode error recovery can keep the transaction alive, so restore an
+     * active function GUC scope before propagating the error in that case.
      */
     save_flinfo = fcinfo->flinfo;
 
@@ -1305,6 +1325,12 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
             (*fmgr_hook)(FHET_ABORT, &(fcache->flinfo), &(fcache->arg));
         }
 
+        if (DB_IS_CMPT(D_FORMAT) && !u_sess->attr.attr_common.enable_xact_abort &&
+            fcache->proconfig != NULL &&
+            save_nestlevel <= u_sess->utils_cxt.GUCNestLevel) {
+            RestoreFunctionGUC(false, save_nestlevel);
+        }
+
         /* restore is_allow_commit_rollback */
         stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
         SetOldUserId(save_olduserid, false);
@@ -1318,7 +1344,11 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     fcinfo->flinfo = save_flinfo;
 
     if (fcache->proconfig != NULL) {
-        AtEOXact_GUC(true, save_nestlevel);
+        if (DB_IS_CMPT(D_FORMAT) && !u_sess->attr.attr_common.enable_xact_abort) {
+            RestoreFunctionGUC(true, save_nestlevel);
+        } else {
+            AtEOXact_GUC(true, save_nestlevel);
+        }
     }
 
     if (OidIsValid(fcache->userid) && !u_sess->exec_cxt.is_exec_trigger_func) {
