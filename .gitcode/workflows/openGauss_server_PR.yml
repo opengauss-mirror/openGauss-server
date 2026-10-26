@@ -1,5 +1,10 @@
 name: openGauss_server_PR
 
+concurrency:
+  preemption:
+    enable: true
+    events: [mr_id]
+
 on:
   push:
     branches:
