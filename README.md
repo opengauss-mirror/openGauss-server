@@ -4,7 +4,7 @@
 
 
 
-- [什么是openGauss](#什么是openGauss)
+- [什么是openGauss](#什么是opengauss)
 - [安装](#安装)
   - [创建配置文件](#创建配置文件)
   - [初始化安装环境](#初始化安装环境)
@@ -515,7 +515,7 @@ https://opengauss.org/zh/
         </tr>
     </tr>
     <tr>
-        <td rowspan=1>v6.0.5-v6.0.6</td>
+        <td rowspan=1>v6.0.5-v6.0.7</td>
         <td>gcc10.3</td>
         <td rowspan=1>
            <strong>openEuler_arm:</strong> <a href="https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz">https://opengauss.obs.cn-south-1.myhuaweicloud.com/6.0.6/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz</a><br/>
