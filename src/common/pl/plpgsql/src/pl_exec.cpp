@@ -24,7 +24,7 @@
 #include "access/xact.h"
 #include "access/tableam.h"
 #include "auditfuncs.h"
-#include "catalog/catalog.h"
+#include "catalog/dependency.h"
 #include "catalog/pg_proc.h"
 #include "catalog/gs_package.h"
 #include "executor/spi_priv.h"
@@ -304,7 +304,7 @@ extern void check_variable_value_info(const char* var_name, const Expr* var_expr
 extern SPIPlanPtr prepare_stmt_exec(PLpgSQL_execstate *estate, PLpgSQL_function *func,
 							  PLpgSQL_stmt_exec *stmt, bool keepplan = false);
 
-static bool isFuncInDSysSchema(Oid funcOid);
+static bool shouldSuppressXactAbortWarning(Oid funcOid);
 
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
@@ -5152,15 +5152,16 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
                 if (DB_IS_CMPT(D_FORMAT) && !estate->func->xact_abort && IsTransactionOrTransactionBlock() &&
                     !u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->plsql_cxt.in_extension_create &&
                     strcmp(estate->func->fn_signature, "inline_code_block") != 0 &&
-                    u_sess->plsql_cxt.trycatch_depth == 0 && !isFuncInDSysSchema(estate->func->fn_oid)) {
+                    u_sess->plsql_cxt.trycatch_depth == 0) {
                     RollbackAndReleaseCurrentSubTransaction();
                     MemoryContextSwitchTo(oldcontext);
                     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+                    bool suppressClientWarning = shouldSuppressXactAbortWarning(estate->func->fn_oid);
                     ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
                     int saved_elevel = edata->elevel;
                     bool saved_output_to_client = edata->output_to_client;
                     edata->elevel = WARNING;
-                    edata->output_to_client = true;
+                    edata->output_to_client = !suppressClientWarning;
                     EmitErrorReport();
                     edata->elevel = saved_elevel;
                     edata->output_to_client = saved_output_to_client;
@@ -17555,18 +17556,19 @@ static Node *get_underlying_node_from_implicit_casting(Node *n, NodeTag underlyi
     return NULL;
 }
 
-/* Check the function's namespace, including Shark's dynamically created schemas. */
-static bool isFuncInDSysSchema(Oid funcOid)
+/* Keep server reporting for recovered errors, but hide client warnings from Shark's sys functions. */
+static bool shouldSuppressXactAbortWarning(Oid funcOid)
 {
-    if (!DB_IS_CMPT(D_FORMAT) || !OidIsValid(funcOid)) {
+    if (!OidIsValid(funcOid)) {
         return false;
     }
 
-    Oid namespaceId = get_func_namespace(funcOid);
-    if (!OidIsValid(namespaceId)) {
+    Oid sysNamespaceId = get_namespace_oid("sys", true);
+    if (!OidIsValid(sysNamespaceId) || get_func_namespace(funcOid) != sysNamespaceId) {
         return false;
     }
 
-    return IsSysSchema(namespaceId) || namespaceId == get_namespace_oid("sys", true) ||
-           namespaceId == get_namespace_oid("information_schema_tsql", true);
+    Oid sharkExtensionId = get_extension_oid("shark", true);
+    return OidIsValid(sharkExtensionId) &&
+           getExtensionOfObject(ProcedureRelationId, funcOid) == sharkExtensionId;
 }

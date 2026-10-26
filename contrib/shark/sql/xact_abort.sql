@@ -235,5 +235,25 @@ drop procedure if exists p3;
 drop procedure if exists p4;
 drop table if exists test;
 
+-- Only Shark-owned functions in sys suppress recovered warnings on the client.
+CREATE FUNCTION d_dbproc.xact_abort_warning_scope() RETURNS integer AS $$
+DECLARE
+    result integer := 0;
+BEGIN
+    SELECT 1 / 0 INTO result;
+    SELECT 42 INTO result;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION d_dbproc.xact_abort_warning_scope() SET SCHEMA sys;
+select sys.xact_abort_warning_scope() as result;
+ALTER EXTENSION shark ADD FUNCTION sys.xact_abort_warning_scope();
+select sys.xact_abort_warning_scope() as result;
+ALTER FUNCTION sys.xact_abort_warning_scope() SET SCHEMA d_dbproc;
+select d_dbproc.xact_abort_warning_scope() as result;
+ALTER EXTENSION shark DROP FUNCTION d_dbproc.xact_abort_warning_scope();
+select d_dbproc.xact_abort_warning_scope() as result;
+DROP FUNCTION d_dbproc.xact_abort_warning_scope();
+
 --dump
 drop schema d_dbproc cascade;

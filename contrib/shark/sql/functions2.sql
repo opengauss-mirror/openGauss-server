@@ -2,6 +2,14 @@ create schema functions_test2;
 set search_path = 'functions_test2';
 set d_format_behavior_compat_options = '';
 
+-- Verify cold-cache lookup, cache misses, and cache hits without statement error recovery.
+set xact_abort on;
+select sys.shark_get_full_year('4', '20', 49) as full_year;
+select sys.shark_get_full_year('49', '20', 49) as full_year;
+select sys.shark_get_full_year('50', '20', 49) as full_year;
+select sys.shark_get_full_year('4', '20', 49) as full_year;
+reset xact_abort;
+
 select datediff(year, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
 select datediff(yy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
 select datediff(yyyy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
