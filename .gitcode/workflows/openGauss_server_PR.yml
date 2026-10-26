@@ -1,9 +1,12 @@
 name: openGauss_server_PR
 
-concurrency:
-  preemption:
-    enable: true
-    events: [mr_id]
+# concurrency:
+#   max: 120
+#   exceed_action: QUEUE
+#   enable: true
+#   preemption:
+#     enable: true
+#     events: [mr_id]
 
 on:
   push:
