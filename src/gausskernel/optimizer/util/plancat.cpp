@@ -1043,7 +1043,13 @@ static bool infer_collation_opclass_match(InferenceElem *elem, Relation idxRel, 
         inferopcinputtype = get_opclass_input_type(elem->inferopclass);
     }
 
-    for (natt = 1; natt <= idxRel->rd_att->natts; natt++) {
+    /*
+     * Only the key attributes take part in uniqueness matching.  INCLUDE
+     * columns are stored in the catalog as trailing index attributes but
+     * carry no opclass/collation usable for inference, so they must be
+     * skipped here.
+     */
+    for (natt = 1; natt <= IndexRelationGetNumberOfKeyAttributes(idxRel); natt++) {
         Oid opfamily = idxRel->rd_opfamily[natt - 1];
         Oid opcinputtype = idxRel->rd_opcintype[natt - 1];
         Oid collation = idxRel->rd_indcollation[natt - 1];
@@ -1098,6 +1104,7 @@ static List* findMatchedIndexOid(UpsertExpr* onconflict, List* indexList,
         Bitmapset *indexedAttrs;
         List *idxExprs;
         List *predExprs;
+        List *arbiterList;
         AttrNumber natt;
         ListCell *el;
 
@@ -1149,9 +1156,14 @@ static List* findMatchedIndexOid(UpsertExpr* onconflict, List* indexList,
         if (!idxForm->indisunique || idxForm->indisexclusion)
             goto next;
 
-        /* Build BMS representation of plain (non expression) index attrs */
+        /*
+         * Build BMS representation of plain (non expression) index attrs.
+         * Only key attributes participate in uniqueness, so INCLUDE columns
+         * must be left out of the comparison, otherwise an inference
+         * specification that names just the key columns can never match.
+         */
         indexedAttrs = NULL;
-        for (natt = 0; natt < idxForm->indnatts; natt++) {
+        for (natt = 0; natt < IndexRelationGetNumberOfKeyAttributes(idxRel); natt++) {
             int attno = idxRel->rd_index->indkey.values[natt];
 
             if (attno != 0)
@@ -1214,11 +1226,27 @@ static List* findMatchedIndexOid(UpsertExpr* onconflict, List* indexList,
         /*
          * If it's a partial index, its predicate must be implied by the ON
          * CONFLICT's WHERE clause.
+         *
+         * Note that arbiterWhere is a single qual expression (not a List).
+         * Normalize it exactly the way RelationGetIndexPredicate() normalizes
+         * the index predicate (constant folding, canonicalization and
+         * implicit-AND flattening), so that both sides of the implication
+         * test have received the same preprocessing.  Otherwise semantically
+         * identical forms can fail to match, e.g. "active = true" on the
+         * arbiter side against an index predicate that was folded down to a
+         * bare boolean Var.  The result is converted to a list of AND'ed
+         * clauses as expected by predicate_implied_by.
          */
         predExprs = RelationGetIndexPredicate(idxRel);
         if (predExprs && varno != 1)
             ChangeVarNodes((Node*)predExprs, 1, varno, 0);
-        if (!predicate_implied_by(predExprs, (List *)onconflict->arbiterWhere))
+        arbiterList = NIL;
+        if (onconflict->arbiterWhere != NULL) {
+            Node* arbiterWhere = eval_const_expressions(NULL, (Node*)onconflict->arbiterWhere);
+            arbiterWhere = (Node*)canonicalize_qual((Expr*)arbiterWhere, false);
+            arbiterList = make_ands_implicit((Expr*)arbiterWhere);
+        }
+        if (!predicate_implied_by(predExprs, arbiterList))
             goto next;
 
         results = lappend_oid(results, idxForm->indexrelid);
