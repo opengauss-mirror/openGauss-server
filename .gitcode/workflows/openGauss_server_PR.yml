@@ -209,118 +209,16 @@ jobs:
           unset ATOMGIT_TOKEN || true
           unset GITHUB_TOKEN || true
           # 纯文档/流水线配置：不跑 LLT，直接打 ci-pipeline-success（合入依赖此标签）。
-          # master 尚无脚本时用工作流内嵌副本，避免仍去跑满门禁。
+          # 跳过逻辑只从 master 拉 pr_paths_should_skip_ci.sh，禁止在 run 块里顶格嵌 heredoc（会弄破 YAML，平台校验直接 FAILED）。
           skip_rc=1
           if [ ! -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            cat > "${dir}/pr_paths_should_skip_ci.sh" << 'SKIP_SCRIPT_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-pr_iid="${GITCODE_PR_IID:-}"
-token="${PR_LABEL_TOKEN:-}"
-path_is_ignored() {
-  local path="$1"
-  path="${path#./}"
-  case "${path}" in
-    .gitcode|.gitcode/*|doc|doc/*|docs|docs/*|docs-lite|docs-lite/*) return 0 ;;
-  esac
-  return 1
-}
-if [[ -z "${pr_iid}" && -n "${RESOLVE_SCRIPT:-}" && -f "${RESOLVE_SCRIPT}" ]]; then
-  resolved="$(mktemp)"
-  if bash -c 'source "$1" >&2; printf "GITCODE_PR_IID=%q\n" "${GITCODE_PR_IID:-}"' _ "${RESOLVE_SCRIPT}" > "${resolved}"; then
-    count="$(grep -c '^GITCODE_PR_IID=' "${resolved}" || true)"
-    if [[ "${count}" -eq 1 ]]; then
-      eval "$(cat "${resolved}")"
-      pr_iid="${GITCODE_PR_IID:-}"
-    fi
-  fi
-  rm -f "${resolved}"
-fi
-if [[ -z "${pr_iid}" || ! "${pr_iid}" =~ ^[0-9]+$ ]]; then
-  echo "No pull request iid; cannot apply docs-only path skip." >&2
-  exit 2
-fi
-if [[ ! "${repo}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ || -z "${token}" ]]; then
-  echo "Missing repo or PR_LABEL_TOKEN; run CI." >&2
-  exit 2
-fi
-api_root="https://api.gitcode.com/api/v5"
-if [[ -n "${ATOMGIT_API_URL:-}" ]]; then
-  api_root="${ATOMGIT_API_URL%/}"
-  case "${api_root}" in */api/v5) ;; *) api_root="${api_root}/api/v5" ;; esac
-fi
-urlencode() {
-  local LC_ALL=C s="$1" i c
-  for ((i = 0; i < ${#s}; i++)); do
-    c="${s:i:1}"
-    case "${c}" in [A-Za-z0-9._~-]) printf '%s' "${c}" ;; *) printf '%%%02X' "'${c}" ;; esac
-  done
-}
-encoded="$(urlencode "${token}")"
-body="$(mktemp)"
-trap 'rm -f "${body}"' EXIT
-code="$(curl -sS --max-time 60 -o "${body}" -w '%{http_code}' \
-  -H "Authorization: Bearer ${token}" -H "Accept: application/json" \
-  "${api_root}/repos/${repo}/pulls/${pr_iid}/files?access_token=${encoded}&per_page=300" || true)"
-if [[ "${code}" != "200" ]]; then
-  echo "Cannot list pull request files: HTTP ${code}" >&2
-  exit 2
-fi
-paths=""
-if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
-  py=python3
-  command -v python3 >/dev/null 2>&1 || py=python
-  paths="$("${py}" - "${body}" << 'PY' || true
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-if not isinstance(data, list):
-    sys.exit(2)
-for item in data:
-    if isinstance(item, dict):
-        name = item.get("filename") or item.get("new_path") or item.get("path") or ""
-        if name:
-            print(name)
-PY
-)" || paths=""
-fi
-if [[ -z "${paths}" ]]; then
-  paths="$(grep -oE '"filename"[[:space:]]*:[[:space:]]*"[^"]+"' "${body}" | sed 's/.*"filename"[[:space:]]*:[[:space:]]*"//;s/"$//' || true)"
-fi
-if [[ -z "${paths}" ]]; then
-  echo "Pull request file list empty; run CI." >&2
-  exit 2
-fi
-outside=0
-total=0
-while IFS= read -r path || [[ -n "${path}" ]]; do
-  [[ -n "${path}" ]] || continue
-  total=$((total + 1))
-  if ! path_is_ignored "${path}"; then
-    echo "Non-ignored change: ${path}" >&2
-    outside=1
-  else
-    echo "Ignored change: ${path}" >&2
-  fi
-done << EOF
-${paths}
-EOF
-if [[ "${total}" -eq 0 ]]; then
-  echo "No paths parsed; run CI." >&2
-  exit 2
-fi
-if [[ "${outside}" -eq 0 ]]; then
-  echo "All ${total} changed path(s) under .gitcode/doc/docs/docs-lite; skip CI tests." >&2
-  exit 0
-fi
-echo "Found changes outside ignored paths; run CI tests." >&2
-exit 1
-SKIP_SCRIPT_EOF
+            echo "pr_paths_should_skip_ci.sh missing on master tip; run full CI." >&2
+          else
+            set +e
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
+            skip_rc=$?
+            set -e
           fi
-          set +e
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-          skip_rc=$?
-          set -e
           if [ "${skip_rc}" -eq 0 ]; then
             echo "Only .gitcode/doc/docs/docs-lite changed; write ci-pipeline-success and skip tests."
             set +e
