@@ -41,18 +41,13 @@
 
 /* for xlog */
 #ifndef RM_GRAPH_ID
-#define RM_GRAPH_ID XLOG_GENERIC_LOG
+#define RM_GRAPH_ID RM_GENERIC_ID
 #endif
 #ifndef XLOG_GRAPH_WRITE_FULL_PAGES
-#define XLOG_GRAPH_WRITE_FULL_PAGES GENERIC_XLOG_FULL_IMAGE
+#define XLOG_GRAPH_WRITE_FULL_PAGES XLOG_GENERIC_LOG
 #endif
 
 namespace gs_vector {
-
-struct XlWriteFullPage {
-    uint32_t block_nums = 0;
-    uint32_t init_flags = 0;
-};
 
 struct BlockData {
     uint16_t st = 0;
@@ -163,15 +158,14 @@ struct GVAtomicImpl : public annlite::light_env::Atomic {
         static constexpr int TWO = 2;
 
         XLogEnsureRecordSpace((int)block_max,
-            (int)(totalblocks * (annlite::toolkit::DirtyState::block_types * TWO + 1)));
+            (int)(totalblocks * annlite::toolkit::DirtyState::block_types * TWO));
 
         START_CRIT_SECTION();
         XLogRecPtr recptr;
-        XlWriteFullPage xlrec;
         size_t blocks = 0;
         XLogBeginInsert();
         BlockData block_datas[BLOCK_MAX_COUNT * 4];
-        uint8_t block_data_size[BLOCK_MAX_COUNT];
+        uint8_t block_data_count[BLOCK_MAX_COUNT];
         size_t idx = 0;
 
         for (size_t i = 0; i < m_buffercount; i++) {
@@ -186,19 +180,23 @@ struct GVAtomicImpl : public annlite::light_env::Atomic {
             if (m_buffers[i].need_init) {
                 XLogRegisterBuffer((uint8_t)blocks, buf, REGBUF_FORCE_IMAGE | REGBUF_STANDARD);
             } else {
-                block_data_size[blocks] = 0;
+                block_data_count[blocks] = 0;
                 for (uint8_t j = 0; j < annlite::toolkit::DirtyState::block_types; j++) {
                     uint16_t datalen = m_buffers[i].dirty_state.blocks[j].ed - m_buffers[i].dirty_state.blocks[j].st;
                     if (datalen == 0) {
                         continue;
                     }
-                    block_data_size[blocks]++;
+                    block_data_count[blocks]++;
                 }
 
                 XLogRegisterBuffer((uint8_t)blocks, buf, REGBUF_STANDARD);
-                XLogRegisterBufData((uint8_t)blocks, (char *)&block_data_size[blocks], sizeof(uint8_t));
-
-                if (block_data_size[blocks] != 0) {
+                /*
+                 * Generic WAL expects each block payload to be a sequence of
+                 * uint16 offset, uint16 length, and bytes.  Keep the count
+                 * local for deciding whether there is payload, but do not
+                 * serialize it into the WAL record.
+                 */
+                if (block_data_count[blocks] != 0) {
                     for (uint8_t j = 0; j < annlite::toolkit::DirtyState::block_types; j++) {
                         uint16_t datalen = m_buffers[i].dirty_state.blocks[j].ed -
                                             m_buffers[i].dirty_state.blocks[j].st;
@@ -208,6 +206,7 @@ struct GVAtomicImpl : public annlite::light_env::Atomic {
                         block_datas[idx].st = m_buffers[i].dirty_state.blocks[j].st;
                         Assert(0 <= block_datas[idx].st && block_datas[idx].st <= BLCKSZ);
                         block_datas[idx].datalen = datalen;
+                        Assert((size_t)block_datas[idx].st + block_datas[idx].datalen <= BLCKSZ);
                         XLogRegisterBufData((uint8_t)blocks, (char*)&block_datas[idx], SIZE_OF_BLOCK_DATA);
                         XLogRegisterBufData((uint8_t)blocks, (char*)page +
                                                 m_buffers[i].dirty_state.blocks[j].st, datalen);
@@ -215,14 +214,11 @@ struct GVAtomicImpl : public annlite::light_env::Atomic {
                     }
                 }
             }
-            xlrec.init_flags  |= ((uint32_t)(m_buffers[i].need_init) << blocks);
             blocks++;
             Assert(blocks < block_max);
         }
 
         Assert(totalblocks == blocks);
-        xlrec.block_nums = (uint32_t)blocks;
-        XLogRegisterData((char*)&xlrec, sizeof(XlWriteFullPage));
         recptr = XLogInsert(m_rmid, m_info, RelationGetBktid(m_index));
         
         for (size_t i = 0; i < m_buffercount; i++) {

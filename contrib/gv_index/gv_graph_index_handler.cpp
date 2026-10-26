@@ -696,7 +696,7 @@ void graph_index_first(IndexScanDesc scan, GraphScanOpaque so)
     annlite::IndexOptions search_options = {
         {"search_type", (int)annlite::NORMAL_ANN},
         {"candidates", (int)rawCandidates},
-        {"enable_brute_force_threshold", (int)0},
+        {"enable_brute_force_threshold", (int)100000},
         {"need_normalized", (bool)need_normalize}};
     FAST_NOTICE("GRAPH_search need_normalize=%d dist_type=%d", (int)need_normalize, (int)meta.dist_type);
     size_t count = graph_index->search(&result_set[0], rawCandidates, &vector->x[0], dim, filter, search_options,
