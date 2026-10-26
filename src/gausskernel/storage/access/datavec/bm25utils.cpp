@@ -24,7 +24,9 @@
 
 #include "access/generic_xlog.h"
 #include "access/datavec/bitvec.h"
+#include "access/heapam.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_partition_fn.h"
 #include "fmgr.h"
 #include "access/datavec/halfutils.h"
 #include "access/datavec/halfvec.h"
@@ -32,6 +34,8 @@
 #include "access/datavec/utils.h"
 #include "storage/buf/bufmgr.h"
 #include "tokenizer.h"
+#include "utils/lsyscache.h"
+#include "utils/partcache.h"
 
 BM25TokenizedDocData BM25DocumentTokenize(const char* doc, const char* dictPath, bool cutForSearch)
 {
@@ -489,7 +493,9 @@ void BM25BatchInsertRecord(Relation index)
 
     if (likely(bm25_ctx->indexOidForCount == indexOid)) {
         bm25_ctx->insertTupleNum += 1;
-    } else if (bm25_ctx->isFirstTuple) {
+    } else if ((RelationIsPartition(index) || bm25_ctx->isFirstTuple) &&
+        !list_member_oid(bm25_ctx->indexOids, indexOid)) {
+        /* Later tuples can visit new physical partitions; mark each on abort. */
         oldCtx = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
         bm25_ctx->indexOids = lappend_oid(bm25_ctx->indexOids, indexOid);
         (void)MemoryContextSwitchTo(oldCtx);
@@ -505,10 +511,53 @@ void BM25BatchInsertResetRecord()
     u_sess->bm25_ctx.isFirstTuple = true;
 }
 
+typedef struct BM25PartitionRelationHandle {
+    Relation parent;
+    Partition partition;
+    Relation relation;
+} BM25PartitionRelationHandle;
+
+/* Open a physical index partition from its pg_partition OID. */
+static Relation BM25OpenIndexByOid(Oid indexOid, Relation *rootIndex, List **handles)
+{
+    Oid parentOid = partid_get_parentid(indexOid);
+    if (!OidIsValid(parentOid)) {
+        *rootIndex = index_open(indexOid, NoLock);
+        return *rootIndex;
+    }
+
+    Relation parent = BM25OpenIndexByOid(parentOid, rootIndex, handles);
+    Partition partition = partitionOpen(parent, indexOid, NoLock);
+    if (partition == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index partition %u", indexOid)));
+    }
+    Relation relation = partitionGetRelation(parent, partition);
+
+    BM25PartitionRelationHandle *handle =
+        (BM25PartitionRelationHandle *)palloc(sizeof(BM25PartitionRelationHandle));
+    handle->parent = parent;
+    handle->partition = partition;
+    handle->relation = relation;
+    *handles = lcons(handle, *handles);
+    return relation;
+}
+
+static void BM25CloseIndexByOid(Relation rootIndex, List *handles)
+{
+    ListCell *cell = NULL;
+    foreach (cell, handles) {
+        BM25PartitionRelationHandle *handle = (BM25PartitionRelationHandle *)lfirst(cell);
+        releaseDummyRelation(&handle->relation);
+        partitionClose(handle->parent, handle->partition, NoLock);
+        pfree(handle);
+    }
+    list_free(handles);
+    index_close(rootIndex, NoLock);
+}
+
 void BM25BatchInsertAbort()
 {
-    Oid indexOid;
-    Relation index;
     Buffer buf;
     Page page;
     GenericXLogState *state = nullptr;
@@ -521,18 +570,22 @@ void BM25BatchInsertAbort()
 
     foreach (lc, u_sess->bm25_ctx.indexOids) {
         Oid indexOid = (Oid)lfirst_oid(lc);
-        index = index_open(indexOid, NoLock);
+        Relation rootIndex = NULL;
+        List *handles = NIL;
+        Relation index = BM25OpenIndexByOid(indexOid, &rootIndex, &handles);
         buf = ReadBuffer(index, BM25_METAPAGE_BLKNO);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &page, buf, &state, false);
         metapBuf = BM25PageGetMeta(page);
         if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER)) {
-            index_close(index, NoLock);
+            GenericXLogAbort(state);
+            UnlockReleaseBuffer(buf);
+            BM25CloseIndexByOid(rootIndex, handles);
             elog(ERROR, "bm25 index is not valid");
         }
         metapBuf->lastBacthInsertFailed = true;
         BM25CommitBuf(buf, &state, false);
-        index_close(index, NoLock);
+        BM25CloseIndexByOid(rootIndex, handles);
     }
     BM25BatchInsertResetRecord();
 }

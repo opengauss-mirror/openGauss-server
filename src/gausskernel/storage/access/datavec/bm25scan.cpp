@@ -32,6 +32,7 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "catalog/index.h"
+#include "catalog/pg_partition_fn.h"
 #include "access/tableam.h"
 #include "db4ai/bayesnet.h"
 #include "access/datavec/bm25heap.h"
@@ -44,6 +45,7 @@
 #include "executor/exec/execdesc.h"
 #include "executor/spi.h"
 #include "utils/guc.h"
+#include "utils/partcache.h"
 
 const uint32 DEFAULT_EXPAND_TIME = 8;
 const float BM25_DEFAULT_OFFSET = 0.5f;
@@ -212,12 +214,20 @@ typedef struct BM25QueryToken {
     float qTokenIDFVal;
     ItemPointerData postingChainHead;
     bool useVarBlock;
+    ItemPointerData tokenMetaCtid;
 } BM25QueryToken;
 
 typedef struct BM25QueryTokensInfo {
     BM25QueryToken *queryTokens;
     uint32 size;
 } BM25QueryTokensInfo;
+
+/* Keep LOCAL expansion batches on the same scoring scale during concurrent DML. */
+struct BM25LocalScanState {
+    BM25MetaPageData meta;
+    BM25QueryTokensInfo tokens;
+    bool initialized;
+};
 
 static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation,
     uint32 maxHashBucketCount, uint32 &bucketFoundCount)
@@ -236,8 +246,9 @@ static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery,
     return;
 }
 
-static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocData &tokenizedQuery,
-    BM25QueryToken *queryTokens, size_t tokenIdx, uint32 &tokenFoundCount, BM25ScanOpaque so)
+static void FindTokenInfo(BM25MetaPageData &meta, Page page, BlockNumber metaBlock,
+    BM25TokenizedDocData &tokenizedQuery, BM25QueryToken *queryTokens, size_t tokenIdx,
+    uint32 &tokenFoundCount, BM25ScanOpaque so)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnoTokenMeta = FirstOffsetNumber; offnoTokenMeta <= maxoffno; offnoTokenMeta++) {
@@ -250,6 +261,10 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
              */
             float docN = (float)meta.documentCount;
             float docFreq = (float)tokenMeta->docCount;
+            if (so->localState != NULL) {
+                /* Term metadata may have advanced since the scan's metapage read. */
+                docFreq = Min(docFreq, docN);
+            }
             if (Bm25GlobalStatsEnabled(so)) {
                 uint32 globalDf = LookupGlobalDf(so->globalDfMap, tokenMeta->token);
                 if (globalDf >= 1 && globalDf <= so->globalDocumentCount) {
@@ -260,6 +275,7 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
             queryTokens[tokenIdx].qTokenIDFVal = tokenizedQuery.tokenDatas[tokenIdx].tokenFreq *
                 std::log(1 + (docN - docFreq + BM25_DEFAULT_OFFSET) / (docFreq + BM25_DEFAULT_OFFSET));
             queryTokens[tokenIdx].qTokenMaxScore = tokenMeta->maxScore;
+            ItemPointerSet(&queryTokens[tokenIdx].tokenMetaCtid, metaBlock, offnoTokenMeta);
             if (meta.version >= BM25_VERSION_VARBLOCK_POSTING && ItemPointerIsValid(&tokenMeta->postingChainHead)) {
                 queryTokens[tokenIdx].postingChainHead = tokenMeta->postingChainHead;
                 queryTokens[tokenIdx].useVarBlock = true;
@@ -299,7 +315,11 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
    /* scan index for queryToken info */
     uint32 bucketFoundCount = 0;
     BM25MetaPageData meta;
-    BM25GetMetaPageInfo(index, &meta);
+    if (so->localState != NULL) {
+        meta = so->localState->meta;
+    } else {
+        BM25GetMetaPageInfo(index, &meta);
+    }
     BlockNumber hashBucketsBlkno = meta.entryPageList.hashBucketsPage;
     Buffer cHashBucketsbuf;
     Page cHashBucketspage;
@@ -325,7 +345,8 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
             cTokenMetasbuf = ReadBuffer(index, nextTokenMetasBlkno);
             LockBuffer(cTokenMetasbuf, BUFFER_LOCK_SHARE);
             cTokenMetaspage = BufferGetPage(cTokenMetasbuf);
-            FindTokenInfo(meta, cTokenMetaspage, tokenizedQuery, queryTokens, tokenIdx, tokenFoundCount, so);
+            FindTokenInfo(meta, cTokenMetaspage, nextTokenMetasBlkno, tokenizedQuery,
+                queryTokens, tokenIdx, tokenFoundCount, so);
             nextTokenMetasBlkno = BM25PageGetOpaque(cTokenMetaspage)->nextblkno;
             UnlockReleaseBuffer(cTokenMetasbuf);
         }
@@ -377,6 +398,24 @@ static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence, 
     /* Only tokens with real postings are filled into resQueryTokens. */
     tokensInfo.size = tokenFillIdx;
     return tokensInfo;
+}
+
+static void RefreshLocalPostingLocations(Relation index, BM25LocalScanState* state)
+{
+    /* VACUUM may replace posting chains between batches. Token metadata stays put. */
+    for (uint32 i = 0; i < state->tokens.size; i++) {
+        BM25QueryToken* token = &state->tokens.queryTokens[i];
+        Buffer buf = ReadBuffer(index, ItemPointerGetBlockNumber(&token->tokenMetaCtid));
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        Page page = BufferGetPage(buf);
+        BM25TokenMetaPage meta = (BM25TokenMetaPage)PageGetItem(page,
+            PageGetItemId(page, ItemPointerGetOffsetNumber(&token->tokenMetaCtid)));
+        token->useVarBlock = state->meta.version >= BM25_VERSION_VARBLOCK_POSTING &&
+            ItemPointerIsValid(&meta->postingChainHead);
+        token->postingChainHead = meta->postingChainHead;
+        token->tokenPostingBlock = token->useVarBlock ? InvalidBlockNumber : meta->postingBlkno;
+        UnlockReleaseBuffer(buf);
+    }
 }
 
 struct BM25ScanScoreHashEntry {
@@ -479,10 +518,11 @@ private:
     size_t scoreHashCapacity;
 };
 
-static inline bool BM25IsDocFiltered(const unsigned char *docIdfilter, uint32 docId)
+static inline bool BM25IsDocFiltered(const BM25ScanCursor* cursor, uint32 docId)
 {
-    return docIdfilter &&
-        ((docIdfilter[docId / BM25_DOCID_MASK_BITS_PER_BYTE] >> (docId % BM25_DOCID_MASK_BITS_PER_BYTE)) & 1u);
+    return docId >= cursor->maxDocId || (cursor->docIdfilter &&
+        ((cursor->docIdfilter[docId / BM25_DOCID_MASK_BITS_PER_BYTE] >>
+            (docId % BM25_DOCID_MASK_BITS_PER_BYTE)) & 1u));
 }
 
 static bool BM25NextFromVarBlock(BM25ScanCursor *cursor)
@@ -502,7 +542,7 @@ static bool BM25NextFromVarBlock(BM25ScanCursor *cursor)
             BM25TokenPostingItem *item = (BM25TokenPostingItem *)(payload + cursor->curPayloadOffset);
             uint32 docId = item->docId;
             cursor->curPayloadOffset += BM25_POSTING_ITEM_ALIGNED_SIZE;
-            if (BM25IsDocFiltered(cursor->docIdfilter, docId)) {
+            if (BM25IsDocFiltered(cursor, docId)) {
                 continue;
             }
             cursor->curDocId = item->docId;
@@ -554,7 +594,7 @@ static bool BM25SeekInVarBlock(BM25ScanCursor *cursor, uint32 docId)
         for (; cursor->curPayloadOffset + BM25_POSTING_ITEM_ALIGNED_SIZE <= len;
             cursor->curPayloadOffset += BM25_POSTING_ITEM_ALIGNED_SIZE) {
             BM25TokenPostingItem *item = (BM25TokenPostingItem *)(payload + cursor->curPayloadOffset);
-            if (item->docId < docId || BM25IsDocFiltered(cursor->docIdfilter, item->docId)) {
+            if (item->docId < docId || BM25IsDocFiltered(cursor, item->docId)) {
                 continue;
             }
             cursor->curDocId = item->docId;
@@ -580,7 +620,7 @@ static bool BM25SeekInPostingPages(BM25ScanCursor *cursor, uint32 docId)
             BM25TokenPostingPage postingItem =
                 (BM25TokenPostingPage)PageGetItem(cursor->page, PageGetItemId(cursor->page, offno));
             uint32 hitDocId = postingItem->docId;
-            if (hitDocId < docId || BM25IsDocFiltered(cursor->docIdfilter, hitDocId)) {
+            if (hitDocId < docId || BM25IsDocFiltered(cursor, hitDocId)) {
                 continue;
             }
             cursor->curDocId = hitDocId;
@@ -625,7 +665,7 @@ static void BM25NextFromPostingPages(BM25ScanCursor *cursor, bool isInit)
         while (OffsetNumberIsValid(nextoffno) && nextoffno <= maxoffno) {
             postingItem = (BM25TokenPostingPage)PageGetItem(cursor->page, PageGetItemId(cursor->page, nextoffno));
             uint32 docId = postingItem->docId;
-            if (BM25IsDocFiltered(cursor->docIdfilter, docId)) {
+            if (BM25IsDocFiltered(cursor, docId)) {
                 nextoffno = OffsetNumberNext(nextoffno);
                 continue;
             }
@@ -696,19 +736,31 @@ void BM25ScanCursor::Close()
 }
 
 static Vector<BM25ScanCursor> MakeBM25ScanCursors(Relation index, BM25QueryToken* queryTokens, uint32 querySize,
-    unsigned char* docIdMask)
+    unsigned char* docIdMask, uint32 maxDocId)
 {
     Vector<BM25ScanCursor> cursors;
     float maxScoreRatio = u_sess->attr.attr_sql.max_score_ratio;
     for (uint32 i = 0; i < querySize; ++i) {
+        float maxScore = queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * maxScoreRatio;
+        if (RelationIsPartition(index)) {
+            /*
+             * LOCAL top-K merging requires a descending stream, including
+             * across candidate expansions. Stored maxima may become stale
+             * after DML or changes to k1/b. The normalized term score cannot
+             * exceed k1 + 1; allow a rounding margin and apply the bound after
+             * max_score_ratio so ratios below one cannot invalidate it.
+             */
+            float safeMaxScore = (u_sess->attr.attr_sql.bm25_k1 + 1.0f) * 1.00001f;
+            maxScore = Max(maxScore, safeMaxScore * queryTokens[i].qTokenIDFVal);
+        }
         if (queryTokens[i].useVarBlock && ItemPointerIsValid(&queryTokens[i].postingChainHead)) {
             cursors.push_back(BM25ScanCursor(index, &queryTokens[i].postingChainHead,
-                queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * maxScoreRatio,
-                queryTokens[i].qTokenIDFVal, docIdMask));
+                maxScore,
+                queryTokens[i].qTokenIDFVal, docIdMask, maxDocId));
         } else {
             cursors.push_back(BM25ScanCursor(index, queryTokens[i].tokenPostingBlock,
-                queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * maxScoreRatio,
-                queryTokens[i].qTokenIDFVal, docIdMask));
+                maxScore,
+                queryTokens[i].qTokenIDFVal, docIdMask, maxDocId));
         }
     }
     return cursors;
@@ -727,7 +779,7 @@ static void SearchTaat(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxM
 {
     BM25QueryToken *queryTokens = queryTokenInfo.queryTokens;
     uint32 querySize = queryTokenInfo.size;
-    Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask);
+    Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask, maxDocId);
     Vector<float> scores(maxDocId);
     for (size_t i = 0; i < querySize; ++i) {
         BM25ScanCursor* cursor = &cursors[i];
@@ -760,7 +812,7 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
     uint32 querySize = queryTokenInfo.size;
     qsort(queryTokens, (size_t)querySize, sizeof(BM25QueryToken), CompareQueryTokenFunc);
 
-    Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask);
+    Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask, maxDocId);
 
     float threshold = heap.full() ? heap.top().val : 0;
 
@@ -922,7 +974,7 @@ static void RescoreCandidatesWithGlobalAvgdl(Relation index, BM25QueryTokensInfo
     }
     /* fresh cursors without the docId mask: candidates are already masked as returned */
     Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokenInfo.queryTokens,
-        queryTokenInfo.size, nullptr);
+        queryTokenInfo.size, nullptr, BM25_INVALID_DOC_ID);
     for (uint32 t = 0; t < cursors.size(); ++t) {
         BM25ScanCursor *cursor = &cursors[t];
         for (uint32 i = 0; i < so->candNums; ++i) {
@@ -970,24 +1022,50 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
     }
 }
 
-static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so, const char* queryString)
+static void AddScanTupleScore(Relation index, Relation heapRel, HeapTuple heapTuple, float score)
 {
-    IndexScanDesc scan;
-    Oid heapRelOid;
-    Relation heapRel;
-    HeapTuple heapTuple;
-    char* scoreKey = nullptr;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
-    TupleTableSlot* slot = NULL;
-    EState* estate = NULL;
-    ExprContext* econtext = NULL;
+    EState* estate = CreateExecutorState();
+    ExprContext* econtext = GetPerTupleExprContext(estate);
+    TupleTableSlot* slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRel));
+    econtext->ecxt_scantuple = slot;
+    IndexInfo* indexInfo = BuildIndexInfo(index);
     List* predicate = NIL;
-    IndexInfo* indexInfo;
 
-    scan = RelationGetIndexScan(index, 0, 0);
-    heapRelOid = IndexGetRelation(RelationGetRelid(index), false);
-    heapRel = heap_open(heapRelOid, AccessShareLock);
+    if (estate->es_is_flt_frame) {
+        predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+    } else {
+        predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
+    }
+
+    (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+    if (predicate == NIL || ExecQual(predicate, econtext)) {
+        FormIndexDatum(indexInfo, slot, estate, values, isnull);
+        char* scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
+        if (scoreKey != NULL) {
+            u_sess->bm25_ctx.scoreHashTable->AddScore(score, scoreKey);
+        }
+    }
+    ExecDropSingleTupleTableSlot(slot);
+    FreeExecutorState(estate);
+    pfree(indexInfo);
+}
+
+static void ConstructScanScoreKeys(Relation index, Relation heapRel, BM25ScanOpaque so, const char* queryString)
+{
+    /*
+     * The executor already opened the heap relation that belongs to this
+     * scan.  A local partition index is recorded in pg_partition rather than
+     * pg_index, so looking it up with IndexGetRelation(index) fails for the
+     * child index.  Reuse the relation supplied by index_beginscan instead.
+     */
+    if (!RelationIsValid(heapRel)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("BM25 scan has no heap relation")));
+    }
+
+    IndexScanDesc scan = RelationGetIndexScan(index, 0, 0);
     scan->heapRelation = heapRel;
     scan->xs_snapshot = GetActiveSnapshot();
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
@@ -998,45 +1076,14 @@ static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so, const char
         }
 
         scan->xs_ctup.t_self = so->candDocs[i].heapCtid;
-        heapTuple = (HeapTuple)IndexFetchTuple(scan);
+        HeapTuple heapTuple = (HeapTuple)IndexFetchTuple(scan);
         if (heapTuple == NULL) {
             continue;
         }
 
-        estate = CreateExecutorState();
-        econtext = GetPerTupleExprContext(estate);
-        slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRel));
-        econtext->ecxt_scantuple = slot;
-        indexInfo = BuildIndexInfo(index);
-
-        if (estate->es_is_flt_frame) {
-            predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
-        } else {
-            predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
-        }
-
-        (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
-
-        if (predicate != NIL) {
-            if (!ExecQual(predicate, econtext)) {
-                ExecDropSingleTupleTableSlot(slot);
-                FreeExecutorState(estate);
-                pfree(indexInfo);
-                continue;
-            }
-        }
-
-        FormIndexDatum(indexInfo, slot, estate, values, isnull);
-        scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
-        if (scoreKey != NULL) {
-            u_sess->bm25_ctx.scoreHashTable->AddScore(so->candDocs[i].score, scoreKey);
-        }
-        ExecDropSingleTupleTableSlot(slot);
-        FreeExecutorState(estate);
-        pfree(indexInfo);
+        AddScanTupleScore(index, heapRel, heapTuple, so->candDocs[i].score);
     }
 
-    heap_close(heapRel, AccessShareLock);
     if (scan->xs_heapfetch) {
         tableam_scan_index_fetch_end(scan->xs_heapfetch);
     }
@@ -1072,6 +1119,11 @@ IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
     so->scanMcxt = CurrentMemoryContext;
     so->globalDocumentCount = 0;
     so->globalTokenCount = 0;
+    so->localState = NULL;
+    if (RelationIsPartition(index)) {
+        so->localState = (BM25LocalScanState*)palloc0(sizeof(BM25LocalScanState));
+        so->localState->meta = bm25MetaData;
+    }
 
     scan->opaque = so;
     return scan;
@@ -1081,6 +1133,25 @@ void bm25rescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey or
 {
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
     so->cursor = 0;
+
+    if (so->localState != NULL) {
+        pfree_ext(so->localState->tokens.queryTokens);
+        so->localState->tokens.size = 0;
+        so->localState->initialized = false;
+        BM25GetMetaPageInfo(scan->indexRelation, &so->localState->meta);
+        pfree_ext(so->candDocs);
+        so->candNums = 0;
+        so->expectedCandNums = u_sess->attr.attr_sql.enable_bm25_taat ? 0 : u_sess->attr.attr_sql.bm25_topk;
+        so->expandedTimes = 0;
+        pfree_ext(so->docIdMask);
+        so->docIdMaskSize = so->localState->meta.nextDocId / BM25_DOCID_MASK_BITS_PER_BYTE + 1;
+        MemoryContext oldContext = MemoryContextSwitchTo(so->scanMcxt);
+        so->docIdMask = (unsigned char*)palloc0(so->docIdMaskSize);
+        MemoryContextSwitchTo(oldContext);
+        if (u_sess->bm25_ctx.scoreHashTable != NULL) {
+            DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        }
+    }
 
     if (keys && scan->numberOfKeys > 0) {
         errno_t rc = memmove_s(scan->keyData, scan->numberOfKeys * sizeof(ScanKeyData),
@@ -1142,9 +1213,13 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
      */
     Assert(ScanDirectionIsForward(dir));
 
-    BM25MetaPageData meta;
-    BM25GetMetaPageInfo(scan->indexRelation, &meta);
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
+    BM25MetaPageData meta;
+    if (so->localState != NULL) {
+        meta = so->localState->meta;
+    } else {
+        BM25GetMetaPageInfo(scan->indexRelation, &meta);
+    }
     if (meta.documentCount == 0) {
         return false;
     }
@@ -1166,7 +1241,19 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
             so->globalDfMap = BuildGlobalDfMap(so->scanMcxt, &so->globalDocumentCount,
                 &so->globalTokenCount);
         }
-        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, queryString, so);
+        BM25QueryTokensInfo queryTokenInfo;
+        if (so->localState != NULL && so->localState->initialized) {
+            RefreshLocalPostingLocations(scan->indexRelation, so->localState);
+            queryTokenInfo = so->localState->tokens;
+        } else {
+            MemoryContext oldContext = MemoryContextSwitchTo(so->scanMcxt);
+            queryTokenInfo = GetQueryTokens(scan->indexRelation, queryString, so);
+            if (so->localState != NULL) {
+                so->localState->tokens = queryTokenInfo;
+                so->localState->initialized = true;
+            }
+            MemoryContextSwitchTo(oldContext);
+        }
         if (queryTokenInfo.size == 0) {
             return false;
         }
@@ -1194,8 +1281,8 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
             RescoreCandidatesWithGlobalAvgdl(scan->indexRelation, queryTokenInfo, so, globalAvgdl);
         }
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so, meta.version);
-        ConstructScanScoreKeys(scan->indexRelation, so, queryString);
-        if (queryTokenInfo.queryTokens != nullptr) {
+        ConstructScanScoreKeys(scan->indexRelation, scan->heapRelation, so, queryString);
+        if (so->localState == NULL && queryTokenInfo.queryTokens != nullptr) {
             pfree(queryTokenInfo.queryTokens);
             queryTokenInfo.queryTokens = nullptr;
         }
@@ -1217,6 +1304,10 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
 void bm25endscan_internal(IndexScanDesc scan)
 {
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
+    if (so->localState != NULL) {
+        pfree_ext(so->localState->tokens.queryTokens);
+        pfree_ext(so->localState);
+    }
     pfree_ext(so->docIdMask);
     pfree_ext(so->candDocs);
     DestroyGlobalDfMap(so->globalDfMap);
@@ -1395,12 +1486,144 @@ Datum bm25_shard_stat(PG_FUNCTION_ARGS)
  * bm25_table_stat(table_pattern text, query text [, column_name text
  *                 [, schema_name text]]) -> text
  *
- * Optimized collection: tokenizes the query ONCE, then iterates over all BM25 shard
- * indexes whose base table matches the given regex pattern on this DN. If column_name
- * is omitted, each matched table must have exactly one BM25 index; if it is supplied,
- * each table must have exactly one BM25 index on that column. Aggregates N / T /
- * per-term df internally and returns "N=<N>;T=<T>;<term:df,...>".
+ * Optimized collection: tokenizes the query ONCE, then iterates over all BM25
+ * physical indexes whose base table matches the given regex pattern on this DN.
+ * LOCAL partition indexes are expanded to their physical index partitions. If
+ * column_name is omitted, each matched table must have exactly one BM25 index;
+ * if it is supplied, each table must have exactly one BM25 index on that column.
+ * Aggregates N / T / per-term df internally and returns "N=<N>;T=<T>;<term:df,...>".
  */
+typedef struct BM25TableStatContext {
+    const char *query;
+    BM25TokenizedDocData tokenizedQuery;
+    bool tokenized;
+    uint64 totalN;
+    uint64 totalT;
+    uint32 *dfAccum;
+    uint32 tokenCount;
+    bool *wanted;
+} BM25TableStatContext;
+
+static void InitializeBm25TableStatQuery(Relation index, BM25TableStatContext *context)
+{
+    if (context->tokenized) {
+        return;
+    }
+    context->tokenizedQuery = BM25DocumentTokenize(context->query, Bm25GetDictPath(index), true);
+    context->tokenized = true;
+    if (context->tokenizedQuery.tokenCount == 0) {
+        return;
+    }
+
+    context->tokenCount = context->tokenizedQuery.tokenCount;
+    context->dfAccum = (uint32 *)palloc0(context->tokenCount * sizeof(uint32));
+    context->wanted = (bool *)palloc0(context->tokenCount * sizeof(bool));
+    for (uint32 i = 0; i < context->tokenCount; i++) {
+        if (!Bm25TermIsDfEncodable(context->tokenizedQuery.tokenDatas[i].tokenValue)) {
+            continue;
+        }
+        bool dup = false;
+        for (uint32 j = 0; j < i; j++) {
+            if (strncmp(context->tokenizedQuery.tokenDatas[i].tokenValue,
+                context->tokenizedQuery.tokenDatas[j].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        context->wanted[i] = !dup;
+    }
+}
+
+static uint32 ReadBm25TokenDocumentCount(Relation index, const BM25TokenData *token, BlockNumber block)
+{
+    uint32 df = 0;
+    while (BlockNumberIsValid(block)) {
+        Buffer tbuf = ReadBuffer(index, block);
+        LockBuffer(tbuf, BUFFER_LOCK_SHARE);
+        Page tpage = BufferGetPage(tbuf);
+        OffsetNumber maxoff = PageGetMaxOffsetNumber(tpage);
+        for (OffsetNumber off = FirstOffsetNumber; off <= maxoff; off++) {
+            BM25TokenMetaPage tm = (BM25TokenMetaPage)PageGetItem(tpage, PageGetItemId(tpage, off));
+            if (tm->hashValue == token->hashValue &&
+                strncmp(tm->token, token->tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+                df = tm->docCount;
+                break;
+            }
+        }
+        block = BM25PageGetOpaque(tpage)->nextblkno;
+        UnlockReleaseBuffer(tbuf);
+        if (df > 0) {
+            break;
+        }
+    }
+    return df;
+}
+
+static void CollectBm25TableStatFromPhysicalIndex(Relation index, BM25TableStatContext *context)
+{
+    BM25MetaPageData meta;
+    BM25GetMetaPageInfo(index, &meta);
+    context->totalN += meta.documentCount;
+    context->totalT += meta.tokenCount;
+
+    InitializeBm25TableStatQuery(index, context);
+    if (context->tokenCount == 0) {
+        return;
+    }
+
+    BlockNumber *buckets = (BlockNumber *)palloc0(sizeof(BlockNumber) * context->tokenCount);
+    for (uint32 i = 0; i < context->tokenCount; i++) {
+        buckets[i] = InvalidBlockNumber;
+    }
+    uint32 bucketFound = 0;
+    BlockNumber hbBlk = meta.entryPageList.hashBucketsPage;
+    if (BlockNumberIsValid(hbBlk)) {
+        Buffer hbBuf = ReadBuffer(index, hbBlk);
+        LockBuffer(hbBuf, BUFFER_LOCK_SHARE);
+        FindBucketsLocation(BufferGetPage(hbBuf), context->tokenizedQuery, buckets,
+            meta.entryPageList.maxHashBucketCount, bucketFound);
+        UnlockReleaseBuffer(hbBuf);
+    }
+    for (uint32 i = 0; i < context->tokenCount; i++) {
+        if (!context->wanted[i]) {
+            continue;
+        }
+        context->dfAccum[i] += ReadBm25TokenDocumentCount(index, &context->tokenizedQuery.tokenDatas[i], buckets[i]);
+    }
+    pfree(buckets);
+}
+
+static void CollectBm25TableStatFromIndex(Relation index, BM25TableStatContext *context)
+{
+    if (!RelationIsPartitioned(index) || RelationIsGlobalIndex(index)) {
+        CollectBm25TableStatFromPhysicalIndex(index, context);
+        return;
+    }
+
+    List *partOids = indexGetPartitionOidList(index);
+    ListCell *cell = NULL;
+    foreach (cell, partOids) {
+        Oid partOid = lfirst_oid(cell);
+        Partition part = partitionOpen(index, partOid, AccessShareLock);
+        if (part == NULL || !part->pd_part->indisusable) {
+            if (part != NULL) {
+                partitionClose(index, part, AccessShareLock);
+            }
+            continue;
+        }
+
+        Relation partIndex = partitionGetRelation(index, part);
+        if (PartitionHasSubpartition(part)) {
+            CollectBm25TableStatFromIndex(partIndex, context);
+        } else {
+            CollectBm25TableStatFromPhysicalIndex(partIndex, context);
+        }
+        releaseDummyRelation(&partIndex);
+        partitionClose(index, part, AccessShareLock);
+    }
+    list_free_ext(partOids);
+}
+
 static Datum bm25_table_stat_internal(FunctionCallInfo fcinfo)
 {
     char *tablePattern = text_to_cstring(PG_GETARG_TEXT_PP(0));
@@ -1415,7 +1638,8 @@ static Datum bm25_table_stat_internal(FunctionCallInfo fcinfo)
     StringInfoData sql;
     initStringInfo(&sql);
     appendStringInfo(&sql,
-        "SELECT i.indexrelid, i.indrelid, t.relname FROM pg_index i "
+        "SELECT i.indexrelid, i.indrelid, t.relname "
+        "FROM pg_index i "
         "JOIN pg_class c ON i.indexrelid = c.oid "
         "JOIN pg_am a ON c.relam = a.oid "
         "JOIN pg_class t ON i.indrelid = t.oid "
@@ -1488,123 +1712,40 @@ static Datum bm25_table_stat_internal(FunctionCallInfo fcinfo)
     SPI_finish();
     pfree(sql.data);
 
-    uint64 totalN = 0;
-    uint64 totalT = 0;
-    BM25TokenizedDocData tq = {NULL, 0, 0};
-    bool tokenized = false;
-
-    /* Per-term df accumulator, summed over every shard index on this node. */
-    uint32 *dfAccum = NULL;
-    uint32 tokenCount = 0;
-    /* Which tokens to report: first occurrence only, and encodable in the df format. */
-    bool *wanted = NULL;
+    BM25TableStatContext context = {query, {NULL, 0, 0}, false, 0, 0, NULL, 0, NULL};
 
     for (int idx = 0; idx < indexCount; idx++) {
         if (!OidIsValid(indexOids[idx])) {
             continue;
         }
         Relation index = index_open(indexOids[idx], AccessShareLock);
-        BM25MetaPageData meta;
-        BM25GetMetaPageInfo(index, &meta);
-        totalN += meta.documentCount;
-        totalT += meta.tokenCount;
-
-        if (!tokenized) {
-            tq = BM25DocumentTokenize(query, Bm25GetDictPath(index), true);
-            tokenized = true;
-            if (tq.tokenCount > 0) {
-                tokenCount = tq.tokenCount;
-                dfAccum = (uint32 *)palloc0(tokenCount * sizeof(uint32));
-                wanted = (bool *)palloc0(tokenCount * sizeof(bool));
-                for (uint32 i = 0; i < tokenCount; i++) {
-                    if (!Bm25TermIsDfEncodable(tq.tokenDatas[i].tokenValue)) {
-                        continue;
-                    }
-                    bool dup = false;
-                    for (uint32 j = 0; j < i; j++) {
-                        if (strncmp(tq.tokenDatas[i].tokenValue, tq.tokenDatas[j].tokenValue,
-                            BM25_MAX_TOKEN_LEN - 1) == 0) {
-                            dup = true;
-                            break;
-                        }
-                    }
-                    wanted[i] = !dup;
-                }
-            }
-        }
-
-        if (tokenCount == 0) {
-            index_close(index, AccessShareLock);
-            continue;
-        }
-
-        BlockNumber *buckets = (BlockNumber *)palloc0(sizeof(BlockNumber) * tokenCount);
-        for (uint32 i = 0; i < tokenCount; i++) {
-            buckets[i] = InvalidBlockNumber;
-        }
-        uint32 bucketFound = 0;
-        BlockNumber hbBlk = meta.entryPageList.hashBucketsPage;
-        if (BlockNumberIsValid(hbBlk)) {
-            Buffer hbBuf = ReadBuffer(index, hbBlk);
-            LockBuffer(hbBuf, BUFFER_LOCK_SHARE);
-            FindBucketsLocation(BufferGetPage(hbBuf), tq, buckets,
-                meta.entryPageList.maxHashBucketCount, bucketFound);
-            UnlockReleaseBuffer(hbBuf);
-        }
-        for (uint32 i = 0; i < tokenCount; i++) {
-            if (!wanted[i]) {
-                continue;
-            }
-            uint32 df = 0;
-            BlockNumber nb = buckets[i];
-            while (BlockNumberIsValid(nb)) {
-                Buffer tbuf = ReadBuffer(index, nb);
-                LockBuffer(tbuf, BUFFER_LOCK_SHARE);
-                Page tpage = BufferGetPage(tbuf);
-                OffsetNumber maxoff = PageGetMaxOffsetNumber(tpage);
-                for (OffsetNumber off = FirstOffsetNumber; off <= maxoff; off++) {
-                    BM25TokenMetaPage tm = (BM25TokenMetaPage)PageGetItem(tpage, PageGetItemId(tpage, off));
-                    if (tm->hashValue == tq.tokenDatas[i].hashValue &&
-                        strncmp(tm->token, tq.tokenDatas[i].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
-                        df = tm->docCount;
-                        break;
-                    }
-                }
-                nb = BM25PageGetOpaque(tpage)->nextblkno;
-                UnlockReleaseBuffer(tbuf);
-                if (df > 0) {
-                    break;
-                }
-            }
-            dfAccum[i] += df;
-        }
-        pfree(buckets);
+        CollectBm25TableStatFromIndex(index, &context);
         index_close(index, AccessShareLock);
     }
 
     StringInfoData result;
     initStringInfo(&result);
-    appendStringInfo(&result, "N=%lu;T=%lu;", (unsigned long)totalN, (unsigned long)totalT);
-    if (tokenCount > 0 && dfAccum != NULL) {
+    appendStringInfo(&result, "N=%lu;T=%lu;", (unsigned long)context.totalN, (unsigned long)context.totalT);
+    if (context.tokenCount > 0 && context.dfAccum != NULL) {
         bool first = true;
-        for (uint32 i = 0; i < tokenCount; i++) {
-            if (!wanted[i]) {
+        for (uint32 i = 0; i < context.tokenCount; i++) {
+            if (!context.wanted[i]) {
                 continue;
             }
             appendStringInfo(&result, "%s%s:%u", (first ? "" : ","),
-                             tq.tokenDatas[i].tokenValue, dfAccum[i]);
+                             context.tokenizedQuery.tokenDatas[i].tokenValue, context.dfAccum[i]);
             first = false;
         }
     }
 
-    if (tq.tokenDatas != NULL) {
-        pfree(tq.tokenDatas);
+    if (context.tokenizedQuery.tokenDatas != NULL) {
+        pfree(context.tokenizedQuery.tokenDatas);
     }
-    if (dfAccum != NULL) {
-        pfree(dfAccum);
+    if (context.dfAccum != NULL) {
+        pfree(context.dfAccum);
     }
-    if (wanted != NULL) {
-        pfree(wanted);
+    if (context.wanted != NULL) {
+        pfree(context.wanted);
     }
     pfree(indexOids);
     pfree(tablePattern);

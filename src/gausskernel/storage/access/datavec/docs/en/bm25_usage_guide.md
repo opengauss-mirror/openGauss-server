@@ -10,11 +10,13 @@ Use Docker to implement containerized deployment of openGauss. This can simplify
 
 ## 2. Syntax Overview
 
-The BM25 full-text search indexing builds full-text indexes on the document column of a regular table, enabling efficient retrieval of documents.
+BM25 builds full-text indexes on the document column of an ordinary or partitioned table, enabling efficient retrieval of documents. Partitioned tables support only LOCAL indexes; GLOBAL indexes are not supported. LOCAL indexes maintain BM25 statistics independently for each partition, so scores from a cross-partition query are not guaranteed to be globally comparable.
+
+For a cross-partition LOCAL query ordered by a single BM25 score in descending order with a LIMIT, each partition can stop after producing the runtime LIMIT + OFFSET qualifying rows before the results are merged and sorted. Queries with `enable_bm25_global_idf` enabled, multiple sort keys, or expressions whose scan ordering cannot be guaranteed retain a full scan. TAAT mode still scores all matching documents within each partition.
 
 - **Index Creation**
 
-    The BM25 indexing support building full-text indexes on specified document columns, with parallel build support that significantly improves index construction speed for large text datasets. The syntax is as follows:
+    BM25 supports building full-text indexes on specified document columns. Indexes on ordinary tables support parallel builds; LOCAL indexes on partitioned tables are currently built serially for each partition. The syntax is as follows:
 
     ```bash
     -- Set the number of parallel build threads, ranging from 1 to 32. If not set, single-thread build is used by default
@@ -25,6 +27,9 @@ The BM25 full-text search indexing builds full-text indexes on the document colu
 
     -- Build a BM25 index for the specified document column of the specified table (custom dictionary directory)
     CREATE INDEX {index_name} on {table_name} using bm25({document_column_name}) WITH (dict_path='{absolute_path_to_ dictionary_directory}');
+
+    -- Build a LOCAL BM25 index on the document column of a partitioned table
+    CREATE INDEX {index_name} ON {partitioned_table_name} USING bm25({document_column_name}) LOCAL;
     ```
 
     For constraints related to BM25 index construction, see [BM25 Index Introduction](bm25_full_text_search_index.md)

@@ -807,8 +807,8 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
-    if (RelationIsPartitioned(rel) && (strcmp(stmt->accessMethod, "bm25") == 0 ||
-        strcmp(stmt->accessMethod, "ivfflat") == 0 ||
+    /* ivfflat and diskann do not support partitioned tables. */
+    if (RelationIsPartitioned(rel) && (strcmp(stmt->accessMethod, "ivfflat") == 0 ||
         strcmp(stmt->accessMethod, "diskann") == 0)) {
         elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
     }
@@ -914,6 +914,18 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     CheckColumnTypeSupportsIndex(relationId, stmt->indexParams);
 
     SetPartionIndexType(stmt, rel, is_alter_table);
+
+    /*
+     * BM25 has a physical index for every partition when it is created as a
+     * LOCAL index.  Keep rejecting GLOBAL BM25 indexes until the access
+     * method has a cross-partition storage and scan implementation.  This
+     * check must follow SetPartionIndexType(), because an index without an
+     * explicit LOCAL/GLOBAL clause can be assigned its default partition
+     * type there.
+     */
+    if (RelationIsPartitioned(rel) && stmt->isGlobal && strcmp(stmt->accessMethod, "bm25") == 0) {
+        elog(ERROR, "%s index is not supported for global partition table.", (stmt->accessMethod));
+    }
 
     if (rel->rd_tam_ops == TableAmUstore && RELATION_IS_PARTITIONED(rel) && stmt->isPartitioned &&
         !stmt->isGlobal && isVectorIndex && !isHnswIndex) {
