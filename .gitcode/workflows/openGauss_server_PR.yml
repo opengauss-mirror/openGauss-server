@@ -787,7 +787,6 @@ jobs:
             echo "Only ignored paths changed; tests will not run."
             exit 0
           fi
-          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
           # Host scripts always come from this repository, not a fork named by the event.
           repo="${GITCODE_REPO:-openGauss/openGauss-server}"
           case "${repo}" in
@@ -813,6 +812,31 @@ jobs:
             fi
           }
           trap cleanup EXIT
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
+          dir="$(mktemp -d)"
+          # 节点上的 git 没有 -C，进目录再执行。
+          (
+            cd "${dir}"
+            git init -q
+            git remote add origin "${server}/${repo}.git"
+            timeout 300 git fetch --depth=1 --force origin refs/heads/master
+            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
+            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh" || true
+            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
+          )
+          # 跨任务 outputs 经常丢 proceed=skip；测试任务自行再判一次路径，避免已打 success 仍跑 LLT。
+          if [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
+            set +e
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
+            path_skip_rc=$?
+            set -e
+            if [ "${path_skip_rc}" -eq 0 ]; then
+              echo "Only .gitcode/doc/docs/docs-lite changed (rechecked); tests will not run."
+              exit 0
+            fi
+          fi
+          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
           # Keep the label token out of this shell for the rest of the job.
           # Checkout reads it from the file, then deletes the file.
           if [ -n "${PR_LABEL_TOKEN:-}" ]; then
@@ -822,16 +846,6 @@ jobs:
             export GITCODE_TOKEN_FILE="${token_file}"
           fi
           unset PR_LABEL_TOKEN || true
-          unset ATOMGIT_TOKEN || true
-          dir="$(mktemp -d)"
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
-          )
           CI_MATRIX_SCRIPT="${{ matrix.script }}" bash "${dir}/ci_job.sh"
 
   openGauss_server_arm:
@@ -886,7 +900,6 @@ jobs:
             echo "Only ignored paths changed; tests will not run."
             exit 0
           fi
-          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
           # Host scripts always come from this repository, not a fork named by the event.
           repo="${GITCODE_REPO:-openGauss/openGauss-server}"
           case "${repo}" in
@@ -912,6 +925,31 @@ jobs:
             fi
           }
           trap cleanup EXIT
+          unset ATOMGIT_TOKEN || true
+          unset GITHUB_TOKEN || true
+          dir="$(mktemp -d)"
+          # 节点上的 git 没有 -C，进目录再执行。
+          (
+            cd "${dir}"
+            git init -q
+            git remote add origin "${server}/${repo}.git"
+            timeout 300 git fetch --depth=1 --force origin refs/heads/master
+            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
+            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh" || true
+            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
+          )
+          # 跨任务 outputs 经常丢 proceed=skip；测试任务自行再判一次路径，避免已打 success 仍跑 LLT。
+          if [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
+            set +e
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
+            path_skip_rc=$?
+            set -e
+            if [ "${path_skip_rc}" -eq 0 ]; then
+              echo "Only .gitcode/doc/docs/docs-lite changed (rechecked); tests will not run."
+              exit 0
+            fi
+          fi
+          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
           # Keep the label token out of this shell for the rest of the job.
           # Checkout reads it from the file, then deletes the file.
           if [ -n "${PR_LABEL_TOKEN:-}" ]; then
@@ -921,16 +959,6 @@ jobs:
             export GITCODE_TOKEN_FILE="${token_file}"
           fi
           unset PR_LABEL_TOKEN || true
-          unset ATOMGIT_TOKEN || true
-          dir="$(mktemp -d)"
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
-          )
           CI_MATRIX_SCRIPT="${{ matrix.script }}" bash "${dir}/ci_job.sh"
 
   report_result:
