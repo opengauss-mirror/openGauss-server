@@ -1083,7 +1083,14 @@ PY
 }
 
 post_pipeline_started_comment() {
-  local run_id server page_url comment_file code err body encoded method
+  local run_id server page_url comment_file code err body encoded method comment_token
+  # The workflow token is action-bot. Gate comments must stay on the ci-bot token,
+  # even after label writes have fallen back to ATOMGIT_TOKEN.
+  comment_token="${PR_LABEL_TOKEN:-}"
+  if [[ -z "${comment_token}" ]]; then
+    echo "PR_LABEL_TOKEN is empty; the start comment was not posted." >&2
+    return 1
+  fi
   run_id="$(find_actions_run_id)" || {
     echo "Cannot find this actions run; the start comment was not posted." >&2
     return 1
@@ -1114,11 +1121,11 @@ PY
   fi
   err="$(mktemp)"
   body="$(mktemp)"
-  encoded="$(urlencode "${token}")"
+  encoded="$(urlencode "${comment_token}")"
   code="000"
   for method in POST PUT; do
     code="$(curl -sS --max-time 30 -o "${body}" -w '%{http_code}' -X "${method}" \
-      -H "Authorization: Bearer ${token}" \
+      -H "Authorization: Bearer ${comment_token}" \
       -H "Content-Type: application/json;charset=UTF-8" \
       --data-binary "@${comment_file}" \
       "${api_root}/repos/${repo}/pulls/${pr_iid}/comments?access_token=${encoded}" 2>"${err}")" || code="000"
