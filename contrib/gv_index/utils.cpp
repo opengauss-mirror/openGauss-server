@@ -73,6 +73,24 @@ static void ValidateStorageTypeOption(const char *value)
     }
 }
 
+/* The core supplies index_type when creating an index on a USTORE table. */
+static void ValidateGraphIndexTypeOption(const char *value)
+{
+    if (value == NULL) {
+        return;
+    }
+#ifdef ENABLE_LITE_MODE
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("index_type is not supported in lite mode")));
+#endif
+    if (pg_strcasecmp(value, UBTREE_INDEX_TYPE_RCR) != 0 &&
+        pg_strcasecmp(value, UBTREE_INDEX_TYPE_PCR) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid index_type value \"%s\"", value),
+                        errhint("Valid values are \"rcr\" and \"pcr\".")));
+    }
+}
+
 /*
  * 使用 GRAPH_RELOPTIONS X-macro 生成 add_*_reloption 调用。
  */

@@ -78,10 +78,11 @@ struct GraphOptions {
  *   TYPE=STRING:   DEFAULT=默认字符串，MIN/MAX=0, EXTRA=validator 或 NULL
  *   TYPE=INT:      DEFAULT=默认值, MIN=最小值, MAX=最大值, EXTRA=0
  *   TYPE=BOOL:     DEFAULT=默认值, MIN/MAX/EXTRA=0
- *   FIELD: GraphOptions 结构体中的成员名（必须与结构体字段名一致，否则编译报错）
+ *   FIELD: GraphOptions 结构体中的成员路径（包括 std_options 内的成员）
  */
 #define GRAPH_RELOPTIONS(XX) \
     XX("storage_type", "storage_type: auto/ustore/astore", STRING, "auto", 0, 0, ValidateStorageTypeOption, storage_type) \
+    XX("index_type", "USTORE index type: rcr/pcr", STRING, NULL, 0, 0, ValidateGraphIndexTypeOption, std_options.index_type) \
     XX("quantization_type", "quantization type: lvq/pq", STRING, "lvq", 0, 0, NULL, quantization_type) \
     XX("prune_alg", "prune algorithm: vamana/npu_knn", STRING, "vamana", 0, 0, ValidatePruneAlg, pruneAlg) \
     XX("subgraph_count", "number of subgraphs", INT, 1, 1, 64, 0, subgraph_count) \
