@@ -9199,17 +9199,22 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
         return;
     }
 
-    LWLockAcquire(FileStatLock, LW_SHARED);
+    /*
+     * Serialize the slot lookup and the counter update under one exclusive lock.
+     * After pgstat moved into shared memory, every backend runs this function
+     * concurrently in pgstat_send, so the previously unlocked non-atomic
+     * changeCount++ pair could lose updates and freeze changeCount odd, which
+     * keeps the seqlock reader in get_local_rel_iostat spinning forever.
+     */
+    LWLockAcquire(FileStatLock, LW_EXCLUSIVE);
     for (i = 0; i < NUM_FILES; i++) {
         entry = (PgStat_FileEntry*)&pgStatFileArray[i];
         if (entry->fn == msg->fn || entry->fn == InvalidOid) {
             break;
         }
     }
-    LWLockRelease(FileStatLock);
 
     if (i == NUM_FILES || entry->fn == InvalidOid) {
-        LWLockAcquire(FileStatLock, LW_EXCLUSIVE);
         if (i == NUM_FILES) {
             TimestampTz longestTime = GetCurrentTimestamp();
             int minLocation = 0;
@@ -9236,7 +9241,6 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
         entry->fn = msg->fn;
 
         fileStatCount = (fileStatCount + 1) % NUM_FILES;
-        LWLockRelease(FileStatLock);
     }
 
     entry->changeCount++;
@@ -9274,6 +9278,7 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
 
     entry->changeCount++;
 
+    LWLockRelease(FileStatLock);
     return;
 }
 
