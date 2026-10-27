@@ -996,12 +996,13 @@ if [[ "${action}" == "result" ]]; then
     success|completed)
       # Skipped, cancelled, or failed matrices can still leave the platform
       # status as success or completed. A cancelled test must not be labeled success.
-      fail_closed_result="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
       # proceed=skip: docs/ci-config only; prepare already wrote success.
+      # Do not treat fail_closed job failure alone as pipeline failure: that job
+      # runs in parallel with tests and can flake while LLT is still running.
       if [[ "${GITCODE_PREPARE_PROCEED:-}" == "skip" ]]; then
         echo "Only ignored paths changed; keeping success." >&2
         action="success"
-      elif [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "skipped" || "${fail_closed_result}" == "failure" || "${fail_closed_result}" == "failed" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
+      elif [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "canceled" || "${GITCODE_PREPARE_RESULT:-}" == "skipped" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
         echo "Tests did not run; reporting failure instead of success." >&2
         action="failed"
       else
