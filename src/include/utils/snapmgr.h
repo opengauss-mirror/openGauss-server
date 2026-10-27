@@ -80,6 +80,7 @@ extern void UpdateActiveSnapshotCommandId(void);
 extern void PopActiveSnapshot(void);
 extern Snapshot GetActiveSnapshot(void);
 extern bool ActiveSnapshotSet(void);
+extern uint32 GetActiveSnapshotCount(void);
 
 extern void FreeSnapshotDeepForce(Snapshot snap);
 

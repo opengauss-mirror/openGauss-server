@@ -365,7 +365,7 @@ from information_schema_tsql.views v
 inner join pg_namespace s on v.table_schema = s.nspname
 where s.nspname = 'sys_view_test_02';
 
-select sid, mode, status, status2, crdate, reserved, category, cmplevel, filename, version
+select sid, mode, status, status2, crdate, reserved, category, cmptlevel, filename, version
 from sys.sysdatabases;
 
 select name, schema_id, principal_id

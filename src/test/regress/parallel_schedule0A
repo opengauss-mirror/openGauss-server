@@ -40,10 +40,13 @@ test: spm_adaptive_gplan
 test: smp_cursor parallel_enable_function
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
+
 #test: uppercase_attribute_name decode_compatible_with_o
 test: outerjoin_bugfix
 #test: updatable_views
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin dependent_view
+
+test: drop_column_view_trigger
 
 # test multiple statistics
 test: functional_dependency record_slow_sql_in_proc

@@ -201,3 +201,6 @@ DROP FUNCTION IF EXISTS pg_catalog.diskannrescan(internal, internal, internal, i
 DROP FUNCTION IF EXISTS pg_catalog.diskanngettuple(internal, internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannendscan(internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannhandler(internal) CASCADE;
+
+-- Restore text_date(text) volatility for rollback.
+ALTER FUNCTION pg_catalog.text_date(text) IMMUTABLE;
