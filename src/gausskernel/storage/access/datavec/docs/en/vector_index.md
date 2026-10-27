@@ -99,6 +99,63 @@ openGauss=# SET hnsw_ef_search = 100;
 openGauss=# SELECT id, embedding <-> '[1,2,3,4,5]'::vector AS distance FROM items ORDER BY distance LIMIT 10;
 ```
 
+#### HNSW Iterative Scans
+
+With a filter, the initial HNSW candidates may contain fewer matching rows than requested by `LIMIT`. Iterative scans continue searching for candidates without rebuilding the index.
+
+| `hnsw_iterative_scan` value | Use case |
+| --- | --- |
+| `off` | Do not continue searching. Only a few rows may remain after filtering. |
+| `strict_order` | Continue searching and keep index output in nondecreasing distance order. Candidates closer than the previously returned distance are skipped. |
+| `relaxed_order` | Default. Continue searching; results from different batches may be out of order. Sort them again if needed. |
+
+Ordinary users can use `SET` for the current session, or `SET LOCAL` within a transaction.
+
+The following examples assume that `items` contains `id`, `category_id`, and `embedding vector(3)`, with an HNSW index using `vector_l2_ops` on `embedding`. The goal is to find the 10 rows in category 1 closest to `[1,2,3]`. The `<->` operator calculates L2 distance; smaller distances indicate greater similarity.
+
+**Case 1: disable iterative scans.** If fewer than 10 initial candidates pass the filter, fewer rows may be returned.
+
+```sql
+SET hnsw_iterative_scan = 'off';
+
+SELECT id, embedding <-> '[1,2,3]'::vector AS distance
+FROM items
+WHERE category_id = 1
+ORDER BY distance
+LIMIT 10;
+```
+
+**Case 2: continue searching and preserve distance order.** Apply this setting and run the query above again.
+
+```sql
+SET hnsw_iterative_scan = 'strict_order';
+```
+
+**Case 3: continue searching and sort the results again.** The inner query finds candidates; the outer query sorts those results.
+
+```sql
+SET hnsw_iterative_scan = 'relaxed_order';
+
+SELECT id, distance
+FROM (
+    SELECT id, embedding <-> '[1,2,3]'::vector AS distance
+    FROM items
+    WHERE category_id = 1
+    ORDER BY distance
+    LIMIT 10
+) AS candidates
+ORDER BY distance + 0;
+```
+
+The outer `ORDER BY distance + 0` explicitly reorders results without changing the distance values or increasing the number of candidates.
+
+Related parameters:
+
+- `hnsw_ef_search`: the query candidate set size, also used as the batch size when resuming the scan.
+- `hnsw_max_scan_tuples`: the visit-count threshold for iterative scans, ranging from `-1` to `2147483647`, with a default of `-1`. Positive values enable the limit; `-1` and `0` leave scan expansion unlimited. It supports `SET` and `SET LOCAL`. The threshold does not limit the initial search, and retained candidates can still be returned after it is reached, so it is not a strict limit on returned rows or visits.
+
+> Iterative scans remain approximate and do not guarantee 10 rows. These parameters apply only when the execution plan uses an HNSW index scan; check the plan with `EXPLAIN`.
+
 ### Parallelism Options
 
 - `parallel_workers` - index build parallelism (0 by default). The value ranges from 1 to 32.
