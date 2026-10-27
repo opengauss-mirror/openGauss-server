@@ -279,7 +279,8 @@ static void pg_decode_stream_abort(LogicalDecodingContext* ctx, ReorderBufferTXN
     }
     OutputPluginPrepareWrite(ctx, true);
     if (data->include_xids)
-        appendStringInfo(ctx->out, "aborting streamed (sub)transaction TXN %lu", txn->xid);
+        appendStringInfo(ctx->out, "aborting streamed (sub)transaction TXN %lu topxid=%lu",
+            txn->xid, toptxn->xid);
     else
         appendStringInfoString(ctx->out, "aborting streamed (sub)transaction");
     OutputPluginWrite(ctx, true);
@@ -321,7 +322,7 @@ static void pg_decode_stream_change(LogicalDecodingContext* ctx, ReorderBufferTX
     }
     OutputPluginPrepareWrite(ctx, true);
     if (data->include_xids)
-        appendStringInfo(ctx->out, "streaming change for TXN %lu", txn->xid);
+        appendStringInfo(ctx->out, "streaming change for TXN %lu", change->txn->xid);
     else
         appendStringInfoString(ctx->out, "streaming change for transaction");
     OutputPluginWrite(ctx, true);
