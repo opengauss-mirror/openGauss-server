@@ -52,11 +52,13 @@ struct GVWorkerArgs {
     static constexpr size_t supported_max_threads = 128;
 
     GVWorkerArgs()
-        : max_worker(0), next_worker_id(0), total_workers(0), terminated(true), index_oid(InvalidOid)
+        : max_worker(0), next_worker_id(0), total_workers(0), terminated(true),
+          index_oid(InvalidOid), index_parent_oid(InvalidOid)
     {}
 
     GVWorkerArgs(size_t _max_worker)
-        : max_worker(_max_worker), next_worker_id(0), total_workers(0), terminated(true), index_oid(InvalidOid)
+        : max_worker(_max_worker), next_worker_id(0), total_workers(0), terminated(true),
+          index_oid(InvalidOid), index_parent_oid(InvalidOid)
     {
         for (size_t i = 0; i < supported_max_threads; ++i) {
             tasks[i] = nullptr;
@@ -132,6 +134,7 @@ struct GVWorkerArgs {
     size_t total_workers;
     bool terminated;
     Oid index_oid;
+    Oid index_parent_oid;
 };
 
 }  // namespace gs_vector

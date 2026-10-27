@@ -60,7 +60,7 @@ struct GVLightEnvImpl : public annlite::LightEnv {
           m_storage(this, index),
           m_eventhandler()
     {
-        m_threadpool.set_index_oid(RelationGetRelid(index));
+        m_threadpool.set_index_relation(index);
     }
 
     RelationData* index_relation() const { return m_index; }

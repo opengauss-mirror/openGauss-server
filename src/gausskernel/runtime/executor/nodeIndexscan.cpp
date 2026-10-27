@@ -536,6 +536,18 @@ void ExecReScanIndexScan(IndexScanState* node)
     node->iss_RuntimeKeysReady = true;
 
     /*
+     * ORDER BY scans retain both an end-of-scan flag and queued tuples.
+     * Reset them before switching partitions as well as on ordinary rescans;
+     * otherwise IndexNextWithReorder skips every partition after the first.
+     */
+    node->iss_ReachedEnd = false;
+    if (node->iss_ReorderQueue != NULL) {
+        while (!pairingheap_is_empty(node->iss_ReorderQueue)) {
+            heap_freetuple(reorderqueue_pop(node));
+        }
+    }
+
+    /*
      * deal with partitioned table
      */
     bool partpruning = !RelationIsSubPartitioned(node->ss.ss_currentRelation) &&
