@@ -4194,6 +4194,14 @@ static int expand_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* stmt
         list_delete_ptr(block_ptr_stack, stmt);
     }
 
+    /* Match native block exit handling for B-format databases with Dolphin. */
+    if (DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin &&
+        rc == PLPGSQL_RC_EXIT && stmt->label != NULL && estate->exitlabel != NULL &&
+        strcmp(stmt->label, estate->exitlabel) == 0) {
+        estate->exitlabel = NULL;
+        rc = PLPGSQL_RC_OK;
+    }
+
     return rc;
 }
 
