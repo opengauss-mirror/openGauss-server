@@ -99,6 +99,63 @@ openGauss=# SET hnsw_ef_search = 100;
 openGauss=# SELECT id, embedding <-> '[1,2,3,4,5]'::vector AS distance FROM items ORDER BY distance limit 10;
 ```
 
+#### HNSW迭代扫描
+
+带过滤条件的HNSW查询，初始候选过滤后可能不足`LIMIT`指定的数量。迭代扫描允许继续寻找候选，不需要重建索引。
+
+| `hnsw_iterative_scan`取值 | 使用情况 |
+| --- | --- |
+| `off` | 不继续搜索，过滤后可能只返回几条结果。 |
+| `strict_order` | 继续搜索，并保持索引输出距离非递减；距离小于此前已返回距离的候选会被跳过。 |
+| `relaxed_order` | 默认值。继续搜索，各批次结果可能乱序，需要时再排序。 |
+
+普通用户可使用`SET`设置当前会话，或在事务中使用`SET LOCAL`。
+
+以下假设`items`表包含`id`、`category_id`和`embedding vector(3)`，并已在`embedding`上创建使用`vector_l2_ops`的HNSW索引。目标是从类别1中查找与`[1,2,3]`最接近的10条数据；`<->`表示L2距离，越小越相似。
+
+**情况一：关闭迭代扫描。** 初始候选过滤后不足10条时，可能只返回几条。
+
+```sql
+SET hnsw_iterative_scan = 'off';
+
+SELECT id, embedding <-> '[1,2,3]'::vector AS distance
+FROM items
+WHERE category_id = 1
+ORDER BY distance
+LIMIT 10;
+```
+
+**情况二：继续搜索，并保持距离顺序。** 设置后再次执行上面的查询。
+
+```sql
+SET hnsw_iterative_scan = 'strict_order';
+```
+
+**情况三：继续搜索，结果再排序。** 内层找候选，外层对找到的结果排序。
+
+```sql
+SET hnsw_iterative_scan = 'relaxed_order';
+
+SELECT id, distance
+FROM (
+    SELECT id, embedding <-> '[1,2,3]'::vector AS distance
+    FROM items
+    WHERE category_id = 1
+    ORDER BY distance
+    LIMIT 10
+) AS candidates
+ORDER BY distance + 0;
+```
+
+外层`ORDER BY distance + 0`不改变距离值，用于显式重排，不会增加候选数量。
+
+相关参数：
+
+- `hnsw_ef_search`：查询候选集大小，也用于确定继续扫描时的批次大小。
+- `hnsw_max_scan_tuples`：迭代扫描访问计数阈值，范围为`-1`～`2147483647`，默认`-1`；正数启用限制，`-1`和`0`不限制扫描扩展。支持`SET`和`SET LOCAL`。阈值不限制初始搜索，达到阈值后仍可返回保留的候选，因此不是返回行数或访问数量的严格上限。
+
+> 迭代扫描仍是近似检索，不保证一定返回10条。上述参数仅在执行计划使用HNSW索引扫描时生效，可用`EXPLAIN`检查。
+
 ### 并发选项
 
 - `parallel_workers` - 构建索引并行度（默认为0），设置范围1~32
