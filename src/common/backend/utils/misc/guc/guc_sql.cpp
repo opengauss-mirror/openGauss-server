@@ -4433,7 +4433,8 @@ static void assign_b_format_behavior_compat_options(const char *newval, void *ex
  */
 static bool check_d_format_behavior_compat_options(char **newval, void **extra, GucSource source)
 {
-    if (strcasecmp(*newval, "ALL") == 0) {
+    if (strcasecmp(*newval, "ALL") == 0 ||
+        strcasecmp(*newval, "ALL,-enable_sbr_identifier") == 0) {
         return true;
     }
 
@@ -4486,6 +4487,12 @@ static void assign_d_format_behavior_compat_options(const char *newval, void *ex
 {
     int start = 0;
     int result = 0;
+
+    if (strcasecmp(newval, "ALL,-enable_sbr_identifier") == 0) {
+        u_sess->utils_cxt.d_format_behavior_compat_flags =
+            0xFFFFFFFF & ~D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER;
+        return;
+    }
 
     if (strcasecmp(newval, "ALL") == 0) {
         u_sess->utils_cxt.d_format_behavior_compat_flags = 0xFFFFFFFF;

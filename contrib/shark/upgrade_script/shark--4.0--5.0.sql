@@ -63,3 +63,61 @@ WHERE information_schema_tsql.is_d_format_schema(nc.oid, nc.nspname)
     AND (pg_has_role(c.relowner, 'USAGE')
 			OR has_column_privilege(c.oid, a.attnum,
 			'SELECT, INSERT, UPDATE, REFERENCES'));
+
+-- Store function-local options without square-bracket identifiers. Use the
+-- configured session default: earlier install scripts temporarily SET LOCAL
+-- this option to an empty string, which must not become the function default.
+CREATE FUNCTION pg_temp.shark_remove_sbr_identifier(target REGPROCEDURE)
+RETURNS void
+LANGUAGE plpgsql
+AS $body$
+DECLARE
+    compat_options TEXT;
+    filtered_options TEXT;
+BEGIN
+    SELECT reset_val INTO compat_options
+      FROM pg_catalog.pg_settings
+     WHERE name = 'd_format_behavior_compat_options';
+
+    IF pg_catalog.upper(compat_options) = 'ALL' THEN
+        compat_options := 'ALL,-enable_sbr_identifier';
+    END IF;
+
+    SELECT COALESCE(pg_catalog.string_agg(option, ','), '')
+      INTO filtered_options
+      FROM (
+          SELECT pg_catalog.lower(pg_catalog.btrim(value, E' \t\n\r"')) AS option
+            FROM pg_catalog.regexp_split_to_table(compat_options, ',') AS value
+      ) AS options
+     WHERE option <> '' AND option <> 'enable_sbr_identifier';
+
+    EXECUTE pg_catalog.format(
+        'ALTER FUNCTION %s SET d_format_behavior_compat_options TO %L',
+        target, filtered_options);
+END;
+$body$;
+
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_get_lang_metadata_json(TEXT)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_get_timeunit_from_string(TEXT, TEXT)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_conv_string_to_datetime_v2(TEXT, TEXT, NUMERIC)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_conv_string_to_datetimeoffset(TEXT, TEXT, NUMERIC)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(SMALLINT, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TINYINT, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(INTEGER, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(BIGINT, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(NUMERIC, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TEXT, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(VARCHAR, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(BPCHAR, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(NVARCHAR2, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(REAL, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(DOUBLE PRECISION, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(BOOLEAN, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TIME, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TIMETZ, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TIMESTAMP, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(TIMESTAMPTZ, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(DATE, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+SELECT pg_temp.shark_remove_sbr_identifier('sys.shark_try_cast_to_any(SMALLDATETIME, ANYELEMENT, INTEGER)'::REGPROCEDURE);
+
+DROP FUNCTION pg_temp.shark_remove_sbr_identifier(REGPROCEDURE);

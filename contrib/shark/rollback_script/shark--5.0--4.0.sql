@@ -63,3 +63,48 @@ WHERE information_schema_tsql.is_d_format_schema(nc.oid, nc.nspname)
     AND (pg_has_role(c.relowner, 'USAGE')
 			OR has_column_privilege(c.oid, a.attnum,
 			'SELECT, INSERT, UPDATE, REFERENCES'));
+
+ALTER FUNCTION sys.shark_get_lang_metadata_json(TEXT)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_get_timeunit_from_string(TEXT, TEXT)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_conv_string_to_datetime_v2(TEXT, TEXT, NUMERIC)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_conv_string_to_datetimeoffset(TEXT, TEXT, NUMERIC)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(SMALLINT, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TINYINT, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(INTEGER, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(BIGINT, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(NUMERIC, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TEXT, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(VARCHAR, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(BPCHAR, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(NVARCHAR2, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(REAL, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(DOUBLE PRECISION, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(BOOLEAN, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TIME, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TIMETZ, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TIMESTAMP, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(TIMESTAMPTZ, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(DATE, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
+ALTER FUNCTION sys.shark_try_cast_to_any(SMALLDATETIME, ANYELEMENT, INTEGER)
+    RESET d_format_behavior_compat_options;
