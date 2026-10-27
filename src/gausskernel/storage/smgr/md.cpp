@@ -693,6 +693,9 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     int nbytes;
     MdfdVec *v = NULL;
 
+    /* file IO statistics accumulation for extend writes (same as mdwrite) */
+    PgStat_Counter time_diff = 0;
+
     /* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
     Assert(blocknum >= mdnblocks(reln, forknum));
@@ -719,9 +722,10 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
         ThreadIoTimer timer;
         CfsExtendExtent(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
                         forknum, blocknum, buffer, COMMON_STORAGE);
+        time_diff = timer.elapsed_us();
         pgstat_track_thread_io_extend(
             RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, BLCKSZ, timer.elapsed_us());
+            t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -756,14 +760,85 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
             }
         }
 
+        time_diff = timer.elapsed_us();
         pgstat_track_thread_io_extend(
             RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, BLCKSZ, timer.elapsed_us());
+            t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
     }
+
+    /* report the extend write to the file IO statistics (see mdwrite; extend used to bypass them) */
+    PgStat_FileIoMsgAccum* acc = &t_thrd.extend_file_stat_acc;
+    if (acc->msg_count == 0) {
+        acc->lst_file = reln->smgr_rnode.node.relNode;
+        acc->lst_db = reln->smgr_rnode.node.dbNode;
+        acc->lst_spc = reln->smgr_rnode.node.spcNode;
+        acc->msg_count = 1;
+        acc->sum_page = 1;
+        acc->sum_time = time_diff;
+        acc->min_time = time_diff;
+        acc->max_time = time_diff;
+    } else if (acc->lst_file != reln->smgr_rnode.node.relNode || acc->msg_count % STAT_MSG_BATCH == 0) {
+        PgStat_MsgFile msg;
+        errno_t rc = memset_s(&msg, sizeof(PgStat_MsgFile), 0, sizeof(PgStat_MsgFile));
+        securec_check(rc, "", "");
+
+        msg.dbid = acc->lst_db;
+        msg.spcid = acc->lst_spc;
+        msg.fn = acc->lst_file;
+        msg.rw = 'w';
+        msg.cnt = acc->msg_count;
+        msg.blks = acc->sum_page;
+        msg.tim = acc->sum_time;
+        msg.lsttim = acc->lst_time;
+        msg.mintim = acc->min_time;
+        msg.maxtim = acc->max_time;
+        reportFileStat(&msg);
+
+        acc->msg_count = 1;
+        acc->sum_page = 1;
+        acc->sum_time = time_diff;
+        if (acc->lst_file != reln->smgr_rnode.node.relNode) {
+            acc->lst_file = reln->smgr_rnode.node.relNode;
+            acc->lst_db = reln->smgr_rnode.node.dbNode;
+            acc->lst_spc = reln->smgr_rnode.node.spcNode;
+            acc->min_time = time_diff;
+            acc->max_time = time_diff;
+        }
+    } else {
+        acc->msg_count++;
+        acc->sum_page++;
+        acc->sum_time += time_diff;
+    }
+    acc->lst_time = time_diff;
+    if (acc->min_time > time_diff) {
+        acc->min_time = time_diff;
+    }
+    if (acc->max_time < time_diff) {
+        acc->max_time = time_diff;
+    }
+
     if (!skipFsync && !SmgrIsTemp(reln)) {
         register_dirty_segment(reln, forknum, v);
     }
     Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber)RELSEG_SIZE));
+}
+
+/*
+ * record_file_op_time -- track min/max/last elapsed time of a single file
+ * write operation, so the reported PgStat_MsgFile carries non-zero
+ * mintim/maxtim/lsttim (the collector overwrites entry->minIOTime with any
+ * zero mintim, see pgstat_recv_filestat).
+ */
+static void record_file_op_time(PgStat_Counter opTime, PgStat_Counter* minOpTime, PgStat_Counter* maxOpTime,
+    PgStat_Counter* lstOpTime)
+{
+    if (opTime != 0 && (*minOpTime == 0 || opTime < *minOpTime)) {
+        *minOpTime = opTime;
+    }
+    if (opTime > *maxOpTime) {
+        *maxOpTime = opTime;
+    }
+    *lstOpTime = opTime;
 }
 
 /*
@@ -808,6 +883,13 @@ void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, i
     }
 
     ThreadIoTimer timer;
+    uint32 write_ops = 0;
+    PgStat_Counter op_time = 0;
+    PgStat_Counter min_op_time = 0;
+    PgStat_Counter max_op_time = 0;
+    PgStat_Counter lst_op_time = 0;
+    instr_time op_start;
+    instr_time op_end;
 
     while (remblocks > 0) {
         BlockNumber segstartblock = curblocknum % relSegSize;
@@ -832,8 +914,14 @@ void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, i
         Assert(segstartblock + numblocks <= relSegSize);
 
         if (unlikely(isCompressed)) {
+            (void)INSTR_TIME_SET_CURRENT(op_start);
             CfsZeroExtend(reln, reln->smgr_rnode.node, v->mdfd_vfd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum,
                           curblocknum, numblocks, COMMON_STORAGE);
+            (void)INSTR_TIME_SET_CURRENT(op_end);
+            INSTR_TIME_SUBTRACT(op_end, op_start);
+            op_time = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(op_end);
+            write_ops++;
+            record_file_op_time(op_time, &min_op_time, &max_op_time, &lst_op_time);
         } else {
             int writtenBlocks = 0;
 
@@ -841,8 +929,14 @@ void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, i
                 int writeBlocks = Min(numblocks - writtenBlocks, zeroExtendBlocksPerWrite);
                 int expectedBytes = BLCKSZ * writeBlocks;
                 off_t writeOffset = seekpos + (off_t)BLCKSZ * writtenBlocks;
+                (void)INSTR_TIME_SET_CURRENT(op_start);
                 int nbytes = FilePWrite(v->mdfd_vfd, useFallocate ? NULL : zeroBuffer, expectedBytes, writeOffset,
                                         (uint32)WAIT_EVENT_DATA_FILE_EXTEND);
+                (void)INSTR_TIME_SET_CURRENT(op_end);
+                INSTR_TIME_SUBTRACT(op_end, op_start);
+                op_time = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(op_end);
+                write_ops++;
+                record_file_op_time(op_time, &min_op_time, &max_op_time, &lst_op_time);
                 if (nbytes != expectedBytes) {
                     if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                         ereport(DEBUG1,
@@ -878,6 +972,22 @@ void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, i
     pgstat_track_thread_io_extend(
         RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
         t_thrd.cur_thread_io_context, (uint64)nblocks * BLCKSZ, timer.elapsed_us());
+
+    /* report the zeroextend write to the file IO statistics (used to bypass them) */
+    PgStat_MsgFile msg;
+    errno_t rc = memset_s(&msg, sizeof(msg), 0, sizeof(msg));
+    securec_check(rc, "", "");
+    msg.dbid = reln->smgr_rnode.node.dbNode;
+    msg.spcid = reln->smgr_rnode.node.spcNode;
+    msg.fn = reln->smgr_rnode.node.relNode;
+    msg.rw = 'w';
+    msg.cnt = write_ops;
+    msg.blks = nblocks;
+    msg.tim = timer.elapsed_us();
+    msg.lsttim = lst_op_time;
+    msg.mintim = min_op_time;
+    msg.maxtim = max_op_time;
+    reportFileStat(&msg);
 
     pfree_ext(unalignedZeroBuffer);
 }

@@ -2041,6 +2041,11 @@ static inline void knl_thread_io_stat_init_single(PgStat_ThreadIOStats* stats)
     MemSet(stats, 0, sizeof(PgStat_ThreadIOStats));
 }
 
+static inline void knl_thread_file_stat_acc_init(PgStat_FileIoMsgAccum* acc)
+{
+    MemSet(acc, 0, sizeof(PgStat_FileIoMsgAccum));
+}
+
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
@@ -2182,6 +2187,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_inval_msg_init(&t_thrd.inval_msg_cxt);
     KnlTSmbWriterInit(&t_thrd.smbWriterCxt);
     knl_thread_io_stat_init(&t_thrd.local_thread_io_stats);
+    knl_thread_file_stat_acc_init(&t_thrd.extend_file_stat_acc);
 }
 
 void knl_thread_layout_dump(void)

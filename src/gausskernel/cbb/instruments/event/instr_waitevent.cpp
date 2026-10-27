@@ -411,10 +411,14 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
                 &lock_info->min_duration);
             updateMaxValueForAtomicType(event_info.lock_info[i].max_duration, &lock_info->max_duration);
             lock_info->counter += event_info.lock_info[i].counter;
-            lock_info->failed_counter += event_info.lock_info[i].failed_counter;
             lock_info->total_duration += event_info.lock_info[i].total_duration;
             lock_info->avg_duration = lock_info->total_duration / lock_info->counter;
         }
+        /* failed waits carry no duration and are recorded even when the
+         * backend never succeeded in acquiring this lock type (counter == 0),
+         * they must be aggregated unconditionally, otherwise pure-failed
+         * backends' failed waits never show up in wait_events. */
+        lock_info->failed_counter += event_info.lock_info[i].failed_counter;
         /* no-wait acquisition counters are independent of the wait counter,
          * they must be aggregated even when the backend never waited on this
          * lock type, otherwise request_count/nw_* stay zero for such locks. */
@@ -432,10 +436,14 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
                 &lwlock_info->min_duration);
             updateMaxValueForAtomicType(event_info.lwlock_info[i].max_duration, &lwlock_info->max_duration);
             lwlock_info->counter += event_info.lwlock_info[i].counter;
-            lwlock_info->failed_counter += event_info.lwlock_info[i].failed_counter;
             lwlock_info->total_duration += event_info.lwlock_info[i].total_duration;
             lwlock_info->avg_duration = lwlock_info->total_duration / lwlock_info->counter;
         }
+        /* failed waits carry no duration and are recorded even when the
+         * backend never succeeded in acquiring this lwlock tranche
+         * (counter == 0), they must be aggregated unconditionally, otherwise
+         * pure-failed backends' failed waits never show up in wait_events. */
+        lwlock_info->failed_counter += event_info.lwlock_info[i].failed_counter;
         /* no-wait acquisition counters are independent of the wait counter,
          * they must be aggregated even when the backend never waited on this
          * lwlock tranche, otherwise request_count/nw_* stay zero for it. */
