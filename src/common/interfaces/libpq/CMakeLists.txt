@@ -283,7 +283,7 @@ if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
 else()
     target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} libkeymgr.a -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread)
 endif()
-add_dependencies(pq_ce libpq_ce encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
+add_dependencies(pq_ce libpq_ce encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser keymgr_static)
 target_link_directories(pq_ce PUBLIC 
     ${SECURE_LIB_PATH}
     ${KMC_LIB_PATH}
