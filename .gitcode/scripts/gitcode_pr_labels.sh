@@ -1002,14 +1002,25 @@ if [[ "${action}" == "result" ]]; then
       if [[ "${GITCODE_PREPARE_PROCEED:-}" == "skip" ]]; then
         echo "Only ignored paths changed; keeping success." >&2
         action="success"
-      elif [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "canceled" || "${GITCODE_PREPARE_RESULT:-}" == "skipped" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
+      elif [[ "${GITCODE_TESTS_RAN:-}" == "no" || "${GITCODE_PREPARE_PROCEED:-}" == "no" || "${GITCODE_PREPARE_RESULT:-}" == "cancelled" || "${GITCODE_PREPARE_RESULT:-}" == "canceled" ]] || matrix_result_incomplete "${GITCODE_X86_RESULT:-}" || matrix_result_incomplete "${GITCODE_ARM_RESULT:-}"; then
+        # Do not treat prepare.result=skipped as failure: AtomGit needs.*.result is
+        # unreliable and was deleting docs-only ci-pipeline-success.
         echo "Tests did not run; reporting failure instead of success." >&2
         action="failed"
       else
         action="success"
       fi
       ;;
-    *) action="failed" ;;
+    *)
+      # pipeline.upstream_status can be FAILED from continue-on-error noise while
+      # docs-only prepare already wrote success. Prefer explicit proceed=skip.
+      if [[ "${GITCODE_PREPARE_PROCEED:-}" == "skip" ]]; then
+        echo "Only ignored paths changed; keeping success despite upstream_status=${status}." >&2
+        action="success"
+      else
+        action="failed"
+      fi
+      ;;
   esac
 fi
 
