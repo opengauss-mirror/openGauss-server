@@ -419,11 +419,13 @@ jobs:
             echo "Only ignored paths changed; tests are intentionally skipped."
             exit 0
           fi
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "no" ] || [ "${GITCODE_PREPARE_RESULT:-}" = "cancelled" ] || [ "${GITCODE_PREPARE_RESULT:-}" = "skipped" ]; then
-            echo "Tests did not run, so this pipeline must not be reported as success." >&2
+          # 只认 proceed=no（身份未确认）。不能用 prepare.result=cancelled/skipped：
+          # 本平台 needs.*.result 语义不稳，误失败会连带 report_skipped 打掉 docs 的 success。
+          if [ "${GITCODE_PREPARE_PROCEED:-}" = "no" ]; then
+            echo "Identity was not confirmed; tests must not be reported as success." >&2
             exit 1
           fi
-          echo "Tests were allowed to run."
+          echo "Tests were allowed to run (proceed=${GITCODE_PREPARE_PROCEED:-empty} result=${GITCODE_PREPARE_RESULT:-empty})."
 
   report_skipped:
     name: Report skipped tests as failed
@@ -518,10 +520,9 @@ jobs:
               ;;
           esac
           # 不能只凭 fail_closed 失败就打 failed：它与门禁并行，outputs 抖动时会在 LLT 未结束时误标红。
-          # 仅当 prepare 明确表示“测试不应算成功”时才写 failed（身份未确认 / prepare 取消或跳过）。
-          prep_result="$(printf '%s' "${GITCODE_PREPARE_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ] && [ "${prep_result}" != "cancelled" ] && [ "${prep_result}" != "canceled" ] && [ "${prep_result}" != "skipped" ]; then
-            echo "fail_closed failed but prepare did not block tests (proceed=${GITCODE_PREPARE_PROCEED:-empty} result=${prep_result:-empty}); not writing failed early."
+          # 仅 proceed=no（身份未确认）才写 failed；不要用 prepare.result=cancelled/skipped。
+          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ]; then
+            echo "fail_closed failed but proceed is not no (proceed=${GITCODE_PREPARE_PROCEED:-empty}); not writing failed early."
             exit 0
           fi
           # steps.state.outputs 到下一步是空的，回到本任务刚写好的固定路径。
@@ -703,9 +704,8 @@ jobs:
               exit 0
               ;;
           esac
-          prep_result="$(printf '%s' "${GITCODE_PREPARE_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ] && [ "${prep_result}" != "cancelled" ] && [ "${prep_result}" != "canceled" ] && [ "${prep_result}" != "skipped" ]; then
-            echo "fail_closed failed but prepare did not block tests; arm will not write failed early."
+          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ]; then
+            echo "fail_closed failed but proceed is not no; arm will not write failed early."
             exit 0
           fi
           if [ "${GITCODE_SKIP_LABELED:-}" = "yes" ]; then
@@ -1059,17 +1059,6 @@ jobs:
               fi
               ;;
           esac
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            echo "Only ignored paths changed; success was already written in prepare."
-            exit 0
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed)
-              echo "Tests did not run. The skipped-result job writes the failed label."
-              exit 0
-              ;;
-          esac
           # steps.state.outputs 到下一步是空的，回到本任务刚写好的固定路径。
           run_key="${GITCODE_RUN_ID:-}"
           case "${run_key}" in
@@ -1139,7 +1128,45 @@ jobs:
             timeout 300 git fetch --depth=1 --force origin refs/heads/master
             git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
+            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
           )
+          # proceed=skip 跨任务常丢失；pipeline.upstream_status 又可能因 continue-on-error 变成 FAILED，
+          # 会把 prepare 已写的 success 覆盖成 failed。路径再判一次，docs-only 强制重写 success。
+          docs_only=0
+          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
+            docs_only=1
+          elif [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
+            set +e
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
+            path_skip_rc=$?
+            set -e
+            if [ "${path_skip_rc}" -eq 0 ]; then
+              docs_only=1
+            fi
+          fi
+          if [ "${docs_only}" -eq 1 ]; then
+            echo "Only ignored paths changed; re-apply ci-pipeline-success (clear any failed)."
+            set +e
+            unset ATOMGIT_TOKEN || true
+            unset GITHUB_TOKEN || true
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" success
+            rc=$?
+            set -e
+            if [ "${rc}" -eq 0 ]; then
+              record "labeled=yes"
+            else
+              record "labeled=no"
+            fi
+            exit "${rc}"
+          fi
+          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
+          case "${fc}" in
+            failure|failed)
+              echo "Tests did not run. The skipped-result job writes the failed label."
+              record "labeled=yes"
+              exit 0
+              ;;
+          esac
           set +e
           # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
           unset ATOMGIT_TOKEN || true
@@ -1240,17 +1267,6 @@ jobs:
               fi
               ;;
           esac
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            echo "Only ignored paths changed; success was already written in prepare."
-            exit 0
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed)
-              echo "Tests did not run. The skipped-result job writes the failed label."
-              exit 0
-              ;;
-          esac
           labeled="$(printf '%s' "${GITCODE_REPORT_LABELED:-}" | tr '[:upper:]' '[:lower:]')"
           # 跨任务输出经常是空的。空值不是 yes，arm 仍要写成功或失败标签。
           if [ "${labeled}" = "yes" ]; then
@@ -1280,7 +1296,34 @@ jobs:
             timeout 300 git fetch --depth=1 --force origin refs/heads/master
             git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
             git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
+            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
           )
+          docs_only=0
+          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
+            docs_only=1
+          elif [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
+            set +e
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
+            path_skip_rc=$?
+            set -e
+            if [ "${path_skip_rc}" -eq 0 ]; then
+              docs_only=1
+            fi
+          fi
+          if [ "${docs_only}" -eq 1 ]; then
+            echo "Only ignored paths changed; arm re-applies ci-pipeline-success."
+            unset ATOMGIT_TOKEN || true
+            unset GITHUB_TOKEN || true
+            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" success
+            exit 0
+          fi
+          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
+          case "${fc}" in
+            failure|failed)
+              echo "Tests did not run. The skipped-result job writes the failed label."
+              exit 0
+              ;;
+          esac
           # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
           unset ATOMGIT_TOKEN || true
           unset GITHUB_TOKEN || true
