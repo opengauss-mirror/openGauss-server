@@ -7,6 +7,7 @@
 
 # test nlssort_pinyin
 test: nlssort_pinyin
+test: drop_column_view_trigger
 
 # test replace func and trunc func
 test: gs_dump_package
