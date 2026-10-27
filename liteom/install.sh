@@ -664,8 +664,8 @@ function init_db()
         die "no gauss installation file is found in app-path. check the installation directory."
     fi
 
-    info "cmd : gs_initdb -D ${data_path} --nodename=${nodename}  ${init_show_parameters}"
-    ./gs_initdb -D ${data_path} --nodename=${nodename} ${init_parameters} | tee -a ${log_file}
+    info "cmd : gs_initdb --locale=C -D ${data_path} --nodename=${nodename}  ${init_show_parameters}"
+    ./gs_initdb --locale=C -D ${data_path} --nodename=${nodename} ${init_parameters} | tee -a ${log_file}
 	if [ ${PIPESTATUS[0]} -ne 0 ]
 	then
 		die "[init primary datanode failed.]"
