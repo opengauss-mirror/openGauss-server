@@ -1344,7 +1344,7 @@ select conname, contype, conkey, confkey, conbin, consrc, conincluding from pg_c
 Indexes:
     "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_f3_f4_key" UNIQUE CONSTRAINT, ubtree (f3, f4) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) INCLUDE (f6, f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
@@ -4354,7 +4354,7 @@ select conname, contype, conkey, confkey, conbin, consrc, conincluding from pg_c
  f7     | integer               |           | plain    |              | 
 Indexes:
     "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) INCLUDE (f6, f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
@@ -7240,7 +7240,7 @@ Options: orientation=row, compression=no, storage_type=ustore
  f6     | integer               |           | plain    |              | 
  f7     | integer               |           | plain    |              | 
 Indexes:
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) INCLUDE (f6, f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
@@ -7294,7 +7294,7 @@ Options: orientation=row, compression=no, storage_type=ustore
  f7     | integer               |           | plain    |              | 
  f5     | integer               |           | plain    |              | 
 Indexes:
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) INCLUDE (f6, f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
     "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)

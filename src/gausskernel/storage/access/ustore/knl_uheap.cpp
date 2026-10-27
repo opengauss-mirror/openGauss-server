@@ -436,7 +436,7 @@ enum UHeapDMLType {
     UHEAP_DELETE,
 };
 
-template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useInplaceUpdate)
+template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool isHotUpdate)
 {
     switch (dmlType) {
         case UHEAP_INSERT: {
@@ -445,10 +445,12 @@ template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useI
         }
         case UHEAP_UPDATE: {
             /*
-             * As of now, we only count non-inplace updates as that are required to
-             * decide whether to trigger autovacuum.
+             * A HOT update is one for which no separate index update was
+             * needed.  An in-place update still requires new index entries
+             * whenever indexed columns were modified, so only in-place
+             * updates that left all indexed columns untouched count as HOT.
              */
-            pgstat_count_heap_update(rel, useInplaceUpdate);
+            pgstat_count_heap_update(rel, isHotUpdate);
             break;
         }
         case UHEAP_DELETE: {
@@ -464,7 +466,7 @@ template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useI
 
 template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer, Buffer* newbuf, UHeapTuple utuple,
                                                      UHeapTuple tuple, ItemPointer tid, const bool hasTupLock,
-                                                     const bool useInplaceUpdate)
+                                                     const bool isHotUpdate)
 {
     UHeapResetPreparedUndo();
 
@@ -482,7 +484,7 @@ template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
 
-    PgStatCountDML<dmlType>(rel, useInplaceUpdate);
+    PgStatCountDML<dmlType>(rel, isHotUpdate);
 
     switch (dmlType) {
         case UHEAP_INSERT:
@@ -3397,7 +3399,7 @@ check_tup_satisfies_update:
         UHeapUpdateFSM(relation, newbuf, true);
     }
     UHeapFinalizeDML<UHEAP_UPDATE>(relation, buffer, &newbuf, newtup, uheaptup, &(oldtup.ctid),
-        haveTupleLock, useInplaceUpdate);
+        haveTupleLock, useInplaceUpdate && !isIndexUpdated);
     if (oldKeyTuple != NULL && isOldTupleCopied) {
         UHeapFreeTuple(oldKeyTuple);
     }
