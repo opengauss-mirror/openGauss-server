@@ -962,3 +962,6 @@ COMMENT ON FUNCTION pg_catalog.ss_ub_link_available() IS 'whether the UB cache l
 -- Drop pg_description rows whose pg_conversion target no longer exists.
 delete from pg_catalog.pg_description where classoid = 2607 and objsubid = 0
     and objoid not in (select oid from pg_catalog.pg_conversion);
+
+-- Mark text_date(text) as stable because text_date('now') depends on statement start timestamp.
+ALTER FUNCTION pg_catalog.text_date(text) STABLE;

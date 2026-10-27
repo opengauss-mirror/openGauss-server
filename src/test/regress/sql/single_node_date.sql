@@ -276,3 +276,6 @@ select 'infinity'::date, '-infinity'::date;
 select 'infinity'::date > 'today'::date as t;
 select '-infinity'::date < 'today'::date as t;
 select isfinite('infinity'::date), isfinite('-infinity'::date), isfinite('today'::date);
+
+-- test current_date is not folded to a constant
+EXPLAIN (VERBOSE ON, COSTS OFF) SELECT current_date;
