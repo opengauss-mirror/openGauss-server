@@ -41,7 +41,7 @@
         └── log // 启动前需存在log目录
         ```
 
-        dss\_init.ini配置内容如下：
+        dss\_inst.ini配置内容如下：
 
         ```
         INST_ID=0
