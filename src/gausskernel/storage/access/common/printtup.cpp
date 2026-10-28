@@ -595,6 +595,20 @@ void SetRemoteDestReceiverParams(DestReceiver *self, Portal portal)
             myState->pub.receiveSlot = printtup_internal_20;
         else
             myState->pub.receiveSlot = printtup_20;
+    } else if (IsConnFromApp() && !IS_SPQ_RUNNING &&
+        myState->pub.receiveSlot == printtupStream && portal->tupDesc != NULL && portal->formats != NULL) {
+        /*
+         * Protocol 3 introduced Bind result formats; printtupStream is text-only.
+         * Select printtup once per receiver to honor mixed formats and re-encode
+         * text DataRows for binary output. It also rejects invalid format codes.
+         * Keep internal connections and SPQ unchanged.
+         */
+        for (int i = 0; i < portal->tupDesc->natts; i++) {
+            if (portal->formats[i] != 0) {
+                myState->pub.receiveSlot = printtup;
+                break;
+            }
+        }
     }
 }
 
