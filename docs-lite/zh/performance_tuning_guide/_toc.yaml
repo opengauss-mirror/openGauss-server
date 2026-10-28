@@ -103,6 +103,8 @@ sections:
             href: ./hint_specifying_not_to_expand_subqueries.md
           - label: 指定不使用全局计划缓存的Hint
             href: ./hint_specifying_not_to_use_global_plan_cache.md
+          - label: 谓词下推的Hint
+            href: ./hint_for_predicate_push.md
           - label: 同层参数化路径的Hint
             href: ./hint_of_parameterized_paths_at_the_same_level.md
           - label: 将部分Error降级为Warning的Hint
