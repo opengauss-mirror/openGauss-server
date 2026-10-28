@@ -4,16 +4,12 @@ on:
   push:
     branches:
       - master
-    # push 不写合入标签；只改文档/流水线配置时不必占节点。
     paths-ignore:
       - '.gitcode/**'
       - 'doc/**'
       - 'docs/**'
       - 'docs-lite/**'
   pull_request_target:
-    # AtomGit 的活动名是 open、update、reopen。opened 和 synchronize 过不了校验。
-    # 不在这里 paths-ignore：纯 .gitcode/doc/docs/docs-lite 变更也必须起流水线，
-    # 由 prepare 打 ci-pipeline-success 并跳过 LLT；否则平台不触发、合入缺 success 标签。
     types:
       - open
       - update
@@ -36,1295 +32,473 @@ permissions:
   pr: write
   note: write
 
+# Kubernetes runner-set（Settings → Actions → Runners → kubernetes）在原有 server_x86 /
+# server_arm 标签基础上新增 cpu=16（与 ci_config runs-on 的 cpu=N 写法一致）。
+# 当前 fork 已登记：arm-16 → server_arm + cpu=16；x86 需同集群再建 server_x86 + cpu=16。
+# job 增加 container:（参考 ci_config PR-pipeline.yml）：步骤在指定镜像内执行；
+# 测试任务在该容器里执行 /usr/local/bin/entrypoint_*.sh，并挂载 docker.sock。
 # 同一 PR 再次触发（新提交、reopen、/retest）时，立刻取消还在跑的上一次门禁。
-# mr_id 抢占只作用于同一个合并请求；不同 PR 仍可并行，最多 5 条。
+# mr_id 抢占只作用于同一个合并请求；不同 PR 仍可并行。
 concurrency:
-  enable: true
   max: 100
   exceed-action: QUEUE
+  enable: true
   preemption:
     enable: true
-    events:
-      - mr_id
+    events: [mr_id]
 
 env:
+  pr_id: ${{ atomgit.event.pull_request.number }}
   GITCODE_REPO: openGauss/openGauss-server
-  # 评论事件不在这里取号。issue.number 可能是评论编号，base_ref 也可能不是 PR 目标分支。
   GITCODE_EVENT_NAME: ${{ atomgit.event_name }}
   GITCODE_RUN_ID: ${{ atomgit.workflow_run_id }}
-  # pipeline.upstream_status 在这台平台上是空的。打结果标签时用这个运行号去查测试任务。
   GITCODE_ACTIONS_RUN_ID: ${{ atomgit.run_id }}
   GITCODE_PR_IID: ${{ (atomgit.event_name != 'pull_request_comment' && atomgit.event_name != 'pr_comment') && (atomgit.event.pull_request.number || atomgit.event.pull_request.iid || atomgit.event.merge_request.iid || atomgit.event.merge_request.number) || '' }}
   GITCODE_TARGET_BRANCH: ${{ (atomgit.event_name != 'pull_request_comment' && atomgit.event_name != 'pr_comment') && (atomgit.base_ref || atomgit.event.pull_request.base.ref || atomgit.event.pull_request.target_branch || atomgit.event.merge_request.target_branch) || '' }}
 
-jobs:
-  prepare:
-    name: Mark running
-    # 只有这一处在流水线开始时写标签。测试不依赖下面的 arm 补跑，arm 被跳过也不会取消测试。
-    runs-on: [self-hosted, server_x86]
-    timeout-minutes: 10
-    # 打标签失败不把整条流水线标红。结果写入本任务的临时文件，再由成功的步骤公布。
-    continue-on-error: true
-    outputs:
-      proceed: ${{ steps.publish.outputs.proceed }}
-      labeled: ${{ steps.publish.outputs.labeled }}
-      run_epoch: ${{ steps.state.outputs.run_epoch }}
-    steps:
-      - name: Create label state
-        id: state
-        env:
-          LABEL_JOB_TAG: prepare
-        run: |
-          set -eu
-          umask 077
-          # 下一步读不到 steps.state.outputs，状态文件用运行号放在固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*)
-              echo "Cannot name the label state file." >&2
-              exit 1
-              ;;
-          esac
-          state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG}"
-          nonce="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)"
-          if [ -z "${nonce}" ]; then
-            nonce="$$${RANDOM}${RANDOM}"
-          fi
-          # 每次流水线都生成一次时间标记。没有运行号时用它排序；
-          # 有运行号时也留下，后面没运行号的流水线才知道哪一次更新。
-          run_epoch="$(date +%s%3N 2>/dev/null || true)"
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="$(date +%s 2>/dev/null || true)" ;;
-          esac
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="" ;;
-          esac
-          printf '%s\n' "job=${LABEL_JOB_TAG}" "nonce=${nonce}" "phase=init" "run_epoch=${run_epoch}" > "${state}"
-          chmod 600 "${state}"
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          if [ -n "${out}" ]; then
-            printf '%s\n' "path=${state}" "nonce=${nonce}" "run_epoch=${run_epoch}" >> "${out}"
-          fi
-      - name: Mark PR as running
-        id: mark
+stages:
+  create_label:
+    name: CreateLabel
+    select: selected_by_default
+    jobs:
+      prepare:
+        name: Mark running
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:script-1.0.1
+          options: --user root
+        timeout-minutes: 10
         continue-on-error: true
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: prepare
-          GITCODE_RUN_EPOCH: ${{ steps.state.outputs.run_epoch }}
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
+        outputs:
+          proceed: ${{ steps.publish.outputs.proceed }}
+          labeled: ${{ steps.publish.outputs.labeled }}
+          run_epoch: ${{ steps.state.outputs.run_epoch }}
+        steps:
+          - name: Createlabel
+            id: state
+            env:
+              LABEL_JOB_TAG: prepare
+              PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
+            run: |
+              set -eu
+              umask 077
+              run_key="${GITCODE_RUN_ID:-}"
+              case "${run_key}" in
+                ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
+              esac
+              case "${run_key}" in
+                ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
+              esac
+              case "${run_key}" in
+                ''|*[!A-Za-z0-9._-]*)
+                  echo "Cannot name the label state file." >&2
+                  exit 1
+                  ;;
+              esac
+              repo="${GITCODE_REPO:-openGauss/openGauss-server}"
+              server="${ATOMGIT_SERVER_URL:-}"
+              if [ -z "${server}" ]; then
+                server="${GITCODE_SERVER_URL:-}"
               fi
-              ;;
-          esac
-          # steps.state.outputs 到下一步是空的，回到本任务刚写好的固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          # 上一步写在 /tmp 的文件，下一步看不到。在本步骤里重建，再调用打标签脚本。
-          if [ -z "${state}" ] || [ ! -f "${state}" ] || ! grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}"; then
-            echo "Label state from the previous step is unavailable; creating it in this step." >&2
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) run_key="step$$" ;;
-            esac
-            state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-job}"
-            if [ -z "${nonce}" ]; then
-              nonce="step$$"
-            fi
-            umask 077
-            printf '%s\n' "job=${LABEL_JOB_TAG:-job}" "nonce=${nonce}" "phase=init" > "${state}"
-            chmod 600 "${state}"
-          fi
-          if [ -n "${nonce}" ] && ! grep -Fqx -- "nonce=${nonce}" "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if ! grep -q '^nonce=.' "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if [ -z "${GITCODE_RUN_EPOCH:-}" ]; then
-            GITCODE_RUN_EPOCH="$(grep '^run_epoch=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            export GITCODE_RUN_EPOCH
-          fi
-          printf '%s\n' "phase=started" >> "${state}"
-          record() {
-            printf '%s\n' "$1" >> "${state}"
-          }
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; record "proceed=no"; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
-          )
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          # 纯文档/流水线配置：不跑 LLT，直接打 ci-pipeline-success（合入依赖此标签）。
-          # 跳过逻辑只从 master 拉 pr_paths_should_skip_ci.sh，禁止在 run 块里顶格嵌 heredoc（会弄破 YAML，平台校验直接 FAILED）。
-          skip_rc=1
-          if [ ! -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            echo "pr_paths_should_skip_ci.sh missing on master tip; run full CI." >&2
-          else
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-            skip_rc=$?
-            set -e
-          fi
-          if [ "${skip_rc}" -eq 0 ]; then
-            echo "Only .gitcode/doc/docs/docs-lite changed; write ci-pipeline-success and skip tests."
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" success
-            rc=$?
-            set -e
-            if [ "${rc}" -eq 3 ]; then
-              record "proceed=no"
-              record "labeled=no"
-              exit 1
-            fi
-            record "proceed=skip"
-            if [ "${rc}" -eq 0 ]; then
-              record "labeled=yes"
-            else
-              record "labeled=no"
-            fi
-            exit "${rc}"
-          fi
-          set +e
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" running
-          rc=$?
-          set -e
-          if [ "${rc}" -eq 3 ]; then
-            record "proceed=no"
-            record "labeled=no"
-            exit 1
-          fi
-          record "proceed=yes"
-          if [ "${rc}" -eq 0 ]; then
-            record "labeled=yes"
-          else
-            record "labeled=no"
-          fi
-          exit "${rc}"
-      - name: Publish label result
-        id: publish
-        if: always()
-        env:
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: prepare
-        run: |
-          set -eu
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          record() {
-            if [ -n "${out}" ]; then
-              printf '%s\n' "$1" >> "${out}"
-            fi
-          }
-          proceed=""
-          labeled=""
-          trusted=0
-          if [ -n "${state}" ] && [ -f "${state}" ] && grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}" ] && { [ -z "${nonce}" ] || grep -Fqx -- "nonce=${nonce}" "${state}"; } && grep -q '^nonce=.' "${state}"; then
-            trusted=1
-          fi
-          if [ "${trusted}" -eq 1 ]; then
-            phase="$(grep '^phase=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            proceed="$(grep '^proceed=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            labeled="$(grep '^labeled=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            if [ "${phase}" = "init" ] && [ -z "${proceed}" ] && [ -z "${labeled}" ]; then
-              proceed=yes
-              labeled=yes
-            else
-              if [ -z "${proceed}" ]; then
-                proceed=yes
+              if [ -z "${server}" ]; then
+                server="https://gitcode.com"
               fi
-              if [ -z "${labeled}" ]; then
-                labeled=no
-              fi
-            fi
-          else
-            proceed=yes
-            labeled=no
-          fi
-          if [ -n "${state}" ]; then
-            rm -f "${state}"
-          fi
-          record "proceed=${proceed}"
-          record "labeled=${labeled}"
+              server="${server%/}"
+              src="$(mktemp -d)"
+              trap 'rm -rf "${src}"' EXIT
+              timeout 300 git clone --depth=1 --branch master "${server}/${repo}.git" "${src}"
+              label_script="${src}/.gitcode/scripts/gitcode_pr_labels.sh"
+              bash "${label_script}" delete ci-pipeline-success
+              bash "${label_script}" delete ci-pipeline-failed
+              bash "${label_script}" add ci-pipeline-running
 
-  prepare_arm:
-    name: Mark running on arm
-    # x86 没写成时再写一次。没有任务依赖它，所以这里被跳过不会取消测试。
-    # 结果任务也不依赖它。晚到时只补 running，不能把已经写上的成功或失败盖掉。
-    needs: prepare
-    # 平台的 if 不能读 needs，也不能调用 cancelled()。x86 没写成时由下面的脚本补写。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_arm]
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Mark PR as running
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          GITCODE_RUN_EPOCH: ${{ needs.prepare.outputs.run_epoch }}
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-          GITCODE_PREPARE_LABELED: ${{ needs.prepare.outputs.labeled }}
-          GITCODE_KEEP_TERMINAL_RESULT: "yes"
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
-              fi
-              ;;
-          esac
-          proceed="${GITCODE_PREPARE_PROCEED:-}"
-          result="$(printf '%s' "${GITCODE_PREPARE_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          labeled="${GITCODE_PREPARE_LABELED:-}"
-          if [ "${proceed}" = "no" ]; then
-            echo "Identity was not confirmed; arm will not write running."
-            exit 0
-          fi
-          if [ "${proceed}" = "skip" ]; then
-            echo "Docs-only changes; arm will not write running."
-            exit 0
-          fi
-          case "${result}" in
-            cancelled|canceled|skipped)
-              echo "Prepare was ${result}; arm will not write running."
-              exit 0
-              ;;
-          esac
-          # 跨任务的 labeled 经常是空的。只有明确写成 yes 才跳过，空值仍由 arm 补写。
-          if [ "${labeled}" = "yes" ]; then
-            echo "x86 already labeled this run."
-            exit 0
-          fi
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-          )
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" running
-
-  fail_closed:
-    name: Fail when tests did not run
-    needs: prepare
-    # 每次都跑，并且不依赖测试任务。测试有排队时这里成功。
-    # 身份没确认或打标签被取消时这里失败，且没有 continue-on-error。
-    # 失败任务的输出可能被丢掉，所以时间标记不从这里往外传。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_x86]
-    timeout-minutes: 5
-    steps:
-      - name: Check whether tests ran
-        env:
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-        run: |
-          set -eu
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            echo "Only ignored paths changed; tests are intentionally skipped."
-            exit 0
-          fi
-          # 只认 proceed=no（身份未确认）。不能用 prepare.result=cancelled/skipped：
-          # 本平台 needs.*.result 语义不稳，误失败会连带 report_skipped 打掉 docs 的 success。
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "no" ]; then
-            echo "Identity was not confirmed; tests must not be reported as success." >&2
-            exit 1
-          fi
-          echo "Tests were allowed to run (proceed=${GITCODE_PREPARE_PROCEED:-empty} result=${GITCODE_PREPARE_RESULT:-empty})."
-
-  report_skipped:
-    name: Report skipped tests as failed
-    # 测试任务被跳过时不能作为依赖，否则失败标签写不出来。
-    # 时间标记从 prepare 取。它在流水线开始时生成；fail_closed 会故意失败，输出可能丢失。
-    needs: [prepare, fail_closed]
-    # 平台的 if 不能读 needs。测试是否被跳过，由步骤里看 fail_closed 的结果。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_x86]
-    timeout-minutes: 10
-    continue-on-error: true
-    outputs:
-      labeled: ${{ steps.publish.outputs.labeled }}
-    steps:
-      - name: Create label state
-        id: state
-        env:
-          LABEL_JOB_TAG: skipped
-        run: |
-          set -eu
-          umask 077
-          # 下一步读不到 steps.state.outputs，状态文件用运行号放在固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*)
-              echo "Cannot name the label state file." >&2
-              exit 1
-              ;;
-          esac
-          state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG}"
-          nonce="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)"
-          if [ -z "${nonce}" ]; then
-            nonce="$$${RANDOM}${RANDOM}"
-          fi
-          run_epoch="$(date +%s%3N 2>/dev/null || true)"
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="$(date +%s 2>/dev/null || true)" ;;
-          esac
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="" ;;
-          esac
-          printf '%s\n' "job=${LABEL_JOB_TAG}" "nonce=${nonce}" "phase=init" "run_epoch=${run_epoch}" > "${state}"
-          chmod 600 "${state}"
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          if [ -n "${out}" ]; then
-            printf '%s\n' "path=${state}" "nonce=${nonce}" "run_epoch=${run_epoch}" >> "${out}"
-          fi
-      - name: Mark PR as failed
-        id: mark
+  only_doc:
+    name: only_doc
+    select: selected_by_default
+    jobs:
+      Detect_file_changes:
+        name: Detect_file_changes
         continue-on-error: true
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          PIPELINE_UPSTREAM_STATUS: FAILED
-          GITCODE_TESTS_RAN: no
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-          GITCODE_FAIL_CLOSED_RESULT: ${{ needs.fail_closed.result }}
-          GITCODE_RUN_EPOCH: ${{ needs.prepare.outputs.run_epoch }}
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: skipped
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:script-1.0.1
+        outputs:
+          need_run_ut: ${{ steps.set-skip.outputs.need_run_ut }}
+        steps:
+          - name: checkout
+            uses: checkout
+            with:
+              ref: refs/merge-requests/${{ env.pr_id }}/head
+              fetch-depth: 0
+              allow-unsafe-pr-checkout: true
+          - name: Only_doc_commit
+            id: filter
+            uses: paths-changes-filter
+            with:
+              event-name: 'pull_request'
+              base: ${{ atomgit.event.pull_request.base.ref }}
+              repo: ${{ atomgit.repository }}
+              number: ${{ env.pr_id }}
+              token: ${{ secrets.GIT_TOKEN }}
+              list-files: json
+              predicate-quantifier: every
+              filters: |
+                changed:
+                  - '**'
+                non-doc:
+                  - '!**/*.md'
+                  - '!**/*.rst'
+                  - '!**/*.log'
+                  - '!**/*.png'
+                  - '!**/*.jpg'
+                  - '!**/*.doc'
+                  - '!**/*.eddx'
+                  - '!**/*.svg'
+                  - '!.gitcode/**'
+                  - '!**/*.yml'
+                  - '!**/*.yaml'
+
+          - name: set build skip flag
+            id: set-skip
+            env:
+              CHANGED_FILES: ${{ steps.filter.outputs.changed_files }}
+              NON_DOC: ${{ steps.filter.outputs.non-doc }}
+            run: |
+              echo "changed: $CHANGED_FILES"
+              echo "non-doc: $NON_DOC"
+              if [ "$NON_DOC" = "true" ]; then
+                echo "need_run_ut=yes" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "need_run_ut=no" >> "$ATOMGIT_OUTPUT"
               fi
-              ;;
-          esac
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            echo "Only ignored paths changed; do not write failed."
-            exit 0
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed) ;;
-            *)
-              echo "Tests were allowed to run. This job does not write the result label."
-              exit 0
-              ;;
-          esac
-          # 不能只凭 fail_closed 失败就打 failed：它与门禁并行，outputs 抖动时会在 LLT 未结束时误标红。
-          # 仅 proceed=no（身份未确认）才写 failed；不要用 prepare.result=cancelled/skipped。
-          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ]; then
-            echo "fail_closed failed but proceed is not no (proceed=${GITCODE_PREPARE_PROCEED:-empty}); not writing failed early."
-            exit 0
-          fi
-          # steps.state.outputs 到下一步是空的，回到本任务刚写好的固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          # 上一步写在 /tmp 的文件，下一步看不到。在本步骤里重建，再调用打标签脚本。
-          if [ -z "${state}" ] || [ ! -f "${state}" ] || ! grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}"; then
-            echo "Label state from the previous step is unavailable; creating it in this step." >&2
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) run_key="step$$" ;;
-            esac
-            state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-job}"
-            if [ -z "${nonce}" ]; then
-              nonce="step$$"
-            fi
-            umask 077
-            printf '%s\n' "job=${LABEL_JOB_TAG:-job}" "nonce=${nonce}" "phase=init" > "${state}"
-            chmod 600 "${state}"
-          fi
-          if [ -n "${nonce}" ] && ! grep -Fqx -- "nonce=${nonce}" "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if ! grep -q '^nonce=.' "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if [ -z "${GITCODE_RUN_EPOCH:-}" ]; then
-            GITCODE_RUN_EPOCH="$(grep '^run_epoch=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            export GITCODE_RUN_EPOCH
-          fi
-          printf '%s\n' "phase=started" >> "${state}"
-          record() {
-            printf '%s\n' "$1" >> "${state}"
-          }
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; record "labeled=no"; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-          )
-          set +e
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
-          rc=$?
-          set -e
-          if [ "${rc}" -eq 0 ]; then
-            record "labeled=yes"
-          else
-            record "labeled=no"
-          fi
-          exit "${rc}"
-      - name: Publish label result
-        id: publish
-        if: always()
-        env:
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: skipped
-        run: |
-          set -eu
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          record() {
-            if [ -n "${out}" ]; then
-              printf '%s\n' "$1" >> "${out}"
-            fi
-          }
-          labeled=""
-          trusted=0
-          if [ -n "${state}" ] && [ -f "${state}" ] && grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}" ] && { [ -z "${nonce}" ] || grep -Fqx -- "nonce=${nonce}" "${state}"; } && grep -q '^nonce=.' "${state}"; then
-            trusted=1
-          fi
-          if [ "${trusted}" -eq 1 ]; then
-            phase="$(grep '^phase=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            labeled="$(grep '^labeled=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            if [ "${phase}" = "init" ] && [ -z "${labeled}" ]; then
-              labeled=yes
-            elif [ -z "${labeled}" ]; then
-              labeled=no
-            fi
-          else
-            labeled=no
-          fi
-          if [ -n "${state}" ]; then
-            rm -f "${state}"
-          fi
-          record "labeled=${labeled}"
 
-  report_skipped_arm:
-    name: Report skipped tests as failed on arm
-    needs: [report_skipped, fail_closed, prepare]
-    # x86 没写成失败标签时再补。是否该写，由步骤判断。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_arm]
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Mark PR as failed
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          PIPELINE_UPSTREAM_STATUS: FAILED
-          GITCODE_TESTS_RAN: no
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-          GITCODE_FAIL_CLOSED_RESULT: ${{ needs.fail_closed.result }}
-          GITCODE_SKIP_LABELED: ${{ needs.report_skipped.outputs.labeled }}
-          GITCODE_RUN_EPOCH: ${{ needs.prepare.outputs.run_epoch }}
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
+  test_case:
+    name: running test case
+    select: selected_by_default
+    jobs:
+      llt_a_arm:
+        name: fastcheck_A_arm
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_arm, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-arm:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_a_arm.outputs.result }}
+        steps:
+          - name: run_fastcheck_a_arm
+            id: run_fastcheck_a_arm
+            run: |
+              PART_TYPE=A
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
               fi
-              ;;
-          esac
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            echo "Only ignored paths changed; arm will not write failed."
-            exit 0
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed) ;;
-            *)
-              echo "Tests were allowed to run. Arm will not write the failed label."
-              exit 0
-              ;;
-          esac
-          if [ "${GITCODE_PREPARE_PROCEED:-}" != "no" ]; then
-            echo "fail_closed failed but proceed is not no; arm will not write failed early."
-            exit 0
-          fi
-          if [ "${GITCODE_SKIP_LABELED:-}" = "yes" ]; then
-            echo "x86 already wrote the failed label."
-            exit 0
-          fi
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-          )
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
 
-  openGauss_server_x86:
-    name: openGauss x86
-    needs: [prepare]
-    # 只等 x86 打标签结束。平台的 if 不能读 needs，也不能调用 cancelled()。
-    # needs.prepare.result 在这台平台上是空的，不能用它决定是否测试。
-    # 标签失败时测试仍会启动。身份没确认时 proceed=no，脚本在拉代码前退出。
-    if: ${{ always() }}
-    # 7 台节点都打上 server_x86。调度器把下面 7 个任务分给空闲节点，一台一个，配对不固定。
-    runs-on: [self-hosted, server_x86]
-    # 同一台机器用 flock 串行。10 个任务若排到同一台，总时限要盖住整队等待和各自 120 分钟测试。
-    timeout-minutes: 1680
-    strategy:
-      fail-fast: false
-      max-parallel: 7
-      matrix:
-        include:
-          - name: x86-LLT-A
-            script: main_llt_A.sh
-          - name: x86-LLT-B
-            script: main_llt_B.sh
-          - name: x86-LLT-C
-            script: main_llt_C.sh
-          - name: x86-OM-Install
-            script: main_om_install.sh
-          - name: x86-OM-Upgrade
-            script: main_om_upgrade.sh
-          - name: x86-SS-Hatest
-            script: main_ss_hatest.sh
-          - name: x86-SS
-            script: main_ss.sh
-    steps:
-      - name: Manual checkout source code
-        env:
-          WORKSPACE_ROOT: /usr1/gauss_jenkins/jenkins/workspace1/
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          # 官方跨任务输出是 jobs.<id>.outputs。needs.<id>.result 这里一直是空的。
-          GITCODE_PREPARE_PROCEED: ${{ jobs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_PROCEED_NEEDS: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-        run: |
-          set -eu
-          proceed="${GITCODE_PREPARE_PROCEED:-}"
-          if [ -z "${proceed}" ]; then
-            proceed="${GITCODE_PREPARE_PROCEED_NEEDS:-}"
-          fi
-          result="$(printf '%s' "${GITCODE_PREPARE_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${result}" in
-            cancelled|canceled|skipped)
-              echo "Prepare result is ${result}; tests will not run."
-              exit 0
-              ;;
-          esac
-          if [ "${proceed}" = "no" ]; then
-            echo "PR identity was not confirmed; tests will not run."
-            exit 0
-          fi
-          if [ "${proceed}" = "skip" ]; then
-            echo "Only ignored paths changed; tests will not run."
-            exit 0
-          fi
-          # Host scripts always come from this repository, not a fork named by the event.
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir=""
-          token_file=""
-          cleanup() {
-            if [ -n "${dir}" ]; then
-              rm -rf "${dir}"
-            fi
-            if [ -n "${token_file}" ]; then
-              rm -f "${token_file}"
-            fi
-          }
-          trap cleanup EXIT
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          dir="$(mktemp -d)"
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh" || true
-            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
-          )
-          # 跨任务 outputs 经常丢 proceed=skip；测试任务自行再判一次路径，避免已打 success 仍跑 LLT。
-          if [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-            path_skip_rc=$?
-            set -e
-            if [ "${path_skip_rc}" -eq 0 ]; then
-              echo "Only .gitcode/doc/docs/docs-lite changed (rechecked); tests will not run."
-              exit 0
-            fi
-          fi
-          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
-          # Keep the label token out of this shell for the rest of the job.
-          # Checkout reads it from the file, then deletes the file.
-          if [ -n "${PR_LABEL_TOKEN:-}" ]; then
-            token_file="$(mktemp)"
-            chmod 600 "${token_file}"
-            printf '%s\n' "${PR_LABEL_TOKEN}" > "${token_file}"
-            export GITCODE_TOKEN_FILE="${token_file}"
-          fi
-          unset PR_LABEL_TOKEN || true
-          CI_MATRIX_SCRIPT="${{ matrix.script }}" bash "${dir}/ci_job.sh"
+      llt_b_arm:
+        name: fastcheck_B_arm
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_arm, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-arm:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_b_arm.outputs.result }}        
+        steps:
+          - name: run_fastcheck_b_arm
+            id: run_fastcheck_b_arm
+            run: |
+              PART_TYPE=B
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi              
 
-  openGauss_server_arm:
-    name: openGauss arm
-    needs: [prepare]
-    # 只等 x86 打标签结束。平台的 if 不能读 needs，也不能调用 cancelled()。
-    # needs.prepare.result 在这台平台上是空的，不能用它决定是否测试。
-    # 标签失败时测试仍会启动。身份没确认时 proceed=no，脚本在拉代码前退出。
-    if: ${{ always() }}
-    # 3 台节点都打上 server_arm。调度器把下面 3 个任务分给空闲节点，一台一个，配对不固定。
-    runs-on: [self-hosted, server_arm]
-    # 同一台机器用 flock 串行。10 个任务若排到同一台，总时限要盖住整队等待和各自 120 分钟测试。
-    timeout-minutes: 1680
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        include:
-          - name: arm-LLT-A
-            script: main_llt_A.sh
-          - name: arm-LLT-B
-            script: main_llt_B.sh
-          - name: arm-LLT-C
-            script: main_llt_C.sh
-    steps:
-      - name: Manual checkout source code
-        env:
-          WORKSPACE_ROOT: /usr1/gauss_jenkins/jenkins/workspace1/
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          # 官方跨任务输出是 jobs.<id>.outputs。needs.<id>.result 这里一直是空的。
-          GITCODE_PREPARE_PROCEED: ${{ jobs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_PROCEED_NEEDS: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-        run: |
-          set -eu
-          proceed="${GITCODE_PREPARE_PROCEED:-}"
-          if [ -z "${proceed}" ]; then
-            proceed="${GITCODE_PREPARE_PROCEED_NEEDS:-}"
-          fi
-          result="$(printf '%s' "${GITCODE_PREPARE_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${result}" in
-            cancelled|canceled|skipped)
-              echo "Prepare result is ${result}; tests will not run."
-              exit 0
-              ;;
-          esac
-          if [ "${proceed}" = "no" ]; then
-            echo "PR identity was not confirmed; tests will not run."
-            exit 0
-          fi
-          if [ "${proceed}" = "skip" ]; then
-            echo "Only ignored paths changed; tests will not run."
-            exit 0
-          fi
-          # Host scripts always come from this repository, not a fork named by the event.
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir=""
-          token_file=""
-          cleanup() {
-            if [ -n "${dir}" ]; then
-              rm -rf "${dir}"
-            fi
-            if [ -n "${token_file}" ]; then
-              rm -f "${token_file}"
-            fi
-          }
-          trap cleanup EXIT
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          dir="$(mktemp -d)"
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/ci_job.sh" > "${dir}/ci_job.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh" || true
-            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
-          )
-          # 跨任务 outputs 经常丢 proceed=skip；测试任务自行再判一次路径，避免已打 success 仍跑 LLT。
-          if [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-            path_skip_rc=$?
-            set -e
-            if [ "${path_skip_rc}" -eq 0 ]; then
-              echo "Only .gitcode/doc/docs/docs-lite changed (rechecked); tests will not run."
-              exit 0
-            fi
-          fi
-          echo "Prepare proceed=${proceed:-empty}; starting ${{ matrix.script }}."
-          # Keep the label token out of this shell for the rest of the job.
-          # Checkout reads it from the file, then deletes the file.
-          if [ -n "${PR_LABEL_TOKEN:-}" ]; then
-            token_file="$(mktemp)"
-            chmod 600 "${token_file}"
-            printf '%s\n' "${PR_LABEL_TOKEN}" > "${token_file}"
-            export GITCODE_TOKEN_FILE="${token_file}"
-          fi
-          unset PR_LABEL_TOKEN || true
-          CI_MATRIX_SCRIPT="${{ matrix.script }}" bash "${dir}/ci_job.sh"
+      llt_c_arm:
+        name: fastcheck_C_arm
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_arm, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-arm:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_c_arm.outputs.result }}
+        steps:
+          - name: run_fastcheck_c_arm
+            id: run_fastcheck_c_arm
+            run: |
+              PART_TYPE=C
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      llt_a_x86:
+        name: fastcheck_A_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_a_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_a_x86
+            id: run_fastcheck_a_x86
+            run: |
+              PART_TYPE=A
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      llt_b_x86:
+        name: fastcheck_B_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_b_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_b_x86
+            id: run_fastcheck_b_x86
+            run: |
+              PART_TYPE=B
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      llt_c_x86:
+        name: fastcheck_C_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:llt-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_c_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_c_x86
+            id: run_fastcheck_c_x86
+            run: |
+              PART_TYPE=C
+              sh /usr/local/bin/entrypoint_llt.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      om_install_x86:
+        name: om_install_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:ominstall-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_om_install_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_om_install_x86
+            id: run_fastcheck_om_install_x86
+            run: |
+              sh /usr/local/bin/entrypoint_om_install.sh
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      om_upgrade_x86:
+        name: om_upgrade_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:omupgrade-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_om_upgrade_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_om_upgrade_x86
+            id: run_fastcheck_om_upgrade_x86
+            run: |
+              sh /usr/local/bin/entrypoint_om_upgrade.sh
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      ss_hatest_x86:
+        name: ss_hatest_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:ssha-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_ss_hatest_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_ss_hatest_x86
+            id: run_fastcheck_ss_hatest_x86
+            run: |
+              sh /usr/local/bin/entrypoint_ss_hatest.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
+      ss_x86:
+        name: ss_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:ss-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_ss_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_ss_x86
+            id: run_fastcheck_ss_x86
+            run: |
+              sh /usr/local/bin/entrypoint_ss.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
 
   report_result:
     name: Report pipeline result
-    # 结果任务必须留在 jobs 里。post 里的 needs 引用不到这些任务，整份工作流会校验失败，/retest 也不会注册。
-    # 测试真的会跑时才依赖它们，结果要等测试结束再写。
-    # 测试被跳过时，失败标签由 report_skipped 写，这里不再跑，避免依赖被跳过的任务。
-    needs: [prepare, openGauss_server_x86, openGauss_server_arm, fail_closed]
-    # 测试被跳过时不写结果标签。平台的 if 不能读 needs，改在步骤里判断。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_x86]
-    timeout-minutes: 10
-    continue-on-error: true
-    outputs:
-      labeled: ${{ steps.publish.outputs.labeled }}
-    steps:
-      - name: Show upstream status
-        run: echo "pipeline.upstream_status=${{ pipeline.upstream_status }}"
-      - name: Create label state
-        id: state
-        env:
-          LABEL_JOB_TAG: result
-        run: |
-          set -eu
-          umask 077
-          # 下一步读不到 steps.state.outputs，状态文件用运行号放在固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*)
-              echo "Cannot name the label state file." >&2
-              exit 1
-              ;;
-          esac
-          state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG}"
-          nonce="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)"
-          if [ -z "${nonce}" ]; then
-            nonce="$$${RANDOM}${RANDOM}"
-          fi
-          run_epoch="$(date +%s%3N 2>/dev/null || true)"
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="$(date +%s 2>/dev/null || true)" ;;
-          esac
-          case "${run_epoch}" in
-            ''|*[!0-9]*) run_epoch="" ;;
-          esac
-          printf '%s\n' "job=${LABEL_JOB_TAG}" "nonce=${nonce}" "phase=init" "run_epoch=${run_epoch}" > "${state}"
-          chmod 600 "${state}"
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          if [ -n "${out}" ]; then
-            printf '%s\n' "path=${state}" "nonce=${nonce}" "run_epoch=${run_epoch}" >> "${out}"
-          fi
-      - name: Update pull request label
-        id: mark
-        continue-on-error: true
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          PIPELINE_UPSTREAM_STATUS: ${{ pipeline.upstream_status }}
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-          GITCODE_X86_RESULT: ${{ needs.openGauss_server_x86.result }}
-          GITCODE_ARM_RESULT: ${{ needs.openGauss_server_arm.result }}
-          GITCODE_FAIL_CLOSED_RESULT: ${{ needs.fail_closed.result }}
-          GITCODE_RUN_EPOCH: ${{ needs.prepare.outputs.run_epoch }}
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: result
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
+    select: selected_by_default
+    jobs: 
+      report_result:
+        name: report_result
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:script-1.0.1
+          options: --user root
+        timeout-minutes: 10
+        continue-on-error: false
+        outputs:
+          labeled: ${{ steps.publish.outputs.labeled }}
+        steps:
+          - name: Show upstream status
+            run: echo "pipeline.upstream_status=${{ pipeline.upstream_status }}"
+          - name: Create label state
+            id: state
+            env:
+              LABEL_JOB_TAG: result
+              PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
+              NEED_RUN_UT: ${{ jobs.Detect_file_changes.outputs.need_run_ut }}
+              LLT_A_ARM: ${{ jobs.llt_a_arm.outputs.result }}
+              LLT_B_ARM: ${{ jobs.llt_b_arm.outputs.result }}
+              LLT_C_ARM: ${{ jobs.llt_c_arm.outputs.result }}
+              LLT_A_X86: ${{ jobs.llt_a_x86.outputs.result }}
+              LLT_B_X86: ${{ jobs.llt_b_x86.outputs.result }}
+              LLT_C_X86: ${{ jobs.llt_c_x86.outputs.result }}
+              OM_INSTALL_X86: ${{ jobs.om_install_x86.outputs.result }}
+              OM_UPGRADE_X86: ${{ jobs.om_upgrade_x86.outputs.result }}
+              SS_HATEST_X86: ${{ jobs.ss_hatest_x86.outputs.result }}
+              SS_X86: ${{ jobs.ss_x86.outputs.result }}
+            run: |
+              set -eu
+              umask 077
+              echo "LLT_A_ARM=${LLT_A_ARM}"
+              echo "LLT_B_ARM=${LLT_B_ARM}"
+              echo "LLT_C_ARM=${LLT_C_ARM}"
+              echo "LLT_A_X86=${LLT_A_X86}"
+              echo "LLT_B_X86=${LLT_B_X86}"
+              echo "LLT_C_X86=${LLT_C_X86}"
+              echo "OM_INSTALL_X86=${OM_INSTALL_X86}"
+              echo "OM_UPGRADE_X86=${OM_UPGRADE_X86}"
+              echo "SS_HATEST_X86=${SS_HATEST_X86}"
+
+              pipeline_success=-1
+              if [ "$LLT_A_ARM" = 0 ] && [ "$LLT_B_ARM" = 0 ] && \
+                [ "$LLT_C_ARM" = 0 ] && [ "$LLT_A_X86" = 0 ] &&  \
+                [ "$LLT_B_X86" = 0 ] && [ "$LLT_C_X86" = 0 ] &&  \
+                [ "$OM_INSTALL_X86" = 0 ] && [ "$OM_UPGRADE_X86" = 0 ] && \
+                [ "$SS_HATEST_X86" = 0 ] && [ "$SS_X86" = 0 ]; then
+                echo "全部为 0"
+                pipeline_success=0
+              else
+                echo "有非 0"
+                pipeline_success=1
               fi
-              ;;
-          esac
-          # steps.state.outputs 到下一步是空的，回到本任务刚写好的固定路径。
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          # 上一步写在 /tmp 的文件，下一步看不到。在本步骤里重建，再调用打标签脚本。
-          if [ -z "${state}" ] || [ ! -f "${state}" ] || ! grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}"; then
-            echo "Label state from the previous step is unavailable; creating it in this step." >&2
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) run_key="step$$" ;;
-            esac
-            state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-job}"
-            if [ -z "${nonce}" ]; then
-              nonce="step$$"
-            fi
-            umask 077
-            printf '%s\n' "job=${LABEL_JOB_TAG:-job}" "nonce=${nonce}" "phase=init" > "${state}"
-            chmod 600 "${state}"
-          fi
-          if [ -n "${nonce}" ] && ! grep -Fqx -- "nonce=${nonce}" "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if ! grep -q '^nonce=.' "${state}"; then
-            echo "Label state file does not match this job." >&2
-            exit 1
-          fi
-          if [ -z "${GITCODE_RUN_EPOCH:-}" ]; then
-            GITCODE_RUN_EPOCH="$(grep '^run_epoch=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            export GITCODE_RUN_EPOCH
-          fi
-          printf '%s\n' "phase=started" >> "${state}"
-          record() {
-            printf '%s\n' "$1" >> "${state}"
-          }
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; record "labeled=no"; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
-          )
-          # proceed=skip 跨任务常丢失；pipeline.upstream_status 又可能因 continue-on-error 变成 FAILED，
-          # 会把 prepare 已写的 success 覆盖成 failed。路径再判一次，docs-only 强制重写 success。
-          docs_only=0
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            docs_only=1
-          elif [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-            path_skip_rc=$?
-            set -e
-            if [ "${path_skip_rc}" -eq 0 ]; then
-              docs_only=1
-            fi
-          fi
-          if [ "${docs_only}" -eq 1 ]; then
-            echo "Only ignored paths changed; re-apply ci-pipeline-success (clear any failed)."
-            set +e
-            unset ATOMGIT_TOKEN || true
-            unset GITHUB_TOKEN || true
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" success
-            rc=$?
-            set -e
-            if [ "${rc}" -eq 0 ]; then
-              record "labeled=yes"
-            else
-              record "labeled=no"
-            fi
-            exit "${rc}"
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed)
-              echo "Tests did not run. The skipped-result job writes the failed label."
-              record "labeled=yes"
-              exit 0
-              ;;
-          esac
-          set +e
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
-          rc=$?
-          set -e
-          if [ "${rc}" -eq 0 ]; then
-            record "labeled=yes"
-          else
-            record "labeled=no"
-          fi
-          exit "${rc}"
-      - name: Publish label result
-        id: publish
-        if: always()
-        env:
-          LABEL_STATE_PATH: ${{ steps.state.outputs.path }}
-          LABEL_STATE_NONCE: ${{ steps.state.outputs.nonce }}
-          LABEL_JOB_TAG: result
-        run: |
-          set -eu
-          out="${ATOMGIT_OUTPUT:-${GITHUB_OUTPUT:-}}"
-          run_key="${GITCODE_RUN_ID:-}"
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_ID:-}" ;;
-          esac
-          case "${run_key}" in
-            ''|*[!A-Za-z0-9._-]*) run_key="${ATOMGIT_RUN_NUMBER:-}" ;;
-          esac
-          state="${LABEL_STATE_PATH:-}"
-          if [ -z "${state}" ] || [ ! -f "${state}" ]; then
-            case "${run_key}" in
-              ''|*[!A-Za-z0-9._-]*) state="" ;;
-              *) state="/tmp/opengauss-ci-label-${run_key}-${LABEL_JOB_TAG:-}" ;;
-            esac
-          fi
-          nonce="${LABEL_STATE_NONCE:-}"
-          record() {
-            if [ -n "${out}" ]; then
-              printf '%s\n' "$1" >> "${out}"
-            fi
-          }
-          labeled=""
-          trusted=0
-          if [ -n "${state}" ] && [ -f "${state}" ] && grep -Fqx -- "job=${LABEL_JOB_TAG:-}" "${state}" ] && { [ -z "${nonce}" ] || grep -Fqx -- "nonce=${nonce}" "${state}"; } && grep -q '^nonce=.' "${state}"; then
-            trusted=1
-          fi
-          if [ "${trusted}" -eq 1 ]; then
-            phase="$(grep '^phase=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            labeled="$(grep '^labeled=' "${state}" | tail -n 1 | cut -d= -f2- || true)"
-            if [ "${phase}" = "init" ] && [ -z "${labeled}" ]; then
-              labeled=yes
-            elif [ -z "${labeled}" ]; then
-              labeled=no
-            fi
-          else
-            labeled=no
-          fi
-          if [ -n "${state}" ]; then
-            rm -f "${state}"
-          fi
-          record "labeled=${labeled}"
-  report_result_arm:
-    name: Report pipeline result on arm
-    needs: [report_result, prepare, openGauss_server_x86, openGauss_server_arm, fail_closed]
-    # x86 没写成结果时再补。平台的 if 不能读 needs，也不能调用 cancelled()。
-    if: ${{ always() }}
-    runs-on: [self-hosted, server_arm]
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Show upstream status
-        run: echo "pipeline.upstream_status=${{ pipeline.upstream_status }}"
-      - name: Update pull request label
-        # 步骤 if 不能裸用 pull_request.number 这类字段，平台会报 invalid step-if。是否是 PR 在下面判断。
-        if: always()
-        env:
-          PR_LABEL_TOKEN: ${{ secrets.PR_LABEL_TOKEN }}
-          PIPELINE_UPSTREAM_STATUS: ${{ pipeline.upstream_status }}
-          GITCODE_PREPARE_PROCEED: ${{ needs.prepare.outputs.proceed }}
-          GITCODE_PREPARE_RESULT: ${{ needs.prepare.result }}
-          GITCODE_X86_RESULT: ${{ needs.openGauss_server_x86.result }}
-          GITCODE_ARM_RESULT: ${{ needs.openGauss_server_arm.result }}
-          GITCODE_FAIL_CLOSED_RESULT: ${{ needs.fail_closed.result }}
-          GITCODE_REPORT_LABELED: ${{ needs.report_result.outputs.labeled }}
-          GITCODE_REPORT_RESULT: ${{ needs.report_result.result }}
-          GITCODE_RUN_EPOCH: ${{ needs.prepare.outputs.run_epoch }}
-        run: |
-          set -eu
-          event_name="$(printf '%s' "${GITCODE_EVENT_NAME:-${ATOMGIT_EVENT_NAME:-}}" | tr '[:upper:]' '[:lower:]')"
-          case "${event_name}" in
-            *note*|*comment*|*pull_request*|*pullrequest*|*merge_request*|*mergerequest*) ;;
-            *)
-              if [ -z "${GITCODE_PR_IID:-}" ]; then
-                echo "Not a pull request event; skip label update."
-                exit 0
+
+              if [ "${NEED_RUN_UT}" = 'no' ]; then
+                echo "只有文档修改，跳过用例部分"
+                pipeline_success=0
               fi
-              ;;
-          esac
-          labeled="$(printf '%s' "${GITCODE_REPORT_LABELED:-}" | tr '[:upper:]' '[:lower:]')"
-          # 跨任务输出经常是空的。空值不是 yes，arm 仍要写成功或失败标签。
-          if [ "${labeled}" = "yes" ]; then
-            echo "x86 already reported the pipeline result."
-            exit 0
-          fi
-          repo="${GITCODE_REPO:-openGauss/openGauss-server}"
-          case "${repo}" in
-            */*) ;;
-            *) echo "Invalid repository: ${repo}" >&2; exit 1 ;;
-          esac
-          server="${ATOMGIT_SERVER_URL:-}"
-          if [ -z "${server}" ]; then
-            server="${GITCODE_SERVER_URL:-}"
-          fi
-          if [ -z "${server}" ]; then
-            server="https://gitcode.com"
-          fi
-          server="${server%/}"
-          dir="$(mktemp -d)"
-          trap 'rm -rf "${dir}"' EXIT
-          # 节点上的 git 没有 -C，进目录再执行。
-          (
-            cd "${dir}"
-            git init -q
-            git remote add origin "${server}/${repo}.git"
-            timeout 300 git fetch --depth=1 --force origin refs/heads/master
-            git show "FETCH_HEAD:.gitcode/scripts/gitcode_pr_labels.sh" > "${dir}/gitcode_pr_labels.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/resolve_gitcode_env.sh" > "${dir}/resolve_gitcode_env.sh"
-            git show "FETCH_HEAD:.gitcode/scripts/pr_paths_should_skip_ci.sh" > "${dir}/pr_paths_should_skip_ci.sh" || true
-          )
-          docs_only=0
-          if [ "${GITCODE_PREPARE_PROCEED:-}" = "skip" ]; then
-            docs_only=1
-          elif [ -s "${dir}/pr_paths_should_skip_ci.sh" ]; then
-            set +e
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/pr_paths_should_skip_ci.sh"
-            path_skip_rc=$?
-            set -e
-            if [ "${path_skip_rc}" -eq 0 ]; then
-              docs_only=1
-            fi
-          fi
-          if [ "${docs_only}" -eq 1 ]; then
-            echo "Only ignored paths changed; arm re-applies ci-pipeline-success."
-            unset ATOMGIT_TOKEN || true
-            unset GITHUB_TOKEN || true
-            RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" success
-            exit 0
-          fi
-          fc="$(printf '%s' "${GITCODE_FAIL_CLOSED_RESULT:-}" | tr '[:upper:]' '[:lower:]')"
-          case "${fc}" in
-            failure|failed)
-              echo "Tests did not run. The skipped-result job writes the failed label."
-              exit 0
-              ;;
-          esac
-          # 标签只能由 opengauss-ci-bot（PR_LABEL_TOKEN）写，不能用 action-bot。
-          unset ATOMGIT_TOKEN || true
-          unset GITHUB_TOKEN || true
-          RESOLVE_SCRIPT="${dir}/resolve_gitcode_env.sh" bash "${dir}/gitcode_pr_labels.sh" result
+
+              repo="${GITCODE_REPO:-openGauss/openGauss-server}"
+              server="${ATOMGIT_SERVER_URL:-}"
+              if [ -z "${server}" ]; then
+                server="${GITCODE_SERVER_URL:-}"
+              fi
+              if [ -z "${server}" ]; then
+                server="https://gitcode.com"
+              fi
+              server="${server%/}"
+              src="$(mktemp -d)"
+              trap 'rm -rf "${src}"' EXIT
+              timeout 300 git clone --depth=1 --branch master "${server}/${repo}.git" "${src}"
+              label_script="${src}/.gitcode/scripts/gitcode_pr_labels.sh"
+
+              if [ "${pipeline_success}" == 0 ]; then
+                echo "-------- 打 success 标签 --------"
+                bash "${label_script}" delete ci-pipeline-running
+                bash "${label_script}" delete ci-pipeline-failed
+                bash "${label_script}" add ci-pipeline-success
+              else
+                echo "-------- 打 failed 标签 ---------"
+                bash "${label_script}" delete ci-pipeline-running
+                bash "${label_script}" delete ci-pipeline-success
+                bash "${label_script}" add ci-pipeline-failed
+                exit 1
+              fi
