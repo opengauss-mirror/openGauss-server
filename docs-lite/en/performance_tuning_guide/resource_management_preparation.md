@@ -580,7 +580,7 @@ After resource load management is enabled, the system automatically creates  **d
 
 ### Prerequisites<a name="section17352165513395"></a>
 
-You are familiar with the  [CREATE RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/create-resource-pool.html),  [ALTER RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/alter-resource-pool.html), and  [DROP RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/drop-resource-pool.html)syntax.
+You are familiar with the  [CREATE RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/create_resource_pool.html),  [ALTER RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/alter_resource_pool.html), and  [DROP RESOURCE POOL](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/drop_resource_pool.html)syntax.
 
 ### **Procedure** <a name="en-us_topic_0066854608_section16606579202019"></a>
 
@@ -661,7 +661,7 @@ DROP RESOURCE POOL
     (7 rows)
     ```
 
-- View information about Cgroups associated with a resource pool. For details, see  **[gs\_control\_group\_info\(p...](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/statistics-information-functions.html)**.
+- View information about Cgroups associated with a resource pool. For details, see  **[gs\_control\_group\_info\(p...](https://docs.opengauss.org/en/docs/latest-lite/sql_reference/statistics_information_functions.html)**.
 
     In the following example,  **resource\_pool\_a1**  is the name of the resource pool.
 
