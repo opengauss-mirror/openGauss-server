@@ -1480,7 +1480,6 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     bool is_event_trigger = false;
     Oid saveCallerOid = InvalidOid;
     Oid savaCallerParentOid = InvalidOid;
-    Oid saveRunningFuncOid = u_sess->plsql_cxt.running_func_oid;
     bool is_pkg_func = false;
 
     int i;
@@ -1642,7 +1641,6 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
                 PG_END_TRY();
             }
 #endif
-            saveCallFromFuncOid(saveRunningFuncOid);
             ReThrowError(edata);
         }
         PG_END_TRY();
@@ -1667,7 +1665,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         UpdateCurrCompilePgObjStatus(save_curr_status);
     }
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction && !u_sess->plsql_cxt.running_func_oid) {
+    if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
         PG_TRY();
         {
             ProcInsertGsSource(funcoid, true);
