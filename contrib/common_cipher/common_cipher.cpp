@@ -120,8 +120,10 @@ void crypto_module_sess_exit(void *sess)
 int crypto_create_symm_key(void *sess, ModuleSymmKeyAlgo algo, unsigned char *key_id, size_t *key_id_size)
 {
     int ret = CRYPT_MOD_OK;
+    unsigned int keylen = (unsigned int)(*key_id_size);
 
-    ret = internal_generate_symm_key(sess, algo, key_id, (unsigned int*)key_id_size);
+    ret = internal_generate_symm_key(sess, algo, key_id, &keylen);
+    *key_id_size = (size_t)keylen;
     if (ret != CRYPT_MOD_OK) {
         set_thread_errno(ret);
     }
@@ -240,6 +242,7 @@ void crypto_ctx_clean(void *ctx)
 int crypto_encrypt_decrypt(void *ctx, int enc, unsigned char *data, size_t data_size, unsigned char *iv, size_t iv_size, unsigned char *result, size_t *result_size, unsigned char *tag)
 {
     int ret = CRYPT_MOD_OK;
+    unsigned int outlen = (unsigned int)(*result_size);
 
     if ((enc == INTERNAL_DO_ENC && *result_size < (data_size + INTERNAL_BLOCK_LEN)) 
         || (enc == INTERNAL_DO_DEC && *result_size < data_size)) {
@@ -248,10 +251,12 @@ int crypto_encrypt_decrypt(void *ctx, int enc, unsigned char *data, size_t data_
     }
 
     if (enc == INTERNAL_DO_ENC) {
-        ret = internal_symm_encrypt(ctx, data, data_size, iv, iv_size, result, (unsigned int*)result_size, tag);
+        ret = internal_symm_encrypt(ctx, data, data_size, iv, iv_size, result, &outlen, tag);
     } else if (enc == INTERNAL_DO_DEC) {
-        ret = internal_symm_decrypt(ctx, data, data_size, iv, iv_size, result, (unsigned int*)result_size, tag);
+        ret = internal_symm_decrypt(ctx, data, data_size, iv, iv_size, result, &outlen, tag);
     }
+    /* internal interfaces use unsigned int, write back the full size_t */
+    *result_size = (size_t)outlen;
 
     if (ret != CRYPT_MOD_OK) {
         set_thread_errno(ret);
@@ -278,8 +283,10 @@ int crypto_encrypt_decrypt(void *ctx, int enc, unsigned char *data, size_t data_
 int crypto_digest(void *sess, ModuleDigestAlgo algo, unsigned char * data, size_t data_size,unsigned char *result, size_t *result_size)
 {
     int ret = CRYPT_MOD_OK;
+    unsigned int outlen = (unsigned int)(*result_size);
 
-    ret = internal_digest(sess, algo, data, data_size, result, (unsigned int*)result_size);
+    ret = internal_digest(sess, algo, data, data_size, result, &outlen);
+    *result_size = (size_t)outlen;
     if (ret != CRYPT_MOD_OK) {
         set_thread_errno(ret);
     }
@@ -457,18 +464,18 @@ int crypto_deterministic_enc_dec(void *sess, int enc, unsigned char *data, unsig
 
         crypto_hmac_clean(tmphmacctx);
 
-
-        ret = internal_symm_encrypt(tmpkeyctx, data, data_size, tmpiv, INTERNAL_IV_LEN, result + INTERNAL_HMAC_LEN, (unsigned int*)result_size, NULL);
+        unsigned int tmplen = (unsigned int)(*result_size);
+        ret = internal_symm_encrypt(tmpkeyctx, data, data_size, tmpiv, INTERNAL_IV_LEN,
+            result + INTERNAL_HMAC_LEN, &tmplen, NULL);
         if (ret != CRYPT_MOD_OK) {
             set_thread_errno(ret);
         }
 
         crypto_ctx_clean(tmpkeyctx);
 
-        *result_size += INTERNAL_HMAC_LEN;
+        *result_size = (size_t)tmplen + INTERNAL_HMAC_LEN;
 
         return ret;
-
     } else if (enc == INTERNAL_DO_DEC){
         void *tmphmacctx = NULL;
         unsigned char tmphmac[INTERNAL_HMAC_LEN] = {0};
@@ -480,12 +487,15 @@ int crypto_deterministic_enc_dec(void *sess, int enc, unsigned char *data, unsig
         /*获取hmac*/
         memcpy(verifyhmac, data, INTERNAL_HMAC_LEN);
 
-        ret = internal_symm_decrypt(tmpkeyctx, data + INTERNAL_HMAC_LEN, data_size - INTERNAL_HMAC_LEN, tmpiv, INTERNAL_IV_LEN, result, (unsigned int*)result_size, NULL);
+        unsigned int tmplen = (unsigned int)(*result_size);
+        ret = internal_symm_decrypt(tmpkeyctx, data + INTERNAL_HMAC_LEN, data_size - INTERNAL_HMAC_LEN,
+            tmpiv, INTERNAL_IV_LEN, result, &tmplen, NULL);
         if (ret != CRYPT_MOD_OK) {
             set_thread_errno(ret);
             crypto_ctx_clean(tmpkeyctx);
             return  ret;
         } 
+        *result_size = (size_t)tmplen;
 
         crypto_ctx_clean(tmpkeyctx);
 

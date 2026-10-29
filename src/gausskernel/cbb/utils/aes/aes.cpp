@@ -150,6 +150,9 @@ bool writeFileAfterEncryption(
     if (moduleKeyCtx && encFunc) {
         int ret = 1;
         cipherlen = outputlen;
+        /* the module callback updates *result_size as a real size_t (8 bytes),
+         * so it must not be pointed at cipherlen (GS_UINT32, 4 bytes) via a cast */
+        size_t cipherlenSize = (size_t)cipherlen;
 
         if (moduleHmacCtx && hmacFunc) {
             /*caculate plaint hmac*/
@@ -163,7 +166,8 @@ bool writeFileAfterEncryption(
                 return false;
             }
 
-            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
+            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, RANDOM_LEN,
+                (unsigned char*)outputstr, &cipherlenSize, NULL);
             if (ret != 1) {
                 free(writeBuff);
                 writeBuff = NULL;
@@ -172,10 +176,12 @@ bool writeFileAfterEncryption(
                 return false;
             }
 
+            cipherlen = (GS_UINT32)cipherlenSize;
             cipherlen += CRYPTO_MODULE_HMAC_LEN;
             cipherstart = CRYPTO_MODULE_HMAC_LEN + RANDOM_LEN;
         }else {
-            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, 16, (unsigned char*)outputstr, (size_t*)(&cipherlen), NULL);
+            ret = encFunc(moduleKeyCtx, 1, (unsigned char*)inputstr, inputstrlen, randvalue, RANDOM_LEN,
+                (unsigned char*)outputstr, &cipherlenSize, NULL);
             if (ret != 1) {
                 free(writeBuff);
                 writeBuff = NULL;
@@ -184,6 +190,7 @@ bool writeFileAfterEncryption(
                 return false;
             }
 
+            cipherlen = (GS_UINT32)cipherlenSize;
             cipherstart = RANDOM_LEN;
         }
         
@@ -270,6 +277,50 @@ void initDecryptInfo(DecryptInfo* pDecryptInfo)
     pDecryptInfo->moduleHmacCtx = NULL;
     pDecryptInfo->moduleSessionCtx = NULL;
 }
+
+/*
+ * Reset the per-file decrypt state (salt, derived key and pending chunk
+ * buffer) for soft AES128 files. Each encrypted file carries its own 16-byte
+ * salt in its header, so when several -f files are processed in one gsql
+ * process, the next file must re-read its own salt and re-derive the key
+ * instead of reusing the previous file's, otherwise its decryption fails.
+ * The user key, encryptInclude mark and crypto-module contexts are kept.
+ */
+void ResetDecryptSaltInfo(DecryptInfo* pDecryptInfo)
+{
+    errno_t errorno = EOK;
+
+    pDecryptInfo->randget = false;
+    errorno = memset_s(pDecryptInfo->rand, RANDOM_LEN + 1, '\0', RANDOM_LEN + 1);
+    if (errorno != EOK) {
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    /* clean the derived key for security */
+    errorno = memset_s(pDecryptInfo->g_decrypt_key, RANDOM_LEN, '\0', RANDOM_LEN);
+    if (errorno != EOK) {
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    /* drop any pending chunk state left by the previous file */
+    pDecryptInfo->isCurrLineProcess = false;
+    if (pDecryptInfo->decryptChunk != NULL) {
+        errorno = memset_s(pDecryptInfo->decryptChunk, pDecryptInfo->decryptChunkLen,
+            '\0', pDecryptInfo->decryptChunkLen);
+        if (errorno != EOK) {
+            securec_check_c(errorno, "\0", "\0");
+        }
+        free(pDecryptInfo->decryptChunk);
+        pDecryptInfo->decryptChunk = NULL;
+    }
+    pDecryptInfo->decryptChunkLen = 0;
+    pDecryptInfo->decryptChunkPos = 0;
+
+    if (pDecryptInfo->decryptBuff != NULL) {
+        free(pDecryptInfo->decryptBuff);
+        pDecryptInfo->decryptBuff = NULL;
+    }
+}
 static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
 {
     int nread = 0;
@@ -339,13 +390,15 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         nread = (int)fread((void*)ciphertext, 1, cipherlen, source);
         if (nread) {
             if (pDecryptInfo->moduleKeyCtx && pDecryptInfo->clientSymmCryptoFunc) {
-
                 if (pDecryptInfo->moduleHmacCtx && pDecryptInfo->clientHmacFunc) {
                     unsigned char hmac[CRYPTO_MODULE_HMAC_LEN + 1] = {0};
                     size_t hmaclen = 0;
-                    plainlen = cipherlen;
+                    /* the module callback updates *result_size as a real size_t (8 bytes),
+                     * so it must not be pointed at plainlen (GS_UINT32, 4 bytes) via a cast */
+                    size_t plainlenSize = (size_t)cipherlen;
                     moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext + CRYPTO_MODULE_HMAC_LEN, cipherlen - CRYPTO_MODULE_HMAC_LEN,
-                        pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
+                        pDecryptInfo->rand, RANDOM_LEN, outputstr, &plainlenSize, NULL);
+                    plainlen = (GS_UINT32)plainlenSize;
 
                     /*verify hmac*/
                     moduleRet = pDecryptInfo->clientHmacFunc(pDecryptInfo->moduleHmacCtx, outputstr, plainlen, hmac, &hmaclen);
@@ -353,9 +406,10 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
                         hmacverified = false;
                     }
                 } else {
-                    plainlen = cipherlen;
+                    size_t plainlenSize = (size_t)cipherlen;
                     moduleRet = pDecryptInfo->clientSymmCryptoFunc(pDecryptInfo->moduleKeyCtx, 0, ciphertext, cipherlen,
-                        pDecryptInfo->rand, 16, outputstr,(size_t*)(&plainlen), NULL);
+                        pDecryptInfo->rand, RANDOM_LEN, outputstr, &plainlenSize, NULL);
+                    plainlen = (GS_UINT32)plainlenSize;
                 }
                 
             } else {

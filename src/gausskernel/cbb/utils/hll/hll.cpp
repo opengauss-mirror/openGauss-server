@@ -238,12 +238,18 @@ void HllObjectUnpack(HllObject hllobject, const uint8_t *hllbyte, const size_t h
             errmsg("hllsize = %zu is smaller than hllobjectsize=%d", hllsize, HLL_HEAD_SIZE + hllobject->lenUsed)));
     }
 
+    /* check lenUsed <= lenTotal to prevent heap overflow during memcpy */
+    if (hllobject->lenUsed > hllobject->lenTotal) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("invalid hll data, lenUsed(%u) is greater than lenTotal(%u)",
+                hllobject->lenUsed, hllobject->lenTotal)));
+    }
     if (hllobject->lenUsed > 0) {
         MemoryContext old = MemoryContextSwitchTo(cxt);
         hllobject->hllData = (uint8_t *)palloc0((hllobject->lenTotal) * sizeof(uint8_t));
         (void)MemoryContextSwitchTo(old);
 
-        rc = memcpy_s(hllobject->hllData, hllobject->lenUsed, hllbyte + HLL_HEAD_SIZE, hllobject->lenUsed);
+        rc = memcpy_s(hllobject->hllData, hllobject->lenTotal, hllbyte + HLL_HEAD_SIZE, hllobject->lenUsed);
         securec_check(rc, "\0", "\0");
     }
 }
