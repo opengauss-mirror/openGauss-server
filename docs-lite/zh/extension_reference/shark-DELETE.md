@@ -6,7 +6,7 @@ DELETE从指定的表里删除满足WHERE子句的行。如果WHERE子句不存�
 
 ## 注意事项<a name="zh-cn_topic_0283136795_zh-cn_topic_0237122131_zh-cn_topic_0059778379_sfc96c070e8574f4ea9a2726e898fda17"></a>
 
-- 本章节仅包含shark新增语法，原openGauss的DELETE语法未作删除和修改。原openGauss的DELETE语法请参考章节[DELETE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/DELETE.html)。
+- 本章节仅包含shark新增语法，原openGauss的DELETE语法未作删除和修改。原openGauss的DELETE语法请参考章节[DELETE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/delete.html)。
 - 新增支持table_hint子句。
 
 ## 语法格式<a name="zh-cn_topic_0283136795_zh-cn_topic_0237122131_zh-cn_topic_0059778379_s84baecef89484d5f87f57b0545b46202"></a>
@@ -93,4 +93,4 @@ DROP TABLE
 
 ## 相关链接<a name="section156744489391"></a>
 
-[DELETE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/DELETE.html)
+[DELETE](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/delete.html)

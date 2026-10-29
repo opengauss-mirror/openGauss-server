@@ -739,7 +739,7 @@ for chunk in completion:
 
 - DeepSeek API 文档：[首次调用 API | DeepSeek API Docs](https://api-docs.deepseek.com/zh-cn/)
 
-- openGauss DataVec 文档：[openGauss DataVec 向量数据库](https://docs.opengauss.org/zh/docs/latest/docs/DataVec/)
+- openGauss DataVec 文档：[openGauss DataVec 向量数据库](https://docs.opengauss.org/zh/docs/latest/datavec/datavec_overview.html)
 
 
 ## 附录
