@@ -78,3 +78,22 @@ select * from t1_view1;
 
 drop view t1_view1;
 drop table t1;
+
+-- Each overload must return the rebuilt definition on its first call.
+create table viewdef_restore (a int, b text, c int) with (storage_type=ustore);
+create view viewdef_plain as select a, b, c from viewdef_restore;
+create view viewdef_pretty as select a, b, c from viewdef_restore;
+create view viewdef_wrap as select a, b, c from viewdef_restore;
+alter table viewdef_restore drop b;
+alter table viewdef_restore add b text first;
+create temporary table viewdef_first as select
+    pg_get_viewdef('viewdef_plain'::regclass) as plain_def,
+    pg_get_viewdef('viewdef_pretty'::text, true) as pretty_def,
+    pg_get_viewdef('viewdef_wrap'::regclass, 20) as wrap_def;
+select length(plain_def) > 0 and plain_def = pg_get_viewdef('viewdef_plain'::regclass) as plain_ok,
+       length(pretty_def) > 0 and pretty_def = pg_get_viewdef('viewdef_pretty'::text, true) as pretty_ok,
+       length(wrap_def) > 0 and wrap_def = pg_get_viewdef('viewdef_wrap'::regclass, 20) as wrap_ok
+from viewdef_first;
+drop table viewdef_first;
+drop view viewdef_plain, viewdef_pretty, viewdef_wrap;
+drop table viewdef_restore;

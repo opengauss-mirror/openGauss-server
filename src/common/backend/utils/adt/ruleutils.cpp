@@ -6162,7 +6162,20 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
                         errmsg("View %s references invalid table(s), view(s) or column(s).", get_rel_name(ev_class))));
             restore_invalid_view_column_names(query);
         } else {
-            /* if view becomes valid, return buf directly, since it has been assigned. */
+            /*
+             * Validation updates pg_rewrite, not our output buffer. Re-read
+             * the rule before deparsing: the old query can still contain the
+             * attribute numbers of columns that were dropped and re-added.
+             */
+            Relation rewriteRel = relation_open(RewriteRelationId, AccessShareLock);
+            HeapTuple rewriteTuple = SearchSysCache2(RULERELNAME,
+                ObjectIdGetDatum(ev_class), PointerGetDatum(ViewSelectRuleName));
+            if (!HeapTupleIsValid(rewriteTuple)) {
+                elog(ERROR, "cache lookup failed for rewrite rule for view with OID %u", ev_class);
+            }
+            make_viewdef(buf, rewriteTuple, RelationGetDescr(rewriteRel), prettyFlags, wrapColumn);
+            ReleaseSysCache(rewriteTuple);
+            relation_close(rewriteRel, AccessShareLock);
             heap_close(ev_relation, AccessShareLock);
             return;
         }

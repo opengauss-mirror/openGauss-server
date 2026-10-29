@@ -232,7 +232,8 @@ select * from t1;
  f4     | bigint  |           | plain    | 
  f5     | integer |           | plain    | 
 View definition:
-SELECT t1.f1, t1.f2, t1.f3, t1.f4, t1.f5 FROM t1;
+ SELECT t1.f1, t1.f2, t1.f3, t1.f4, t1.f5
+   FROM t1;
 
 select * from t1_view1;
   f1  | f2 |  f3  | f4 |  f5  
@@ -472,7 +473,8 @@ Options: orientation=row, storage_type=ustore, compression=no, toast.storage_typ
  f4     | bigint  |           | plain    | 
  f5     | integer |           | plain    | 
 View definition:
-SELECT t1.f1, t1.f2, t1.f3, t1.f4, t1.f5 FROM t1;
+ SELECT t1.f1, t1.f2, t1.f3, t1.f4, t1.f5
+   FROM t1;
 
 select * from t1_view1;
   f1  | f2 |  f3  | f4 |  f5  
@@ -485,3 +487,26 @@ select * from t1_view1;
 
 drop view t1_view1;
 drop table t1;
+-- Each overload must return the rebuilt definition on its first call.
+create table viewdef_restore (a int, b text, c int) with (storage_type=ustore);
+create view viewdef_plain as select a, b, c from viewdef_restore;
+create view viewdef_pretty as select a, b, c from viewdef_restore;
+create view viewdef_wrap as select a, b, c from viewdef_restore;
+alter table viewdef_restore drop b;
+alter table viewdef_restore add b text first;
+create temporary table viewdef_first as select
+    pg_get_viewdef('viewdef_plain'::regclass) as plain_def,
+    pg_get_viewdef('viewdef_pretty'::text, true) as pretty_def,
+    pg_get_viewdef('viewdef_wrap'::regclass, 20) as wrap_def;
+select length(plain_def) > 0 and plain_def = pg_get_viewdef('viewdef_plain'::regclass) as plain_ok,
+       length(pretty_def) > 0 and pretty_def = pg_get_viewdef('viewdef_pretty'::text, true) as pretty_ok,
+       length(wrap_def) > 0 and wrap_def = pg_get_viewdef('viewdef_wrap'::regclass, 20) as wrap_ok
+from viewdef_first;
+ plain_ok | pretty_ok | wrap_ok 
+----------+-----------+---------
+ t        | t         | t
+(1 row)
+
+drop table viewdef_first;
+drop view viewdef_plain, viewdef_pretty, viewdef_wrap;
+drop table viewdef_restore;
