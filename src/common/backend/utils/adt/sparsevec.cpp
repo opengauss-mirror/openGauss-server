@@ -224,11 +224,6 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
             long index;
             float value;
 
-            if (nnz == Min(maxNnz, SPARSEVEC_MAX_NNZ)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                        errmsg("the current nnz value of %d ran out of buffer: \"%s\"", nnz, lit)));
-            }
             while (SparsevecIsspace(*pt)) {
                 pt++;
             }
@@ -284,6 +279,13 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
                                 errmsg("\"%s\" is out of range for type sparsevec", pnstrdup(pt, stringEnd - pt))));
 
             CheckElement(value);
+
+            /* Check capacity only when storing a non-zero element. */
+            if (value != 0 && nnz >= Min(maxNnz, SPARSEVEC_MAX_NNZ)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("the current nnz value of %d ran out of buffer: \"%s\"", nnz, lit)));
+            }
 
             /* Do not store zero values */
             if (value != 0) {
