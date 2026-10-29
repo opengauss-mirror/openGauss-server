@@ -12,7 +12,7 @@ end test_package_depend2_pkg;
 WARNING:  Type t does not exist.
 WARNING:  The header information of function p1 is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create  or replace package body test_package_depend2_pkg is
 procedure p1(param test_package_depend3_pkg.t) is
     begin
@@ -25,14 +25,14 @@ WARNING:  The header information of function p1 is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  The header information of function p1 is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 create or replace package test_package_depend3_pkg is
 type t is record (col1 int, col2 text, col3 varchar);
 procedure p1(param test_package_depend2_pkg.t);
 end test_package_depend3_pkg;
 /
 --?.*
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create  or replace  package body test_package_depend3_pkg is
 procedure p1(param test_package_depend2_pkg.t) is
     begin
@@ -41,7 +41,7 @@ procedure p1(param test_package_depend2_pkg.t) is
 end test_package_depend3_pkg;
 /
 --?.*
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 call test_package_depend2_pkg.p1((1,'a','2023'));
 INFO:  call param: (1,a,2023)
  p1 
@@ -69,7 +69,7 @@ end pkg1;
 WARNING:  Type x does not exist.
 WARNING:  The header information of function a is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package body pkg1 is
 procedure a(zz pkg2.x) is
 begin
@@ -82,14 +82,14 @@ WARNING:  The header information of function a is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  The header information of function a is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 create or replace package pkg2 is
 type x is record(tt int);
 procedure a(zz pkg1.x);
 end pkg2;
 /
 --?.*
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package body pkg2 is
 procedure a( zz pkg1.x) is
 begin
@@ -98,7 +98,7 @@ end;
 end pkg2;
 /
 --?.*
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 \parallel on 2
 begin
 perform pkg1.a(row(1));
