@@ -164,7 +164,7 @@ LIMIT 2;
 在上述SQL查询中：
 
 - `to_tsvector@@to_tsquery`: `@@`是openGauss的全文检索匹配算子，当`tsvector`（document）匹配到`tsquery`（query）时返回true。
-- `ts_rank(to_tsvector, to_tsquery, integer)`：openGauss提供了两个预置的[排序方法](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/sort_the_query_results.html)（`ts_rank`， `ts_rank_cd`），可将相关性最高的文档排在前面。同时，通过设置`integer`类型的标准化选项来定义文档长度的影响程度。
+- `ts_rank(to_tsvector, to_tsquery, integer)`：openGauss提供了两个预置的[排序方法](https://docs.opengauss.org/zh/docs/latest-lite/sql_reference/ranking_search_results.html)（`ts_rank`， `ts_rank_cd`），可将相关性最高的文档排在前面。同时，通过设置`integer`类型的标准化选项来定义文档长度的影响程度。
 
 综合以上步骤，即可实现高效的全文检索。
 
