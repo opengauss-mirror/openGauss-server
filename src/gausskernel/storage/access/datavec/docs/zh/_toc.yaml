@@ -109,6 +109,8 @@ sections:
         sections:
           - label: Cognee
             href: ./cognee.md
+          - label: Haystack
+            href: ./haystack.md
           - label: Feast + openGauss
             href: ./feast_opengauss_online_store.md
       - label:  嵌入模型
