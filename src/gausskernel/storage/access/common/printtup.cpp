@@ -1114,7 +1114,10 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
                 getTypeOutputInfo(typeinfo->attrs[i].atttypid, &thisState->typoutput, &thisState->typisvarlena);
                 need_finfo = true;
             }
-            if (need_finfo) {
+            /*
+             * Protocol 2 text output always uses OutputFunctionCall().
+             */
+            if (need_finfo || myState->pub.receiveSlot == printtup_20) {
                 fmgr_info(thisState->typoutput, &thisState->finfo);
             }
             thisState->encoding = get_valid_charset_by_collation(typeinfo->attrs[i].attcollation);
