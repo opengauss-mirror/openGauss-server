@@ -1158,5 +1158,199 @@ ERROR:  The table definition of "rca_null_003" has been changed.
 drop table RCA_NULL_003 purge;
 purge recyclebin;
 ---------------------------------------------------------------------------------
+-- repeated flashback to before truncate: the second flashback reports an
+-- error and the data restored by the first flashback must stay intact
+create table rb8531_t(id int primary key, v int);
+insert into rb8531_t select i,1 from generate_series(1,20) i;
+truncate table rb8531_t;
+timecapsule table rb8531_t to before truncate;
+select count(*) from rb8531_t; -- expected 20
+ count 
+-------
+    20
+(1 row)
+
+timecapsule table rb8531_t to before truncate; -- expected error
+ERROR:  recycle object "rb8531_t" desired does not exist or expired
+select count(*) from rb8531_t; -- expected 20
+ count 
+-------
+    20
+(1 row)
+
+drop table rb8531_t purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- after multiple truncates the flashbacks restore the versions from oldest
+-- to newest; once all versions are consumed the next flashback errors out
+create table rb8531_m(a int);
+insert into rb8531_m values(1);
+truncate table rb8531_m;
+insert into rb8531_m values(2);
+truncate table rb8531_m;
+insert into rb8531_m values(3);
+truncate table rb8531_m;
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 1
+ a 
+---
+ 1
+(1 row)
+
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 2
+ a 
+---
+ 2
+(1 row)
+
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 3
+ a 
+---
+ 3
+(1 row)
+
+timecapsule table rb8531_m to before truncate; -- expected error
+ERROR:  recycle object "rb8531_m" desired does not exist or expired
+select * from rb8531_m; -- expected 3
+ a 
+---
+ 3
+(1 row)
+
+drop table rb8531_m purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- with the recyclebin enabled, truncate keeps the same foreign key
+-- semantics as with the recyclebin disabled, and both the parent and the
+-- child table are recorded in the recyclebin
+create table rb8532_p(id int primary key);
+create table rb8532_c(id int primary key, pid int references rb8532_p(id));
+insert into rb8532_p values (1);
+insert into rb8532_c values (10,1);
+truncate table rb8532_p restrict; -- expected error
+ERROR:  cannot truncate a table referenced in a foreign key constraint
+DETAIL:  Table "rb8532_c" references "rb8532_p".
+HINT:  Truncate table "rb8532_c" at the same time, or use TRUNCATE ... CASCADE.
+truncate table rb8532_p cascade;
+select count(*) from rb8532_p; -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from rb8532_c; -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from gs_recyclebin where rcyoriginname in ('rb8532_p','rb8532_c') and rcyoperation = 't'; -- expected 2
+ count 
+-------
+     2
+(1 row)
+
+timecapsule table rb8532_c to before truncate; -- expected error: parent not flashed back yet
+ERROR:  flashback table to before truncate would violate foreign key constraint "rb8532_c_pid_fkey" on table "rb8532_c"
+DETAIL:  Key (pid=1) is still not present in table "rb8532_p".
+timecapsule table rb8532_p to before truncate;
+select count(*) from rb8532_p; -- expected 1
+ count 
+-------
+     1
+(1 row)
+
+timecapsule table rb8532_c to before truncate;
+select count(*) from rb8532_c; -- expected 1
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from rb8532_c c join rb8532_p p on c.pid = p.id; -- expected 1
+ count 
+-------
+     1
+(1 row)
+
+---------------------------------------------------------------------------------
+-- flashing back the parent errors out while the child still references a
+-- key that would be swapped out; after the reference is removed the
+-- flashback succeeds
+truncate table rb8532_p cascade;
+insert into rb8532_p values (9);
+insert into rb8532_c values (90,9);
+timecapsule table rb8532_p to before truncate; -- expected error: pid=9 would be swapped out
+ERROR:  flashback table to before truncate would violate foreign key constraint "rb8532_c_pid_fkey" on table "rb8532_c"
+DETAIL:  Key (pid=9) is still not present in table "rb8532_p".
+delete from rb8532_c;
+timecapsule table rb8532_p to before truncate;
+select count(*) from rb8532_p; -- expected 1
+ count 
+-------
+     1
+(1 row)
+
+timecapsule table rb8532_c to before truncate;
+select count(*) from rb8532_c; -- expected 1
+ count 
+-------
+     1
+(1 row)
+
+drop table rb8532_c, rb8532_p cascade;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- when the cascade group contains an astore table the whole statement
+-- falls back to the regular truncate path; a self-referencing foreign key
+-- table supports both truncate and flashback
+create table rb8532_p2(id int primary key);
+create table rb8532_c2(id int primary key, pid int references rb8532_p2(id));
+create table rb8532_a2(id int primary key, pid int references rb8532_p2(id)) with (storage_type=astore);
+insert into rb8532_p2 values (1);
+insert into rb8532_c2 values (10,1);
+insert into rb8532_a2 values (20,1);
+truncate table rb8532_p2 cascade;
+select count(*) from rb8532_p2; -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from rb8532_c2; -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from rb8532_a2; -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from gs_recyclebin where rcyoriginname in ('rb8532_p2','rb8532_c2','rb8532_a2'); -- expected 0
+ count 
+-------
+     0
+(1 row)
+
+drop table rb8532_a2, rb8532_c2, rb8532_p2 cascade;
+-- self-referencing foreign key
+create table rb8532_s(id int primary key, pid int references rb8532_s(id));
+insert into rb8532_s values (1,NULL),(2,1);
+truncate table rb8532_s restrict;
+timecapsule table rb8532_s to before truncate;
+select count(*) from rb8532_s; -- expected 2
+ count 
+-------
+     2
+(1 row)
+
+drop table rb8532_s purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
 reset client_min_messages;
