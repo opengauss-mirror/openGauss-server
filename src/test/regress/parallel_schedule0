@@ -1202,3 +1202,4 @@ test: create_force_view
 
 # test replication=standbywrite non-internal trust bypass security
 test: replication_standbywrite_security
+test: datetime_to_char datetime_to_char_full
