@@ -275,8 +275,13 @@ void symmEncDec(DecryptInfo* pDecryptInfo, bool isEnc, char* indata, int inlen, 
 {
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    /* the module callback updates *result_size as a real size_t (8 bytes),
+     * so it must not be pointed at outlen (int, 4 bytes) via a cast */
+    size_t outlenSize = (size_t)(*outlen);
 
-    ret = crypto_encrypt_decrypt_use(pDecryptInfo->moduleKeyCtx, isEnc, (unsigned char*)indata, inlen, pDecryptInfo->rand, 16, (unsigned char*)outdata, (size_t*)outlen, NULL);
+    ret = crypto_encrypt_decrypt_use(pDecryptInfo->moduleKeyCtx, isEnc, (unsigned char*)indata, inlen,
+        pDecryptInfo->rand, RANDOM_LEN, (unsigned char*)outdata, &outlenSize, NULL);
+    *outlen = (int)outlenSize;
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         releaseCryptoCtx(0, pDecryptInfo);
@@ -324,8 +329,13 @@ void cryptoHmac(DecryptInfo* pDecryptInfo, char* indata, int inlen, char* outdat
 {
     int ret = 1;
     char errmsg[MAX_ERRMSG_LEN] = {0};
+    /* the module callback updates *result_size as a real size_t (8 bytes),
+     * so it must not be pointed at outlen (int, 4 bytes) via a cast */
+    size_t outlenSize = (size_t)(*outlen);
 
-    ret = crypto_hmac_use(pDecryptInfo->moduleHmacCtx, (unsigned char*)indata, inlen, (unsigned char*)outdata, (size_t*)outlen);
+    ret = crypto_hmac_use(pDecryptInfo->moduleHmacCtx, (unsigned char*)indata, inlen,
+        (unsigned char*)outdata, &outlenSize);
+    *outlen = (int)outlenSize;
     if (ret != 1) {
         crypto_get_errmsg_use(NULL, errmsg);
         releaseHmacCtx(0, pDecryptInfo);
