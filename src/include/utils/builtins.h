@@ -627,6 +627,9 @@ extern Datum bttextcmp(PG_FUNCTION_ARGS);
 extern Datum bttextcmp_c_locale(PG_FUNCTION_ARGS);
 extern Datum bttextcmp_b_format(PG_FUNCTION_ARGS);
 extern Datum bttextcmp_locale(PG_FUNCTION_ARGS);
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+extern Datum bttextcmp_locale_n(PG_FUNCTION_ARGS);
+#endif
 extern Datum bpchar_sortsupport(PG_FUNCTION_ARGS);
 extern Datum bttextsortsupport(PG_FUNCTION_ARGS);
 /*
@@ -1114,6 +1117,9 @@ extern Datum bpcharcmp(PG_FUNCTION_ARGS);
 extern Datum bpcharcmp_c_locale(PG_FUNCTION_ARGS);
 extern Datum bpcharcmp_b_format(PG_FUNCTION_ARGS);
 extern Datum bpcharcmp_locale(PG_FUNCTION_ARGS);
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+extern Datum bpcharcmp_locale_n(PG_FUNCTION_ARGS);
+#endif
 extern Datum bpchar_larger(PG_FUNCTION_ARGS);
 extern Datum bpchar_smaller(PG_FUNCTION_ARGS);
 extern int bpchartruelen(const char* s, int len);
@@ -1225,6 +1231,9 @@ extern Datum name_text(PG_FUNCTION_ARGS);
 extern Datum text_name(PG_FUNCTION_ARGS);
 extern int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid);
 extern int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid);
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+extern int varstr_cmp_locale_n(char* arg1, int len1, char* arg2, int len2, Oid collid);
+#endif
 
 static inline int varstr_cmp_c(char* arg1, int len1, char* arg2, int len2)
 {

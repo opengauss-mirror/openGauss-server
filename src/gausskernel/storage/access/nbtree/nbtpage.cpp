@@ -250,11 +250,13 @@ Buffer _bt_getroot(Relation rel, int access)
     uint32 rootlevel;
     BTMetaPageData *metad = NULL;
 
-    BtRootbufCacheSyncReformVer();
-    BtResetBorrowedRootbuf();
-    rootbuf = BtRootbufGetFromCache(rel, access);
-    if (BufferIsValid(rootbuf)) {
-        return rootbuf;
+    if (g_instance.attr.attr_storage.enable_btree_rootbuf_cache) {
+        BtRootbufCacheSyncReformVer();
+        BtResetBorrowedRootbuf();
+        rootbuf = BtRootbufGetFromCache(rel, access);
+        if (BufferIsValid(rootbuf)) {
+            return rootbuf;
+        }
     }
 
     /*
@@ -1217,6 +1219,12 @@ void BtRootbufCacheEndRevoke(const BufferTag *tag)
 /* Check whether this buffer is being used through borrowed-root. */
 bool BtRootbufIsBorrowed(Relation rel, Buffer buf)
 {
+    /* When root buffer cache is disabled, hasBorrow is never set to true.
+     * Skip the TLS access to u_sess entirely. */
+    if (!g_instance.attr.attr_storage.enable_btree_rootbuf_cache) {
+        return false;
+    }
+
     BtBorrowedRootState *state = BtRootbufGetBorrowedState();
 
     return state != NULL && state->hasBorrow && BufferIsValid(buf) && state->buffer == buf &&

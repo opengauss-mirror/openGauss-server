@@ -71,6 +71,52 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
 static void _bt_search_insert(Relation rel, BTCheckElement* element);
 static void _bt_findinsertloc(Relation rel, BTCheckElement* element,
                               bool checking_unique_flag, Relation heapRel);
+/*
+ * Register either the left-child downlink (old versions) or the
+ * INCOMPLETE_SPLIT buffer (new versions) for an upper-page insert.
+ */
+static void _bt_register_upper_split(Buffer cbuf, IndexTuple itup, BlockNumber *xldownlink,
+                                     uint32 cachedVersionNum)
+{
+    if (cachedVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        *xldownlink = ItemPointerGetBlockNumber(&(itup->t_tid));
+        XLogRegisterData((char *)xldownlink, sizeof(BlockNumber));
+    } else {
+        /*
+         * Register the left child whose INCOMPLETE_SPLIT flag was
+         * cleared.
+         */
+        XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
+    }
+}
+
+/*
+ * Pick the xl_btree_metadata record size for the running page version.
+ */
+static int _bt_meta_xl_size(uint32 cachedVersionNum)
+{
+    if (cachedVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM)
+        return sizeof(xl_btree_metadata_old);
+    if (cachedVersionNum < NBTREE_DEDUPLICATION_VERSION_NUM)
+        return SizeOfBtreeMetadataNoAllEqualImage;
+    return sizeof(xl_btree_metadata);
+}
+
+/*
+ * Register the metapage buffer + metadata payload for the WAL record.
+ */
+static void _bt_register_meta(Buffer metabuf, xl_btree_metadata *xlmeta, int xl_size,
+                              uint32 cachedVersionNum)
+{
+    if (cachedVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        XLogRegisterBuffer(1, metabuf, REGBUF_WILL_INIT);
+        XLogRegisterBufData(1, (char *)xlmeta, xl_size);
+    } else {
+        XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+        XLogRegisterBufData(2, (char *)xlmeta, xl_size);
+    }
+}
+
 static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
                            OffsetNumber newitemoff, int posting_off, bool split_only_page, bool useFastPath);
 static Buffer _bt_split(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
@@ -1015,6 +1061,8 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
                            OffsetNumber newitemoff, int posting_off, bool split_only_page, bool useFastPath)
 {
     Page page;
+    /* Cache workingVersionNum to avoid repeated TLS accesses */
+    uint32 cachedVersionNum = t_thrd.proc->workingVersionNum;
     BTPageOpaqueInternal lpageop;
     OffsetNumber firstright = InvalidOffsetNumber;
     Size itemsz;
@@ -1030,7 +1078,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
 
     Assert(!btree_tuple_is_posting(itup));
 
-    if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+    if (cachedVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
         /* child buffer must be given iff inserting on an internal page */
         Assert(P_ISLEAF(lpageop) == !BufferIsValid(cbuf));
 
@@ -1168,7 +1216,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
             MarkBufferDirty(metabuf);
         }
 
-        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        if (cachedVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
             /* clear INCOMPLETE_SPLIT flag on child if inserting a downlink */
             if (BufferIsValid(cbuf)) {
                 Page cpage = BufferGetPage(cbuf);
@@ -1207,16 +1255,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
             } else if (posting_off != 0) {
                 xlinfo = XLOG_BTREE_INSERT_POST;
             } else {
-                if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
-                    xldownlink = ItemPointerGetBlockNumber(&(itup->t_tid));
-                    XLogRegisterData((char*)&xldownlink, sizeof(BlockNumber));
-                } else {
-                    /*
-                     * Register the left child whose INCOMPLETE_SPLIT flag was
-                     * cleared.
-                     */
-                    XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
-                }
+                _bt_register_upper_split(cbuf, itup, &xldownlink, cachedVersionNum);
                 xlinfo = XLOG_BTREE_INSERT_UPPER;
             }
 
@@ -1228,22 +1267,8 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
                 xlmeta.fastlevel = metad->btm_fastlevel;
                 xlmeta.allequalimage = metad->btm_allequalimage;
 
-                int xl_size;
-                if (t_thrd.proc->workingVersionNum < NBTREE_INSERT_OPTIMIZATION_VERSION_NUM) {
-                    xl_size = sizeof(xl_btree_metadata_old);
-                } else if (t_thrd.proc->workingVersionNum < NBTREE_DEDUPLICATION_VERSION_NUM) {
-                    xl_size = SizeOfBtreeMetadataNoAllEqualImage;
-                } else {
-                    xl_size = sizeof(xl_btree_metadata);
-                }
-
-                if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
-                    XLogRegisterBuffer(1, metabuf, REGBUF_WILL_INIT);
-                    XLogRegisterBufData(1, (char *)&xlmeta, xl_size);
-                } else {
-                    XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
-                    XLogRegisterBufData(2, (char *)&xlmeta, xl_size);
-                }
+                int xl_size = _bt_meta_xl_size(cachedVersionNum);
+                _bt_register_meta(metabuf, &xlmeta, xl_size, cachedVersionNum);
                 xlinfo = XLOG_BTREE_INSERT_META;
             }
 
@@ -1261,7 +1286,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
             } else
                 XLogRegisterBufData(0, (char *)itup, IndexTupleDSize(*itup));
 
-            if (t_thrd.proc->workingVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            if (cachedVersionNum < BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
                 recptr = XLogInsert(RM_BTREE_ID, xlinfo);
             } else {
                 recptr = XLogInsert(RM_BTREE_ID, xlinfo | BTREE_SPLIT_UPGRADE_FLAG);
@@ -1270,7 +1295,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
             if (BufferIsValid(metabuf)) {
                 PageSetLSN(metapg, recptr);
             }
-            if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+            if (cachedVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
                 if (BufferIsValid(cbuf)) {
                     PageSetLSN(BufferGetPage(cbuf), recptr);
                 }
@@ -1284,7 +1309,7 @@ static void _bt_insertonpg(Relation rel, BTScanInsert itup_key, Buffer buf, Buff
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
         }
-        if (t_thrd.proc->workingVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
+        if (cachedVersionNum >= BTREE_SPLIT_DELETE_UPGRADE_VERSION) {
             if (BufferIsValid(cbuf)) {
                 _bt_relbuf(rel, cbuf);
             }

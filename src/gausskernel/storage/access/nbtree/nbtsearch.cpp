@@ -321,7 +321,10 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer* bufP, int access, boo
          * this is a good opportunity to finish splits of internal pages too.
          */
         *bufP = _bt_moveright(rel, key, *bufP, (access == BT_WRITE), stack_in, page_access, parallel_end);
-        borrowedRoot = BtRootbufIsBorrowed(rel, *bufP);
+        /* Only re-check borrowed state if we previously had a borrowed root.
+         * If the root wasn't borrowed, moving right cannot make it borrowed. */
+        if (borrowedRoot)
+            borrowedRoot = BtRootbufIsBorrowed(rel, *bufP);
 
         /* if this is a leaf page, we're done */
         page = BufferGetPage(*bufP);
@@ -840,11 +843,62 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
     ScanKey scankey = key->scankeys;
     num_compare_keys = Min(num_tuple_attrs, key->keysz);
     Assert(!btree_tuple_is_posting(itup) || key->allequalimage);
+
+    Datum tuple_values[INDEX_MAX_KEYS];
+    bool tuple_isnull[INDEX_MAX_KEYS];
+    bool has_nulls = IndexTupleHasNulls(itup);
+    char* tp = (char*)itup + IndexInfoFindDataOffset(itup->t_info);
+    bits8* bp = (bits8*)((char*)itup + sizeof(IndexTupleData));
+    int off = 0;
+    bool slow = false;
+    int deformed = 0;
+
+    Assert(num_compare_keys <= INDEX_MAX_KEYS);
+
     for (int i = 0; i < num_compare_keys; i++, scankey++) {
         Datum datum;
         bool isNull = false;
+        int attnum = scankey->sk_attno - 1;
 
-        datum = index_getattr(itup, scankey->sk_attno, itupdesc, &isNull);
+        while (deformed <= attnum) {
+            Form_pg_attribute thisatt = TupleDescAttr(itupdesc, deformed);
+
+            if (has_nulls && att_isnull(deformed, bp)) {
+                tuple_values[deformed] = (Datum)0;
+                tuple_isnull[deformed] = true;
+                slow = true;
+            } else {
+                tuple_isnull[deformed] = false;
+
+                if (!slow && thisatt->attcacheoff >= 0) {
+                    off = thisatt->attcacheoff;
+                } else if (thisatt->attlen == -1) {
+                    if (!slow && (uint)off == att_align_nominal(off, thisatt->attalign)) {
+                        thisatt->attcacheoff = off;
+                    } else {
+                        off = att_align_pointer(off, thisatt->attalign, -1, tp + off);
+                        slow = true;
+                    }
+                } else {
+                    off = att_align_nominal(off, thisatt->attalign);
+
+                    if (!slow)
+                        thisatt->attcacheoff = off;
+                }
+
+                tuple_values[deformed] = fetchatt(thisatt, tp + off);
+
+                off = att_addlength_pointer(off, thisatt->attlen, tp + off);
+
+                if (thisatt->attlen <= 0) {
+                    slow = true;
+                }
+            }
+            deformed++;
+        }
+
+        datum = tuple_values[attnum];
+        isNull = tuple_isnull[attnum];
 
         if (likely((!(scankey->sk_flags & SK_ISNULL)) && !isNull)) {
             int8 multiplier = (scankey->sk_flags & SK_BT_DESC) ? 1 : -1;

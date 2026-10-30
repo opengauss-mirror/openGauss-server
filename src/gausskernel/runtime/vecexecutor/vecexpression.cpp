@@ -1926,7 +1926,12 @@ static void BindingGenericFunction(FunctionCallInfo finfo, MemoryContext fcacheC
 
     Assert(funcRuntime != NULL);
 
-    funcRuntime->internalFinfo = (FunctionCallInfoData*)palloc0(SizeForFunctionCallInfo(nargs));
+    /* nargs may be 0 or 1 (e.g. nullary/unary generic functions called from vector engine),
+     * in which case SizeForFunctionCallInfo(nargs) is smaller than sizeof(FunctionCallInfoData)
+     * and the memcpy_s below would overflow the allocation (heap-buffer-overflow).
+     * Allocate at least sizeof(FunctionCallInfoData) to stay safe. */
+    Size finfoSize = Max(SizeForFunctionCallInfo(nargs), sizeof(FunctionCallInfoData));
+    funcRuntime->internalFinfo = (FunctionCallInfoData*)palloc0(finfoSize);
 
     errno_t rc =
         memcpy_s(funcRuntime->internalFinfo, sizeof(FunctionCallInfoData), finfo, sizeof(FunctionCallInfoData));

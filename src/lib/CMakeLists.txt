@@ -17,6 +17,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/pgcommon
     ${CMAKE_CURRENT_SOURCE_DIR}/cm_common
     ${CMAKE_CURRENT_SOURCE_DIR}/cm_communication
+    ${CMAKE_CURRENT_SOURCE_DIR}/strncoll
 )
 
 add_subdirectory(gstrace)
@@ -29,4 +30,5 @@ add_subdirectory(page_compression)
 add_subdirectory(pgcommon)
 add_subdirectory(cm_common)
 add_subdirectory(cm_communication)
+add_subdirectory(strncoll)
 

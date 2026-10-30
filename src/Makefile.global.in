@@ -1183,6 +1183,9 @@ submake-libplpgsql:
 submake-pagecompression:
 	$(MAKE) -C $(top_builddir)/src/lib/page_compression all
 
+submake-strncoll:
+	$(MAKE) -C $(top_builddir)/src/lib/strncoll all
+
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
@@ -1192,7 +1195,7 @@ submake-kwlist-clean:
 $(top_srcdir)/src/include/parser/kwlist_d.h: $(top_srcdir)/src/include/parser/kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --extern -o $(top_srcdir)/src/include/parser $(top_srcdir)/src/include/parser/kwlist.h
 
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression submake-strncoll
 
 
 ##########################################################################

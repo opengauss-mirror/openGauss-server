@@ -36,6 +36,11 @@
 #include "utils/memutils.h"
 #include "utils/numeric.h"
 #include "utils/pg_locale.h"
+#include "utils/strncoll_glibc.h"
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+#include <gnu/libc-version.h>
+#include <pthread.h>
+#endif
 #include "parser/parser.h"
 #include "utils/int8.h"
 #include "utils/sortsupport.h"
@@ -1813,6 +1818,40 @@ static void text_position_cleanup(TextPositionState* state)
     }
 }
 
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+static pthread_once_t strncoll_glibc_once = PTHREAD_ONCE_INIT;
+static bool strncoll_glibc_ok = false;
+
+/*
+ * strncoll_glibc_check()
+ * Examine the glibc version once, from strncoll_glibc_supported().
+ */
+static void strncoll_glibc_check(void)
+{
+    const char *version = gnu_get_libc_version();
+    int major = 0;
+    int minor = 0;
+
+    if (version != NULL && sscanf(version, "%d.%d", &major, &minor) == 2 &&
+        major == STRNCOLL_GLIBC_MAJOR_MIN && minor >= STRNCOLL_GLIBC_MINOR_MIN &&
+        minor <= STRNCOLL_GLIBC_MINOR_MAX) {
+        strncoll_glibc_ok = true;
+    }
+}
+
+/*
+ * strncoll_glibc_supported()
+ * Whether the running glibc falls in the range whose private locale data
+ * layout matches what strncoll() was written against.  Checked once and
+ * cached; this is the only place the glibc version is examined.
+ */
+static bool strncoll_glibc_supported(void)
+{
+    pthread_once(&strncoll_glibc_once, strncoll_glibc_check);
+    return strncoll_glibc_ok;
+}
+#endif
+
 void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
 {
     switch (finfo->fn_oid) {
@@ -1821,6 +1860,10 @@ void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
                 finfo->fn_addr = bttextcmp_c_locale;
             } else if (is_b_format_collation(collation)) {
                 finfo->fn_addr = bttextcmp_b_format;
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+            } else if (strncoll_glibc_supported()) {
+                finfo->fn_addr = bttextcmp_locale_n;
+#endif
             } else {
                 finfo->fn_addr = bttextcmp_locale;
             }
@@ -1830,6 +1873,10 @@ void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
                 finfo->fn_addr = bpcharcmp_c_locale;
             } else if (is_b_format_collation(collation)) {
                 finfo->fn_addr = bpcharcmp_b_format;
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+            } else if (strncoll_glibc_supported()) {
+                finfo->fn_addr = bpcharcmp_locale_n;
+#endif
             } else {
                 finfo->fn_addr = bpcharcmp_locale;
             }
@@ -1841,6 +1888,10 @@ void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
 
 /* varstr_cmp_locale()
  * General locale-aware path: strcoll / wcscoll.
+ *
+ * Copies the inputs into NUL-terminated buffers because strcoll() cannot be
+ * given a length.  The copy-free variant used for btree comparisons is
+ * varstr_cmp_locale_n().
  */
 int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid)
 {
@@ -1993,6 +2044,46 @@ int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid)
 
     return result;
 }
+
+/*
+ * varstr_cmp_locale_n()
+ * Length-bounded locale-aware comparison that uses strncoll() and therefore
+ * does not copy the inputs.  Same contract as varstr_cmp_locale(); only used
+ * where strncoll() is supported (see strncoll.cpp).
+ */
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+int varstr_cmp_locale_n(char* arg1, int len1, char* arg2, int len2, Oid collid)
+{
+    int result;
+    pg_locale_t mylocale = 0;
+
+    if (collid != DEFAULT_COLLATION_OID) {
+        if (!OidIsValid(collid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INDETERMINATE_COLLATION),
+                    errmsg("could not determine which collation to use for string comparison"),
+                    errhint("Use the COLLATE clause to set the collation explicitly.")));
+        }
+        mylocale = pg_newlocale_from_collation(collid);
+    }
+
+    if (len1 == len2 && memcmp(arg1, arg2, len1) == 0) {
+        return 0;
+    }
+
+    /*
+     * strcoll() only accepts NUL-terminated strings, which forced a copy of
+     * both inputs before.  strncoll() is length-bounded, so no copy is needed.
+     * Fall back to a byte-wise comparison to keep the ordering of strings the
+     * collation considers equal deterministic.
+     */
+    result = strncoll(arg1, len1, arg2, len2, mylocale);
+    if (result == 0) {
+        result = varstr_cmp_c(arg1, len1, arg2, len2);
+    }
+    return result;
+}
+#endif
 
 /* varstr_cmp()
  * Comparison function for text strings with given lengths.
@@ -2338,6 +2429,25 @@ Datum bttextcmp_locale(PG_FUNCTION_ARGS)
 
     PG_RETURN_INT32(result);
 }
+
+#if defined(HAVE_LOCALE_T) && defined(__GLIBC__) && !defined(WIN32)
+Datum bttextcmp_locale_n(PG_FUNCTION_ARGS)
+{
+    text* arg1 = PG_GETARG_TEXT_PP(0);
+    text* arg2 = PG_GETARG_TEXT_PP(1);
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "bttextcmp_locale_n()");
+
+    int32 result;
+    result = varstr_cmp_locale_n(VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1),
+                                 VARDATA_ANY(arg2), VARSIZE_ANY_EXHDR(arg2),
+                                 PG_GET_COLLATION());
+
+    PG_FREE_IF_COPY(arg1, 0);
+    PG_FREE_IF_COPY(arg2, 1);
+
+    PG_RETURN_INT32(result);
+}
+#endif
 
 Datum bttextsortsupport(PG_FUNCTION_ARGS)
 {

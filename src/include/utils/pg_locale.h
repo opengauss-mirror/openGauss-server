@@ -69,6 +69,13 @@ typedef int pg_locale_t;
 
 extern pg_locale_t pg_newlocale_from_collation(Oid collid);
 
+/*
+ * Compare two byte strings according to a collation without requiring the
+ * inputs to be NUL-terminated.  An input length of -1 means the string is
+ * NUL-terminated.
+ */
+extern int strncoll(const char* arg1, int len1, const char* arg2, int len2, pg_locale_t locale);
+
 /* These functions convert from/to libc's wchar_t, *not* pg_wchar_t */
 #ifdef USE_WIDE_UPPER_LOWER
 extern size_t wchar2char(char* to, const wchar_t* from, size_t tolen, pg_locale_t locale);
