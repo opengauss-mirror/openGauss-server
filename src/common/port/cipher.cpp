@@ -1214,8 +1214,11 @@ GS_UINT32 CRYPT_decrypt(GS_UINT32 ulAlgId, const GS_UCHAR* pucKey, GS_UINT32 ulK
 
     /* padding bytes of the last block need to be removed */
     blocksize = EVP_CIPHER_CTX_block_size(ctx);
+    if (blocksize == 0 || *pulPLen == 0 || *pulPLen < blocksize) {
+        goto err;
+    }
     oLen = (*pulPLen) - 1;
-    while (*(pucPlainText + oLen) == 0) {
+    while (oLen > 0 && *(pucPlainText + oLen) == 0) {
         oLen--;
     }
     if (oLen >= ((*pulPLen) - blocksize) && *(pucPlainText + oLen) == 0x80) {

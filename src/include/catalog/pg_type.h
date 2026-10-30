@@ -898,4 +898,14 @@ DATA(insert OID = 8310 (  _sparsevec	PGNSP PGUID -1 f b A f t \054 0	8307 0 arra
 	 ((typid) == NVARCHAR2OID) || \
 	 (type_is_set(typid)))
 
+#define IsDSupportCharsetType(typid) \
+	(((typid) == TEXTOID) || \
+	 ((typid) == VARCHAROID) || \
+	 ((typid) == BPCHAROID) || \
+	 ((typid) == NVARCHAR2OID) || \
+	 (targetissqlvariant(typid)) || \
+	 (IsBinaryType(typid)) || \
+	 (type_is_enum(typid)) || \
+	 (type_is_set(typid)))
+
 #endif   /* PG_TYPE_H */
