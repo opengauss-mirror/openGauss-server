@@ -1928,6 +1928,9 @@ typedef struct knl_t_utils_context {
     int32 beyondChunk;
 
     bool backend_reserved;
+
+    /* Skip transient cross-parameter checks while restoring the GUC snapshot. */
+    bool restoringGucOptions;
 } knl_t_utils_context;
 
 typedef struct knl_t_pgxc_context {

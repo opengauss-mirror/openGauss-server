@@ -274,6 +274,7 @@ extern const char* GetConfigOption(const char* name, bool missing_ok, bool restr
 extern const char* GetConfigOptionResetString(const char* name);
 extern void ProcessConfigFile(GucContext context);
 extern void InitializeGUCOptions(void);
+extern bool IsRestoringGUCOptions(void);
 extern void InitializePostmasterGUC();
 extern void init_sync_guc_variables(void);
 extern void repair_guc_variables(void);

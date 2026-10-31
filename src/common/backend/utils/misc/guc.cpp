@@ -5854,6 +5854,12 @@ void InitializePostmasterGUC()
     parseDmsInstanceCount();
 }
 
+/* True while restoring the postmaster's GUC snapshot. */
+bool IsRestoringGUCOptions(void)
+{
+    return t_thrd.utils_cxt.restoringGucOptions;
+}
+
 /*
  * Initialize GUC options during program startup.
  *
@@ -11447,6 +11453,8 @@ void read_nondefault_variables(void)
         return;
     }
 
+    /* Restore validated postmaster values without checking transient combinations. */
+    t_thrd.utils_cxt.restoringGucOptions = true;
     for (;;) {
         struct config_generic* record = NULL;
 
@@ -11481,6 +11489,7 @@ void read_nondefault_variables(void)
         pfree(varsourcefile);
     }
 
+    t_thrd.utils_cxt.restoringGucOptions = false;
     FreeFile(fp);
 
     // shared_buffers is 32MB for dummyStandby

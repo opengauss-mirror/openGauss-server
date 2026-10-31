@@ -1135,6 +1135,7 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
 
     utils_cxt->maxChunksPerThread = 0;
     utils_cxt->beyondChunk = 0;
+    utils_cxt->restoringGucOptions = false;
 }
 
 static void knl_t_pgxc_init(knl_t_pgxc_context* pgxc_cxt)
