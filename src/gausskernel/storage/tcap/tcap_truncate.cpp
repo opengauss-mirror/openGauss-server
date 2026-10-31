@@ -79,11 +79,13 @@
 #include "commands/trigger.h"
 #include "commands/typecmds.h"
 #include "executor/node/nodeModifyTable.h"
+#include "executor/spi.h"
 #include "rewrite/rewriteRemove.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr/relfilenode.h"
 #include "utils/acl.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
@@ -190,10 +192,36 @@ void TrPartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId
     SetPartCacheNeedEOXActWork(true);
 }
 
+/*
+ * Brief     : close the given relation oid set under the "referenced by"
+ *             relation: append every relation that references any of the
+ *             given ones, directly or transitively.
+ * Description: mirrors the closure loop of ExecuteTruncate. The caller is
+ *              responsible for holding a suitable lock on the relations.
+ */
+static List *TrGetTruncateGroupRels(List *relids)
+{
+    List *newrelids = heap_truncate_find_FKs(relids);
+
+    while (newrelids != NIL) {
+        ListCell *newcell = NULL;
+
+        foreach (newcell, newrelids) {
+            relids = lappend_oid(relids, lfirst_oid(newcell));
+        }
+        list_free_ext(newrelids);
+        newrelids = heap_truncate_find_FKs(relids);
+    }
+
+    return relids;
+}
+
 bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt)
 {
     RangeVar *rel = NULL;
     Oid relid;
+    List *relids = NIL;
+    ListCell *cell = NULL;
 
     if (/*
          * Disable Recyclebin-based-Truncate when with purge option, or
@@ -211,8 +239,29 @@ bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt)
 
     rel = (RangeVar *)linitial(stmt->relations);
     relid = RangeVarGetRelid(rel, NoLock, false);
+    if (!NeedTrComm(relid)) {
+        return false;
+    }
 
-    return NeedTrComm(relid);
+    /*
+     * With CASCADE the truncate group also contains every relation that
+     * references the target one (directly or transitively). Each member
+     * must support the recyclebin-based truncate as well, otherwise fall
+     * back to the regular truncate path, so that the whole group keeps
+     * exactly the same behavior as with the recyclebin disabled.
+     */
+    if (stmt->behavior == DROP_CASCADE) {
+        relids = TrGetTruncateGroupRels(list_make1_oid(relid));
+        foreach (cell, relids) {
+            if (!NeedTrComm(lfirst_oid(cell))) {
+                list_free_ext(relids);
+                return false;
+            }
+        }
+        list_free_ext(relids);
+    }
+
+    return true;
 }
 
 void TrTruncateOnePart(Relation rel, HeapTuple tup, Oid insertBaseid)
@@ -310,27 +359,144 @@ bool TrJudgeHaveTrigger(Oid tgOid)
     return false;
 }
 
-void TrTruncate(const TruncateStmt *stmt)
+/*
+ * Brief     : do the recyclebin-based truncate for one relation: record the
+ *             old relfilenode to the recyclebin and swap in a new empty one.
+ * Description: the relation must be opened in AccessExclusiveLock and all
+ *             the common checks must have been done by the caller.
+ */
+static void TrTruncateOneTable(Relation rel)
 {
-    RangeVar *rv = (RangeVar*)linitial(stmt->relations);
-    Relation rel;
-    Oid relid;
+    Oid relid = RelationGetRelid(rel);
     Oid toastRelid;
     TrObjDesc baseDesc;
-    bool haveTrigger = false;
 
+    /*
+     * Create a new empty storage file for the relation, and assign it
+     * as the relfilenode value, and record the old relfilenode to
+     * recyclebin.
+     */
+    TrDescInit(rel, &baseDesc, RB_OPER_TRUNCATE, RB_OBJ_TABLE, true, true);
+    baseDesc.id = baseDesc.baseid = TrDescWrite(&baseDesc);
+    TrUpdateBaseid(&baseDesc);
+
+    /*
+     * If rel is partition table, find all partitions, and create some new
+     * empty storage file for the all partitions of the relation, and assign
+     * them as the relfilenodes value, and record the old relfilenodes to
+     * recyclebin.
+     */
+    if (RELATION_IS_PARTITIONED(rel)) {
+        TrPartitionTableProcess(rel, baseDesc.baseid);
+    }
+
+    TrRelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, &baseDesc);
+
+    /* The same for the toast table, if any. */
+    toastRelid = rel->rd_rel->reltoastrelid;
+    if (OidIsValid(toastRelid) && !RELATION_IS_PARTITIONED(rel)) {
+        Relation relToast = relation_open(toastRelid, AccessExclusiveLock);
+        TrRelationSetNewRelfilenode(relToast, u_sess->utils_cxt.RecentXmin, &baseDesc);
+        heap_close(relToast, NoLock);
+    }
+
+    /* Reconstruct the indexes to match, and we're done. */
+    (void)ReindexRelation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, &baseDesc);
+
+    /* report truncate to PgStatCollector */
+    pgstat_report_truncate(relid, InvalidOid, false);
+
+    /* Record time of truancate relation. */
+    recordRelationMTime(relid, rel->rd_rel->relkind);
+}
+
+/*
+ * Brief     : in CASCADE mode, collect every relation referencing the group
+ *             closed so far: open, check and append it to the group.
+ * Description: mirrors the closure loop of ExecuteTruncate: each new
+ *              relation is locked before searching for its own referencing
+ *              relations, so the group stays closed once computed.
+ */
+static List *TrCollectCascadeTruncateRels(List *relids)
+{
+    List *rels = NIL;
+    List *newrelids = heap_truncate_find_FKs(relids);
+
+    while (newrelids != NIL) {
+        ListCell *newcell = NULL;
+
+        foreach (newcell, newrelids) {
+            Oid newrelid = lfirst_oid(newcell);
+            Relation member = heap_open(newrelid, AccessExclusiveLock);
+
+            ereport(NOTICE, (errmsg("truncate cascades to table \"%s\"", RelationGetRelationName(member))));
+            truncate_check_rel(member);
+
+            if (!NeedTrComm(newrelid)) {
+                heap_close(member, NoLock);
+                ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("the truncate group changed concurrently, please retry the statement")));
+            }
+
+            if (TrJudgeHaveTrigger(newrelid)) {
+                ereport(WARNING,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Not support truncate triggers where use recyclebin features, "
+                               "requires manual truncate target table")));
+            }
+
+            CheckTableForSerializableConflictIn(member);
+
+            rels = lappend(rels, member);
+            relids = lappend_oid(relids, newrelid);
+        }
+        list_free_ext(newrelids);
+        newrelids = heap_truncate_find_FKs(relids);
+    }
+
+    return rels;
+}
+
+/*
+ * Brief     : check the truncate group against foreign key references,
+ *             with the same semantics as ExecuteTruncate.
+ * Description: in RESTRICT mode the group must not be referenced by any
+ *              relation outside of it; in CASCADE mode the group is already
+ *              closed, so the check only runs as a cross-check in
+ *              assert-enabled builds.
+ */
+static void TrTruncateCheckFks(Relation rel, List *rels, DropBehavior behavior)
+{
+    List *allrels = lcons(rel, list_copy(rels));
+
+#ifdef USE_ASSERT_CHECKING
+    heap_truncate_check_FKs(allrels, false);
+#else
+    if (behavior == DROP_RESTRICT) {
+        heap_truncate_check_FKs(allrels, false);
+    }
+#endif
+    list_free_ext(allrels);
+}
+
+void TrTruncate(const TruncateStmt *stmt)
+{
+    RangeVar *rv = (RangeVar *)linitial(stmt->relations);
+    Relation rel;
+    Oid relid;
+    Oid mlogid;
+    List *rels = NIL;
+    ListCell *cell = NULL;
     /*
      * 1. Open relation in AccessExclusiveLock, and check permission, etc.
      */
-
     rel = heap_openrv(rv, AccessExclusiveLock);
     relid = RelationGetRelid(rel);
-
     /*
      * seqScan table pg_trigger and find exist truncate trigger.
      */
-    haveTrigger = TrJudgeHaveTrigger(relid);
-    if (haveTrigger) {
+    if (TrJudgeHaveTrigger(relid)) {
         ereport(WARNING,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Not support truncate triggers where use recyclebin features, "
@@ -338,7 +504,7 @@ void TrTruncate(const TruncateStmt *stmt)
     }
 
     /* find matview exists or not. */
-    Oid mlogid = find_matview_mlog_table(relid);
+    mlogid = find_matview_mlog_table(relid);
     if (OidIsValid(mlogid)) {
         heap_close(rel, NoLock);
         ereport(ERROR,
@@ -359,52 +525,31 @@ void TrTruncate(const TruncateStmt *stmt)
     CheckTableForSerializableConflictIn(rel);
 
     /*
-     * 2. Create a new empty storage file for the relation, and assign it
-     * as the relfilenode value, and record the old relfilenode to recyclebin.
+     * 2. In CASCADE mode, suck in all referencing relations as well.
      */
-     
-    TrDescInit(rel, &baseDesc, RB_OPER_TRUNCATE, RB_OBJ_TABLE, true, true);
-    baseDesc.id = baseDesc.baseid = TrDescWrite(&baseDesc);
-    TrUpdateBaseid(&baseDesc);
-
-    /*
-     * step 2.1. If rel is partition table, find all partitions, and Create some new empty
-     * storage file for the all partitions of the relation, and assign them as the
-     * relfilenodes value, and record the old relfilenodes to recyclebin.
-     */
-    if (RELATION_IS_PARTITIONED(rel)) {
-        TrPartitionTableProcess(rel, baseDesc.baseid);
-    }
-
-    TrRelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, &baseDesc);
-
-    /*
-     * 3. The same for the toast table, if any.
-     */
-
-    toastRelid = rel->rd_rel->reltoastrelid;
-    if (OidIsValid(toastRelid) && !RELATION_IS_PARTITIONED(rel)) {
-        Relation relToast = relation_open(toastRelid, AccessExclusiveLock);
-        TrRelationSetNewRelfilenode(relToast, u_sess->utils_cxt.RecentXmin, &baseDesc);
-        heap_close(relToast, NoLock);
+    if (stmt->behavior == DROP_CASCADE) {
+        rels = TrCollectCascadeTruncateRels(list_make1_oid(relid));
     }
 
     /*
-     * 4. Reconstruct the indexes to match, and we're done.
+     * 3. Check foreign key references, just like the regular path.
      */
-
-    (void)ReindexRelation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, &baseDesc);
+    TrTruncateCheckFks(rel, rels, stmt->behavior);
 
     /*
-     * 5. Report stat, and clean.
+     * 4. Do the recyclebin-based truncate for every relation of the group.
      */
+    TrTruncateOneTable(rel);
+    foreach (cell, rels) {
+        TrTruncateOneTable((Relation)lfirst(cell));
+    }
 
-    /* report truncate to PgStatCollector */
-    pgstat_report_truncate(relid, InvalidOid, false);
-
-    /* Record time of truancate relation. */
-    recordRelationMTime(relid, rel->rd_rel->relkind);
-
+    /*
+     * 5. Clean.
+     */
+    foreach (cell, rels) {
+        heap_close((Relation)lfirst(cell), NoLock);
+    }
     heap_close(rel, NoLock);
 }
 
@@ -461,6 +606,200 @@ void TrDoPurgeObjectTruncate(TrObjDesc *desc)
      * visible to the next deletion step.
      */
     CommandCounterIncrement();
+}
+
+/*
+ * Brief     : fetch one foreign key column array (conkey or confkey) from
+ *             the pg_constraint tuple into attnums.
+ * Return    : number of key columns.
+ */
+static int TrFkFetchAttnums(HeapTuple conTup, AttrNumber keyAttr, int16 *attnums)
+{
+    const char *arrname = (keyAttr == Anum_pg_constraint_conkey) ? "conkey" : "confkey";
+    Datum adatum;
+    bool isNull = false;
+    ArrayType *arr = NULL;
+    int numkeys;
+    int i;
+
+    adatum = SysCacheGetAttr(CONSTROID, conTup, keyAttr, &isNull);
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("null %s for constraint %u", arrname, HeapTupleGetOid(conTup))));
+    }
+    arr = DatumGetArrayTypeP(adatum);
+    numkeys = ARR_DIMS(arr)[0];
+    if (ARR_NDIM(arr) != 1 || numkeys < 0 || numkeys > INDEX_MAX_KEYS || ARR_HASNULL(arr) ||
+        ARR_ELEMTYPE(arr) != INT2OID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("%s is not a 1-D smallint array", arrname)));
+    }
+    for (i = 0; i < numkeys; i++) {
+        attnums[i] = ((const int16 *)ARR_DATA_PTR(arr))[i];
+    }
+
+    return numkeys;
+}
+
+/*
+ * Brief     : build the existence-check query for one foreign key
+ *             constraint against the current state of both tables.
+ * Description: SELECT fk columns FROM <referencing> c
+ *              WHERE (fk columns are all not null)
+ *                AND NOT EXISTS (SELECT 1 FROM <referenced> p
+ *                                WHERE p.pk = c.fk)
+ *              LIMIT 1
+ *              No ONLY: when either side is a partitioned table the rows
+ *              live in the partitions and must be scanned too.
+ */
+static void TrFkAppendCheckSql(StringInfo sql, Form_pg_constraint con,
+    const int16 *fkAttnums, const int16 *pkAttnums, int numkeys)
+{
+    char *fkRelName = quote_qualified_identifier(get_namespace_name(get_rel_namespace(con->conrelid)),
+        get_rel_name(con->conrelid));
+    char *pkRelName = quote_qualified_identifier(get_namespace_name(get_rel_namespace(con->confrelid)),
+        get_rel_name(con->confrelid));
+    int i;
+
+    appendStringInfo(sql, "SELECT ");
+    for (i = 0; i < numkeys; i++) {
+        appendStringInfo(sql, "%sc.%s", i > 0 ? ", " : "",
+            quote_identifier(get_attname(con->conrelid, fkAttnums[i])));
+    }
+    appendStringInfo(sql, " FROM %s c WHERE ", fkRelName);
+    for (i = 0; i < numkeys; i++) {
+        appendStringInfo(sql, "%sc.%s IS NOT NULL", i > 0 ? " AND " : "",
+            quote_identifier(get_attname(con->conrelid, fkAttnums[i])));
+    }
+    appendStringInfo(sql, " AND NOT EXISTS (SELECT 1 FROM %s p WHERE ", pkRelName);
+    for (i = 0; i < numkeys; i++) {
+        appendStringInfo(sql, "%sp.%s = c.%s", i > 0 ? " AND " : "",
+            quote_identifier(get_attname(con->confrelid, pkAttnums[i])),
+            quote_identifier(get_attname(con->conrelid, fkAttnums[i])));
+    }
+    appendStringInfo(sql, ") LIMIT 1");
+
+    pfree_ext(fkRelName);
+    pfree_ext(pkRelName);
+}
+
+/*
+ * Brief     : report the violation found by the check query: the first
+ *             offending row is still referenced or still dangling.
+ */
+static void TrFkReportViolation(Form_pg_constraint con, const int16 *fkAttnums, int numkeys)
+{
+    StringInfoData keys;
+    int i;
+
+    initStringInfo(&keys);
+    for (i = 0; i < numkeys; i++) {
+        char *keyval = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, i + 1);
+
+        appendStringInfo(&keys, "%s%s=%s", i > 0 ? ", " : "",
+            quote_identifier(get_attname(con->conrelid, fkAttnums[i])), keyval != NULL ? keyval : "NULL");
+        if (keyval != NULL) {
+            pfree_ext(keyval);
+        }
+    }
+
+    ereport(ERROR,
+        (errcode(ERRCODE_FOREIGN_KEY_VIOLATION),
+            errmsg("flashback table to before truncate would violate foreign "
+                   "key constraint \"%s\" on table \"%s\"",
+                NameStr(con->conname), get_rel_name(con->conrelid)),
+            errdetail("Key (%s) is still not present in table \"%s\".",
+                keys.data, get_rel_name(con->confrelid))));
+}
+
+/*
+ * Brief     : check one foreign key constraint against the current state,
+ *             right after the flashback swapped a new relfilenode in.
+ * Description: the swap replaces the whole content of the restored table:
+ *              - the rows swapped out are removed, so no row of any
+ *                referencing table may still reference them;
+ *              - the rows swapped in are added, so they must find their
+ *                referenced keys in the referenced table.
+ *             Both directions collapse into a single existence query on the
+ *             resulting state, executed through SPI with a fresh snapshot.
+ *             Any violation raises an error which aborts (and thereby fully
+ *             rolls back) the flashback.
+ */
+static void TrCheckFkAfterRestore(HeapTuple conTup)
+{
+    Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(conTup);
+    int16 fkAttnums[INDEX_MAX_KEYS];
+    int16 pkAttnums[INDEX_MAX_KEYS];
+    StringInfoData sql;
+    int numkeys;
+
+    numkeys = TrFkFetchAttnums(conTup, Anum_pg_constraint_conkey, fkAttnums);
+    if (TrFkFetchAttnums(conTup, Anum_pg_constraint_confkey, pkAttnums) != numkeys) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("confkey is not a 1-D smallint array")));
+    }
+
+    initStringInfo(&sql);
+    TrFkAppendCheckSql(&sql, con, fkAttnums, pkAttnums, numkeys);
+
+    if (SPI_execute(sql.data, true, 1) != SPI_OK_SELECT) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("recyclebin foreign key check failed")));
+    }
+    if (SPI_processed > 0) {
+        TrFkReportViolation(con, fkAttnums, numkeys);
+    }
+
+    pfree_ext(sql.data);
+}
+
+/*
+ * Brief     : validate every foreign key constraint that involves the
+ *             restored relation, on either side of the constraint.
+ * Description: constraints that are not validated (NOT VALID) are skipped,
+ *              since they do not enforce anything anyway.
+ */
+static void TrValidateRestoreTruncateFk(Oid relid)
+{
+    Relation conRel;
+    SysScanDesc scan;
+    HeapTuple tup;
+    bool connected = false;
+
+    conRel = heap_open(ConstraintRelationId, AccessShareLock);
+
+    scan = systable_beginscan(conRel, InvalidOid, false, NULL, 0, NULL);
+    while ((tup = systable_getnext(scan)) != NULL) {
+        Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
+        if (con->contype != CONSTRAINT_FOREIGN || !con->convalidated) {
+            continue;
+        }
+        if (con->conrelid != relid && con->confrelid != relid) {
+            continue;
+        }
+
+        if (!connected) {
+            if (SPI_connect() != SPI_OK_CONNECT) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("SPI connect failed for recyclebin foreign key check")));
+            }
+            connected = true;
+        }
+
+        TrCheckFkAfterRestore(tup);
+    }
+    systable_endscan(scan);
+
+    heap_close(conRel, AccessShareLock);
+
+    if (connected) {
+        SPI_finish();
+    }
 }
 
 /* flashback table to before truncate */
@@ -521,13 +860,22 @@ void TrRestoreTruncate(const TimeCapsuleStmt *stmt)
 
     systable_endscan(sd);
     heap_close(rbRel, RowExclusiveLock);
-    heap_close(rel, NoLock);
 
     /*
-     * CommandCounterIncrement here to ensure that preceding changes are all
-     * visible to the next deletion step.
+     * CommandCounterIncrement here to ensure that the swapped relfilenodes
+     * are visible to the foreign key checks below.
      */
     CommandCounterIncrement();
+
+    /*
+     * 5. The swap must keep the referential integrity: as a referencing
+     * table, the restored rows must find their referenced keys; as a
+     * referenced table, the rows swapped out must not leave dangling
+     * references behind. Any violation aborts the whole flashback.
+     */
+    TrValidateRestoreTruncateFk(relid);
+
+    heap_close(rel, NoLock);
 
     return;
 }
