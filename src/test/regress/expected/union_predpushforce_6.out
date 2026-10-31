@@ -174,14 +174,57 @@ EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.to
                                        Index Cond: (col1 = 42)
 (16 rows)
 
-SELECT 'KNOWN_LIMIT_union_swapped_outputs';
-             ?column?              
------------------------------------
- KNOWN_LIMIT_union_swapped_outputs
+SELECT 'union_swapped_outputs';
+       ?column?        
+-----------------------
+ union_swapped_outputs
 (1 row)
 
-EXPLAIN SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col2 col1,col1 col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_f) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
-ERROR:  could not devise a query plan for the given query
+EXPLAIN (COSTS OFF) SELECT /*+ set(rewrite_rule predpushforce) */ a.id,b.id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col2 col1,col1 col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_f) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, b.id, (sum(union_predpushforce_6.pp_f.amount))
+   ->  Nested Loop Left Join
+         ->  Nested Loop
+               ->  Seq Scan on pp_a a
+               ->  Materialize
+                     ->  Seq Scan on pp_b b
+         ->  HashAggregate
+               Group By Key: union_predpushforce_6.pp_f.col2, union_predpushforce_6.pp_f.col1, union_predpushforce_6.pp_f.col3
+               ->  Append
+                     ->  Bitmap Heap Scan on pp_f
+                           Recheck Cond: ((col1 = b.k) AND (col2 = a.k))
+                           ->  Bitmap Index Scan on pp_f_idx
+                                 Index Cond: ((col1 = b.k) AND (col2 = a.k))
+                     ->  Bitmap Heap Scan on pp_f
+                           Recheck Cond: ((col1 = a.k) AND (col2 = b.k))
+                           ->  Bitmap Index Scan on pp_f_idx
+                                 Index Cond: ((col1 = a.k) AND (col2 = b.k))
+(18 rows)
+
+-- Check all pushed parameters, duplicate keys and null-extended LEFT JOIN rows.
+INSERT INTO pp_a VALUES(3,NULL),(4,999),(5,2);
+INSERT INTO pp_b VALUES(3,NULL),(4,999),(5,4);
+ANALYZE pp_a; ANALYZE pp_b;
+CREATE TEMP TABLE pp_swapped_expected AS SELECT /*+ set(rewrite_rule none) */ a.id AS a_id,b.id AS b_id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col2 col1,col1 col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_f) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+CREATE TEMP TABLE pp_swapped_actual AS SELECT /*+ set(rewrite_rule predpushforce) */ a.id AS a_id,b.id AS b_id,v.total FROM pp_a a CROSS JOIN pp_b b LEFT JOIN (SELECT col1,col2,col3,SUM(amount) total FROM (SELECT col2 col1,col1 col2,col3,amount FROM pp_f UNION ALL SELECT col1,col2,col3,amount FROM pp_f) t GROUP BY col1,col2,col3) v ON v.col1=a.k AND v.col2=b.k ORDER BY a.id,b.id,v.total;
+SELECT count(*) AS row_count FROM pp_swapped_actual;
+ row_count 
+-----------
+        61
+(1 row)
+
+SELECT count(*) AS differences FROM ((SELECT * FROM pp_swapped_actual EXCEPT ALL SELECT * FROM pp_swapped_expected) UNION ALL (SELECT * FROM pp_swapped_expected EXCEPT ALL SELECT * FROM pp_swapped_actual)) d;
+ differences 
+-------------
+           0
+(1 row)
+
+DROP TABLE pp_swapped_actual, pp_swapped_expected;
+DELETE FROM pp_a WHERE id > 2;
+DELETE FROM pp_b WHERE id > 2;
+ANALYZE pp_a; ANALYZE pp_b;
 SELECT 'union_physical_column_mapping';
            ?column?            
 -------------------------------

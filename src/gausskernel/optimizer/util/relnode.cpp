@@ -1106,7 +1106,9 @@ ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel,
     /* If we already have a PPI for this parameterization, just return it */
     foreach (lc, baserel->ppilist) {
         ppi = (ParamPathInfo*)lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+        /* Upper-level Params are part of the path's parameterization too. */
+        if (bms_equal(ppi->ppi_req_outer, required_outer) &&
+            bms_equal(ppi->ppi_req_upper, upper_params))
             return ppi;
     }
 
@@ -1169,7 +1171,9 @@ ParamPathInfo* get_subquery_parampathinfo(PlannerInfo* root, RelOptInfo* baserel
     /* If we already have a PPI for this parameterization, just return it */
     foreach (lc, baserel->ppilist) {
         ppi = (ParamPathInfo*)lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+        /* Upper-level Params are part of the path's parameterization too. */
+        if (bms_equal(ppi->ppi_req_outer, required_outer) &&
+            bms_equal(ppi->ppi_req_upper, upper_params))
             return ppi;
     }
 
@@ -1421,7 +1425,9 @@ ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids require
     /* If we already have a PPI for this parameterization, just return it */
     foreach (lc, appendrel->ppilist) {
         ppi = (ParamPathInfo*)lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+        /* Upper-level Params are part of the path's parameterization too. */
+        if (bms_equal(ppi->ppi_req_outer, required_outer) &&
+            bms_equal(ppi->ppi_req_upper, upper_params))
             return ppi;
     }
 
