@@ -561,6 +561,8 @@ ANALYZE rme_eqp;
 ANALYZE trs_trs_ne;
 ANALYZE spc_room;
 
+SET enable_bitmapscan = off;
+
 -- should not push down
 SET rewrite_rule = 'none';
 EXPLAIN (COSTS OFF)
@@ -596,6 +598,8 @@ FROM SPC_ROOM
 WHERE NVL(DELETE_STATE, '0') = '0'
 ) B1 ON v1.POSIT_ID = B1.ROOM_ID
 WHERE B1.CHINA_NAME = '特定机房';
+
+RESET enable_bitmapscan;
 
 -- case 4
 CREATE TABLE a_apply_detail_cutover (
