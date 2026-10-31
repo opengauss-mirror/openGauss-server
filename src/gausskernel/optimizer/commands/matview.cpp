@@ -2726,7 +2726,8 @@ static void CheckMatviewBaserel(RangeTblEntry *rte, bool isIncremental, List **v
         list_free_ext(subRteList);
     }
 
-    heap_close(rel, AccessShareLock);
+    /* Keep checked view definitions stable until creation or refresh finishes. */
+    heap_close(rel, NoLock);
 }
 
 /* When create or refresh matview, we need check base table is whether supported. */
@@ -2743,19 +2744,19 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
     foreach (lc, rteList) {
         RangeTblEntry *rte = (RangeTblEntry*)lfirst(lc);
 
-        /* only check nodegroup for create matview */
-        if (isCreateMatview) {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (!isIncremental && (get_pgxc_class_groupoid(rte->relid) != ng_get_installation_group_oid())) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("relation \"%s\" is distributed in a non-installation node group, which is not supported",
-                        rte->relname)));
-            }
+        /* Only check nodegroup when creating a materialized view. */
+        if (isCreateMatview && !isIncremental &&
+            (get_pgxc_class_groupoid(rte->relid) != ng_get_installation_group_oid())) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("relation \"%s\" is distributed in a non-installation node group, which is not supported",
+                    rte->relname)));
+        }
 #endif
 
-            CheckMatviewBaserel(rte, isIncremental, &visitedViews);
-        }
+        /* Recheck current view definitions when refreshing as well. */
+        CheckMatviewBaserel(rte, isIncremental, &visitedViews);
 
         /* privileges are both checked when create/refresh matview */
         (void)CheckPermissionForBasetable(rte);

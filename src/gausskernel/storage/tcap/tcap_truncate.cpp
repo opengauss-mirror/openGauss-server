@@ -685,18 +685,40 @@ static void TrFkAppendCheckSql(StringInfo sql, Form_pg_constraint con,
     pfree_ext(pkRelName);
 }
 
-/*
- * Brief     : report the violation found by the check query: the first
- *             offending row is still referenced or still dangling.
- */
-static void TrFkReportViolation(Form_pg_constraint con, const int16 *fkAttnums, int numkeys)
+/* Check table-level and then key-column privileges, as RI validation does. */
+static bool TrFkHasSelectPrivilege(Oid relid, const int16 *attnums, int numkeys)
+{
+    if (pg_class_aclcheck(relid, GetUserId(), ACL_SELECT) == ACLCHECK_OK) {
+        return true;
+    }
+    for (int i = 0; i < numkeys; i++) {
+        if (pg_attribute_aclcheck(relid, attnums[i], GetUserId(), ACL_SELECT) != ACLCHECK_OK) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Report the first offending row without exposing keys the caller cannot read. */
+static void TrFkReportViolation(Form_pg_constraint con, const int16 *fkAttnums, int numkeys,
+    HeapTuple tuple, TupleDesc tupdesc)
 {
     StringInfoData keys;
     int i;
 
+    /* As in ri_ReportViolation, do not expose keys the caller cannot read. */
+    if (!TrFkHasSelectPrivilege(con->conrelid, fkAttnums, numkeys)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FOREIGN_KEY_VIOLATION),
+                errmsg("flashback table to before truncate would violate foreign "
+                       "key constraint \"%s\" on table \"%s\"",
+                    NameStr(con->conname), get_rel_name(con->conrelid)),
+                errdetail("Key is still not present in table \"%s\".", get_rel_name(con->confrelid))));
+    }
+
     initStringInfo(&keys);
     for (i = 0; i < numkeys; i++) {
-        char *keyval = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, i + 1);
+        char *keyval = SPI_getvalue(tuple, tupdesc, i + 1);
 
         appendStringInfo(&keys, "%s%s=%s", i > 0 ? ", " : "",
             quote_identifier(get_attname(con->conrelid, fkAttnums[i])), keyval != NULL ? keyval : "NULL");
@@ -712,6 +734,149 @@ static void TrFkReportViolation(Form_pg_constraint con, const int16 *fkAttnums, 
                 NameStr(con->conname), get_rel_name(con->conrelid)),
             errdetail("Key (%s) is still not present in table \"%s\".",
                 keys.data, get_rel_name(con->confrelid))));
+}
+
+static const int TR_FK_CHECK_BATCH_SIZE = 256;
+
+typedef struct TrFkOwnerCheckContext {
+    Form_pg_constraint con;
+    const int16 *fkAttnums;
+    int numkeys;
+    Relation fkRel;
+    Relation pkRel;
+    Oid saveUserId;
+    int saveSecContext;
+    Snapshot snapshot;
+} TrFkOwnerCheckContext;
+
+/* Build the child-key scan and the parameterized parent-key lookup. */
+static void TrBuildFkOwnerCheckSql(const TrFkOwnerCheckContext *check, const int16 *pkAttnums,
+    StringInfo fkSql, StringInfo pkSql, Oid *argtypes)
+{
+    appendStringInfoString(fkSql, "SELECT ");
+    for (int i = 0; i < check->numkeys; i++) {
+        appendStringInfo(fkSql, "%s%s", i > 0 ? ", " : "",
+            quote_identifier(get_attname(check->con->conrelid, check->fkAttnums[i])));
+        argtypes[i] = get_atttype(check->con->conrelid, check->fkAttnums[i]);
+    }
+    appendStringInfo(fkSql, " FROM %s WHERE ",
+        quote_qualified_identifier(get_namespace_name(RelationGetNamespace(check->fkRel)),
+            RelationGetRelationName(check->fkRel)));
+    appendStringInfo(pkSql, "SELECT 1 FROM %s WHERE ",
+        quote_qualified_identifier(get_namespace_name(RelationGetNamespace(check->pkRel)),
+            RelationGetRelationName(check->pkRel)));
+    for (int i = 0; i < check->numkeys; i++) {
+        appendStringInfo(fkSql, "%s%s IS NOT NULL", i > 0 ? " AND " : "",
+            quote_identifier(get_attname(check->con->conrelid, check->fkAttnums[i])));
+        appendStringInfo(pkSql, "%s%s = $%d", i > 0 ? " AND " : "",
+            quote_identifier(get_attname(check->con->confrelid, pkAttnums[i])), i + 1);
+    }
+}
+
+/* SPI result tables stay alive until explicitly freed, including during parent lookups. */
+static void TrCheckFkOwnerRows(const TrFkOwnerCheckContext *check, SPIPlanPtr pkPlan,
+    SPITupleTable *rows, uint64 count)
+{
+    for (uint64 row = 0; row < count; row++) {
+        Datum values[INDEX_MAX_KEYS];
+        char nulls[INDEX_MAX_KEYS];
+        for (int i = 0; i < check->numkeys; i++) {
+            bool isNull;
+            values[i] = SPI_getbinval(rows->vals[row], rows->tupdesc, i + 1, &isNull);
+            nulls[i] = isNull ? 'n' : ' ';
+        }
+        SetUserIdAndSecContext(check->pkRel->rd_rel->relowner,
+            check->saveSecContext | SECURITY_LOCAL_USERID_CHANGE);
+        int result = SPI_execute_snapshot(pkPlan, values, nulls, check->snapshot, InvalidSnapshot, true, false, 1);
+        SetUserIdAndSecContext(check->saveUserId, check->saveSecContext);
+        if (result != SPI_OK_SELECT) {
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("recyclebin foreign key check failed")));
+        }
+        if (SPI_processed == 0) {
+            TrFkReportViolation(check->con, check->fkAttnums, check->numkeys, rows->vals[row], rows->tupdesc);
+        }
+        SPI_freetuptable(SPI_tuptable);
+    }
+}
+
+/* Match ri_PlanCheck / ri_PerformCheck for preparation and execution. */
+static void TrRunFkOwnerCheck(const TrFkOwnerCheckContext *check, const char *fkSql,
+    const char *pkSql, Oid *argtypes)
+{
+    SetUserIdAndSecContext(check->fkRel->rd_rel->relowner, check->saveSecContext | SECURITY_LOCAL_USERID_CHANGE);
+    SPIPlanPtr fkPlan = SPI_prepare(fkSql, 0, NULL);
+    if (fkPlan == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_PREPARE_FAILURE),
+            errmsg("SPI_prepare failed for recyclebin foreign key check")));
+    }
+    PushActiveSnapshot(check->snapshot);
+    Portal cursor = SPI_cursor_open(NULL, fkPlan, NULL, NULL, true);
+    PopActiveSnapshot();
+
+    SetUserIdAndSecContext(check->pkRel->rd_rel->relowner, check->saveSecContext | SECURITY_LOCAL_USERID_CHANGE);
+    SPIPlanPtr pkPlan = SPI_prepare(pkSql, check->numkeys, argtypes);
+    if (pkPlan == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_PREPARE_FAILURE),
+            errmsg("SPI_prepare failed for recyclebin foreign key check")));
+    }
+    SetUserIdAndSecContext(check->saveUserId, check->saveSecContext);
+
+    uint64 count;
+    do {
+        SetUserIdAndSecContext(check->fkRel->rd_rel->relowner, check->saveSecContext | SECURITY_LOCAL_USERID_CHANGE);
+        SPI_cursor_fetch(cursor, true, TR_FK_CHECK_BATCH_SIZE);
+        SetUserIdAndSecContext(check->saveUserId, check->saveSecContext);
+        count = SPI_processed;
+        SPITupleTable *rows = SPI_tuptable;
+        TrCheckFkOwnerRows(check, pkPlan, rows, count);
+        SPI_freetuptable(rows);
+    } while (count > 0);
+    SPI_cursor_close(cursor);
+    SPI_freeplan(fkPlan);
+    SPI_freeplan(pkPlan);
+}
+
+/*
+ * Like the RI trigger fallback, read each table as its owner when the caller
+ * cannot run the join. Never run a cross-owner query with elevated privileges.
+ * Use one latest snapshot for both queries, including in repeatable read.
+ */
+static void TrCheckFkAsOwner(Form_pg_constraint con, const int16 *fkAttnums,
+    const int16 *pkAttnums, int numkeys)
+{
+    TrFkOwnerCheckContext check;
+    StringInfoData fkSql;
+    StringInfoData pkSql;
+    Oid argtypes[INDEX_MAX_KEYS];
+
+    check.con = con;
+    check.fkAttnums = fkAttnums;
+    check.numkeys = numkeys;
+    check.fkRel = heap_open(con->conrelid, AccessShareLock);
+    check.pkRel = heap_open(con->confrelid, AccessShareLock);
+    check.snapshot = RegisterSnapshot(GetLatestSnapshot());
+    GetUserIdAndSecContext(&check.saveUserId, &check.saveSecContext);
+    initStringInfo(&fkSql);
+    initStringInfo(&pkSql);
+    TrBuildFkOwnerCheckSql(&check, pkAttnums, &fkSql, &pkSql, argtypes);
+
+    PG_TRY();
+    {
+        TrRunFkOwnerCheck(&check, fkSql.data, pkSql.data, argtypes);
+    }
+    PG_CATCH();
+    {
+        SetUserIdAndSecContext(check.saveUserId, check.saveSecContext);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    UnregisterSnapshot(check.snapshot);
+    pfree_ext(fkSql.data);
+    pfree_ext(pkSql.data);
+    heap_close(check.fkRel, NoLock);
+    heap_close(check.pkRel, NoLock);
 }
 
 /*
@@ -733,6 +898,7 @@ static void TrCheckFkAfterRestore(HeapTuple conTup)
     int16 fkAttnums[INDEX_MAX_KEYS];
     int16 pkAttnums[INDEX_MAX_KEYS];
     StringInfoData sql;
+    SPIPlanPtr plan;
     int numkeys;
 
     numkeys = TrFkFetchAttnums(conTup, Anum_pg_constraint_conkey, fkAttnums);
@@ -742,26 +908,45 @@ static void TrCheckFkAfterRestore(HeapTuple conTup)
                 errmsg("confkey is not a 1-D smallint array")));
     }
 
+    if (!TrFkHasSelectPrivilege(con->conrelid, fkAttnums, numkeys) ||
+        !TrFkHasSelectPrivilege(con->confrelid, pkAttnums, numkeys)) {
+        TrCheckFkAsOwner(con, fkAttnums, pkAttnums, numkeys);
+        return;
+    }
+
     initStringInfo(&sql);
     TrFkAppendCheckSql(&sql, con, fkAttnums, pkAttnums, numkeys);
 
-    if (SPI_execute(sql.data, true, 1) != SPI_OK_SELECT) {
+    plan = SPI_prepare(sql.data, 0, NULL);
+    if (plan == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_PREPARE_FAILURE),
+                errmsg("SPI_prepare failed for recyclebin foreign key check")));
+    }
+
+    /*
+     * Like RI_Initial_Check, validate against the latest committed state even
+     * in transaction-snapshot mode. A read-only SPI_execute would reuse the
+     * active snapshot and could miss referencing rows committed since the
+     * transaction started. TrRestoreTruncate has already advanced the command
+     * counter so that our own changes are visible as well.
+     */
+    if (SPI_execute_snapshot(plan, NULL, NULL, GetLatestSnapshot(), InvalidSnapshot, true, false, 1) != SPI_OK_SELECT) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("recyclebin foreign key check failed")));
     }
     if (SPI_processed > 0) {
-        TrFkReportViolation(con, fkAttnums, numkeys);
+        TrFkReportViolation(con, fkAttnums, numkeys, SPI_tuptable->vals[0], SPI_tuptable->tupdesc);
     }
 
+    SPI_freeplan(plan);
     pfree_ext(sql.data);
 }
 
 /*
  * Brief     : validate every foreign key constraint that involves the
  *             restored relation, on either side of the constraint.
- * Description: constraints that are not validated (NOT VALID) are skipped,
- *              since they do not enforce anything anyway.
  */
 static void TrValidateRestoreTruncateFk(Oid relid)
 {
@@ -775,7 +960,7 @@ static void TrValidateRestoreTruncateFk(Oid relid)
     scan = systable_beginscan(conRel, InvalidOid, false, NULL, 0, NULL);
     while ((tup = systable_getnext(scan)) != NULL) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
-        if (con->contype != CONSTRAINT_FOREIGN || !con->convalidated) {
+        if (con->contype != CONSTRAINT_FOREIGN) {
             continue;
         }
         if (con->conrelid != relid && con->confrelid != relid) {
