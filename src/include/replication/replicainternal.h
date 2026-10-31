@@ -20,6 +20,8 @@
 #endif
 
 #define IP_LEN 64
+/* replconninfo host name. The last byte is NUL; DNS names are at most 255 octets. */
+#define REPL_HOST_LEN 256
 #define SSL_MODE_LEN 16
 #define PG_PROTOCOL_VERSION "MPPDB"
 
@@ -147,14 +149,14 @@ typedef struct runmodeparam {
  * Indicate one connect channel
  */
 typedef struct replconninfo {
-    char localhost[IP_LEN];
+    char localhost[REPL_HOST_LEN];
     int localport;
     int localheartbeatport;
     int remotenodeid;
-    char remotehost[IP_LEN];
+    char remotehost[REPL_HOST_LEN];
     int remoteport;
     int remoteheartbeatport;
-    char remoteuwalhost[IP_LEN];
+    char remoteuwalhost[REPL_HOST_LEN];
     int remoteuwalport;
     bool isCascade;
     bool isCrossRegion;
