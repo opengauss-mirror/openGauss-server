@@ -25,6 +25,21 @@
 #define PG_CONTROL_VERSION    923
 
 /*
+ * Layout of the WAL resource manager table (see access/rmgrlist.h). The ids
+ * after RM_MOT_ID shift when the server is built without MOT, so WAL cannot be
+ * replayed across builds with and without MOT. Older releases left the field
+ * zero, which means unknown.
+ */
+#define RMGR_LAYOUT_UNKNOWN 0
+#define RMGR_LAYOUT_WITHOUT_MOT 'L'
+#define RMGR_LAYOUT_WITH_MOT 'M'
+#ifdef ENABLE_MOT
+#define RMGR_LAYOUT_CURRENT RMGR_LAYOUT_WITH_MOT
+#else
+#define RMGR_LAYOUT_CURRENT RMGR_LAYOUT_WITHOUT_MOT
+#endif
+
+/*
  * Body of CheckPoint XLOG records.  This is declared here because we keep
  * a copy of the latest one in pg_control for possible disaster recovery.
  * Changing this struct requires a PG_CONTROL_VERSION bump.
@@ -187,6 +202,13 @@ typedef struct ControlFileData {
     XLogRecPtr    backupStartPoint;
     XLogRecPtr    backupEndPoint;
     bool        backupEndRequired;
+
+    /*
+     * RMGR_LAYOUT_* of the server that last wrote this file. It occupies what
+     * used to be padding, so neither the size of the struct nor the offsets of
+     * the other fields change.
+     */
+    uint8        rmgrLayout;
 
     /*
      * Parameter settings that determine if the WAL can be used for archival
