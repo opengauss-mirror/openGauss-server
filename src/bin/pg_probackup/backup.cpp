@@ -804,6 +804,7 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
     for (i = 0; i < (int)parray_num(xlog_files_list); i++)
     {
         pgFile	   *file = (pgFile *) parray_get(xlog_files_list, i);
+        struct stat st;
 
         join_path_components(wal_full_path, pg_xlog_path, file->rel_path);
 
@@ -823,9 +824,14 @@ static void add_xlog_files_into_backup_list(const char *database_path, const cha
             elog(ERROR, "Cannot encrypt WAL segment \"%s\"", wal_full_path);
         }
 
+        /* the size from the directory scan predates the encryption above */
+        if (fio_stat(wal_full_path, &st, true, FIO_BACKUP_HOST) != 0) {
+            elog(ERROR, "Cannot stat WAL segment \"%s\": %s", wal_full_path, gs_strerror(errno));
+        }
+
         file->crc = pgFileGetCRC(wal_full_path, true, false);
         /* sizes are accounted in plaintext bytes, the container adds its own */
-        file->size = enc_plain_size(wal_full_path, file->size);
+        file->size = enc_plain_size(wal_full_path, st.st_size);
         file->write_size = file->size;
 
         /* overwrite rel_path, because now it is relative to

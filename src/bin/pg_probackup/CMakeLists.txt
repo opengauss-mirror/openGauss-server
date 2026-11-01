@@ -19,7 +19,7 @@ AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/oss TGT_probackup_SRC)
 
 set(TGT_probackup_INC ${ZLIB_INCLUDE_PATH} ${LZ4_INCLUDE_PATH} ${ZSTD_INCLUDE_PATH} ${PROJECT_SRC_DIR}/lib/page_compression ${PROJECT_SRC_DIR}/include/storage/gs_uwal ${AWSSDK_INCLUDE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/oss)
 
-set(probackup_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DHAVE_LIBZ)
+set(probackup_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DGS_PROBACKUP_BUILD -DHAVE_LIBZ)
 set(probackup_COMPILE_OPTIONS ${PROTECT_OPTIONS} ${BIN_SECURE_OPTIONS} ${OS_OPTIONS} ${WARNING_OPTIONS} ${OPTIMIZE_OPTIONS} ${CHECK_OPTIONS})
 set(probackup_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 set(probackup_LINK_LIBS libpgcommon.a libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz -llz4 -lpq -lpagecompression -lzstd -laws-cpp-sdk-core -laws-cpp-sdk-s3)
