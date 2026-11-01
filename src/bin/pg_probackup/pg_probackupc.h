@@ -217,6 +217,7 @@ extern void write_backup_data_bytes(pgBackup *backup);
 extern bool lock_backup(pgBackup *backup, bool strict, bool exclusive);
 
 extern const char *pgBackupGetBackupMode(pgBackup *backup);
+extern const char *GetBackupDisplayMode(const pgBackup *backup);
 
 extern parray *catalog_get_instance_list(void);
 extern parray *catalog_get_backup_list(const char *instance_name, time_t requested_backup_id);
@@ -236,6 +237,7 @@ extern void pin_backup(pgBackup    *target_backup,
                             pgSetBackupParams *set_backup_params);
 extern void add_note(pgBackup *target_backup, const char *note);
 extern void pgBackupWriteControl(FILE *out, pgBackup *backup);
+extern void ShowBackupControl(FILE *out, pgBackup *backup);
 extern void write_backup_filelist(pgBackup *backup, parray *files,
                                   const char *root, parray *external_list, bool sync);
 

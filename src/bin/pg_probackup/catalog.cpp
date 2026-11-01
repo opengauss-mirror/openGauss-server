@@ -866,6 +866,17 @@ pgBackupGetBackupMode(pgBackup *backup)
     return backupModes[backup->backup_mode];
 }
 
+/* Backup mode as shown by show: cumulative PTRACK backups read as PTRACK/C. */
+const char *
+GetBackupDisplayMode(const pgBackup *backup)
+{
+    if (backup->backup_mode == BACKUP_MODE_DIFF_PTRACK &&
+        backup->incrementalType == INCR_TYPE_CUMULATIVE) {
+        return "PTRACK/C";
+    }
+    return backupModes[backup->backup_mode];
+}
+
 static bool
 IsDir(const char *dirpath, const char *entry, fio_location location)
 {
@@ -2346,15 +2357,16 @@ add_note(pgBackup *target_backup, const char *note)
 }
 
 /*
- * Write information about backup.in to stream "out".
+ * Write information about backup.in to stream "out", with the backup mode
+ * rendered as "mode".
  */
-void
-pgBackupWriteControl(FILE *out, pgBackup *backup)
+static void
+WriteControlWithMode(FILE *out, pgBackup *backup, const char *mode)
 {
     char    timestamp[100];
 
     fio_fprintf(out, "#Configuration\n");
-    fio_fprintf(out, "backup-mode = %s\n", pgBackupGetBackupMode(backup));
+    fio_fprintf(out, "backup-mode = %s\n", mode);
     fio_fprintf(out, "stream = %s\n", backup->stream ? "true" : "false");
     fio_fprintf(out, "compress-alg = %s\n",
         deparse_compress_alg(backup->compress_alg));
@@ -2463,6 +2475,20 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
 
     fio_fprintf(out, "\n#S3 Storage status\n");
     fio_fprintf(out, "s3-status = %s\n", ossStatus2str(backup->oss_status));
+}
+
+/* backup.control keeps the mode in the form readBackupControlFile() parses back */
+void
+pgBackupWriteControl(FILE *out, pgBackup *backup)
+{
+    WriteControlWithMode(out, backup, pgBackupGetBackupMode(backup));
+}
+
+/* show -i output, where cumulative backups read as PTRACK/C */
+void
+ShowBackupControl(FILE *out, pgBackup *backup)
+{
+    WriteControlWithMode(out, backup, GetBackupDisplayMode(backup));
 }
 
 /*
