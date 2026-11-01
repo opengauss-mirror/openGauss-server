@@ -2556,8 +2556,12 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     /* backup local file */
     else
     {
-        /* open source file for read */
-        in = fopen(from_fullpath, PG_BINARY_R);
+        /*
+         * merge copies files of an encrypted backup, read them through their
+         * container; DSS paths need the device-aware fopen
+         */
+        in = is_dss_file(from_fullpath) ? fopen(from_fullpath, PG_BINARY_R) :
+                                          EncFopen(from_fullpath, PG_BINARY_R);
         if (in == NULL)
         {
             /* maybe deleted, it's not error in case of backup */
@@ -3291,7 +3295,12 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         /* force compress page if file is compressed file */
         calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
     }
-    in = fopen(from_fullpath, PG_BINARY_R);
+    /*
+     * merge reads back the staged file it wrote into an encrypted FULL backup;
+     * DSS paths need the device-aware fopen
+     */
+    in = is_dss_file(from_fullpath) ? fopen(from_fullpath, PG_BINARY_R) :
+                                      EncFopen(from_fullpath, PG_BINARY_R);
     if (in == NULL)
     {
         /*
