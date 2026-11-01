@@ -602,8 +602,8 @@ static void help_backup(void)
     printf(_("                                   behavior when CBM data for a cumulative backup is unavailable:\n"));
     printf(_("                                   \"error\" - abort the backup (default),\n"));
     printf(_("                                   \"differential\" - degrade to differential with a warning\n"));
-    printf(_("      --parent-backup-id=backup-id use the specified backup as parent\n"));
-    printf(_("                                   (must be a valid FULL backup or the latest backup of the chain)\n"));
+    printf(_("      --parent-backup-id=backup-id use the specified FULL backup as parent\n"));
+    printf(_("                                   of a cumulative incremental backup\n"));
     printf(_("      --archive-timeout=timeout    wait timeout for WAL segment archiving (default: 5min)\n"));
     printf(_("      --backup-pg-replslot]        backup of '%s' directory\n"), PG_REPLSLOT_DIR);
 

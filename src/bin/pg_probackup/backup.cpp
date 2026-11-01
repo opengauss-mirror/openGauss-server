@@ -369,8 +369,7 @@ static pgBackup *FindBackupById(parray *backupList, time_t backupId)
 }
 
 static void
-validate_requested_parent_backup(pgBackup *parentBackup, TimeLineID tli,
-                                 pgBackup *chainTail)
+validate_requested_parent_backup(pgBackup *parentBackup, TimeLineID tli)
 {
     pgBackup *invalidBackup = NULL;
 
@@ -396,15 +395,13 @@ validate_requested_parent_backup(pgBackup *parentBackup, TimeLineID tli,
     }
 
     /*
-     * Restrict explicit parent to a valid FULL backup or the latest backup of
-     * the current chain. Anything else would silently fork the backup chain
-     * in a way merge and retention cannot handle.
+     * An explicit parent names the FULL baseline of a cumulative incremental
+     * backup. Differential backups always follow the chain tail on their own.
      */
-    if (parentBackup->backup_mode != BACKUP_MODE_FULL &&
-        (chainTail == NULL || parentBackup->start_time != chainTail->start_time)) {
-        elog(ERROR, "Parent backup %s must be a valid FULL backup or "
-             "the latest backup of the current chain",
-            base36enc(parentBackup->start_time));
+    if (parentBackup->backup_mode != BACKUP_MODE_FULL) {
+        elog(ERROR, "Parent backup %s is a %s backup, --parent-backup-id "
+             "must specify a valid FULL backup",
+            base36enc(parentBackup->start_time), pgBackupGetBackupMode(parentBackup));
     }
 
     if (parentBackup->media_type != current.media_type) {
@@ -545,7 +542,7 @@ preflight_incremental_backup(PGconn *backup_conn)
                 base36enc(g_requestedParentBackupId));
         }
 
-        validate_requested_parent_backup(parentBackup, tli, chainTail);
+        validate_requested_parent_backup(parentBackup, tli);
 
         if (!cbm_interval_available(backup_conn, parentBackup->start_lsn)) {
             elog(ERROR, "CBM information starting from LSN %X/%X of parent backup %s "
@@ -554,8 +551,7 @@ preflight_incremental_backup(PGconn *backup_conn)
                  base36enc(parentBackup->start_time));
         }
 
-        current.incrementalType = (parentBackup->backup_mode == BACKUP_MODE_FULL) ?
-            INCR_TYPE_CUMULATIVE : INCR_TYPE_DIFFERENTIAL;
+        current.incrementalType = INCR_TYPE_CUMULATIVE;
     } else { /* g_incrementalType == INCR_TYPE_CUMULATIVE */
         if (chainTail == NULL) {
             elog(ERROR, "Valid backup on current timeline %u is not found, "
