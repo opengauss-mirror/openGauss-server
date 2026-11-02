@@ -18583,6 +18583,34 @@ static void setPrimaryNotnull(Oid relid, IndexStmt *stmt, AlteredTableInfo* tab)
 }
 
 /*
+ * Index rebuilding changes its OID even when the storage can be reused.
+ * Restore CLUSTER ON after the replacement indexes have been created.
+ */
+static void ATQueueClusteredIndexRestore(Oid indexOid, Relation rel, AlteredTableInfo* tab)
+{
+    /* Ustore does not support CLUSTER; do not restore legacy markers. */
+    if (rel->rd_tam_ops == TableAmUstore) {
+        return;
+    }
+
+    HeapTuple indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
+    if (!HeapTupleIsValid(indexTuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", indexOid)));
+    }
+    bool isClustered = ((Form_pg_index)GETSTRUCT(indexTuple))->indisclustered;
+    ReleaseSysCache(indexTuple);
+    if (!isClustered) {
+        return;
+    }
+
+    AlterTableCmd* cmd = makeNode(AlterTableCmd);
+    cmd->subtype = AT_ClusterOn;
+    cmd->name = get_rel_name(indexOid);
+    tab->subcmds[AT_PASS_OLD_CONSTR] = lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
+}
+
+/*
  * Attach each generated command to the proper place in the work queue.
  * Note this could result in creation of entirely new work-queue entries.
  *
@@ -18612,11 +18640,15 @@ static void AttachEachCommandInQueue(
                     }
                 }
 
+                /* Preserve the comment when recreating the index. */
+                stmt->idxcomment = GetComment(oldId, RelationRelationId, 0);
+
                 tab = ATGetQueueEntry(wqueue, rel);
                 newcmd = makeNode(AlterTableCmd);
                 newcmd->subtype = AT_ReAddIndex;
                 newcmd->def = (Node*)stmt;
                 tab->subcmds[AT_PASS_OLD_INDEX] = lappend(tab->subcmds[AT_PASS_OLD_INDEX], newcmd);
+                ATQueueClusteredIndexRestore(oldId, rel, tab);
                 break;
             }
             case T_AlterTableStmt: {
@@ -18629,24 +18661,31 @@ static void AttachEachCommandInQueue(
                     Constraint* con = NULL;
 
                     switch (cmd->subtype) {
-                        case AT_AddIndex:
+                        case AT_AddIndex: {
                             Assert(IsA(cmd->def, IndexStmt));
                             SetPartionIndexType((IndexStmt*)cmd->def, rel, true);
+                            Oid oldIndexId = get_constraint_index(oldId);
                             if (!rewrite) {
                                 if (RelationIsPartitioned(rel) && !((IndexStmt*)cmd->def)->isGlobal) {
-                                    tryReusePartedIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def, rel);
+                                    tryReusePartedIndex(oldIndexId, (IndexStmt*)cmd->def, rel);
                                 } else {
-                                    TryReuseIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def);
+                                    TryReuseIndex(oldIndexId, (IndexStmt*)cmd->def);
                                 }
                             }
 
+                            /* Preserve the comment on the constraint backing index. */
+                            ((IndexStmt*)cmd->def)->idxcomment =
+                                GetComment(oldIndexId, RelationRelationId, 0);
+
                             cmd->subtype = AT_ReAddIndex;
                             tab->subcmds[AT_PASS_OLD_INDEX] = lappend(tab->subcmds[AT_PASS_OLD_INDEX], cmd);
+                            ATQueueClusteredIndexRestore(oldIndexId, rel, tab);
 
                             if (tab->is_first_after) {
                                 setPrimaryNotnull(rel->rd_id, (IndexStmt*)cmd->def, tab);
                             }
                             break;
+                        }
                         case AT_AddConstraint:
                             Assert(IsA(cmd->def, Constraint));
                             con = (Constraint*)cmd->def;
