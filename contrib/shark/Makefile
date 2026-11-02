@@ -4,11 +4,11 @@ BASECODEDIR=src
 BEPARSERDIR=src/backend_parser
 PLDIR=src/pltsql
 
-shark--2.0.sql: shark--1.0.sql upgrade_script/shark--1.0--2.0.sql
+shark--2.1.sql: shark--1.0.sql upgrade_script/shark--1.0--2.0.sql upgrade_script/shark--2.0--2.1.sql
 	cat $^ > $@
 
-DATA_built = shark--2.0.sql
-DATA = shark--2.0.sql upgrade_script/shark--1.0--2.0.sql rollback_script/shark--2.0--1.0.sql
+DATA_built = shark--2.1.sql
+DATA = shark--2.1.sql upgrade_script/shark--2.0--2.1.sql rollback_script/shark--2.1--2.0.sql upgrade_script/shark--1.0--2.0.sql rollback_script/shark--2.0--1.0.sql
 REGRESS = dummy
 
 OBJS = shark.o dbcc.o varlena.o sqlvariant.o datefuncs.o
