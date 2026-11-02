@@ -36,6 +36,7 @@ public:
     {
         config = modelConfig;
     }
+    Vector** BatchEmbed(OGAIString* texts, size_t textNum, int* dim) override;
     char* BuildEmbeddingReqBody(OGAIString* texts, size_t textNum) override;
     void ParseEmbeddingRespBody(char* respBody, Vector** results, size_t start, size_t textNum) override;
 };

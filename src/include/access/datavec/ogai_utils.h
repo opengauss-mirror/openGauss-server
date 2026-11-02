@@ -33,6 +33,15 @@
 
 #define OGAI_ERROR_BUF_SZ 4096
 
+typedef enum {
+    OLLAMA_EMBED_NATIVE,
+    OLLAMA_EMBED_LEGACY,
+    OLLAMA_EMBED_OPENAI
+} OllamaEmbeddingProtocol;
+
+OllamaEmbeddingProtocol GetOllamaEmbeddingProtocol(const char* url);
+char* ResolveOllamaEmbeddingUrl(const char* url);
+
 HttpMgr* GetHttpMgr(KmErr* errBuf, const char* url, const char* apiKey, ModelProvider provider);
 
 #endif // OGAI_UTILS_H
