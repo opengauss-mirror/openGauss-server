@@ -469,9 +469,18 @@ extern void DestroyListElements(ListPartElement* src, int elementNum);
 extern void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);
 extern void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen);
 extern void DestroyPartitionMap(PartitionMap* partMap);
-/* search fake relation with partOid, if no need partitionno, just input 0 */
-extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+
+/* Search fake relation with partOid. If no partition number is needed, use INVALID_PARTITION_NO. */
+extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid* partOid,
     int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
+
+/* Keep the value-based interface for plugin callers that do not need the updated partition OID. */
+static inline bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+    int partitionno, Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true)
+{
+    return trySearchFakeReationForPartitionOid(
+        fakeRels, cxt, rel, &partOid, partitionno, fakeRelation, partition, lmode, checkSubPart);
+}
 
 #ifndef FRONTEND
 typedef bool (*nullsMinimalPolicy)();
