@@ -152,7 +152,7 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/shark--5.0.sql
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--1.0--2.0.sql
     DESTINATION share/postgresql/extension/
 )
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--2.0--3.0.sql
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--2.1--3.0.sql
     DESTINATION share/postgresql/extension/
 )
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--3.0--4.0.sql
@@ -173,10 +173,16 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--2.0--2.0.1.sql
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--2.0.1--2.0.sql
     DESTINATION share/postgresql/extension/
 )
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--3.0--2.0.sql
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--3.0--2.1.sql
     DESTINATION share/postgresql/extension/
 )
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--2.0--1.0.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--2.0--2.1.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--2.1--2.0.sql
     DESTINATION share/postgresql/extension/
 )
 install(TARGETS shark DESTINATION lib/postgresql)
