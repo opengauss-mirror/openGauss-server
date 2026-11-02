@@ -25,6 +25,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "postmaster/postmaster.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/pgxcnode.h"
@@ -436,6 +437,15 @@ Datum create_wdr_snapshot(PG_FUNCTION_ARGS)
         ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("GUC parameter 'enable_wdr_snapshot' is off")));
         PG_RETURN_TEXT_P(cstring_to_text("WDR snapshot request can't be executed"));
         ;
+    }
+    if (RecoveryInProgress()) {
+        ereport(ERROR,
+            (errmodule(MOD_WDR_SNAPSHOT),
+            errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+            errmsg("WDR snapshot can not be created on standby"),
+            errdetail("The snapshot data tables in snapshot schema are read-only on standby."),
+            errcause("WDR snapshot is only supported on the primary node."),
+            erraction("Run create_wdr_snapshot() on the primary node")));
     }
     if (!PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) && (IS_SINGLE_NODE != true)) {
         ereport(NOTICE, (errmsg("take snapshot must be on CCN node")));
@@ -1198,8 +1208,59 @@ void SnapshotNameSpace::GetDatabaseList(List** databaselist)
 }
 
 /*
+ * MarkSharkSkipDb
+ * Called from the PG_CATCH path of InsertOneDbTables when the per-database
+ * subtransaction failed because extension "shark" was installed in the
+ * database before, while "shark" is not configured in parameter
+ * "shared_preload_libraries", so connecting to this database always fails.
+ * Mark the skipped database in snapshot.tables_snap_timestamp so that the
+ * WDR report can display the warning. This function runs in a catch block
+ * and must not throw: all failures are reported by WARNING only.
+ */
+static void MarkSharkSkipDb(const char* dbname, uint64 curr_snapid)
+{
+    StringInfoData query;
+    bool isnull = false;
+    int count = 0;
+
+    /* report the warning and mark the skipped database only once for one snapshot */
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "select pg_catalog.count(*) from snapshot.tables_snap_timestamp where snapshot_id = %lu and "
+        "db_name = '%s' and tablename = 'wdr_shark_skip'",
+        curr_snapid, dbname);
+    if (SPI_execute(query.data, false, 0) == SPI_OK_SELECT && SPI_processed > 0) {
+        count = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    }
+    pfree_ext(query.data);
+    if (count > 0) {
+        return;
+    }
+
+    ereport(WARNING, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_WARNING),
+        errmsg("Database \"%s\" is a D-compatible database and has installed extension \"shark\", but "
+            "\"shark\" is not configured in parameter \"shared_preload_libraries\", WDR skips this database",
+            dbname),
+        errdetail("Add \"shark\" into parameter \"shared_preload_libraries\" and restart, then the WDR "
+            "information of this database can be collected")));
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "INSERT INTO snapshot.tables_snap_timestamp(snapshot_id, db_name, tablename, start_ts, end_ts) "
+        "values(%lu, '%s', 'wdr_shark_skip', '%s', '%s')",
+        curr_snapid, dbname, GetCurrentTimeStampString(), GetCurrentTimeStampString());
+    /* ExecuteQuery reports failures by WARNING instead of throwing, safe in the catch block */
+    (void)SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_INSERT);
+    pfree_ext(query.data);
+}
+
+/*
  * InsertOneDbTables
  *        for exemple pg_stat_xxx and pg_statio_xxx tables relation with pg_class
+ *
+ * Each database is collected in its own subtransaction: a single broken
+ * database (e.g. connection refused because the database needs an extension
+ * in shared_preload_libraries, or a failing dbe_perf view) must not abort
+ * the whole snapshot. The failed database is skipped with a WARNING.
  */
 void SnapshotNameSpace::InsertOneDbTables(const char** views, int numViews, uint64 curr_snapid)
 {
@@ -1208,7 +1269,44 @@ void SnapshotNameSpace::InsertOneDbTables(const char** views, int numViews, uint
     foreach_cell(cell, databaseList)
     {
         List* row = (List*)lfirst(cell);
-        SnapshotNameSpace::InsertDatabaseData((char*)linitial(row), curr_snapid, views, numViews);
+        const char* dbname = (const char*)linitial(row);
+        MemoryContext oldcontext = CurrentMemoryContext;
+        ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+        PG_TRY();
+        {
+            BeginInternalSubTransaction(NULL);
+            MemoryContextSwitchTo(oldcontext);
+            SnapshotNameSpace::InsertDatabaseData(dbname, curr_snapid, views, numViews);
+            ReleaseCurrentSubTransaction();
+            MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        }
+        PG_CATCH();
+        {
+            /* roll back only this database's subtransaction and keep the snapshot going */
+            RollbackAndReleaseCurrentSubTransaction();
+            MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            ErrorData* edata = CopyErrorData();
+            /* when the failure is caused by extension "shark" installed in the database while it is
+             * not configured in "shared_preload_libraries", the FATAL message mentioning "shark"
+             * comes as the detail of "could not establish connection", so check both fields */
+            bool sharkSkip = (edata != NULL &&
+                ((edata->message != NULL && strstr(edata->message, "shark") != NULL) ||
+                (edata->detail != NULL && strstr(edata->detail, "shark") != NULL)));
+            ereport(WARNING,
+                (errmodule(MOD_WDR_SNAPSHOT),
+                errcode(ERRCODE_WARNING),
+                errmsg("Failed to snapshot database %s, cause: %s", dbname, edata->message),
+                errdetail("database %s is skipped in snapshot " UINT64_FORMAT, dbname, curr_snapid)));
+            FlushErrorState();
+            FreeErrorData(edata);
+            SPI_restore_connection();
+            if (sharkSkip) {
+                MarkSharkSkipDb(dbname, curr_snapid);
+            }
+        }
+        PG_END_TRY();
     }
     DeepListFree(databaseList, true);
 }
@@ -1517,7 +1615,8 @@ NON_EXEC_STATIC void SnapshotMain()
          */
         pg_usleep(INTERVAL);
         if ((PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) || IS_SINGLE_NODE) &&
-            u_sess->attr.attr_common.enable_wdr_snapshot && !SS_IN_REFORM) {
+            u_sess->attr.attr_common.enable_wdr_snapshot && !SS_IN_REFORM && !RecoveryInProgress()) {
+            /* the snapshot tables are read-only on standby, idle until promoted */
             /* to avoid dead lock with redis, disable snapshot during redistribution */
             check_snapshot_thd_exit();
             SnapshotNameSpace::SubSnapshotMain();
