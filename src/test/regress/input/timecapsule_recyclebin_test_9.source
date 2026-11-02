@@ -553,5 +553,95 @@ timecapsule table RCA_NULL_003 to before truncate;
 drop table RCA_NULL_003 purge;
 purge recyclebin;
 ---------------------------------------------------------------------------------
+-- repeated flashback to before truncate: the second flashback reports an
+-- error and the data restored by the first flashback must stay intact
+create table rb8531_t(id int primary key, v int);
+insert into rb8531_t select i,1 from generate_series(1,20) i;
+truncate table rb8531_t;
+timecapsule table rb8531_t to before truncate;
+select count(*) from rb8531_t; -- expected 20
+timecapsule table rb8531_t to before truncate; -- expected error
+select count(*) from rb8531_t; -- expected 20
+drop table rb8531_t purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- after multiple truncates the flashbacks restore the versions from oldest
+-- to newest; once all versions are consumed the next flashback errors out
+create table rb8531_m(a int);
+insert into rb8531_m values(1);
+truncate table rb8531_m;
+insert into rb8531_m values(2);
+truncate table rb8531_m;
+insert into rb8531_m values(3);
+truncate table rb8531_m;
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 1
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 2
+timecapsule table rb8531_m to before truncate;
+select * from rb8531_m; -- expected 3
+timecapsule table rb8531_m to before truncate; -- expected error
+select * from rb8531_m; -- expected 3
+drop table rb8531_m purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- with the recyclebin enabled, truncate keeps the same foreign key
+-- semantics as with the recyclebin disabled, and both the parent and the
+-- child table are recorded in the recyclebin
+create table rb8532_p(id int primary key);
+create table rb8532_c(id int primary key, pid int references rb8532_p(id));
+insert into rb8532_p values (1);
+insert into rb8532_c values (10,1);
+truncate table rb8532_p restrict; -- expected error
+truncate table rb8532_p cascade;
+select count(*) from rb8532_p; -- expected 0
+select count(*) from rb8532_c; -- expected 0
+select count(*) from gs_recyclebin where rcyoriginname in ('rb8532_p','rb8532_c') and rcyoperation = 't'; -- expected 2
+timecapsule table rb8532_c to before truncate; -- expected error: parent not flashed back yet
+timecapsule table rb8532_p to before truncate;
+select count(*) from rb8532_p; -- expected 1
+timecapsule table rb8532_c to before truncate;
+select count(*) from rb8532_c; -- expected 1
+select count(*) from rb8532_c c join rb8532_p p on c.pid = p.id; -- expected 1
+---------------------------------------------------------------------------------
+-- flashing back the parent errors out while the child still references a
+-- key that would be swapped out; after the reference is removed the
+-- flashback succeeds
+truncate table rb8532_p cascade;
+insert into rb8532_p values (9);
+insert into rb8532_c values (90,9);
+timecapsule table rb8532_p to before truncate; -- expected error: pid=9 would be swapped out
+delete from rb8532_c;
+timecapsule table rb8532_p to before truncate;
+select count(*) from rb8532_p; -- expected 1
+timecapsule table rb8532_c to before truncate;
+select count(*) from rb8532_c; -- expected 1
+drop table rb8532_c, rb8532_p cascade;
+purge recyclebin;
+---------------------------------------------------------------------------------
+-- when the cascade group contains an astore table the whole statement
+-- falls back to the regular truncate path; a self-referencing foreign key
+-- table supports both truncate and flashback
+create table rb8532_p2(id int primary key);
+create table rb8532_c2(id int primary key, pid int references rb8532_p2(id));
+create table rb8532_a2(id int primary key, pid int references rb8532_p2(id)) with (storage_type=astore);
+insert into rb8532_p2 values (1);
+insert into rb8532_c2 values (10,1);
+insert into rb8532_a2 values (20,1);
+truncate table rb8532_p2 cascade;
+select count(*) from rb8532_p2; -- expected 0
+select count(*) from rb8532_c2; -- expected 0
+select count(*) from rb8532_a2; -- expected 0
+select count(*) from gs_recyclebin where rcyoriginname in ('rb8532_p2','rb8532_c2','rb8532_a2'); -- expected 0
+drop table rb8532_a2, rb8532_c2, rb8532_p2 cascade;
+-- self-referencing foreign key
+create table rb8532_s(id int primary key, pid int references rb8532_s(id));
+insert into rb8532_s values (1,NULL),(2,1);
+truncate table rb8532_s restrict;
+timecapsule table rb8532_s to before truncate;
+select count(*) from rb8532_s; -- expected 2
+drop table rb8532_s purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
 reset client_min_messages;

@@ -206,6 +206,10 @@ test: user_host_test
 # test for new_expr_by_flatten
 test: enable_expr_fusion_flatten
 
+# RECORD field deparsing for proven-dummy subqueries
+test: plpgsql_array_geqo
+test: ruleutils_record
+
 # PR 9678: array, GEQO and PL/pgSQL plan-cache backport
 test: plpgsql_array_geqo
 

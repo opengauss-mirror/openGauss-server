@@ -224,7 +224,12 @@ void cluster(ClusterStmt* stmt, bool isTopLevel)
         tableOid = RangeVarGetRelidExtended(
             stmt->relation, lockMode, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
         rel = heap_open(tableOid, NoLock);
-
+        /* Ustore tables do not support CLUSTER. */
+        if (rel->rd_tam_ops == TableAmUstore) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cluster not supported in ustore")));
+        }
         TrForbidAccessRbObject(RelationRelationId, tableOid, stmt->relation->relname);
 
         /* cluster a specific partition */
@@ -468,6 +473,20 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
          * which is redundant, but we leave it for extra safety.
          */
         if (RELATION_IS_OTHER_TEMP(OldHeap)) {
+            relation_close(OldHeap, lockMode);
+            goto out;
+        }
+
+        /*
+         * Skip ustore tables: CLUSTER is not supported on them.  Normally the
+         * clustered flag can no longer be set on an ustore table, but it may
+         * still be present in databases upgraded from older releases.
+         */
+        if (OldHeap->rd_tam_ops == TableAmUstore) {
+            ereport(NOTICE,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("skipping \"%s\" --- cluster not supported in ustore",
+                        RelationGetRelationName(OldHeap))));
             relation_close(OldHeap, lockMode);
             goto out;
         }

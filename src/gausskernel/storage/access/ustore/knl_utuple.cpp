@@ -1098,7 +1098,18 @@ bool UHeapAttIsNull(UHeapTuple tup, int attnum, TupleDesc tupleDesc)
      */
     Assert(!tupleDesc || attnum <= tupleDesc->natts);
     if (attnum > (int)UHeapTupleHeaderGetNatts(tup->disk_tuple)) {
-        return true;
+        /*
+         * The tuple lacks this attribute because it was added after the tuple
+         * was stored (ALTER TABLE ADD COLUMN without rewrite). Fetch the init
+         * default value from tupleDesc, keeping the null-check semantics
+         * aligned with UHeapDeformTupleGuts() which fills tts_values by
+         * heapGetInitDefVal() for such missing attributes.
+         */
+        bool isnull = true;
+        if (tupleDesc != NULL) {
+            (void)heapGetInitDefVal(attnum, tupleDesc, &isnull);
+        }
+        return isnull;
     }
 
     if (attnum > 0) {
