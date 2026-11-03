@@ -193,6 +193,7 @@ void gs_find_abnormal_memctx(MemoryContext context)
 void gs_recursive_verify_memctx(MemoryContext context, bool is_shared)
 {
     MemoryContext child;
+    volatile bool contextLocked = false;
 
     PG_TRY();
     {
@@ -200,6 +201,7 @@ void gs_recursive_verify_memctx(MemoryContext context, bool is_shared)
 
         if (is_shared) {
             MemoryContextLock(context);
+            contextLocked = true;
         }
 
         gs_find_abnormal_memctx(context);
@@ -213,15 +215,16 @@ void gs_recursive_verify_memctx(MemoryContext context, bool is_shared)
     }
     PG_CATCH();
     {
-        if (is_shared) {
+        if (contextLocked) {
             MemoryContextUnlock(context);
+            contextLocked = false;
         }
 
         PG_RE_THROW();
     }
     PG_END_TRY();
 
-    if (is_shared) {
+    if (contextLocked) {
         MemoryContextUnlock(context);
     }
 }
@@ -376,7 +379,8 @@ void gs_display_uncontrolled_query(int* procIdx)
 
     /* search the thread and print its memory usage */
     if (saveSessionid || maxSessionid) {
-        volatile PGPROC* proc = NULL;
+        PGPROC* volatile proc = NULL;
+        volatile bool deleMemContextLocked = false;
         int idx = 0;
         PG_TRY();
         {
@@ -390,9 +394,11 @@ void gs_display_uncontrolled_query(int* procIdx)
                 if (proc->sessMemorySessionid == saveSessionid || proc->sessMemorySessionid == maxSessionid) {
                     /*lock this proc's delete MemoryContext action*/
                     (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
+                    deleMemContextLocked = true;
                     if (NULL != proc->topmcxt)
                         gs_recursive_verify_memctx(proc->topmcxt, false);
                     (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+                    deleMemContextLocked = false;
                 }
             }
 
@@ -400,9 +406,9 @@ void gs_display_uncontrolled_query(int* procIdx)
         }
         PG_CATCH();
         {
-            if (*procIdx < (int)g_instance.proc_base->allProcCount) {
-                proc = g_instance.proc_base_all_procs[*procIdx];
+            if (deleMemContextLocked && proc != NULL) {
                 (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+                deleMemContextLocked = false;
             }
             PG_RE_THROW();
         }

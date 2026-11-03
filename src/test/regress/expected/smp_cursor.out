@@ -146,10 +146,77 @@ NOTICE:
 CONTEXT:  PL/pgSQL function inline_code_block line 5 at FETCH
 -- test resource conflict checking
 begin;
+set local lockwait_timeout = '5s';
 declare xc no scroll cursor for select * from t1;
+move all xc;
+--?NOTICE:.*
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: declare xc no scroll cursor for select * from t1;
+Name: datanode1
+--?Streaming(type: LOCAL GATHER dop: 1/2).*
+  Output: a, b, c, d
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?  ->  Seq Scan on smp_cursor.t1.*
+        Output: a, b, c, d
+
+
+--?NOTICE:.*
+----------------------------NestLevel:0----------------------------
+--?duration:.*
+
 drop table t1;
 ERROR:  cannot DROP TABLE "t1" because it is being used by active queries in this session
 end;
+-- consumer early close must not be treated as producer completion
+set enable_auto_explain = off;
+create table empty_side(a int);
+insert into empty_side select generate_series(1, 100);
+analyze empty_side;
+delete from empty_side;
+create or replace function slow_predicate(i int) returns boolean as $$
+begin
+    perform pg_sleep(5);
+    return true;
+end;
+$$ language plpgsql immutable cost 100000;
+begin;
+set local statement_timeout = '2s';
+set local enable_nestloop = off;
+set local enable_mergejoin = off;
+explain (costs off)
+    select s.a
+      from (select a from t1 where slow_predicate(a) offset 0) s
+      join (select a from empty_side where slow_predicate(a) offset 0) e on s.a = e.a;
+--?.*QUERY PLAN.*
+--?-+
+ Hash Join
+   Hash Cond: (t1.a = empty_side.a)
+   ->  Limit
+         ->  Limit
+               ->  Streaming(type: LOCAL GATHER dop: 1/2)
+                     ->  Limit
+                           ->  Seq Scan on t1
+                                 Filter: slow_predicate(a)
+   ->  Hash
+         ->  Limit
+               ->  Limit
+                     ->  Streaming(type: LOCAL GATHER dop: 1/2)
+                           ->  Limit
+                                 ->  Seq Scan on empty_side
+                                       Filter: slow_predicate(a)
+(15 rows)
+
+declare xc no scroll cursor for
+    select s.a
+      from (select a from t1 where slow_predicate(a) offset 0) s
+      join (select a from empty_side where slow_predicate(a) offset 0) e on s.a = e.a;
+move all xc;
+set local statement_timeout = 0;
+end;
+set enable_auto_explain = on;
 -- test cursor with hold
 begin;
 declare xc no scroll cursor with hold for select * from t1;
@@ -596,4 +663,7 @@ NOTICE:
 CONTEXT:  PL/pgSQL function inline_code_block line 9 at FETCH
 set enable_auto_explain = off;
 drop schema smp_cursor cascade;
-NOTICE:  drop cascades to table t1
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table empty_side
+drop cascades to function slow_predicate(integer)

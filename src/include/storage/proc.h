@@ -169,6 +169,7 @@ struct PGPROC {
     BackendId backendId; /* This backend's backend ID (if assigned) */
     Oid databaseId;      /* OID of database this backend is using */
     Oid roleId;          /* OID of role using this backend */
+    knl_thread_role role;
 
     /* Backend or session working version number. */
     uint32 workingVersionNum;

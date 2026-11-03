@@ -49,9 +49,40 @@ end;
 
 -- test resource conflict checking
 begin;
+set local lockwait_timeout = '5s';
 declare xc no scroll cursor for select * from t1;
+move all xc;
 drop table t1;
 end;
+
+-- consumer early close must not be treated as producer completion
+set enable_auto_explain = off;
+create table empty_side(a int);
+insert into empty_side select generate_series(1, 100);
+analyze empty_side;
+delete from empty_side;
+create or replace function slow_predicate(i int) returns boolean as $$
+begin
+    perform pg_sleep(5);
+    return true;
+end;
+$$ language plpgsql immutable cost 100000;
+begin;
+set local statement_timeout = '2s';
+set local enable_nestloop = off;
+set local enable_mergejoin = off;
+explain (costs off)
+    select s.a
+      from (select a from t1 where slow_predicate(a) offset 0) s
+      join (select a from empty_side where slow_predicate(a) offset 0) e on s.a = e.a;
+declare xc no scroll cursor for
+    select s.a
+      from (select a from t1 where slow_predicate(a) offset 0) s
+      join (select a from empty_side where slow_predicate(a) offset 0) e on s.a = e.a;
+move all xc;
+set local statement_timeout = 0;
+end;
+set enable_auto_explain = on;
 
 -- test cursor with hold
 begin;

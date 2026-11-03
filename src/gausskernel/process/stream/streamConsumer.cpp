@@ -52,6 +52,23 @@ StreamConsumer::~StreamConsumer()
     m_sharedContext = NULL;
 }
 
+bool StreamConsumer::allProducersComplete()
+{
+    if (m_sharedContext == NULL) {
+        return false;
+    }
+
+#ifdef __aarch64__
+    pg_memory_barrier();
+#endif
+    for (int i = 0; i < m_connNum; i++) {
+        if (!m_sharedContext->is_producer_complete[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
  * @Description: Init the consumer object
  *

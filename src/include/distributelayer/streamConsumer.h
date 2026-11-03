@@ -86,6 +86,8 @@ public:
         return m_sharedContext;
     }
 
+    bool allProducersComplete();
+
     /*
      * Record the orign node list in case of DN pruned in with-recursive execution
      * mode, store the corresponding producer connection list from which the
