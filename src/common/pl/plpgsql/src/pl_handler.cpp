@@ -1072,9 +1072,13 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         save_debug_info = func->debug;
         NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
 
-        // set the procedure's search_path as the current search_path
-        validate_search_path(func);
-        PushOverrideSearchPath(func->fn_searchpath, true);
+        /* Bind the search path only for routines that require it. */
+        const bool useOverrideSearchPath = !DB_IS_CMPT(PG_FORMAT) || ispackage ||
+            OidIsValid(protypoid) || OidIsValid(func->parent_oid);
+        if (useOverrideSearchPath) {
+            validate_search_path(func);
+            PushOverrideSearchPath(func->fn_searchpath, true);
+        }
 
         saved_Pseudo_CurrentUserId = u_sess->misc_cxt.Pseudo_CurrentUserId;
         u_sess->misc_cxt.Pseudo_CurrentUserId = &func->fn_owner;
@@ -1171,7 +1175,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
 #endif /* ENABLE_MULTIPLE_NODES */
             plpgsql_restore_current_value_stp_with_exception(saved_current_stp_with_exception);
             // resume the search_path when there is an error
-            PopOverrideSearchPath();
+            if (useOverrideSearchPath) {
+                PopOverrideSearchPath();
+            }
 
             saveCallFromFuncOid(InvalidOid);
             restoreCallFromPkgOid(secondLevelPkgOid);
@@ -1242,7 +1248,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         t_thrd.postgres_cxt.cur_command_tag = old_node_tag;
 
         // resume the search_path when the procedure has executed
-        PopOverrideSearchPath();
+        if (useOverrideSearchPath) {
+            PopOverrideSearchPath();
+        }
 
         if (AUDIT_EXEC_ENABLED) {
             auditExecPLpgSQLFunction(func, AUDIT_OK);

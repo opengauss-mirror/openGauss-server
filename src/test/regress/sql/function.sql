@@ -1006,6 +1006,31 @@ drop function execute_into_null_func;
 drop function strict_select_into_null_func;
 drop function strict_execute_into_null_func;
 reset behavior_compat_options;
+
+-- Test runtime search path changes in ordinary functions.
+SET search_path TO public;
+CREATE SCHEMA function_search_path;
+CREATE TABLE function_search_path.a(id integer);
+INSERT INTO function_search_path.a VALUES (1);
+
+CREATE FUNCTION public.test_function_search_path() RETURNS integer AS $$
+DECLARE
+    result integer;
+BEGIN
+    EXECUTE 'SET search_path TO public, "$user", function_search_path';
+    EXECUTE 'SELECT id FROM a LIMIT 1' INTO result;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT public.test_function_search_path() AS value;
+SHOW search_path;
+
+SET search_path TO public;
+DROP FUNCTION public.test_function_search_path();
+DROP TABLE function_search_path.a;
+DROP SCHEMA function_search_path;
+RESET search_path;
 \c regression;
 drop database IF EXISTS pl_test_funcion;
 
