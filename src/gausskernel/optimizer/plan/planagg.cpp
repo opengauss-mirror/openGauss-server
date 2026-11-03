@@ -314,7 +314,8 @@ Plan* optimize_minmax_aggregates(PlannerInfo* root, List* tlist, const AggClause
  *		that each one is a MIN/MAX aggregate.  If so, build a list of the
  *		distinct aggregate calls in the tree.
  *
- * Returns TRUE if a non-MIN/MAX aggregate is found, FALSE otherwise.
+ * Returns TRUE if a non-MIN/MAX aggregate or an unaggregated Var is found,
+ * FALSE otherwise.
  * (This seemingly-backward definition is used because expression_tree_walker
  * aborts the scan on TRUE return, which is what we want.)
  *
@@ -329,6 +330,14 @@ static bool find_minmax_aggs_walker(Node* node, List** context)
 {
     if (node == NULL)
         return false;
+    /*
+     * A MIN/MAX index plan replaces the aggregate with an InitPlan and has no
+     * input tuple for evaluating Vars outside the aggregate.  Such Vars are
+     * normally rejected during parse analysis, but compatibility modes can
+     * allow them when full GROUP BY checks are disabled.
+     */
+    if (IsA(node, Var))
+        return ((Var*)node)->varlevelsup == 0;
     if (IsA(node, Aggref)) {
         Aggref* aggref = (Aggref*)node;
         Oid aggsortop;
@@ -890,4 +899,3 @@ bool check_agg_optimizable(Aggref* aggref, int16* strategy)
 
     return true;
 }
-

@@ -183,6 +183,7 @@ test: single_node_oidjoins single_node_type_sanity
 test: single_node_insert xc_rownum
 test: single_node_temple
 test: single_node_create_function_1
+test: rownum_agg_test
 #test: single_node_create_type
 #test: single_node_create_table
 #test: single_node_create_function_2
