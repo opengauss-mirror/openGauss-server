@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92985;
+const uint32 GRAND_VERSION_NUM = 92986;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 UPGRADE_SHARK_2_1_VERSION_NUM = 92986;
 const uint32 LSG_VERSION_NUM = 92985;
 const uint32 RABITQ_VERSION_NUM = 92985;
 const uint32 UHEAP_LOCK_VERSION_NUM = 92978;
