@@ -1,0 +1,54 @@
+-- gs_dump must not cut a column default at a "COLLATE" that is part of a string literal
+drop database if exists dump_collate_default_src;
+NOTICE:  database "dump_collate_default_src" does not exist, skipping
+drop database if exists dump_collate_default_dst;
+NOTICE:  database "dump_collate_default_dst" does not exist, skipping
+create database dump_collate_default_src;
+create database dump_collate_default_dst;
+\c dump_collate_default_src
+create table t_collate_default(
+  v1 text collate "C" default (case when true then 'plain text' else 'other' end),
+  v2 text collate "C" default (case when true then 'A COLLATE B' else 'C' end),
+  v3 text collate "C" default 'x COLLATE y',
+  v4 text collate "C" default ('p' collate "C"),
+  v5 text collate "C" default 'it''s COLLATE z' || 'tail'
+);
+select a.attname, pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
+  join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+  where d.adrelid = 't_collate_default'::regclass order by a.attnum;
+ attname |                          pg_get_expr                          
+---------+---------------------------------------------------------------
+ v1      | CASE WHEN true THEN 'plain text'::text ELSE 'other'::text END
+ v2      | CASE WHEN true THEN 'A COLLATE B'::text ELSE 'C'::text END
+ v3      | 'x COLLATE y'::text
+ v4      | ('p'::text COLLATE "C")
+ v5      | ('it''s COLLATE z'::text || 'tail'::text)
+(5 rows)
+
+\! @abs_bindir@/gs_dump dump_collate_default_src -p @portstring@ -s -O -x -t t_collate_default -f @abs_bindir@/dump_collate_default.sql >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gsql -d dump_collate_default_dst -p @portstring@ -X -q -v ON_ERROR_STOP=1 -f @abs_bindir@/dump_collate_default.sql >/dev/null 2>&1; echo $?
+0
+\c dump_collate_default_dst
+select a.attname, pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
+  join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+  where d.adrelid = 't_collate_default'::regclass order by a.attnum;
+ attname |                          pg_get_expr                          
+---------+---------------------------------------------------------------
+ v1      | CASE WHEN true THEN 'plain text'::text ELSE 'other'::text END
+ v2      | CASE WHEN true THEN 'A COLLATE B'::text ELSE 'C'::text END
+ v3      | 'x COLLATE y'::text
+ v4      | ('p'::text COLLATE "C")
+ v5      | ('it''s COLLATE z'::text || 'tail'::text)
+(5 rows)
+
+insert into t_collate_default default values;
+select * from t_collate_default;
+     v1     |     v2      |     v3      | v4 |         v5         
+------------+-------------+-------------+----+--------------------
+ plain text | A COLLATE B | x COLLATE y | p  | it's COLLATE ztail
+(1 row)
+
+\c regression
+drop database if exists dump_collate_default_src;
+drop database if exists dump_collate_default_dst;
