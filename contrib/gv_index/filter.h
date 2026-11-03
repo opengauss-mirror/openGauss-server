@@ -104,8 +104,7 @@ struct SelectFilter : public annlite::Filter<Value> {
     }
     bool operator()(const Value& value, size_t offset) override
     {
-        Assert(false);
-        return true;
+        return (*this)(value);
     }
     bool operator()(const Value& value, const char* page, size_t offset) override
     {

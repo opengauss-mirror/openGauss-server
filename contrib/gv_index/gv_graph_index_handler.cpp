@@ -82,6 +82,18 @@ static void validate_and_adjust_graph_options(Relation index, GraphOptions *opts
                         errmsg("vector_dimension %d exceeds maxmium allowed %d", dim, MAX_DIMENSION)));
     }
 
+    if (opts->enable_vector_copy) {
+        // OriginalVectorFormat stores a dimension followed by float32 coordinates.
+        size_t vector_bytes = sizeof(annlite::DimensionType) + static_cast<size_t>(dim) * sizeof(float);
+        if (vector_bytes > gs_vector::GVPageStorage::data_size) {
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("original vector size %zu exceeds page data capacity %zu "
+                                   "when enable_vector_copy is enabled",
+                                   vector_bytes, gs_vector::GVPageStorage::data_size),
+                            errhint("Set enable_vector_copy=false or reduce vector dimensions.")));
+        }
+    }
+
     /* 2. subgraph_count 由 reloption 约束 [1, 64], SQL 层已保证非零，无需重复检查 */
 
     /* 3. enable_neighbor_embedded 是实验性legacy功能，强制关闭并警告 */
@@ -115,6 +127,11 @@ static annlite::IndexOptions make_quant_opts(const char *quant_type, uint32_t di
     /* pq: Product Quantization (默认 16 centroids，即pq4bit) */
     if (strcmp(quant_type, "pq") == 0) {
         size_t segment_count = ((dim > pq_max_use_all_subs) && (dim % 2 == 0)) ? dim : dim / 2;
+        if (segment_count == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("PQ segment count must be greater than zero for vector dimension %u", dim),
+                            errhint("Use quantization_type=lvq or increase vector dimensions.")));
+        }
         return annlite::VectorQuantizationConfig::make_quantized_pq4bit(dim, segment_count);
     }
     /* lvq: Locally Adaptive Vector Quantization (默认) */
@@ -270,10 +287,9 @@ static void AppendNpuBuildOptions(annlite::IndexOptions &buildOptions, const Gra
 #endif
 
 /* 填充 build_options, 使用 GraphOptions 中用户指定的参数，缺失则用默认值 */
-static annlite::IndexOptions build_options_from_graph_options(Relation heap, Relation index, GraphOptions *opts,
+static annlite::IndexOptions build_options_from_graph_options(const GraphBuildOptionValues &values,
     annlite::VectorDistanceType dist_type)
 {
-    GraphBuildOptionValues values = ReadGraphBuildOptionValues(heap, index, opts);
     LogGraphBuildOptions(values, dist_type);
     annlite::IndexOptions buildOptions = MakeBaseBuildOptions(values, dist_type);
     buildOptions.append_all(make_quant_opts(values.quantType, (uint32_t)values.dim));
@@ -291,11 +307,14 @@ static void graph_build_indexfile(Relation heap, Relation index, IndexInfo *inde
     using IndexType = annlite::Index<KeyBase, annlite::Value64, uint32_t, annlite::PageBasedToolKitEnv>;
 
     LightEnvImpl light_env_impl(index);
-    annlite::IndexOptions build_options = build_options_from_graph_options(heap, index, opts, dist_type);
+    GraphBuildOptionValues values = ReadGraphBuildOptionValues(heap, index, opts);
+    annlite::IndexOptions build_options = build_options_from_graph_options(values, dist_type);
 
     // 数据源 - 从堆表读取向量数据，返回annlite::Value64(二进制与GraphValueTypeV3兼容)
     using DataSource = gs_vector::GVDataSourceImpl<KeyBase, annlite::Value64>;
     DataSource data_source(heap, index, index_info, RelationIsUstoreFormat(heap));
+    // All build algorithms require the exact vector count before importing rows.
+    data_source.count_rows();
 
     IndexType* graph_index = CreateGraphIndex(&light_env_impl);
     // create_metapage 内部会先调用DocFactory::init初始化存储，再创建page0的metapage

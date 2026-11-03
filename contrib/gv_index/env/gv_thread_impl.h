@@ -34,6 +34,7 @@
 
 #include "c.h"
 #include "catalog/index.h"
+#include "catalog/pg_partition_fn.h"
 #include "postmaster/bgworker.h"
 #include "utils/elog.h"
 #include "utils/rel.h"
@@ -49,13 +50,19 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
     using Task = GVWorkerArgs::Task;
 
     GVThreadPoolImpl()
-        : m_max_threads(0), m_env(nullptr), m_init(false), m_index_oid(InvalidOid)
+        : m_max_threads(0), m_env(nullptr), m_init(false),
+          m_index_oid(InvalidOid), m_index_parent_oid(InvalidOid)
     {}
     GVThreadPoolImpl(size_t threads, annlite::LightEnv *_env)
-        : m_max_threads(threads), m_env(_env), m_init(false), m_index_oid(InvalidOid)
+        : m_max_threads(threads), m_env(_env), m_init(false),
+          m_index_oid(InvalidOid), m_index_parent_oid(InvalidOid)
     {}
 
-    void set_index_oid(Oid oid) { m_index_oid = oid; }
+    void set_index_relation(Relation index)
+    {
+        m_index_oid = RelationGetRelid(index);
+        m_index_parent_oid = index->parentId;
+    }
 
     static void* worker(void *void_args)
     {
@@ -81,16 +88,32 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
         GVWorkerArgs** args_ptr = static_cast<GVWorkerArgs**>(bwc->bgshared);
         if (args_ptr != nullptr && *args_ptr != nullptr) {
             GVWorkerArgs* args = *args_ptr;
+            Relation index_parent = nullptr;
             if (OidIsValid(args->index_oid)) {
-                Relation index_rel = index_open(args->index_oid, AccessShareLock);
+                Relation index_rel;
+                if (OidIsValid(args->index_parent_oid)) {
+                    // LOCAL index OIDs live in pg_partition, not pg_class.
+                    // Each worker needs its own parent and dummy Relation.
+                    index_parent = index_open(args->index_parent_oid, AccessShareLock);
+                    Partition index_part = partitionOpen(index_parent, args->index_oid, AccessShareLock);
+                    index_rel = partitionGetRelation(index_parent, index_part);
+                    partitionClose(index_parent, index_part, AccessShareLock);
+                } else {
+                    index_rel = index_open(args->index_oid, AccessShareLock);
+                }
                 GVPageStorage::set_worker_index(index_rel);
             }
             (void)worker(args);
 
             Relation index_rel = GVPageStorage::get_worker_index();
             if (index_rel != nullptr) {
-                index_close(index_rel, AccessShareLock);
                 GVPageStorage::set_worker_index(nullptr);
+                if (index_parent != nullptr) {
+                    releaseDummyRelation(&index_rel);
+                    index_close(index_parent, AccessShareLock);
+                } else {
+                    index_close(index_rel, AccessShareLock);
+                }
             }
         }
     }
@@ -127,6 +150,7 @@ struct GVThreadPoolImpl : public annlite::light_env::ComputeTaskRunner {
         m_workers_arg = GVWorkerArgs(m_max_threads);
         m_workers_arg.set_terminated(false);
         m_workers_arg.index_oid = m_index_oid;
+        m_workers_arg.index_parent_oid = m_index_parent_oid;
 
         GVWorkerArgs **pointer = (GVWorkerArgs **)palloc(sizeof(GVWorkerArgs *));
         *pointer = &m_workers_arg;
@@ -203,6 +227,7 @@ private:
     GVWorkerArgs m_workers_arg;
     bool m_init;
     Oid m_index_oid;
+    Oid m_index_parent_oid;
 };
 } /* namespace gs_vector */
 

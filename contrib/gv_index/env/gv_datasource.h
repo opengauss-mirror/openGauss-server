@@ -111,7 +111,7 @@ public:
     GVDataSourceImpl(Relation heap, Relation index, IndexInfo *index_info, bool is_ustore)
         : m_heap(heap), m_index(index), m_ii(index_info),
         m_index_tuples(0), m_heap_tuples(0), m_is_ustore(is_ustore),
-        m_estimated_rows(estimate_row_count(heap))
+        m_estimated_rows(estimate_row_count(heap)), m_rows_counted(false)
     {}
 
     bool is_open() const { return m_heap != nullptr; }
@@ -121,9 +121,8 @@ public:
 
     void set_rows(size_t rows) override
     {
-        if (rows > 0) {
-            m_estimated_rows = rows;
-        }
+        m_estimated_rows = rows;
+        m_rows_counted = true;
     }
 
     size_t get_rows() const override
@@ -133,11 +132,20 @@ public:
 
     bool rows_counted() const override
     {
-        return true;
+        // The page/statistics estimate is only an allocation hint. Builds need
+        // the exact number of scanned vectors, including the empty case.
+        return m_rows_counted;
     }
 
     double heap_tuples() const { return m_heap_tuples; }
     double index_tuples() const { return (double)m_index_tuples; }
+
+    void count_rows()
+    {
+        size_t rows = 0;
+        tableam_index_build_scan(m_heap, m_index, m_ii, true, CountRowsCallBack, &rows, NULL);
+        set_rows(rows);
+    }
 
     void open()
     {
@@ -339,6 +347,15 @@ private:
     double m_heap_tuples;
     bool m_is_ustore;
     size_t m_estimated_rows;
+    bool m_rows_counted;
+
+    static void CountRowsCallBack(Relation index, HeapTuple hup, Datum *values,
+        const bool *isnull, bool tupleIsAlive, void *state)
+    {
+        if (!isnull[0]) {
+            ++*static_cast<size_t *>(state);
+        }
+    }
 
     static void ScanOperatorCallBack(Relation index, HeapTuple hup, Datum *values,
         const bool *isnull, bool tupleIsAlive, void *state)
