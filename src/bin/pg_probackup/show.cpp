@@ -578,7 +578,7 @@ show_backup(const char *instance_name, time_t requested_backup_id)
     }
 
     if (show_format == SHOW_PLAIN)
-        pgBackupWriteControl(stdout, backup);
+        ShowBackupControl(stdout, backup);
     else
         elog(ERROR, "Invalid show format %d", (int) show_format);
 
@@ -675,10 +675,7 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
         widths[cur] = Max(widths[cur], strlen(row->recovery_time));
         cur++;
 
-        /* Mode: cumulative PTRACK backups are rendered as PTRACK/C */
-        row->mode = (backup->backup_mode == BACKUP_MODE_DIFF_PTRACK &&
-                     backup->incrementalType == INCR_TYPE_CUMULATIVE) ?
-            "PTRACK/C" : pgBackupGetBackupMode(backup);
+        row->mode = GetBackupDisplayMode(backup);
         widths[cur] = Max(widths[cur], strlen(row->mode));
         cur++;
 
