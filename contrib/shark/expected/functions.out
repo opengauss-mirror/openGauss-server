@@ -1848,7 +1848,7 @@ select dateadd(dd,2,time'23:20:20');
  Wed Jan 03 23:20:20 1900
 (1 row)
 
-select dateadd(dd,3,timetz '23:20:20');
+select dateadd(dd,3,timetz '23:20:20-07:00');
            dateadd            
 ------------------------------
  Thu Jan 04 22:20:20 1900 PST
