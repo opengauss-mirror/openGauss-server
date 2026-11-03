@@ -1,6 +1,14 @@
 name: openGauss_server_PR
 
 on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '.gitcode/**'
+      - 'doc/**'
+      - 'docs/**'
+      - 'docs-lite/**'
   pull_request_target:
     types:
       - open
@@ -172,7 +180,6 @@ stages:
       llt_a_arm:
         name: fastcheck_A_arm
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_arm, cpu=16]
@@ -197,7 +204,6 @@ stages:
       llt_b_arm:
         name: fastcheck_B_arm
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_arm, cpu=16]
@@ -222,7 +228,6 @@ stages:
       llt_c_arm:
         name: fastcheck_C_arm
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_arm, cpu=16]
@@ -247,7 +252,6 @@ stages:
       llt_a_x86:
         name: fastcheck_A_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -272,7 +276,6 @@ stages:
       llt_b_x86:
         name: fastcheck_B_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -297,7 +300,6 @@ stages:
       llt_c_x86:
         name: fastcheck_C_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -322,7 +324,6 @@ stages:
       om_install_x86:
         name: om_install_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -346,7 +347,6 @@ stages:
       om_upgrade_x86:
         name: om_upgrade_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -370,7 +370,6 @@ stages:
       ss_hatest_x86:
         name: ss_hatest_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
@@ -394,7 +393,6 @@ stages:
       ss_x86:
         name: ss_x86
         timeout-minutes: 60
-        needs: [Detect_file_changes]
         if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
         continue-on-error: true
         runs-on: [self-hosted, server_x86, cpu=16]
