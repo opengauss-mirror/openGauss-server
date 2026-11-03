@@ -939,6 +939,25 @@ int pg_mblen(const char* mbstr)
     return ((*pg_wchar_table[u_sess->mb_cxt.DatabaseEncoding->encoding].mblen)((const unsigned char*)mbstr));
 }
 
+/*
+ * Return a multibyte character length that is safe for the remaining input.
+ * Some encoding-specific mblen functions infer the length from the leading
+ * byte and can return more bytes than remain in a truncated string.
+ */
+int GetSafeMbCharLength(const char* mbstr, int remainingLength)
+{
+    if (mbstr == NULL || remainingLength <= 0) {
+        return 0;
+    }
+
+    int charLength = pg_mblen(mbstr);
+    if (charLength > remainingLength ||
+        pg_encoding_verifymb(GetDatabaseEncoding(), mbstr, charLength) < 0) {
+        return 1;
+    }
+    return charLength;
+}
+
 /* returns the display length of a multibyte character */
 int pg_dsplen(const char* mbstr)
 {

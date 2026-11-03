@@ -16,6 +16,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/sysattr.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
@@ -23,6 +24,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_class.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
@@ -36,11 +38,44 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "storage/lmgr.h"
 #include "utils/syscache.h"
 #include "catalog/gs_package.h"
 #include "parser/parse_type.h"
 #include "catalog/gs_dependencies_fn.h"
 #include "utils/pl_package.h"
+
+static bool is_relkind_relation(Oid rel_oid)
+{
+    if (rel_oid < FirstNormalObjectId) {
+        return false;
+    }
+
+    HeapTuple tp = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_oid));
+    if (!HeapTupleIsValid(tp)) {
+        return false;
+    }
+
+    Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tp);
+    bool isRelation = (reltup->relkind == RELKIND_RELATION);
+    ReleaseSysCache(tp);
+    return isRelation;
+}
+
+void lock_normal_type_relation_by_typeid(Oid type_oid, int lockmode)
+{
+    /* System types cannot be altered, so no relation lock is needed. */
+    if (type_oid < FirstNormalObjectId) {
+        return;
+    }
+
+    Oid rel_oid = get_typ_typrelid(type_oid);
+    if (rel_oid == InvalidOid || !is_relkind_relation(rel_oid)) {
+        return;
+    }
+
+    LockRelationOid(rel_oid, (LOCKMODE)lockmode);
+}
 
 /* ----------------------------------------------------------------
  *		TypeShellMake

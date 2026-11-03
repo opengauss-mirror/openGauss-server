@@ -54,6 +54,7 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
     Cost fitness;
     int savelength;
     struct HTAB* savehash;
+    MemoryContext saved_geqo_backup_context;
 
     /*
      * Create a private memory context that will hold all temp storage
@@ -67,45 +68,62 @@ Cost geqo_eval(PlannerInfo* root, Gene* tour, int num_gene)
     mycontext = AllocSetContextCreate(
         CurrentMemoryContext, "GEQO", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     oldcxt = MemoryContextSwitchTo(mycontext);
-
-    /*
-     * gimme_tree will add entries to root->join_rel_list, which may or may
-     * not already contain some entries.  The newly added entries will be
-     * recycled by the MemoryContextDelete below, so we must ensure that the
-     * list is restored to its former state before exiting.  We can do this by
-     * truncating the list to its original length.	NOTE this assumes that any
-     * added entries are appended at the end!
-     *
-     * We also must take care not to mess up the outer join_rel_hash, if there
-     * is one.	We can do this by just temporarily setting the link to NULL.
-     * (If we are dealing with enough join rels, which we very likely are, a
-     * new hash table will get built and used locally.)
-     *
-     * join_rel_level[] shouldn't be in use, so just Assert it isn't.
-     */
+    saved_geqo_backup_context = u_sess->opt_cxt.mmgr_geqo_backup_context;
+    u_sess->opt_cxt.mmgr_geqo_backup_context = oldcxt;
     savelength = list_length(root->join_rel_list);
     savehash = root->join_rel_hash;
-    AssertEreport(root->join_rel_level == NULL, MOD_OPT, "");
 
-    root->join_rel_hash = NULL;
+    PG_TRY();
+    {
+        /*
+         * gimme_tree will add entries to root->join_rel_list, which may or may
+         * not already contain some entries.  The newly added entries will be
+         * recycled by the MemoryContextDelete below, so we must ensure that the
+         * list is restored to its former state before exiting.  We can do this by
+         * truncating the list to its original length.	NOTE this assumes that any
+         * added entries are appended at the end!
+         *
+         * We also must take care not to mess up the outer join_rel_hash, if there
+         * is one.	We can do this by just temporarily setting the link to NULL.
+         * (If we are dealing with enough join rels, which we very likely are, a
+         * new hash table will get built and used locally.)
+         *
+         * join_rel_level[] shouldn't be in use, so just Assert it isn't.
+         */
+        AssertEreport(root->join_rel_level == NULL, MOD_OPT, "");
 
-    /* construct the best path for the given combination of relations */
-    joinrel = gimme_tree(root, tour, num_gene);
+        root->join_rel_hash = NULL;
 
-    /*
-     * compute fitness
-     *
-     * XXX geqo does not currently support optimization for partial result
-     * retrieval --- how to fix?
-     */
-    fitness = ((Path*)linitial(joinrel->cheapest_total_path))->total_cost;
+        /* construct the best path for the given combination of relations */
+        joinrel = gimme_tree(root, tour, num_gene);
 
-    /*
-     * Restore join_rel_list to its former state, and put back original
-     * hashtable if any.
-     */
-    root->join_rel_list = list_truncate(root->join_rel_list, savelength);
-    root->join_rel_hash = savehash;
+        /*
+         * compute fitness
+         *
+         * XXX geqo does not currently support optimization for partial result
+         * retrieval --- how to fix?
+         */
+        fitness = ((Path*)linitial(joinrel->cheapest_total_path))->total_cost;
+
+        /*
+         * Restore join_rel_list to its former state, and put back original
+         * hashtable if any.
+         */
+        root->join_rel_list = list_truncate(root->join_rel_list, savelength);
+        root->join_rel_hash = savehash;
+    }
+    PG_CATCH();
+    {
+        root->join_rel_list = list_truncate(root->join_rel_list, savelength);
+        root->join_rel_hash = savehash;
+        u_sess->opt_cxt.mmgr_geqo_backup_context = saved_geqo_backup_context;
+        (void)MemoryContextSwitchTo(oldcxt);
+        MemoryContextDelete(mycontext);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    u_sess->opt_cxt.mmgr_geqo_backup_context = saved_geqo_backup_context;
 
     /* release all the memory acquired within gimme_tree */
     (void)MemoryContextSwitchTo(oldcxt);

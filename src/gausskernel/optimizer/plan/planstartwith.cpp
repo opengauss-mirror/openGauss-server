@@ -1462,7 +1462,11 @@ static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan
 
     foreach (lc, plan->targetlist) {
         TargetEntry *te = (TargetEntry *)lfirst(lc);
-        Assert (IsA(te->expr, Var));
+        /* A projection may add non-Var entries that cannot identify a
+         * base column used by a hierarchical pseudo column. */
+        if (te->expr == NULL || !IsA(te->expr, Var)) {
+            continue;
+        }
         if (list_member(tmp_list, te->expr)) {
             *colEntryList = lappend(*colEntryList, te);
         }
@@ -1775,39 +1779,43 @@ static void FixArrayInternalEntry(List *targetlsit)
     foreach(lc1, targetlsit) {
         TargetEntry *entry = (TargetEntry *)lfirst(lc1);
 
-        if (entry->resname != NULL &&
-           (strstr(entry->resname, "array_key_") ||
-            strstr(entry->resname, "array_col_"))) {
-            int varno = ((Var *)entry->expr)->varno;
-            int attno = entry->resname[10] - '0';
-            int resno = 0;
+        /* array_key uses the StartWith executor's own bookkeeping.  Only
+         * array_col entries need to be remapped to regular output Vars. */
+        if (GetPseudoColumnType(entry) != SWCOL_ARRAY_COL ||
+            entry->expr == NULL || !IsA(entry->expr, Var)) {
+            continue;
+        }
 
-            foreach(lc2, targetlsit) {
-                TargetEntry *entry2 = (TargetEntry *)lfirst(lc2);
+        Var *entry_var = (Var *)entry->expr;
+        int varno = entry_var->varno;
+        int attno = atoi(entry->resname + strlen("array_col_"));
+        int resno = 0;
 
-                if (GetPseudoColumnType(entry2) == SWCOL_REGULAR) {
-                    int varno2 = ((Var *)entry2->expr)->varno;
-                    int attno2 = ((Var *)entry2->expr)->varattno;
+        foreach(lc2, targetlsit) {
+            TargetEntry *entry2 = (TargetEntry *)lfirst(lc2);
 
-                    if (varno == varno2 && attno2 == attno) {
-                        resno = entry2->resno;
-                        break;
-                    }
+            if (GetPseudoColumnType(entry2) == SWCOL_REGULAR &&
+                entry2->expr != NULL && IsA(entry2->expr, Var)) {
+                Var *entry2_var = (Var *)entry2->expr;
+                int varno2 = entry2_var->varno;
+                int attno2 = entry2_var->varattno;
+
+                if (varno == varno2 && attno2 == attno) {
+                    resno = entry2->resno;
+                    break;
                 }
             }
+        }
 
+        /* Keep the original name if there is no matching regular Var.
+         * Renaming it to array_col_0 would make executor lookup fail. */
+        if (resno > 0) {
             char newArrayName[NAMEDATALEN];
             errno_t rc = memset_s(newArrayName, NAMEDATALEN, 0, NAMEDATALEN);
             securec_check(rc, "\0", "\0");
 
-            if (strstr(entry->resname, "array_key_")) {
-                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_key_%d", resno);
-                securec_check_ss(rc, "\0", "\0");
-            } else if (strstr(entry->resname, "array_col_")) {
-                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_col_%d", resno);
-                securec_check_ss(rc, "\0", "\0");
-            }
-
+            rc = sprintf_s(newArrayName, NAMEDATALEN, "array_col_%d", resno);
+            securec_check_ss(rc, "\0", "\0");
             entry->resname = pstrdup(newArrayName);
         }
     }
@@ -1858,8 +1866,8 @@ static bool IsPseudoInternalEntryExists(List *targetlist, TargetEntry *tle)
             continue;
         }
 
-        Assert (IsA(tle->expr, Var));
-        if (pg_strcasecmp(curEntry->resname, tle->resname) == 0) {
+        if (curEntry->resname != NULL && tle->resname != NULL &&
+            pg_strcasecmp(curEntry->resname, tle->resname) == 0) {
             result = true;
             break;
         }
@@ -1904,7 +1912,9 @@ static void AddPseudoEntries(Plan *plan, Index relid, PlanAccessPathSearchContex
              * The target entry's resno,varno,varattno is created in CteScan planing stage,
              * before we add it to curernt plan, we need do proper resno adjustment
              */
-            Assert (IsA(entry->expr, Var));
+            if (entry->expr == NULL || !IsA(entry->expr, Var)) {
+                continue;
+            }
             index++;
             ((Var *)entry->expr)->varno = relid;
             if (adapt) {
@@ -1916,7 +1926,10 @@ static void AddPseudoEntries(Plan *plan, Index relid, PlanAccessPathSearchContex
         }
     }
 
-    if (context->botNode != NULL) {
+    /* Keep the top CteScan's internal names as part of the tuple
+     * descriptor consumed by the StartWith executor. */
+    if (context->botNode != NULL &&
+        context->topNode != NULL && context->topNode != plan) {
         FixArrayInternalEntry(plan->targetlist);
     }
 

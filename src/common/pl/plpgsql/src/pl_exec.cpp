@@ -5204,7 +5204,23 @@ static void plpgsql_set_outparam_value(PLpgSQL_execstate* estate, PLpgSQL_expr* 
         }
         tuple = heap_form_tuple(paramtupdesc, (values + 1), (nulls + 1));
     }
-    PLpgSQL_row* row = (PLpgSQL_row*)estate->datums[expr->out_param_dno];
+    /* The datum number belongs to the estate that owns this expression. */
+    if (estate->datums == NULL || expr->out_param_dno >= estate->ndatums) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmodule(MOD_PLSQL),
+             errmsg("OUT parameter datum number %d is out of range", expr->out_param_dno)));
+    }
+
+    PLpgSQL_datum* out_datum = estate->datums[expr->out_param_dno];
+    if (out_datum == NULL || out_datum->dtype != PLPGSQL_DTYPE_ROW) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmodule(MOD_PLSQL),
+             errmsg("OUT parameter datum %d is not a row datum", expr->out_param_dno)));
+    }
+
+    PLpgSQL_row* row = (PLpgSQL_row*)out_datum;
     exec_move_row(estate, NULL, row, tuple, paramtupdesc);
     heap_freetuple(tuple);
     pfree(values);
@@ -9307,7 +9323,11 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     /* Execute SQL through move cursor, only in A compatibility mode */
     if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && is_has_update_in_query(query)) {
         SPI_cursor_move(portal, true, FETCH_ALL);
-        SPI_cursor_move(portal, false, FETCH_ALL);
+        ExecutorRewind(portal->queryDesc);
+        portal->atStart = true;
+        portal->atEnd = false;
+        portal->portalPos = 0;
+        portal->posOverflow = false;
     }
     return PLPGSQL_RC_OK;
 }
@@ -15648,6 +15668,18 @@ void plpgsql_hashtable_clear_invalid_obj(bool need_clear)
     plpgsql_hashtable_clear_invalid_func();
 }
 
+void gsplsql_record_nested_compile_invalid_package(Oid pkgOid)
+{
+    if (!OidIsValid(pkgOid)) {
+        return;
+    }
+
+    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList =
+        list_append_unique_oid(u_sess->plsql_cxt.nestedCompileInvalidPackageList, pkgOid);
+    MemoryContextSwitchTo(oldContext);
+}
+
 /*
  * Check dependency for function and package's hash table,
  * and delete the invalid package or functio from session.
@@ -15678,11 +15710,13 @@ void plpgsql_hashtable_delete_and_check_invalid_item(int classId, Oid objId)
     }
 
     /*
-     * when compile, invalid the package may cause confilct, so ignore it.
-     * maybe a better way to record it and handler it later, will support in
-     * the future.
+     * when compile, invalid the package may cause conflict, so record it and
+     * handle it after the transaction outcome is known.
      */
     if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        if (classId == PACKAGEOID) {
+            gsplsql_record_nested_compile_invalid_package(objId);
+        }
         return;
     }
     
@@ -15751,6 +15785,29 @@ void delete_package_and_check_invalid_item(Oid pkgOid)
         delete_package_and_check_invalid_item(lfirst_oid(cell));
     }
     list_free_ext(invalidPkgList);
+}
+
+void GsplsqlCleanupNestedCompileInvalidPackages(bool isRollback)
+{
+    List* packageList = u_sess->plsql_cxt.nestedCompileInvalidPackageList;
+    if (packageList == NIL) {
+        return;
+    }
+
+    /* A nested compiler still owns the package while it is active. Defer the
+     * cleanup until the outer transaction cleanup has restored the context. */
+    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        return;
+    }
+
+    u_sess->plsql_cxt.nestedCompileInvalidPackageList = NIL;
+    if (isRollback) {
+        ListCell* cell = NULL;
+        foreach (cell, packageList) {
+            delete_package_and_check_invalid_item(lfirst_oid(cell));
+        }
+    }
+    list_free_ext(packageList);
 }
 
 /*

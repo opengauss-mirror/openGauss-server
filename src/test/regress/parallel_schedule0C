@@ -207,4 +207,17 @@ test: user_host_test
 test: enable_expr_fusion_flatten
 
 # RECORD field deparsing for proven-dummy subqueries
+test: plpgsql_array_geqo
 test: ruleutils_record
+
+# PR 9678: array, GEQO and PL/pgSQL plan-cache backport
+test: plpgsql_array_geqo
+
+# PR 9664: holdable cursor and autonomous package state
+test: cursor_hold_backport
+test: autonomous_package_backport
+
+# PR 9695: hierarchical targetlists, OUT datums and table row types
+test: startwith_window_backport
+test: out_datum_backport
+test: rowtype_lock_backport
