@@ -137,7 +137,7 @@ FROM ogai.vectorize_tasks;
 |------|---------|------|------|
 | msg_id | BIGSERIAL | UNIQUE | 消息自增ID |
 | task_id | INTEGER | - | 关联的任务ID |
-| pk_value | INTEGER | - | 待处理记录的主键值 |
+| pk_value | BIGINT | - | 待处理记录的主键值 |
 | status | ogai.queue_status | NOT NULL, DEFAULT 'ready' | 处理状态 |
 | vt | TIMESTAMP | NOT NULL | 可见时间（用于延迟处理） |
 | fail_reason | TEXT | DEFAULT NULL | 失败原因 |
@@ -331,6 +331,13 @@ ogai.ai_vectorize(
 | p_max_chunk_size | INTEGER | 否 | 1000 | 最大分块大小（0表示不分块） |
 | p_max_chunk_overlap | INTEGER | 否 | 200 | 分块重叠大小 |
 | p_enable_bm25 | BOOLEAN | 否 | true | 是否创建 BM25 全文索引 |
+
+`p_primary_key` 传入源表的主键列名。异步模式支持 `TINYINT`、`SMALLINT`、
+`INTEGER`、`BIGINT`（包括 `SERIAL`/`BIGSERIAL` 对应的底层整数类型）；
+其他主键类型在创建任务相关对象之前返回 `success = false`。同步模式保留
+`TEXT` 主键支持，并支持 `BIGINT`。本次直接修正 1.0 安装定义，适用于安装修复后
+新建的扩展。已有扩展中的函数和队列表定义不会随二进制或安装 SQL 自动更新，
+存量迁移需单独处理。
 
 **语法：**
 

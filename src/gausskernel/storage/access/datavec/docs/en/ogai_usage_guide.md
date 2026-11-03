@@ -137,7 +137,7 @@ FROM ogai.vectorize_tasks;
 |------|---------|------|------|
 | msg_id | BIGSERIAL | UNIQUE | Auto-increment message ID |
 | task_id | INTEGER | - | Associated task ID |
-| pk_value | INTEGER | - | Primary key value of the record to process |
+| pk_value | BIGINT | - | Primary key value of the record to process |
 | status | ogai.queue_status | NOT NULL, DEFAULT 'ready' | Processing status |
 | vt | TIMESTAMP | NOT NULL | Visibility time for delayed processing |
 | fail_reason | TEXT | DEFAULT NULL | Failure reason |
@@ -331,6 +331,15 @@ ogai.ai_vectorize(
 | p_max_chunk_size | INTEGER | No | 1000 | Maximum chunk size. `0` disables chunking. |
 | p_max_chunk_overlap | INTEGER | No | 200 | Chunk overlap size |
 | p_enable_bm25 | BOOLEAN | No | true | Whether to create a BM25 full-text index |
+
+`p_primary_key` names the source column. Asynchronous mode supports `TINYINT`,
+`SMALLINT`, `INTEGER`, and `BIGINT` (including the underlying integer types of
+`SERIAL`/`BIGSERIAL`); other key types return `success = false` before creating
+task objects. Synchronous mode retains `TEXT` support and supports `BIGINT`.
+This directly fixes the version 1.0 installation definitions for newly created
+extensions. Replacing server binaries or installation SQL does not automatically
+update existing functions or queue columns; existing installations need a
+separately planned migration.
 
 **Syntax:**
 

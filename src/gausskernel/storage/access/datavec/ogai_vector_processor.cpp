@@ -110,6 +110,8 @@ typedef enum {
 /* Cache for reusing EmbeddingClient across tasks with the same model key within a worker. */
 typedef struct {
     char modelKey[64];
+    char ownerName[64];
+    int dimension;
     EmbeddingClient *client;
     MemoryContext clientCtx;
     MemoryContext parentCtx;       /* long-lived parent context (outlives subtransactions) */
@@ -366,7 +368,7 @@ static bool GetTaskConfig(
 /* getdocument content */
 static bool GetDocumentContent(
     OgaiTaskConfig *config,
-    int pkValue,
+    int64 pkValue,
     char **contentOut,
     OgaiFailType *failType,
     char *failReason,
@@ -403,7 +405,7 @@ static bool GetDocumentContent(
         config->srcCol, config->srcSchema, config->srcTable, config->primaryKey);
     securec_check_ss_c(nRet, "", "");
 
-    Oid paramTypes[1] = {INT4OID};
+    Oid paramTypes[1] = {INT8OID};
     SPIPlanPtr plan = SPI_prepare(sql, 1, paramTypes);
     if (plan == NULL) {
         *failType = FAIL_TYPE_SPI_ERROR;
@@ -419,7 +421,7 @@ static bool GetDocumentContent(
         return false;
     }
 
-    Datum params[1] = {Int32GetDatum(pkValue)};
+    Datum params[1] = {Int64GetDatum(pkValue)};
     char paramNulls[1] = {' '};
     spiRc = SPI_execute_plan(plan, params, paramNulls, true, 0);
     SPI_freeplan(plan);
@@ -441,7 +443,7 @@ static bool GetDocumentContent(
     if (SPI_processed == 0) {
         *failType = FAIL_TYPE_DOCUMENT_NOT_FOUND;
         nRet = snprintf_s(failReason, failReasonLen, failReasonLen - 1,
-                "Document not found: %s.%s(%s=%d)",
+                "Document not found: %s.%s(%s=" INT64_FORMAT ")",
                 config->srcSchema, config->srcTable, config->primaryKey, pkValue);
         securec_check_ss_c(nRet, "", "");
         if (!hasTransaction) {
@@ -460,7 +462,7 @@ static bool GetDocumentContent(
     if (value == NULL || strlen(value) == 0) {
         *failType = FAIL_TYPE_DOCUMENT_CONTENT_NULL;
         nRet = snprintf_s(failReason, failReasonLen, failReasonLen - 1,
-            "Document content is empty: %s.%s(%s=%d)",
+            "Document content is empty: %s.%s(%s=" INT64_FORMAT ")",
             config->srcSchema, config->srcTable, config->primaryKey, pkValue);
         securec_check_ss_c(nRet, "", "");
         if (!hasTransaction) {
@@ -642,6 +644,13 @@ static OgaiVectorizeSharedContext* OgaiInitSharedContext(int *nworkers)
 
     int taskCount = (int)SPI_processed;
 
+    TupleDesc tupdesc = SPI_tuptable->tupdesc;
+    Oid pkType = tupdesc->attrs[2].atttypid;
+    if (pkType != INT4OID && pkType != INT8OID) {
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+            errmsg("OGAI queue primary key column must be integer or bigint")));
+    }
+
     /* Allocate shared context from instance-level memory.
      * This memory is freed by BgworkerCleanupSharedContext via pfree_ext(bwc->bgshared). */
     shared = (OgaiVectorizeSharedContext *)MemoryContextAllocZero(
@@ -651,7 +660,6 @@ static OgaiVectorizeSharedContext* OgaiInitSharedContext(int *nworkers)
     pg_atomic_init_u32(&shared->nextTask, 0);
     shared->taskCount = taskCount;
 
-    TupleDesc tupdesc = SPI_tuptable->tupdesc;
     for (int i = 0; i < taskCount; i++) {
         HeapTuple tuple = SPI_tuptable->vals[i];
 
@@ -665,7 +673,9 @@ static OgaiVectorizeSharedContext* OgaiInitSharedContext(int *nworkers)
 
         /* pk_value (column 3) */
         datum = SPI_getbinval(tuple, tupdesc, 3, &isNull);
-        shared->tasks[i].pkValue = isNull ? 0 : DatumGetInt32(datum);
+        /* Accept 1.0 queues while the server binary and extension are upgraded. */
+        shared->tasks[i].pkValue = isNull ? 0 :
+            (pkType == INT8OID ? DatumGetInt64(datum) : (int64)DatumGetInt32(datum));
 
         /* retry_count (column 4) */
         datum = SPI_getbinval(tuple, tupdesc, 4, &isNull);
@@ -724,6 +734,40 @@ static bool CopyChunkEmbeddingToInstance(OgaiEmbeddingChunk *dest,
     return true;
 }
 
+/* Generate chunk embeddings while the caller owns exception cleanup. */
+static bool WorkerGenerateChunkEmbeddings(OgaiVectorizeTask *task, EmbeddingClient *client,
+                                         const TextSplitResult *splitResult,
+                                         OgaiEmbeddingChunk *chunkResults, int dimension)
+{
+    for (int i = 0; i < splitResult->chunkCount; i++) {
+        char *chunkText = splitResult->chunks[i].chunk;
+        int dim = dimension;
+        Vector **vectors = client->BatchEmbed(&chunkText, 1, &dim);
+        if (!vectors || !vectors[0]) {
+            task->resultStatus = TASK_RESULT_FAIL;
+            task->failType = (int)FAIL_TYPE_EMBEDDING_GENERATE_FAILED;
+            errno_t nRet = snprintf_s(task->failReason, sizeof(task->failReason),
+                                      sizeof(task->failReason) - 1,
+                                      "Failed to generate embedding for chunk %d", i + 1);
+            if (nRet == -1) {
+                securec_check_ss_c(nRet, "", "");
+            }
+            return false;
+        }
+        CopyChunkEmbeddingToInstance(&chunkResults[i], chunkText, vectors[0]);
+    }
+    return true;
+}
+
+/* Release per-chunk instance allocations; the caller owns the outer array. */
+static void FreeChunkEmbeddingData(OgaiEmbeddingChunk *chunkResults, int chunkCount)
+{
+    for (int j = 0; j < chunkCount; j++) {
+        pfree_ext(chunkResults[j].chunkText);
+        pfree_ext(chunkResults[j].vectorData);
+    }
+}
+
 /* Join mode: split text into chunks, generate embedding for each, copy to instance memory. */
 static void WorkerGenerateJoinEmbeddings(OgaiVectorizeTask *task,
                                          EmbeddingClient *client, const char *content,
@@ -753,32 +797,25 @@ static void WorkerGenerateJoinEmbeddings(OgaiVectorizeTask *task,
         sizeof(OgaiEmbeddingChunk) * chunkCount);
 
     bool allOk = true;
-    for (int i = 0; i < chunkCount; i++) {
-        char *chunkText = split_result.chunks[i].chunk;
-        int dim = taskConfig->dim;
-        Vector **vectors = client->BatchEmbed(&chunkText, 1, &dim);
-        if (!vectors || !vectors[0]) {
-            task->resultStatus = TASK_RESULT_FAIL;
-            task->failType = (int)FAIL_TYPE_EMBEDDING_GENERATE_FAILED;
-            errno_t nRet = snprintf_s(task->failReason, sizeof(task->failReason),
-                                      sizeof(task->failReason) - 1,
-                                      "Failed to generate embedding for chunk %d", i + 1);
-            securec_check_ss_c(nRet, "", "");
-            allOk = false;
-            break;
-        }
-        CopyChunkEmbeddingToInstance(&chunkResults[i], chunkText, vectors[0]);
+    PG_TRY();
+    {
+        allOk = WorkerGenerateChunkEmbeddings(task, client, &split_result, chunkResults, taskConfig->dim);
     }
+    PG_CATCH();
+    {
+        /* Instance allocations are not reclaimed when the task context is deleted. */
+        FreeChunkEmbeddingData(chunkResults, chunkCount);
+        pfree_ext(chunkResults);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     if (allOk) {
         task->chunkCount = chunkCount;
         task->chunks = chunkResults;
         task->resultStatus = TASK_RESULT_SUCCESS;
     } else {
-        for (int j = 0; j < chunkCount; j++) {
-            pfree_ext(chunkResults[j].chunkText);
-            pfree_ext(chunkResults[j].vectorData);
-        }
+        FreeChunkEmbeddingData(chunkResults, chunkCount);
         pfree_ext(chunkResults);
     }
 
@@ -826,6 +863,8 @@ static void ResetWorkerEmbeddingCache(WorkerEmbeddingCache *cache)
     }
     cache->client = NULL;
     cache->modelKey[0] = '\0';
+    cache->ownerName[0] = '\0';
+    cache->dimension = 0;
 }
 
 static void EnsureWorkerProcPortUser(void)
@@ -876,11 +915,11 @@ static bool OgaiCatalogRelationExists(const char *schemaName, const char *relati
 
 static EmbeddingClient *WorkerEnsureEmbeddingClient(const OgaiTaskConfig *taskConfig,
                                                     WorkerEmbeddingCache *cache,
-                                                    MemoryContext tmpCtx,
-                                                    ModelConfig *modelConfig)
+                                                    MemoryContext tmpCtx)
 {
     EmbeddingClient *client = cache->client;
-    if (client != NULL && strcmp(cache->modelKey, taskConfig->modelKey) == 0) {
+    if (client != NULL && strcmp(cache->modelKey, taskConfig->modelKey) == 0 &&
+        strcmp(cache->ownerName, taskConfig->ownerName) == 0 && cache->dimension == taskConfig->dim) {
         return client;
     }
 
@@ -889,6 +928,7 @@ static EmbeddingClient *WorkerEnsureEmbeddingClient(const OgaiTaskConfig *taskCo
                             "OgaiWorkerClientCacheCtx", ALLOCSET_DEFAULT_SIZES);
     MemoryContextSwitchTo(cache->clientCtx);
 
+    ModelConfig *modelConfig = (ModelConfig *)palloc0(sizeof(ModelConfig));
     modelConfig->dimension = taskConfig->dim;
     modelConfig->maxBatch = 1;
     AsyncGenerateModelConfig(modelConfig, taskConfig->modelKey, taskConfig->ownerName);
@@ -899,6 +939,10 @@ static EmbeddingClient *WorkerEnsureEmbeddingClient(const OgaiTaskConfig *taskCo
         errno_t rc = strncpy_s(cache->modelKey, sizeof(cache->modelKey),
                                taskConfig->modelKey, sizeof(cache->modelKey) - 1);
         securec_check(rc, "", "");
+        rc = strncpy_s(cache->ownerName, sizeof(cache->ownerName),
+                       taskConfig->ownerName, sizeof(cache->ownerName) - 1);
+        securec_check(rc, "", "");
+        cache->dimension = taskConfig->dim;
     }
     MemoryContextSwitchTo(tmpCtx);
     return client;
@@ -938,14 +982,11 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
     MemoryContext tmpCtx = AllocSetContextCreate(CurrentMemoryContext,
                                 "OgaiWorkerEmbeddingCtx", ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(tmpCtx);
-    ModelConfig modelConfig;
-    errno_t rc = memset_s(&modelConfig, sizeof(modelConfig), 0, sizeof(modelConfig));
-    securec_check(rc, "", "");
     volatile bool caughtError = false;
 
     PG_TRY();
     {
-        EmbeddingClient *client = WorkerEnsureEmbeddingClient(taskConfig, cache, tmpCtx, &modelConfig);
+        EmbeddingClient *client = WorkerEnsureEmbeddingClient(taskConfig, cache, tmpCtx);
         WorkerDispatchEmbeddingByMode(task, taskConfig, client, content);
     }
     PG_CATCH();
@@ -960,7 +1001,7 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
         task->failType = (int)FAIL_TYPE_UNKNOWN;
         errno_t nRet = snprintf_s(task->failReason, sizeof(task->failReason),
                                   sizeof(task->failReason) - 1,
-                                  "Exception in embedding model call for task_id=%d, pk_value=%d: %s",
+                                  "Exception in embedding model call for task_id=%d, pk_value=" INT64_FORMAT ": %s",
                                   task->taskId, task->pkValue, errMsg);
         securec_check_ss_c(nRet, "", "");
         FreeErrorData(edata);
@@ -1013,7 +1054,7 @@ static void WorkerGenerateEmbedding(OgaiVectorizeTask *task, WorkerEmbeddingCach
         task->failType = (int)FAIL_TYPE_DOCUMENT_CONTENT_NULL;
         errno_t nRet = snprintf_s(task->failReason, sizeof(task->failReason),
                                   sizeof(task->failReason) - 1,
-                                  "Document content is empty: pk_value=%d", task->pkValue);
+                                  "Document content is empty: pk_value=" INT64_FORMAT, task->pkValue);
         securec_check_ss_c(nRet, "", "");
         pfree_ext(content);
         return;
@@ -1050,12 +1091,12 @@ static bool LeaderWriteAppendResult(OgaiVectorizeTask *task)
         task->config.srcSchema, task->config.srcTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
 
-    Oid paramTypes[2] = {VECTOROID, INT4OID};
+    Oid paramTypes[2] = {VECTOROID, INT8OID};
     SPIPlanPtr plan = SPI_prepare(sql, 2, paramTypes);
     if (plan == NULL) {
         return false;
     }
-    Datum params[2] = { PointerGetDatum(task->vectorData), Int32GetDatum(task->pkValue) };
+    Datum params[2] = { PointerGetDatum(task->vectorData), Int64GetDatum(task->pkValue) };
     char paramNulls[2] = {' ', ' '};
     int spiRc = SPI_execute_plan(plan, params, paramNulls, false, 0);
     SPI_freeplan(plan);
@@ -1074,13 +1115,13 @@ static bool LeaderWriteJoinResultWithoutChunking(OgaiVectorizeTask *task, const 
         task->config.srcSchema, joinTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
 
-    Oid paramTypes[2] = {INT4OID, VECTOROID};
+    Oid paramTypes[2] = {INT8OID, VECTOROID};
     SPIPlanPtr plan = SPI_prepare(sql, 2, paramTypes);
     if (plan == NULL) {
         return false;
     }
 
-    Datum params[2] = {Int32GetDatum(task->pkValue), PointerGetDatum(task->vectorData)};
+    Datum params[2] = {Int64GetDatum(task->pkValue), PointerGetDatum(task->vectorData)};
     char paramNulls[2] = {' ', ' '};
     int spiRc = SPI_execute_plan(plan, params, paramNulls, false, 0);
     SPI_freeplan(plan);
@@ -1099,14 +1140,14 @@ static bool LeaderWriteJoinChunkResults(OgaiVectorizeTask *task, const char *joi
         task->config.srcSchema, joinTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
 
-    Oid paramTypes[4] = {INT4OID, INT4OID, TEXTOID, VECTOROID};
+    Oid paramTypes[4] = {INT8OID, INT4OID, TEXTOID, VECTOROID};
     SPIPlanPtr plan = SPI_prepare(sql, 4, paramTypes);
     if (plan == NULL) {
         return false;
     }
     for (int j = 0; j < task->chunkCount; j++) {
         Datum params[4] = {
-            Int32GetDatum(task->pkValue), Int32GetDatum(j + 1),
+            Int64GetDatum(task->pkValue), Int32GetDatum(j + 1),
             CStringGetTextDatum(task->chunks[j].chunkText),
             PointerGetDatum(task->chunks[j].vectorData)
         };
@@ -1135,12 +1176,12 @@ static bool LeaderWriteJoinResults(OgaiVectorizeTask *task)
         "DELETE FROM %s.%s WHERE %s = $1",
         task->config.srcSchema, joinTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
-    Oid delTypes[1] = {INT4OID};
+    Oid delTypes[1] = {INT8OID};
     SPIPlanPtr delPlan = SPI_prepare(sql, 1, delTypes);
     if (delPlan == NULL) {
         return false;
     }
-    Datum delParams[1] = {Int32GetDatum(task->pkValue)};
+    Datum delParams[1] = {Int64GetDatum(task->pkValue)};
     char delNulls[1] = {' '};
     int delRc = SPI_execute_plan(delPlan, delParams, delNulls, false, 0);
     SPI_freeplan(delPlan);
@@ -1197,7 +1238,7 @@ static void LeaderHandleSuccessTask(OgaiVectorizeTask *task)
         if (writeOk) {
             ReleaseCurrentSubTransaction();
             DeleteQueueRecord(task->msgId);
-            ereport(LOG, (errmsg("Task success: msg_id=%ld, task_id=%d, pk_value=%d, mode=%s",
+            ereport(LOG, (errmsg("Task success: msg_id=%ld, task_id=%d, pk_value=" INT64_FORMAT ", mode=%s",
                                  task->msgId, task->taskId, task->pkValue, task->config.tableMethod)));
         } else {
             RollbackAndReleaseCurrentSubTransaction();
@@ -1371,7 +1412,7 @@ static bool WorkerProcessOneTask(OgaiVectorizeSharedContext *shared,
         errno_t nRet = snprintf_s(shared->tasks[idx].failReason,
                                   sizeof(shared->tasks[idx].failReason),
                                   sizeof(shared->tasks[idx].failReason) - 1,
-                                  "Unhandled exception in worker for task_id=%d, pk_value=%d: %s",
+                                  "Unhandled exception in worker for task_id=%d, pk_value=" INT64_FORMAT ": %s",
                                   shared->tasks[idx].taskId, shared->tasks[idx].pkValue, errMsg);
         securec_check_ss_c(nRet, "", "");
         FreeErrorData(edata);

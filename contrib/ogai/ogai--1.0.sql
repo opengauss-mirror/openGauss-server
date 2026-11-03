@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS ogai.vectorize_queue
 (
     msg_id BIGSERIAL UNIQUE,
     task_id integer,
-    pk_value integer,
+    pk_value BIGINT,
     status ogai.queue_status NOT NULL DEFAULT 'ready',
     vt TIMESTAMP NOT NULL,
     fail_reason TEXT DEFAULT NULL,
@@ -170,6 +170,7 @@ RETURNS VOID AS $$
 DECLARE
     v_chunk_record RECORD;
     v_chunk_id INTEGER := 1;
+    v_primary_key_type TEXT;
 BEGIN
     -- Check if the operation is UPDATE, if so, raise an error
     IF p_operation = 'UPDATE' THEN
@@ -177,19 +178,30 @@ BEGIN
             USING HINT = 'To update vectorized data: 1) Delete the old record, 2) Insert the new record, or use ai_unvectorize() and ai_vectorize() to recreate the task.';
     END IF;
 
+    SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)
+      INTO v_primary_key_type
+      FROM pg_catalog.pg_attribute a
+      JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = p_src_schema AND c.relname = p_src_table
+       AND a.attname = p_primary_key AND a.attnum > 0 AND NOT a.attisdropped;
+    IF v_primary_key_type IS NULL THEN
+        RAISE EXCEPTION 'Primary key column %.%.% not found', p_src_schema, p_src_table, p_primary_key;
+    END IF;
+
     IF p_task_type = 'sync' THEN
         IF p_operation = 'INSERT' AND p_content IS NOT NULL THEN
             IF p_table_method = 'append' THEN
                 EXECUTE format(
-                    'UPDATE %I.%I SET ogai_embedding = pg_catalog.ogai_embedding($1, $2, $3) WHERE %I = $4',
-                    p_src_schema, p_src_table, p_primary_key
+                    'UPDATE %I.%I SET ogai_embedding = pg_catalog.ogai_embedding($1, $2, $3) WHERE %I = $4::%s',
+                    p_src_schema, p_src_table, p_primary_key, v_primary_key_type
                 ) USING p_content, p_embed_model, p_dim, p_pk_value;
 ELSE
                 -- join mode: supports text chunking
                 -- Delete old text first
                 EXECUTE format(
-                    'DELETE FROM %I.%I WHERE %I = $1',
-                    p_src_schema, p_src_table || '_vector', p_primary_key
+                    'DELETE FROM %I.%I WHERE %I = $1::%s',
+                    p_src_schema, p_src_table || '_vector', p_primary_key, v_primary_key_type
                 ) USING p_pk_value;
                 -- Decide processing method based on chunk size
                 IF p_max_chunk_size > 0 THEN
@@ -199,8 +211,8 @@ SELECT chunk FROM pg_catalog.ogai_chunk(p_content, p_max_chunk_size, p_max_chunk
                       LOOP
     EXECUTE format(
                             'INSERT INTO %I.%I (%I, chunk_id, chunk_text, ogai_embedding, updated_at)
-                             VALUES ($1, $2, $3, pg_catalog.ogai_embedding($4, $5, $6), CURRENT_TIMESTAMP)',
-                            p_src_schema, p_src_table || '_vector', p_primary_key
+                             VALUES ($1::%s, $2, $3, pg_catalog.ogai_embedding($4, $5, $6), CURRENT_TIMESTAMP)',
+                            p_src_schema, p_src_table || '_vector', p_primary_key, v_primary_key_type
                         ) USING p_pk_value, v_chunk_id, v_chunk_record.chunk,
                                 v_chunk_record.chunk, p_embed_model, p_dim;
 v_chunk_id := v_chunk_id + 1;
@@ -209,15 +221,15 @@ ELSE
                     -- No chunking, only store vectors
                     EXECUTE format(
                         'INSERT INTO %I.%I (%I, ogai_embedding, updated_at)
-                         VALUES ($1, pg_catalog.ogai_embedding($2, $3, $4), CURRENT_TIMESTAMP)',
-                        p_src_schema, p_src_table || '_vector', p_primary_key
+                         VALUES ($1::%s, pg_catalog.ogai_embedding($2, $3, $4), CURRENT_TIMESTAMP)',
+                        p_src_schema, p_src_table || '_vector', p_primary_key, v_primary_key_type
                     ) USING p_pk_value, p_content, p_embed_model, p_dim;
 END IF;
 END IF;
         ELSIF p_operation = 'DELETE' AND p_table_method = 'join' THEN
             EXECUTE format(
-                'DELETE FROM %I.%I WHERE %I = $1',
-                p_src_schema, p_src_table || '_vector', p_primary_key
+                'DELETE FROM %I.%I WHERE %I = $1::%s',
+                p_src_schema, p_src_table || '_vector', p_primary_key, v_primary_key_type
             ) USING p_pk_value;
 END IF;
     -- Async mode: write to queue
@@ -228,8 +240,8 @@ ELSE
             IF p_operation = 'DELETE' THEN
                 IF p_table_method = 'join' THEN
                     EXECUTE format(
-                        'DELETE FROM %I.%I WHERE %I = $1',
-                        p_src_schema, p_src_table || '_vector', p_primary_key
+                        'DELETE FROM %I.%I WHERE %I = $1::%s',
+                        p_src_schema, p_src_table || '_vector', p_primary_key, v_primary_key_type
                     ) USING p_pk_value;
                 END IF;
                 RETURN;
@@ -242,8 +254,8 @@ ELSE
 
             -- Insert queue record: task_id and pk_value
             INSERT INTO ogai.vectorize_queue (task_id, pk_value, status, vt)
-            VALUES (v_task_id, p_pk_value::INTEGER, 'ready', CURRENT_TIMESTAMP);
-            
+            VALUES (v_task_id, p_pk_value::BIGINT, 'ready', CURRENT_TIMESTAMP);
+
             -- Notify background processing
             PERFORM pg_catalog.ogai_notify();
         END;
@@ -353,17 +365,36 @@ BEGIN
             WHERE table_schema = p_src_schema
               AND table_name = p_src_table
               AND column_name = p_src_col;
-            
+
             IF v_column_type IS NULL THEN
-                RETURN QUERY SELECT NULL::INT, false, 0, 
+                RETURN QUERY SELECT NULL::INT, false, 0,
                     format('Column %I.%I.%I not found', p_src_schema, p_src_table, p_src_col);
                 RETURN;
             END IF;
-            
+
             IF v_column_type != 'text' THEN
-                RETURN QUERY SELECT NULL::INT, false, 0, 
-                    format('BM25 index only supports TEXT type columns. Column %I is of type %s. Please disable BM25 (set enable_bm25=false) or change the column type to TEXT.', 
+                RETURN QUERY SELECT NULL::INT, false, 0,
+                    format('BM25 index only supports TEXT type columns. Column %I is of type %s. Please disable BM25 (set enable_bm25=false) or change the column type to TEXT.',
                            p_src_col, v_column_type);
+                RETURN;
+            END IF;
+        END;
+    END IF;
+
+    -- The asynchronous queue stores signed 64-bit integer primary keys.
+    -- Validate before creating a task, trigger or vector table.
+    IF p_task_type = 'async' THEN
+        DECLARE
+            v_async_pk_type TEXT;
+        BEGIN
+            SELECT data_type INTO v_async_pk_type
+              FROM information_schema.columns
+             WHERE table_schema = p_src_schema AND table_name = p_src_table
+               AND column_name = p_primary_key;
+            IF v_async_pk_type IS NULL OR
+               v_async_pk_type NOT IN ('tinyint', 'smallint', 'integer', 'bigint') THEN
+                RETURN QUERY SELECT NULL::INT, false, 0,
+                    'Async vectorization requires a TINYINT, SMALLINT, INTEGER or BIGINT primary key column';
                 RETURN;
             END IF;
         END;
@@ -566,7 +597,7 @@ END IF;
             v_processed := v_processed + 1;
 
         EXCEPTION WHEN OTHERS THEN
-            v_error_rows := array_append(v_error_rows, v_row.pk);
+            v_error_rows := array_append(v_error_rows, v_row.pk::text);
             v_error_msgs := array_append(v_error_msgs, format('Row %s error at %s: %s', v_row.pk, now(), SQLERRM));
             CONTINUE;
         END;
@@ -576,7 +607,7 @@ END IF;
         -- Batch insert all non-null content primary keys to queue
         EXECUTE format(
             'INSERT INTO ogai.vectorize_queue (task_id, pk_value, status, vt)
-             SELECT $1, %I::INTEGER, ''ready'', CURRENT_TIMESTAMP
+             SELECT $1, %I::BIGINT, ''ready'', CURRENT_TIMESTAMP
              FROM %I.%I
              WHERE %I IS NOT NULL',
             p_primary_key, p_src_schema, p_src_table, p_src_col
@@ -600,7 +631,7 @@ END IF;
                     p_src_schema, p_src_table, p_src_col
                 );
             END IF;
-            
+
             -- Create HNSW vector index
             EXECUTE format(
                 'CREATE INDEX IF NOT EXISTS %I ON %I.%I USING hnsw(ogai_embedding %s)',
@@ -633,7 +664,7 @@ END IF;
                     );
                 END IF;
             END IF;
-            
+
             -- Create HNSW vector index
             EXECUTE format(
                 'CREATE INDEX IF NOT EXISTS %I ON %I.%I USING hnsw(ogai_embedding %s)',
@@ -669,7 +700,7 @@ END IF;
     ELSE
         -- Async mode result
         RETURN QUERY SELECT v_task_id, true, v_processed,
-                        format('Async task registered. Enqueued %s existing rows from %I.%I for background processing', 
+                        format('Async task registered. Enqueued %s existing rows from %I.%I for background processing',
                                v_processed, p_src_schema, p_src_table);
     END IF;
 END;

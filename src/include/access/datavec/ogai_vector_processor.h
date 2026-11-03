@@ -79,7 +79,7 @@ typedef struct OgaiVectorizeTask {
     /* ---- Input: set by leader in OgaiInitSharedContext ---- */
     int64 msgId;
     int taskId;
-    int pkValue;
+    int64 pkValue;
     int retryCount;
 
     /* ---- Output: set by worker ---- */

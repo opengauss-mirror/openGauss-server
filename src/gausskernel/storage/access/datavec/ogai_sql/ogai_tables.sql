@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS ogai.vectorize_queue
 (
     msg_id BIGSERIAL UNIQUE,
     task_id integer,
-    pk_value integer,
+    pk_value bigint,
     status ogai.queue_status NOT NULL DEFAULT 'ready',
     vt TIMESTAMP NOT NULL,
     fail_reason TEXT DEFAULT NULL,
