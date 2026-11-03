@@ -1,5 +1,4 @@
 name: openGauss_server_PR
-run-name: ${{ atomgit.event.pull_request.title || atomgit.event.merge_request.title || atomgit.event.issue.title || 'openGauss_server_PR' }}
 
 on:
   pull_request_target:
