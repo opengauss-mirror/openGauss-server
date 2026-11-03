@@ -316,7 +316,6 @@ void restoreConfigDir()
         if (strcmp(filename + 1, BACKUP_CONTROL_FILE) == 0) {
             join_path_components(dir_path, "/", dir_name);
             fio_mkdir(dir_path, DIR_PERMISSION, location);
-            pg_free(dir_name);
         }
     }
     parray_free(obj_list);
