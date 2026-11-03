@@ -4474,10 +4474,10 @@ static void dumpClientGlobalKeys(Archive *fout, const Oid nspoid, const char *ns
             PQfreemem(unescaped_data);
         } 
         appendPQExpBuffer(createClientGlobalKeysQry,
-            "CREATE CLIENT MASTER KEY %s.%s ", nspname, fmtId(global_key_name));
+            "CREATE CLIENT MASTER KEY %s ", fmtQualifiedId(nspname, global_key_name));
         appendPQExpBuffer(createClientGlobalKeysQry, 
             "WITH ( KEY_STORE = %s , KEY_PATH = \"%s\", ALGORITHM = %s );", key_store, key_path, algorithm);
-        appendPQExpBuffer(delQry, "DROP CLIENT MASTER KEY IF EXISTS %s.%s;\n", nspname, fmtId(global_key_name));
+        appendPQExpBuffer(delQry, "DROP CLIENT MASTER KEY IF EXISTS %s;\n", fmtQualifiedId(nspname, global_key_name));
 
         ArchiveEntry(fout,
             nilCatalogId,
@@ -4536,19 +4536,23 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
     int i_column_key_name = 0;
     int i_cek_global_key_name = 0;
     int i_cek_global_key_id = 0;
+    int i_cek_global_key_nspname = 0;
 
     Oid column_key_id = 0;
     const char *column_key_name = NULL;
     const char *cek_global_key_name = NULL;
+    const char *cek_global_key_nspname = NULL;
     Oid cek_global_key_id = 0;
 
     int cek_ntups = 0;
     int cek_args_ntups = 0;
     int cmk_args_ntups = 0;
     appendPQExpBuffer(selectColumnKeysQry,
-        " SELECT a.oid, a.column_key_name, b.global_key_name, a.global_key_id "
+        " SELECT a.oid, a.column_key_name, b.global_key_name, a.global_key_id, n.nspname AS global_key_nspname "
         " from gs_column_keys a inner join gs_client_global_keys b "
-        " on a.global_key_id = b.oid where a.key_namespace = %u;", nspoid);
+        " on a.global_key_id = b.oid "
+        " left join pg_catalog.pg_namespace n on b.key_namespace = n.oid "
+        " where a.key_namespace = %u;", nspoid);
 
     cek_res = ExecuteSqlQuery(fout, selectColumnKeysQry->data, PGRES_TUPLES_OK);
     cek_ntups = PQntuples(cek_res);
@@ -4557,6 +4561,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
     i_column_key_name = PQfnumber(cek_res, "column_key_name");
     i_cek_global_key_name = PQfnumber(cek_res, "global_key_name");
     i_cek_global_key_id =  PQfnumber(cek_res, "global_key_id");
+    i_cek_global_key_nspname = PQfnumber(cek_res, "global_key_nspname");
     
     for (cek_index = 0; cek_index < cek_ntups; cek_index++) {
         char *key = NULL;
@@ -4579,6 +4584,8 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
         column_key_name = PQgetvalue(cek_res, cek_index, i_column_key_name);
         cek_global_key_name = PQgetvalue(cek_res, cek_index, i_cek_global_key_name);
         cek_global_key_id = atooid(PQgetvalue(cek_res, cek_index, i_cek_global_key_id));
+        cek_global_key_nspname = PQgetisnull(cek_res, cek_index, i_cek_global_key_nspname) ?
+            nspname : PQgetvalue(cek_res, cek_index, i_cek_global_key_nspname);
         appendPQExpBuffer(selectColumnKeysArgsQry,
             "SELECT * from gs_column_keys_args where column_key_id = '%u';", column_key_id);
         cek_args_res = ExecuteSqlQuery(fout, selectColumnKeysArgsQry->data, PGRES_TUPLES_OK);
@@ -4656,12 +4663,15 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
             }
             PQfreemem(unescaped_data);
         }
+        /* fmtQualifiedId() returns a static buffer, so each call needs its own append */
         appendPQExpBuffer(createColumnEncryptionKeysQry,
-            "CREATE COLUMN ENCRYPTION KEY %s.%s ", nspname, column_key_name);
-        appendPQExpBuffer(createColumnEncryptionKeysQry, 
-            "WITH VALUES (CLIENT_MASTER_KEY = %s.%s, encrypted_value='%s', ALGORITHM = %s );\n",
-            nspname, cek_global_key_name, deprocessed_cek, algorithm);
-        appendPQExpBuffer(delQry, "DROP COLUMN ENCRYPTION KEY IF EXISTS %s.%s;\n", nspname, fmtId(column_key_name));
+            "CREATE COLUMN ENCRYPTION KEY %s ", fmtQualifiedId(nspname, column_key_name));
+        appendPQExpBuffer(createColumnEncryptionKeysQry,
+            "WITH VALUES (CLIENT_MASTER_KEY = %s, ", fmtQualifiedId(cek_global_key_nspname, cek_global_key_name));
+        appendPQExpBuffer(createColumnEncryptionKeysQry,
+            "encrypted_value='%s', ALGORITHM = %s );\n", deprocessed_cek, algorithm);
+        appendPQExpBuffer(delQry, "DROP COLUMN ENCRYPTION KEY IF EXISTS %s;\n",
+            fmtQualifiedId(nspname, column_key_name));
         ArchiveEntry(fout,
             nilCatalogId,
             createDumpId(),
