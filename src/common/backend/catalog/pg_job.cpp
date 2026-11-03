@@ -1062,10 +1062,11 @@ void execute_job(int4 job_id)
 
         save = t_thrd.utils_cxt.CurrentResourceOwner;
 
-        /* set search path to current object nspOID */
-        OverrideSearchPath* overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-        PushOverrideSearchPath(overridePath);
-        pfree_ext(overridePath);
+        /*
+         * Use the worker session search path. execute_simple_query() can commit
+         * transactions before returning, so an override must not span the job.
+         * Scheduler SQL and procedure jobs set current_schema when needed.
+         */
 
         if (!execute_backend_scheduler_job(job_name, &buf)) {
             appendStringInfo(&buf, "%s", what);
