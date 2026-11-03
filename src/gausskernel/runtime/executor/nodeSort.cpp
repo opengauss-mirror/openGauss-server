@@ -16,6 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeSort.h"
 #include "miscadmin.h"
@@ -168,16 +169,25 @@ static TupleTableSlot* ExecSort(PlanState* state)
         /*
          * Scan the subplan and feed all the tuples to tuplesort.
          */
-        for (;;) {
-            slot = ExecProcNode(outer_node);
-            if (TupIsNull(slot))
-                break;
 #ifdef PGXC
-            if (plan_node->srt_start_merge)
+        if (plan_node->srt_start_merge) {
+            for (;;) {
+                slot = ExecProcNode(outer_node);
+                if (TupIsNull(slot))
+                    break;
                 tuplesort_puttupleslotontape(tuple_sortstate, slot);
-            else
-#endif /* PGXC */
+            }
+        } else
+#endif
+        if (plan_node->nPresortedCols > 0 && node->bounded && node->bound > 0) {
+            load_prefix_sort_tuples(node, tuple_sortstate);
+        } else {
+            for (;;) {
+                slot = ExecProcNode(outer_node);
+                if (TupIsNull(slot))
+                    break;
                 tuplesort_puttupleslot(tuple_sortstate, slot);
+            }
         }
         
         pgstat_report_waitstatus(STATE_EXEC_SORT);
@@ -333,19 +343,6 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
 
     Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
 
-<<<<<<< HEAD
-=======
-    outerDesc = ExecGetResultType(outerPlanState(sortstate));
-    /*
-     * We perform a Datum sort when we're sorting just a single column,
-     * otherwise we perform a tuple sort.
-     */
-    if (node->nPresortedCols == 0 && outerDesc->natts == 1 && TupleDescAttr(outerDesc, 0)->attbyval)
-        sortstate->datumSort = true;
-    else
-        sortstate->datumSort = false;
-
->>>>>>> 8f52bb0e8... 利用联合索引前缀优化有界排序
     SO1_printf("ExecInitSort: %s\n", "sort node initialized");
 
     return sortstate;

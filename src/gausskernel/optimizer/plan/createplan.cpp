@@ -1697,8 +1697,6 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
 
     return plan;
 }
-<<<<<<< HEAD
-=======
 
 /*
  * create_prefix_sort_plan
@@ -1709,7 +1707,7 @@ static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath
     Plan* subplan = create_plan_recurse(root, bestPath->subpath);
 
     /* Do not carry unused physical columns into the tuplesort. */
-    disuse_physical_tlist(root, subplan, bestPath->subpath);
+    disuse_physical_tlist(subplan, bestPath->subpath);
 
     Sort* plan = make_sort_from_pathkeys(
         root, subplan, bestPath->path.pathkeys, bestPath->limitTuples);
@@ -1720,50 +1718,6 @@ static Sort* create_prefix_sort_plan(PlannerInfo* root, PrefixSortPath* bestPath
 
     return plan;
 }
-
-/*
- * create_memoize_plan
- *      Create a Memoize plan for 'best_path' and (recursively) plans for its
- *      subpaths.
- *
- *      Returns a Plan node.
- */
-static Memoize *
-create_memoize_plan(PlannerInfo *root, MemoizePath *best_path)//;, int flags)
-{
-    Memoize *plan;
-    Bitmapset *keyparamids;
-    Plan *subplan;
-    Oid *operators;
-    Oid *collations;
-    List *param_exprs = NIL;
-    ListCell *lc;
-    ListCell *lc2;
-    int nkeys;
-    int i;
-
-    subplan = create_plan_recurse(root, best_path->subpath);
-
-    param_exprs = (List *) replace_nestloop_params(root, (Node *)
-                                                   best_path->param_exprs);
-
-    nkeys = list_length(param_exprs);
-    Assert(nkeys > 0);
-    operators = (Oid*)palloc(nkeys * sizeof(Oid));
-    collations = (Oid*)palloc(nkeys * sizeof(Oid));
-
-    i = 0;
-    forboth(lc, param_exprs, lc2, best_path->hash_operators) {
-        Expr       *param_expr = (Expr *) lfirst(lc);
-        Oid            opno = lfirst_oid(lc2);
-
-        operators[i] = opno;
-        collations[i] = exprCollation((Node *) param_expr);
-        i++;
-    }
-
-    keyparamids = pull_paramids((Expr *) param_exprs);
->>>>>>> 8f52bb0e8... 利用联合索引前缀优化有界排序
 
 /*
  * create_unique_plan
