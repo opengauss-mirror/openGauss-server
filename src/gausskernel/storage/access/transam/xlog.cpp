@@ -6161,6 +6161,7 @@ STATIC void WriteControlFile(void)
 #endif
     t_thrd.shemem_ptr_cxt.ControlFile->float4ByVal = FLOAT4PASSBYVAL;
     t_thrd.shemem_ptr_cxt.ControlFile->float8ByVal = FLOAT8PASSBYVAL;
+    t_thrd.shemem_ptr_cxt.ControlFile->rmgrLayout = RMGR_LAYOUT_CURRENT;
 
     /* Timeline */
     t_thrd.shemem_ptr_cxt.ControlFile->timeline = 0;
@@ -6449,6 +6450,31 @@ loop:
                         errhint("It looks like you need to recompile or gs_initdb.")));
     }
 #endif
+
+    /*
+     * Replaying WAL of the other layout would run records through the wrong
+     * redo routine. Any value other than the two known layouts is treated as
+     * unknown; UpdateControlFile() stamps the current layout.
+     */
+    uint8 rmgrLayout = t_thrd.shemem_ptr_cxt.ControlFile->rmgrLayout;
+    if ((rmgrLayout == RMGR_LAYOUT_WITH_MOT || rmgrLayout == RMGR_LAYOUT_WITHOUT_MOT) &&
+        rmgrLayout != RMGR_LAYOUT_CURRENT) {
+#ifdef ENABLE_MOT
+        ereport(FATAL, (errmsg("database files are incompatible with server"),
+                        errdetail("The database cluster was last written by a server compiled without MOT,"
+                                  " but this server was compiled with MOT, so their WAL resource manager ids differ."),
+                        errhint("Physical backup, restore and replication between builds with and without MOT, "
+                                "such as the enterprise and lite editions, are not supported. "
+                                "Use gs_dump and gs_restore to migrate the data.")));
+#else
+        ereport(FATAL, (errmsg("database files are incompatible with server"),
+                        errdetail("The database cluster was last written by a server compiled with MOT,"
+                                  " but this server was compiled without MOT, so their WAL resource manager ids differ."),
+                        errhint("Physical backup, restore and replication between builds with and without MOT, "
+                                "such as the enterprise and lite editions, are not supported. "
+                                "Use gs_dump and gs_restore to migrate the data.")));
+#endif
+    }
     /* recover the bad primary control file */
     if (retry == true) {
         RecoverControlFile();
@@ -6480,6 +6506,9 @@ void UpdateControlFile(void)
 
     err = memcpy_s(&buffer, write_size, t_thrd.shemem_ptr_cxt.ControlFile, len);
     securec_check(err, "\0", "\0");
+
+    /* files of older releases have no layout yet, see ReadControlFile() */
+    ((ControlFileData *)buffer)->rmgrLayout = RMGR_LAYOUT_CURRENT;
 
     INIT_CRC32C(((ControlFileData *)buffer)->crc);
     COMP_CRC32C(((ControlFileData *)buffer)->crc, (char *)buffer, offsetof(ControlFileData, crc));
