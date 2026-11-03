@@ -4069,6 +4069,18 @@ static void show_sort_keys(SortState* sortstate, List* ancestors, ExplainState* 
         plan->nullsFirst,
         ancestors,
         es);
+
+    if (plan->nPresortedCols > 0) {
+        show_sort_group_keys((PlanState*)sortstate,
+            "Presorted Key",
+            plan->nPresortedCols,
+            plan->sortColIdx,
+            plan->sortOperators,
+            plan->collations,
+            plan->nullsFirst,
+            ancestors,
+            es);
+    }
 }
 
 /*

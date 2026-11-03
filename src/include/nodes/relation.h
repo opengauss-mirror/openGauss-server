@@ -1437,6 +1437,18 @@ typedef struct MaterialPath {
 } MaterialPath;
 
 /*
+ * PrefixSortPath uses an ordered input prefix to bound the tuples read by
+ * an ordinary Sort for ORDER BY ... LIMIT.
+ */
+typedef struct PrefixSortPath {
+    Path path;
+    Path* subpath;
+    int nPresortedCols;
+    double limitTuples;
+    OpMemInfo memInfo;
+} PrefixSortPath;
+
+/*
  * UniquePath represents elimination of distinct rows from the output of
  * its subpath.
  *

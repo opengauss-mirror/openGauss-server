@@ -2564,6 +2564,7 @@ typedef struct SortState {
     bool bounded_Done;    /* value of bounded we did the sort with */
     int64 bound_Done;     /* value of bound we did the sort with */
     void* tuplesortstate; /* private state of tuplesort.c */
+    struct SortSupportData* presortedKeys; /* comparators for the input's ordered prefix */
     int32 local_work_mem; /* work_mem local for this sort */
     int sortMethodId;     /* sort method for explain */
     int spaceTypeId;      /* space type for explain */

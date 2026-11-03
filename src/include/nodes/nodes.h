@@ -910,6 +910,8 @@ typedef enum NodeTag {
     T_GatherPath,
     T_ForeignKeyCacheInfo,
     T_Gather,
+    T_PREFIX_SORT_PATH,
+
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h), the area above where such information is placed is full.
      */
