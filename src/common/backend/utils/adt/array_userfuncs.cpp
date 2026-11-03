@@ -13,10 +13,26 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "catalog/pg_operator.h"
+#include "miscadmin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
+#include "utils/tuplesort.h"
 #include "utils/typcache.h"
+
+typedef struct ArraySortCachedInfo {
+    ArrayMetaState arrayMeta; /* metadata for array_create_iterator */
+    Oid elemLtOpr;            /* "<" operator for element type */
+    Oid elemGtOpr;            /* ">" operator for element type */
+    Oid arrayType;            /* pg_type OID of the array type */
+} ArraySortCachedInfo;
+
+typedef struct ArraySortOperator {
+    Oid type;
+    Oid opr;
+} ArraySortOperator;
 
 /* -----------------------------------------------------------------------------
  * array_push :
@@ -673,4 +689,298 @@ Datum array_position_common(FunctionCallInfo fcinfo)
     }
 
     PG_RETURN_INT32(position);
+}
+
+/*
+ * ArrayReverseN
+ *		Return a copy of array with reversed items.
+ */
+static ArrayType* ArrayReverseN(ArrayType* array, Oid elemType, TypeCacheEntry* typeEntry)
+{
+    ArrayType* result = NULL;
+    int nElem;
+    int nItem;
+    int rDims[MAXDIM];
+    int rLbs[MAXDIM];
+    int half = 2;
+    Datum* elems = NULL;
+    Datum* iElems = NULL;
+    bool* nulls = NULL;
+    bool* iNulls = NULL;
+    errno_t rc = EOK;
+
+    int nDims = ARR_NDIM(array);
+    int* dims = ARR_DIMS(array);
+    int* lbs = ARR_LBOUND(array);
+
+    int16 elemLen = typeEntry->typlen;
+    bool elemByVal = typeEntry->typbyval;
+    char elemAlign = typeEntry->typalign;
+
+    deconstruct_array(array, elemType, elemLen, elemByVal, elemAlign, &elems, &nulls, &nElem);
+
+    /* total number of items */
+    nItem = dims[0];
+    /* number of elements per item */
+    nElem /= nItem;
+
+    /* Reverse the array, item by item */
+    iElems = elems;
+    iNulls = nulls;
+    for (int i = 0; i < nItem / half; i++) {
+        int j = (nItem - i - 1) * nElem;
+        Datum* jElems = elems + j;
+        bool* jNulls = nulls + j;
+
+        /* Swap i'th and j'th items; advance iElems/iNulls to next item */
+        for (int k = 0; k < nElem; k++) {
+            Datum elem = *iElems;
+            bool elemIsNull = *iNulls;
+
+            *iElems++ = *jElems;
+            *iNulls++ = *jNulls;
+            *jElems++ = elem;
+            *jNulls++ = elemIsNull;
+
+            /* Check for cancellation every 4096 elements. */
+            if ((k & 0x0FFF) == 0x0FFF) {
+                CHECK_FOR_INTERRUPTS();
+            }
+        }
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    /* Set up dimensions of the result, preserving lower bounds */
+    rc = memcpy_s(rDims, sizeof(rDims), dims, nDims * sizeof(int));
+    securec_check(rc, "", "");
+    rc = memcpy_s(rLbs, sizeof(rLbs), lbs, nDims * sizeof(int));
+    securec_check(rc, "", "");
+    rDims[0] = nItem;
+
+    result = construct_md_array(elems, nulls, nDims, rDims, rLbs, elemType, elemLen, elemByVal, elemAlign);
+
+    pfree(elems);
+    pfree(nulls);
+
+    return result;
+}
+
+/*
+ * array_reverse
+ *
+ * Returns an array with the same dimensions as the input array, with its
+ * first-dimension elements in reverse order.
+ */
+Datum array_reverse(PG_FUNCTION_ARGS)
+{
+    ArrayType* array = PG_GETARG_ARRAYTYPE_P(0);
+    ArrayType* result = NULL;
+    Oid elemType;
+    TypeCacheEntry* typeEntry = NULL;
+    int minElemNum = 2;
+
+    /*
+     * There is no point in reversing empty arrays or arrays with less than
+     * two items.  Keep the short-circuit order of the checks: dims[0] must
+     * not be touched when ndim == 0.
+     */
+    if (ARR_NDIM(array) < 1 || ARR_DIMS(array)[0] < minElemNum) {
+        PG_RETURN_ARRAYTYPE_P(array);
+    }
+
+    elemType = ARR_ELEMTYPE(array);
+    typeEntry = (TypeCacheEntry*)fcinfo->flinfo->fn_extra;
+    if (typeEntry == NULL || typeEntry->type_id != elemType) {
+        typeEntry = lookup_type_cache(elemType, 0);
+        fcinfo->flinfo->fn_extra = (void*)typeEntry;
+    }
+
+    result = ArrayReverseN(array, elemType, typeEntry);
+
+    /* Avoid leaking memory when handed toasted input */
+    PG_FREE_IF_COPY(array, 0);
+
+    PG_RETURN_ARRAYTYPE_P(result);
+}
+
+/*
+ * GetArraySortCacheInfo
+ *		Return cached array sort metadata for the given element type.
+ */
+static ArraySortCachedInfo* GetArraySortCacheInfo(FunctionCallInfo fcinfo, Oid elemType)
+{
+    ArraySortCachedInfo* cacheInfo = (ArraySortCachedInfo*)fcinfo->flinfo->fn_extra;
+    TypeCacheEntry* typeEntry = NULL;
+
+    if (cacheInfo == NULL) {
+        cacheInfo = (ArraySortCachedInfo*)MemoryContextAllocZero(
+            fcinfo->flinfo->fn_mcxt, sizeof(ArraySortCachedInfo));
+        fcinfo->flinfo->fn_extra = cacheInfo;
+    }
+
+    if (elemType == cacheInfo->arrayMeta.element_type) {
+        return cacheInfo;
+    }
+
+    typeEntry = lookup_type_cache(elemType, TYPECACHE_LT_OPR | TYPECACHE_GT_OPR);
+    cacheInfo->arrayMeta.element_type = elemType;
+    cacheInfo->arrayMeta.typlen = typeEntry->typlen;
+    cacheInfo->arrayMeta.typbyval = typeEntry->typbyval;
+    cacheInfo->arrayMeta.typalign = typeEntry->typalign;
+    cacheInfo->elemLtOpr = typeEntry->lt_opr;
+    cacheInfo->elemGtOpr = typeEntry->gt_opr;
+    cacheInfo->arrayType = get_array_type(elemType);
+
+    return cacheInfo;
+}
+
+/*
+ * GetArraySortOperator
+ *		Resolve the type and comparison operator used by tuplesort.
+ */
+static void GetArraySortOperator(
+    int nDims, Oid elemType, bool descending, ArraySortCachedInfo* cacheInfo,
+    ArraySortOperator* sortOperator)
+{
+    if (nDims == 1) {
+        sortOperator->type = elemType;
+        sortOperator->opr = (descending ? cacheInfo->elemGtOpr : cacheInfo->elemLtOpr);
+    } else {
+        sortOperator->type = cacheInfo->arrayType;
+        if (!OidIsValid(sortOperator->type))
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("could not find array type for data type %s",
+                        format_type_be(elemType))));
+        sortOperator->opr = (descending ? ARRAY_GT_OP : ARRAY_LT_OP);
+    }
+
+    if (!OidIsValid(sortOperator->opr))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("could not identify a comparison function for type %s",
+                    format_type_be(elemType))));
+}
+
+/*
+ * BuildArrayTupleSort
+ *		Load the array items into a tuplesort and perform the sort.
+ */
+static Tuplesortstate* BuildArrayTupleSort(
+    ArrayType* array, ArraySortCachedInfo* cacheInfo, ArraySortOperator* sortOperator,
+    bool nullsFirst, FunctionCallInfo fcinfo)
+{
+    Datum value;
+    bool isNull = false;
+    int nProcessed = 0;
+    int ndims = ARR_NDIM(array);
+    Oid collation = PG_GET_COLLATION();
+    Tuplesortstate* tuplesortstate;
+    tuplesortstate = tuplesort_begin_datum(sortOperator->type,
+                                           sortOperator->opr,
+                                           collation,
+                                           nullsFirst,
+                                           u_sess->attr.attr_memory.work_mem,
+                                           false);
+    ArrayIterator arrayIterator = array_create_iterator(array, ndims - 1,
+                                                        &cacheInfo->arrayMeta);
+
+    while (array_iterate(arrayIterator, &value, &isNull)) {
+        tuplesort_putdatum(tuplesortstate, value, isNull);
+
+        /* Check for cancellation every 4096 elements. */
+        if ((++nProcessed & 0x0FFF) == 0) {
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+    array_free_iterator(arrayIterator);
+    tuplesort_performsort(tuplesortstate);
+
+    return tuplesortstate;
+}
+
+/*
+ * MakeSortedArray
+ *		Build an array from the sorted tuplesort output.
+ */
+static ArrayType* MakeSortedArray(Tuplesortstate* tuplesortState, Oid sortType, int lowerBound)
+{
+    ArrayBuildStateAny* arrayState = NULL;
+    Datum value;
+    bool isNull = false;
+    int nProcessed = 0;
+    ArrayType* newArray = NULL;
+
+    while (tuplesort_getdatum(tuplesortState, true, &value, &isNull)) {
+        arrayState = accumArrayResultAny(
+            arrayState, value, isNull, sortType, CurrentMemoryContext);
+
+        /* Check for cancellation every 4096 elements. */
+        if ((++nProcessed & 0x0FFF) == 0) {
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+    tuplesort_end(tuplesortState);
+    newArray = DatumGetArrayTypeP(makeArrayResultAny(arrayState, CurrentMemoryContext, true));
+    ARR_LBOUND(newArray)[0] = lowerBound;
+
+    return newArray;
+}
+
+/*
+ * ArraySortInternal
+ *		Sort the first dimension of the array.
+ */
+static ArrayType* ArraySortInternal(
+    ArrayType* array, bool descending, bool nullsFirst, FunctionCallInfo fcinfo)
+{
+    int nDims = ARR_NDIM(array);
+    int *dims = ARR_DIMS(array);
+    int *lbs = ARR_LBOUND(array);
+    Oid elemType;
+    ArraySortCachedInfo* cacheInfo = NULL;
+    ArraySortOperator sortOperator;
+    Tuplesortstate* tuplesortState = NULL;
+    ArrayType* newArray = NULL;
+    int minElemNum = 2;
+
+    if (nDims < 1 || dims[0] < minElemNum ||
+        ArrayGetNItems(nDims, dims) < minElemNum) {
+        return array;
+    }
+
+    elemType = ARR_ELEMTYPE(array);
+    cacheInfo = GetArraySortCacheInfo(fcinfo, elemType);
+    GetArraySortOperator(nDims, elemType, descending, cacheInfo, &sortOperator);
+    tuplesortState = BuildArrayTupleSort(array, cacheInfo, &sortOperator, nullsFirst, fcinfo);
+    newArray = MakeSortedArray(tuplesortState, sortOperator.type, lbs[0]);
+
+    PG_FREE_IF_COPY(array, 0);
+
+    return newArray;
+}
+
+Datum array_sort(PG_FUNCTION_ARGS)
+{
+    ArrayType* array = PG_GETARG_ARRAYTYPE_P(0);
+
+    PG_RETURN_ARRAYTYPE_P(ArraySortInternal(array, false, false, fcinfo));
+}
+
+Datum array_sort_order(PG_FUNCTION_ARGS)
+{
+    ArrayType* array = PG_GETARG_ARRAYTYPE_P(0);
+    bool descending = PG_GETARG_BOOL(1);
+
+    /* nullsFirst defaults to the value of descending (R-18) */
+    PG_RETURN_ARRAYTYPE_P(ArraySortInternal(array, descending, descending, fcinfo));
+}
+
+Datum array_sort_order_nulls_first(PG_FUNCTION_ARGS)
+{
+    ArrayType* array = PG_GETARG_ARRAYTYPE_P(0);
+    bool descending = PG_GETARG_BOOL(1);
+    bool nullsFirst = PG_GETARG_BOOL(2);
+
+    PG_RETURN_ARRAYTYPE_P(ArraySortInternal(array, descending, nullsFirst, fcinfo));
 }

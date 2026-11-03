@@ -1,0 +1,209 @@
+-- 基本功能
+SELECT array_reverse(ARRAY[1,2,3]);
+ array_reverse 
+---------------
+ {3,2,1}
+(1 row)
+
+SELECT array_reverse(ARRAY[[1,2],[3,4],[5,6]]);
+    array_reverse    
+---------------------
+ {{5,6},{3,4},{1,2}}
+(1 row)
+
+SELECT array_reverse(ARRAY[3,NULL,1]);
+ array_reverse 
+---------------
+ {1,NULL,3}
+(1 row)
+
+SELECT array_sort(ARRAY[3,1,2]);
+ array_sort 
+------------
+ {1,2,3}
+(1 row)
+
+SELECT array_sort(ARRAY[[2,4],[2,1],[6,5]]);
+     array_sort      
+---------------------
+ {{2,1},{2,4},{6,5}}
+(1 row)
+
+SELECT array_sort(ARRAY['b','A','a'] COLLATE "C");
+ array_sort 
+------------
+ {A,a,b}
+(1 row)
+
+-- 无对应比较操作符，降序排序报错
+SELECT array_sort(ARRAY['1'::xid, '2'::xid], true);
+ERROR:  could not identify a comparison function for type xid
+CONTEXT:  referenced column: array_sort
+-- 参数descending, nulls_first
+SELECT array_sort(ARRAY[2,NULL,1]);
+ array_sort 
+------------
+ {1,2,NULL}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], false);
+ array_sort 
+------------
+ {1,2,NULL}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], true);
+ array_sort 
+------------
+ {NULL,2,1}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], false, false);
+ array_sort 
+------------
+ {1,2,NULL}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], false, true);
+ array_sort 
+------------
+ {NULL,1,2}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], true, false);
+ array_sort 
+------------
+ {2,1,NULL}
+(1 row)
+
+SELECT array_sort(ARRAY[2,NULL,1], true, true);
+ array_sort 
+------------
+ {NULL,2,1}
+(1 row)
+
+-- 指定参数名称
+SELECT array_sort(ARRAY[3,1,2], descending => false, nulls_first => true);
+ array_sort 
+------------
+ {1,2,3}
+(1 row)
+
+-- 参数值为NULL
+SELECT array_sort(NULL::int[]) IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT array_sort(ARRAY[1,2], NULL) IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT array_sort(ARRAY[1,2], true, NULL) IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT array_reverse(NULL::int[]) IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- 空数组/单元素数组
+SELECT array_reverse('{}'::int[]);
+ array_reverse 
+---------------
+ {}
+(1 row)
+
+SELECT array_sort('{}'::int[]);
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(ARRAY[42]);
+ array_sort 
+------------
+ {42}
+(1 row)
+
+SELECT array_dims(array_reverse('{}'::int[]));
+ array_dims 
+------------
+ 
+(1 row)
+
+-- 含零长度维度的多维数组
+SELECT array_fill(1, ARRAY[2,0]);
+ array_fill 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[2,0]));
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[2,0]), true);
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[2,0]), false, true);
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[3,0]));
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[2,2,0]));
+ array_sort 
+------------
+ {}
+(1 row)
+
+SELECT array_sort(array_fill(1, ARRAY[0]));
+ array_sort 
+------------
+ {}
+(1 row)
+
+-- 保留数组下界
+SELECT array_reverse('[0:2]={1,2,3}'::int[]);
+ array_reverse 
+---------------
+ [0:2]={3,2,1}
+(1 row)
+
+SELECT array_sort('[-2:0]={9,8,7}'::int[]);
+   array_sort   
+----------------
+ [-2:0]={7,8,9}
+(1 row)
+
+SELECT array_dims(array_sort('[5:7]={3,1,2}'::int[]));
+ array_dims 
+------------
+ [5:7]
+(1 row)
+
+SELECT pg_typeof(array_sort(ARRAY['b','a']));
+ pg_typeof 
+-----------
+ text[]
+(1 row)
+
