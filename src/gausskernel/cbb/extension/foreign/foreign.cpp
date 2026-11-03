@@ -961,7 +961,9 @@ char* HdfsGetOptionValue(Oid foreignTableId, const char* optionName)
 
     if (optionDef != NULL) {
         optionValue = defGetString(optionDef);
-        if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_SAK)) {
+        /* access_key and secret_access_key are both stored encrypted, decrypt them here. */
+        if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_SAK) ||
+            0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_AK)) {
             decryptKeyString(optionValue, decrypStr, DEST_CIPHER_LENGTH);
             optionValue = pstrdup(decrypStr);
             rc = memset_s(decrypStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
@@ -1107,6 +1109,7 @@ char* getServerOptionValue(Oid srvOid, const char* optionName)
     char* optionValue = NULL;
     ListCell* optionCell = NULL;
     char decrypStr[DEST_CIPHER_LENGTH] = {'\0'};
+    errno_t rc = EOK;
 
     foreach (optionCell, optionList) {
         DefElem* optionDef = (DefElem*)lfirst(optionCell);
@@ -1123,6 +1126,10 @@ char* getServerOptionValue(Oid srvOid, const char* optionName)
             break;
         }
     }
+
+    /* safety concern, clear the plaintext buffer manually. */
+    rc = memset_s(decrypStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "\0", "\0");
 
     return optionValue;
 }
@@ -1252,7 +1259,7 @@ ObsOptions* setObsSrvOptions(ForeignOptions* fOptions)
         options->address = address;
     }
 
-    options->access_key = getFTOptionValue(fOptions->fOptions, OPTION_NAME_SERVER_AK);
+    char* ak = getFTOptionValue(fOptions->fOptions, OPTION_NAME_SERVER_AK);
 
     DefElem* def_elem = getFTOptionDefElemFromList(fOptions->fOptions, OPTION_NAME_SERVER_ENCRYPT);
     options->encrypt = def_elem ? defGetBoolean(def_elem) : false;
@@ -1267,6 +1274,12 @@ ObsOptions* setObsSrvOptions(ForeignOptions* fOptions)
     }
 
     char decrypStr[DEST_CIPHER_LENGTH] = {'\0'};
+    /* access_key and secret_access_key are both stored encrypted, decrypt with obskey. */
+    decryptKeyString(ak, decrypStr, DEST_CIPHER_LENGTH, obskey);
+    options->access_key = pstrdup(decrypStr);
+    rc = memset_s(decrypStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "\0", "\0");
+
     decryptKeyString(sak, decrypStr, DEST_CIPHER_LENGTH, obskey);
     options->secret_access_key = pstrdup(decrypStr);
 
