@@ -950,7 +950,11 @@ static void ExportTableStats(Oid namespaceid, Oid relid, Oid partid, Oid stareli
         }
         Form_pg_index indextup = (Form_pg_index)GETSTRUCT(indexTuple);
         for (int i = 0; i < indextup->indnatts; i++) {
-            is_index_column[indextup->indkey.values[i] - 1] = true;
+            /* Only user attributes have entries in this table-column bitmap. */
+            AttrNumber attnum = indextup->indkey.values[i];
+            if (attnum > 0 && attnum <= attnums) {
+                is_index_column[attnum - 1] = true;
+            }
             if (!cascade) {
                 continue;
             }
@@ -1355,7 +1359,11 @@ static void ImportTableStats(Oid namespaceid, Oid relid, Oid partid, Oid stareli
         }
         Form_pg_index indextup = (Form_pg_index)GETSTRUCT(indexTuple);
         for (int i = 0; i < indextup->indnatts; i++) {
-            is_index_column[indextup->indkey.values[i] - 1] = true;
+            /* Only user attributes have entries in this table-column bitmap. */
+            AttrNumber attnum = indextup->indkey.values[i];
+            if (attnum > 0 && attnum <= attnums) {
+                is_index_column[attnum - 1] = true;
+            }
             if (!cascade) {
                 continue;
             }
@@ -1493,7 +1501,7 @@ Datum gs_import_table_stats(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(5)) {
         statown = pstrdup(ownname);
     } else {
-        statown = text_to_cstring(PG_GETARG_TEXT_P(6));
+        statown = text_to_cstring(PG_GETARG_TEXT_P(5));
     }
     Oid starelid = get_relname_relid(stattab, get_namespace_oid(statown, false));
     if (!OidIsValid(starelid)) {
@@ -1758,7 +1766,11 @@ static void DeleteTableStats(Oid namespaceid, Oid relid, Oid partid, Oid stareli
         }
         Form_pg_index indextup = (Form_pg_index)GETSTRUCT(indexTuple);
         for (int i = 0; i < indextup->indnatts; i++) {
-            is_index_column[indextup->indkey.values[i] - 1] = true;
+            /* Only user attributes have entries in this table-column bitmap. */
+            AttrNumber attnum = indextup->indkey.values[i];
+            if (attnum > 0 && attnum <= attnums) {
+                is_index_column[attnum - 1] = true;
+            }
             if (cascadeIndex) {
                 DeleteColumnStats(namespaceid, relid, indextup->indkey.values[i], starelid, STARELKIND_CLASS);
             }
