@@ -217,17 +217,20 @@ static void insert_profiler_unit_entry(ProfilerUnitHashEntry *unit_entry, SPIPla
          * regard it as an anonymous block */
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", "ANONYMOUS BLOCK");
-        values[2] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[2] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
 
         /* values 3: unit_owner anonymous*/
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", "<anonymous>");
-        values[3] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[3] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
 
         /* values 4: unit_name anonymous*/
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", "<anonymous>");
-        values[4] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[4] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
 
     } else {
         /* values 2: unit_type PROCEDURE or FUNCTION
@@ -251,7 +254,8 @@ static void insert_profiler_unit_entry(ProfilerUnitHashEntry *unit_entry, SPIPla
             appendStringInfo(&buf, "%s", "UNKNOWN");
         }
 
-        values[2] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[2] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
 
         /* values 4: unit_name
          * unit_name is in the pg_proc system table,
@@ -262,7 +266,8 @@ static void insert_profiler_unit_entry(ProfilerUnitHashEntry *unit_entry, SPIPla
 
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", unit_name);
-        values[4] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[4] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
 
         /* get proc_owner oid before release cache */
         proc_owner = proc_struct->proowner;
@@ -280,7 +285,8 @@ static void insert_profiler_unit_entry(ProfilerUnitHashEntry *unit_entry, SPIPla
 
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", usename);
-        values[3] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[3] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
         ReleaseSysCache(auth_tp);
     }
 
@@ -582,7 +588,8 @@ static void insert_profiler_runs(void)
         authid_struct = (Form_pg_authid) GETSTRUCT(auth_tp);
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", NameStr(authid_struct->rolname));
-        values[1] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[1] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
         ReleaseSysCache(auth_tp);
     } else {
         nulls[1] = 'n';
@@ -599,7 +606,8 @@ static void insert_profiler_runs(void)
     if (profiler_cxt->run_comment) {
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", profiler_cxt->run_comment);
-        values[3] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[3] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
     } else {
         nulls[3] = 'n';
     }
@@ -614,7 +622,8 @@ static void insert_profiler_runs(void)
     if (profiler_cxt->run_comment1) {
         resetStringInfo(&buf);
         appendStringInfo(&buf, "%s", profiler_cxt->run_comment1);
-        values[5] = DirectFunctionCall1(varcharin, CStringGetDatum(buf.data));
+        values[5] = DirectFunctionCall3(varcharin, CStringGetDatum(buf.data),
+                                    ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1));
     } else {
         nulls[5] = 'n';
     }
@@ -1286,4 +1295,3 @@ Datum resume_profiler(PG_FUNCTION_ARGS)
 
     PG_RETURN_INT32(PROFILER_ERROR_OK);
 }
-
