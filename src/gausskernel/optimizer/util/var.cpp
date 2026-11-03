@@ -1100,7 +1100,8 @@ static bool collect_param_clause_walker(Node* node, void* context)
     if ((IsA(node, Param) && ((Param*)node)->paramkind != PARAM_EXTERN)) {
         Param *param = (Param *)node;
         ctx->param_ids = bms_add_member(ctx->param_ids, param->paramid);
-        return true;
+        /* Collect every Param; true would stop the expression tree walk. */
+        return false;
     }
 
     if (IsA(node, RestrictInfo)) {
