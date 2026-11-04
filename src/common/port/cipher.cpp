@@ -795,8 +795,8 @@ void gen_cipher_rand_files(
     }
 }
 
-/* decrypt the cipher text to plain text via the stored files */
-void decode_cipher_files(
+/* Decrypt the key from the stored files; return false if reading or decryption fails. */
+bool decode_cipher_files(
     KeyMode mode, const char* user_name, const char* datadir, GS_UCHAR* plainpwd, bool obsnormal_or_initdb)
 {
     GS_UINT32 plainlen = 0;
@@ -809,12 +809,12 @@ void decode_cipher_files(
     if (!isModeExists(mode)) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("invalid key mode.\n"));
-        return;
+        return false;
 #endif
     }
     if (datadir == NULL) {
         (void)fprintf(stderr, _("invalid data dir,recheck it please!\n"));
-        return;
+        return false;
     }
 
     /* in server_mode,read the files begin with server% */
@@ -896,16 +896,18 @@ void decode_cipher_files(
         ClearCipherKeyFile(&cipher_file_content);
         ClearRandKeyFile(&rand_file_content);
         (void)fprintf(stderr, _("read cipher file or random parameter file failed.\n"));
-        return;
+        return false;
     }
 
-    if (!DecryptInputKey(cipher_file_content.cipherkey, CIPHER_LEN, rand_file_content.randkey,
-            cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen)) {
+    bool decrypted = DecryptInputKey(cipher_file_content.cipherkey, CIPHER_LEN, rand_file_content.randkey,
+        cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen);
+    if (!decrypted) {
         (void)fprintf(stderr, _("decrypt key failed.\n"));
     }
 
     ClearCipherKeyFile(&cipher_file_content);
     ClearRandKeyFile(&rand_file_content);
+    return decrypted;
 }
 
 /* check whether the character is special characters */
