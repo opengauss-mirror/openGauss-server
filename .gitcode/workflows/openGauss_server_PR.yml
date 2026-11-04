@@ -1,14 +1,6 @@
 name: openGauss_server_PR
 
 on:
-  push:
-    branches:
-      - master
-    paths-ignore:
-      - '.gitcode/**'
-      - 'doc/**'
-      - 'docs/**'
-      - 'docs-lite/**'
   pull_request_target:
     types:
       - open
