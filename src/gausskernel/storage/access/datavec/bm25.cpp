@@ -265,6 +265,8 @@ static void bm25costestimate_internal(PlannerInfo *root, IndexPath *path, double
 
     *indexStartupCost = 0;
     *indexTotalCost = 0;
+    *indexSelectivity = 1;
+    *indexCorrelation = 0;
     return;
 }
 
