@@ -379,9 +379,10 @@ bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLoca
     for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
         BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(page, PageGetItemId(page, offno));
         if ((tokenMeta->hashValue == tokenData.hashValue) &&
-			(strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
+            (strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
             tokenMetaLocation.blkno = BufferGetBlockNumber(buf);
             tokenMetaLocation.offno = offno;
+            tokenData.tokenId = tokenMeta->tokenId;
             return true;
         }
     }

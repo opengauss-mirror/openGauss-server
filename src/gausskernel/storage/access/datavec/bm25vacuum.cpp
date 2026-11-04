@@ -576,6 +576,13 @@ IndexBulkDeleteResult *bm25vacuumcleanup_internal(IndexVacuumInfo *info, IndexBu
         return stats;
 
     /*
+     * Clean up trailing placeholder chunks left by VarBlockFreeChain.
+     * This must run before IndexFreeSpaceMapVacuum so that reclaimed
+     * space is visible to the FSM compaction.
+     */
+    VarBlockVacuumCleanup(rel);
+
+    /*
      * Like btree/gist/gin: repair the MAIN fork FSM tree (including after VarBlock
      * RecordPageWithFreeSpace when upper layers can lag behind leaf slot usage).
      */
