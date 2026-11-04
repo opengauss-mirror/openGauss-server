@@ -1184,8 +1184,9 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
                 errmsg("cache lookup failed for type %u", rel->rd_att->attrs[i].atttypid)));
         }
         Form_pg_type type_form = (Form_pg_type)GETSTRUCT(tuple);
+        char typtype = type_form->typtype;
         ReleaseSysCache(tuple);
-        if (type_form->typtype != 'b') {
+        if (typtype != 'b') {
             heap_close(rel, NoLock);
             return NOBYPASS_DML_TARGET_TYPE_INVALID;
         }
