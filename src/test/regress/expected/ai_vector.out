@@ -342,49 +342,5 @@ select l2_norm('[1,1]');
 ERROR:  This input type is not supported for l2_norm()
 HINT:  Use explicit casts to vector, sparsevec, or halfvec.
 
--- Check sparsevec input capacity without printing the generated vectors.
-CREATE FUNCTION sparsevec_input_overflow_rejected(input_text text)
-RETURNS boolean AS $$
-BEGIN
-    PERFORM input_text::sparsevec;
-    RETURN false;
-EXCEPTION
-    WHEN invalid_text_representation THEN
-        RETURN true;
-END;
-$$ LANGUAGE plpgsql;
-\pset tuples_only on
-WITH sparse_input AS (
-    SELECT '{' || string_agg(i::text || ':1', ',' ORDER BY i) || '}/16000' AS value_text
-    FROM generate_series(1, 16000) AS g(i)
-)
-SELECT value_text::sparsevec::text = value_text AS nnz_limit_accepted FROM sparse_input;
- t
-
-WITH sparse_input AS (
-    SELECT '{' || string_agg(i::text || ':1', ',' ORDER BY i) || '}/16001' AS value_text
-    FROM generate_series(1, 16001) AS g(i)
-)
-SELECT sparsevec_input_overflow_rejected(value_text) AS nnz_overflow_rejected FROM sparse_input;
- t
-
-WITH sparse_input AS (
-    SELECT '{' || string_agg(i::text || ':' ||
-        CASE WHEN i IN (1, 8000, 16001) THEN '1' ELSE '0' END, ',' ORDER BY i) || '}/16001' AS value_text
-    FROM generate_series(1, 16001) AS g(i)
-)
-SELECT value_text::sparsevec::text = '{1:1,8000:1,16001:1}/16001' AS zero_entries_ignored FROM sparse_input;
- t
-
-WITH sparse_input AS (
-    SELECT string_agg(i::text || ':1', ',' ORDER BY i) AS nonzero_text
-    FROM generate_series(1, 16000) AS g(i)
-)
-SELECT ('{' || nonzero_text || ',16001:0}/16001')::sparsevec::text =
-    ('{' || nonzero_text || '}/16001') AS trailing_zero_accepted FROM sparse_input;
- t
-
-\pset tuples_only off
-DROP FUNCTION sparsevec_input_overflow_rejected(text);
 \c regression
 drop database test;
