@@ -1095,15 +1095,15 @@ static bool cmdtype_is_loop(int cmdtype)
 
 static void plpgsql_cb_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-    /* annoymous blocks don't have fn_oid, do nothing! */
-    if (0 == memcmp("inline_code_block", func->fn_signature, strlen("inline_code_block")))
+    /* Only the exact anonymous-block signature has no catalog entry. */
+    if (0 == strcmp("inline_code_block", func->fn_signature))
         return;
     begin_profile_block(func->fn_oid);
 }
 static void plpgsql_cb_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-    /* annoymous blocks don't have fn_oid, do nothing! */
-    if (0 == memcmp("inline_code_block", func->fn_signature, strlen("inline_code_block")))
+    /* Only the exact anonymous-block signature has no catalog entry. */
+    if (0 == strcmp("inline_code_block", func->fn_signature))
         return;
     end_profile_block(func->fn_oid);
 }
