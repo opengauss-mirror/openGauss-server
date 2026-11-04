@@ -16,6 +16,7 @@
 [0m[1;33m# RUNNING TEST #[0m case: 12 SQLSplitter.sql .......... [1;32mPASS
 [0m[1;33m# RUNNING TEST #[0m case: 13 TrueSQL.sql .............. [1;32mPASS
 [0m[1;33m# RUNNING TEST #[0m case: 14 SQLSyntax.sql ............ [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 15 SecurityPrivileges.sql ... [1;32mPASS
 [0m[1;33m### TEARDOWN ###[0m harness: TeardownTestHarness.sql .. [1;32mPASS
 [0m[1;32m##### DONE #####[0m DB4AI Snapshots regression test complete
 drop database if exists test1;
