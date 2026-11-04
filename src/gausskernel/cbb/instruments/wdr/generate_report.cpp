@@ -235,6 +235,32 @@ static dashboard* CreateDash(void)
 }
 
 static bool UpdataReportSnapGapParam(report_params* params, const char* table_name);
+
+/*
+ * Get the D-compatible databases that were skipped by WDR snapshot because
+ * extension "shark" was installed in them before, while "shark" is not
+ * configured in parameter "shared_preload_libraries". The skipped databases
+ * are marked in snapshot.tables_snap_timestamp by the snapshot process, so
+ * that the report and the log can warn that the WDR information of these
+ * databases cannot be collected until "shark" is configured.
+ */
+static List* get_shark_skip_databases(report_params* params)
+{
+    List* dbList = NIL;
+    List* colType = NIL;
+    StringInfoData query;
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "select distinct db_name from snapshot.tables_snap_timestamp where snapshot_id in (%ld, %ld) "
+        "and tablename = 'wdr_shark_skip' order by db_name",
+        params->begin_snap_id, params->end_snap_id);
+    GenReport::get_query_data(query.data, false, &dbList, &colType);
+    pfree_ext(query.data);
+    list_free_deep(colType);
+    return dbList;
+}
+
 /*
  * generate the type of html report
  */
@@ -294,6 +320,25 @@ char* GenReport::GenerateHtmlReport(report_params* params)
     initStringInfo(&result);
     appendStringInfo(&result, "%s%s%s<h1 class=\"wdr\">Workload Diagnosis Report</h1>", css, specialStyle, js);
     pfree_ext(specialStyle);
+
+    /* warn in the report and log for the D-compatible databases skipped by WDR snapshot */
+    List* sharkSkipDbList = get_shark_skip_databases(params);
+    foreach_cell(cell, sharkSkipDbList)
+    {
+        char* dbname = (char*)linitial((List*)lfirst(cell));
+        ereport(WARNING, (errmsg("Database \"%s\" is a D-compatible database and has installed extension \"shark\", "
+            "but \"shark\" is not configured in parameter \"shared_preload_libraries\", WDR skips this database",
+            dbname),
+            errdetail("Add \"shark\" into parameter \"shared_preload_libraries\" and restart, then the WDR "
+                "information of this database can be collected")));
+        appendStringInfo(&result,
+            "<p /><font color=\"#8B0000\"><b>WARNING: Database \"%s\" is a D-compatible database and has installed "
+            "extension \"shark\", but \"shark\" is not configured in parameter \"shared_preload_libraries\", WDR "
+            "skips this database. Add \"shark\" into parameter \"shared_preload_libraries\" and restart, then the "
+            "WDR information of this database can be collected.</b></font><p />",
+            dbname);
+    }
+    list_free_deep(sharkSkipDbList);
 
     for (uint32 i = 0; i < NUM_REPROT_PART; i++)
         GenReport::GenerateSummaryHtml(g_reportpart[i], params->Contents, result);
@@ -1038,6 +1083,16 @@ void GenReport::get_query_data(char* query, bool with_column_name, List** cstrin
             colname_cstring = lappend(colname_cstring, strName);
         }
         *cstring_values = lappend(*cstring_values, colname_cstring);
+        if (SPI_processed == 0) {
+            /* record column types even when no row returned, or a later with_column_name=false
+             * query appending data rows would leave type list shorter than the row width and
+             * crash table_to_Html on dereferencing the NULL type cell (e.g. standby node report) */
+            for (int32 i = 0; i < SPI_tuptable->tupdesc->natts; i++) {
+                Oid* type = (Oid*)palloc(sizeof(Oid));
+                *type = SPI_gettypeid(SPI_tuptable->tupdesc, i + 1);
+                *columnType = lappend(*columnType, type);
+            }
+        }
     }
 
     /* Get the data in the table and convert it to string format */
@@ -5203,27 +5258,41 @@ static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, repor
             SELECT 'Z', 'SEQUENCE' UNION ALL
             SELECT 'm', 'MATERIALIZED VIEW'
         ),
+        parttype_mapping AS (
+            SELECT 'p' AS parttype, 'TABLE' AS object_type UNION ALL
+            SELECT 's', 'TABLE' UNION ALL
+            SELECT 'x', 'INDEX' UNION ALL
+            SELECT 't', 'TOAST TABLE'
+        ),
         end_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
+                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
             FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
             WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
         ),
         begin_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
+                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
             FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
             WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
         ),
         file_object_type AS (
-            SELECT t2.snap_filenum, COALESCE(mapping.object_type, 'OTHER') AS object_type
+            SELECT DISTINCT
+                t2.snap_dbid, t2.snap_spcid, t2.snap_filenum,
+                COALESCE(mapping.object_type, part_mapping.object_type, 'OTHER') AS object_type
             FROM end_snapshot_data t2
             LEFT JOIN pg_class ON pg_class.relfilenode = t2.snap_filenum
                 AND pg_class.relfilenode <> 0
                 AND t2.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
             LEFT JOIN relkind_mapping mapping ON pg_class.relkind = mapping.relkind
+            LEFT JOIN pg_partition ON pg_partition.relfilenode = t2.snap_filenum
+                AND pg_partition.relfilenode <> 0
+                AND t2.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+            LEFT JOIN parttype_mapping part_mapping ON pg_partition.parttype = part_mapping.parttype
         ),
         file_io_diff AS (
             SELECT
-                t2.snap_filenum,
+                t2.snap_filenum, t2.snap_dbid, t2.snap_spcid,
                 GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
                 GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
                 GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
@@ -5231,16 +5300,20 @@ static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, repor
             FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
                 ON t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
                     AND t1.snap_dbid IS NOT DISTINCT FROM t2.snap_dbid
+                    AND t1.snap_spcid IS NOT DISTINCT FROM t2.snap_spcid
         ),
         object_io_stats AS (
             SELECT
                 fot.object_type,
-                COUNT(DISTINCT fid.snap_filenum) AS object_count,
+                COUNT(DISTINCT (fid.snap_dbid, fid.snap_spcid, fid.snap_filenum)) AS object_count,
                 SUM(fid.diff_reads) AS total_reads,
                 SUM(fid.diff_writes) AS total_writes,
                 SUM(fid.diff_blk_read) AS total_blk_read,
                 SUM(fid.diff_blk_written) AS total_blk_written
-            FROM file_io_diff fid JOIN file_object_type fot ON fid.snap_filenum = fot.snap_filenum
+            FROM file_io_diff fid JOIN file_object_type fot
+                ON fid.snap_filenum IS NOT DISTINCT FROM fot.snap_filenum
+                    AND fid.snap_dbid IS NOT DISTINCT FROM fot.snap_dbid
+                    AND fid.snap_spcid IS NOT DISTINCT FROM fot.snap_spcid
             GROUP BY fot.object_type
         )
         SELECT
