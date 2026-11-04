@@ -99,7 +99,7 @@ test: gs_dump_tableof view_definer_permission_test
 test: single_node_ddl single_node_sqlbypass
 #test: single_node_job
 test: median deferrable
-test: array_funcs array_union first_last_agg
+test: array_funcs array_union first_last_agg array_sort_reverse
 test: fetch_rows_with_ties
 
 #test: hw_pwd_encryption_sm3
