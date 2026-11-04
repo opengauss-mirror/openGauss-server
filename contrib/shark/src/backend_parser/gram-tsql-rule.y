@@ -390,7 +390,7 @@ tsql_CreateProcedureStmt:
                                         int rc = 0;
                                         rc = CompileWhich();
                                         if ((rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) && u_sess->cmd_cxt.CurrentExtensionObject == InvalidOid) {
-                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @8);
+                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @8);
                                         }
 					rc = CompileWhich();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
@@ -1088,7 +1088,7 @@ TSQL_CreateFunctionStmt:
 					int rc = 0;
 					rc = CompileWhich();
 					if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
-						u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @10);
+						u_sess->plsql_cxt.procedure_first_line = GetLineNumber(pg_yyget_extra(yyscanner)->core_yy_extra.scanbuf, @10);
 					}
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					FunctionSources *funcSource = (FunctionSources *)$12;
