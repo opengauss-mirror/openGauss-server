@@ -304,14 +304,14 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
     char* ptr = NULL;
     int parsed = 0;
     int iplen = 0;
-    char tmp_localhost[IP_LEN] = {0};
+    char tmp_localhost[REPL_HOST_LEN] = {0};
     char cascadeToken[IP_LEN] = {0};
     char crossRegionToken[IP_LEN] = {0};
     int tmp_localport = 0;
-    char tmp_remotehost[IP_LEN] = {0};
+    char tmp_remotehost[REPL_HOST_LEN] = {0};
     int tmp_remoteport = 0;
     int tmp_remotenodeid = 0;
-    char tmp_remoteuwalhost[IP_LEN] = {0};
+    char tmp_remoteuwalhost[REPL_HOST_LEN] = {0};
     int tmp_remoteuwalport = 0;
     int cascadeLen = strlen("iscascade");
     int corssRegionLen = strlen("isCrossRegion");
@@ -351,13 +351,13 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
 
         token = strtok_r(ReplStr, ",", &p);
         while (token != NULL) {
-            rc = memset_s(tmp_localhost, IP_LEN, 0, sizeof(tmp_localhost));
+            rc = memset_s(tmp_localhost, sizeof(tmp_localhost), 0, sizeof(tmp_localhost));
             securec_check_c(rc, "\0", "\0");
 
-            rc = memset_s(tmp_remotehost, IP_LEN, 0, sizeof(tmp_remotehost));
+            rc = memset_s(tmp_remotehost, sizeof(tmp_remotehost), 0, sizeof(tmp_remotehost));
             securec_check_c(rc, "\0", "\0");
 
-            rc = memset_s(tmp_remoteuwalhost, IP_LEN, 0, sizeof(tmp_remoteuwalhost));
+            rc = memset_s(tmp_remoteuwalhost, sizeof(tmp_remoteuwalhost), 0, sizeof(tmp_remoteuwalhost));
             securec_check_c(rc, "\0", "\0");
 
             /* localhost */
@@ -381,10 +381,11 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
                 pNext++;
             }
 
-            rc = strncpy_s(tmp_localhost, IP_LEN, iter, iplen);
+            iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+            rc = strncpy_s(tmp_localhost, REPL_HOST_LEN, iter, iplen);
             securec_check_c(rc, "", "");
 
-            tmp_localhost[IP_LEN - 1] = '\0';
+            tmp_localhost[iplen] = '\0';
 
             /* localport */
             iter = strstr(token, "localport");
@@ -422,10 +423,11 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
                 iplen++;
                 pNext++;
             }
-            rc = strncpy_s(tmp_remotehost, IP_LEN, iter, iplen);
+            iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+            rc = strncpy_s(tmp_remotehost, REPL_HOST_LEN, iter, iplen);
             securec_check_c(rc, "", "");
 
-            tmp_remotehost[IP_LEN - 1] = '\0';
+            tmp_remotehost[iplen] = '\0';
 
             /* remoteport */
             iter = strstr(token, "remoteport");
@@ -470,10 +472,11 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
                         iplen++;
                         pNext++;
                     }
-                    rc = strncpy_s(tmp_remoteuwalhost, IP_LEN, iter, iplen);
+                    iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+                    rc = strncpy_s(tmp_remoteuwalhost, REPL_HOST_LEN, iter, iplen);
                     securec_check(rc, "", "");
 
-                    tmp_remoteuwalhost[IP_LEN - 1] = '\0';
+                    tmp_remoteuwalhost[iplen] = '\0';
                 }
             }
 
@@ -519,22 +522,22 @@ bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* 
             }
 
             /* copy the valus from tmp */
-            rc = strncpy_s(repl->localhost, IP_LEN, tmp_localhost, IP_LEN - 1);
+            rc = strncpy_s(repl->localhost, REPL_HOST_LEN, tmp_localhost, REPL_HOST_LEN - 1);
             securec_check_c(rc, "", "");
 
-            repl->localhost[IP_LEN - 1] = '\0';
+            repl->localhost[REPL_HOST_LEN - 1] = '\0';
             repl->localport = tmp_localport;
 
-            rc = strncpy_s(repl->remotehost, IP_LEN, tmp_remotehost, IP_LEN - 1);
+            rc = strncpy_s(repl->remotehost, REPL_HOST_LEN, tmp_remotehost, REPL_HOST_LEN - 1);
             securec_check_c(rc, "", "");
 
-            repl->remotehost[IP_LEN - 1] = '\0';
+            repl->remotehost[REPL_HOST_LEN - 1] = '\0';
             repl->remoteport = tmp_remoteport;
 
-            rc = strncpy_s(repl->remoteuwalhost, IP_LEN, tmp_remoteuwalhost, IP_LEN - 1);
+            rc = strncpy_s(repl->remoteuwalhost, REPL_HOST_LEN, tmp_remoteuwalhost, REPL_HOST_LEN - 1);
             securec_check_c(rc, "", "");
 
-            repl->remoteuwalhost[IP_LEN - 1] = '\0';
+            repl->remoteuwalhost[REPL_HOST_LEN - 1] = '\0';
             repl->remoteuwalport = tmp_remoteuwalport;
             repl->remotenodeid = tmp_remotenodeid;
 

@@ -6613,7 +6613,8 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
                 iplen++;
                 pNext++;
             }
-            errorno = strncpy_s(repl[parsed].localhost, IP_LEN - 1, iter, iplen);
+            iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+            errorno = strncpy_s(repl[parsed].localhost, REPL_HOST_LEN, iter, iplen);
             securec_check(errorno, "\0", "\0");
             repl[parsed].localhost[iplen] = '\0';
 
@@ -6666,8 +6667,8 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
                 iplen++;
                 pNext++;
             }
-            iplen = (iplen >= IP_LEN) ? (IP_LEN - 1) : iplen;
-            errorno = strncpy_s(repl[parsed].remotehost, IP_LEN, iter, iplen);
+            iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+            errorno = strncpy_s(repl[parsed].remotehost, REPL_HOST_LEN, iter, iplen);
             securec_check(errorno, "\0", "\0");
             repl[parsed].remotehost[iplen] = '\0';
 
@@ -6727,8 +6728,8 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
                         iplen++;
                         pNext++;
                     }
-                    iplen = (iplen >= IP_LEN) ? (IP_LEN - 1) : iplen;
-                    errorno = strncpy_s(repl[parsed].remoteuwalhost, IP_LEN, iter, iplen);
+                    iplen = (iplen >= REPL_HOST_LEN) ? (REPL_HOST_LEN - 1) : iplen;
+                    errorno = strncpy_s(repl[parsed].remoteuwalhost, REPL_HOST_LEN, iter, iplen);
                     securec_check(errorno, "\0", "\0");
                     repl[parsed].remoteuwalhost[iplen] = '\0';
                 }
