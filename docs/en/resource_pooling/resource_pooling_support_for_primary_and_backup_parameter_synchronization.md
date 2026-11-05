@@ -16,6 +16,7 @@ In resource pooling scenarios, modifying the GUC configuration file on the prima
 
 This feature supports the synchronization of two configuration files: `postgresql.conf` and `pg_hba.conf`. Upon successful synchronization, the system automatically performs a **SIGHUP-level reload** to apply the new parameters. Synchronization can be triggered in two ways:
 - **Periodically**: The system automatically enters the synchronization workflow every **60 minutes**.
+
 - **On-demand**: Synchronization is triggered when the configuration is reloaded (e.g., via `cm_ctl reload` or `ALTER SYSTEM`).
 
 ## Enhancements<a name="section1340684315478"></a>
@@ -24,7 +25,7 @@ None.
 
 ## Constraints<a name="section06531946143616"></a>
 
-- **Reserved Parameters**: Certain GUC parameters are designated as **node-reserved** and are excluded from synchronization. In addition to the reserved parameters defined for traditional primary-standby deployments, the following resource pooling-specific parameters are treated as reserved and will not be synchronized: `ss_enable_dss`, `ss_enable_dms`, `ss_enable_catalog_centralized`, `ss_instance_id`, `ss_dss_vg_name`, `ss_dss_conn_path`, `ss_rdma_work_config`, `ss_ock_log_path`, `ss_scrlock_server_port`, `ss_enable_ondemand_recovery`, `ss_enable_ondemand_realtime_build`, and `ss_disaster_mode`
+- **Reserved Parameters**: Certain GUC parameters are designated as **node-reserved** and are excluded from synchronization. In addition to the reserved parameters defined for traditional primary-standby deployments, the following resource pooling-specific parameters are treated as reserved and will not be synchronized: `ss_enable_dss`, `ss_enable_dms`, `ss_enable_catalog_centralized`, `ss_instance_id`, `ss_dss_conn_path`, `ss_rdma_work_config`, `ss_ock_log_path`, `ss_scrlock_server_port`, `ss_enable_ondemand_recovery`, `ss_enable_ondemand_realtime_build`, and `ss_disaster_mode`
 
 - Synchronization is strictly limited to the `postgresql.conf` and `pg_hba.conf` files.
 - Parameter loading adheres to standard GUC rules. **Postmaster-level** parameters require a node restart to take effect; they can be synchronized to the standby's configuration file but cannot be dynamically loaded via SIGHUP.
@@ -55,7 +56,6 @@ The system performs synchronization every 60 minutes by default. Users can manua
 - Reloading parameters on the primary using the `gs_guc` tool (e.g., `gs_guc reload`).
 - Executing `ALTER SYSTEM SET paraname TO value;` while connected to the primary database.
 - Performing a switchover or failover (role transition). In this scenario, the new primary overwrites its local configuration with the shared file, and then all standbys follow suit.
-
 
 > In resource pooling mode, it is strongly discouraged to use `gs_guc set`. The `set` operation only modifies the local configuration file and does not update the shared configuration on the storage. Consequently, during a subsequent switchover or failover, the new primary will overwrite its local configuration with the outdated shared file, causing your changes to be lost.
 >
