@@ -82,22 +82,22 @@ Compared to traditional `gs_initdb` database creation, resource pooling divides 
    dd if=/dev/zero bs=2048 count=100000 of=/dev/tpcc_log
 
    # Create VGs
-   dsscmd cv -g data -v /dev/tpcc_data -s 2048 -D /data/ss_test/dss_home
-   dsscmd cv -g log  -v /dev/tpcc_log -s 65536 -D /data/ss_test/dss_home
+   dsscmd cv -g data -v /dev/tpcc_data -s 2048 -D /data/test/dss_home
+   dsscmd cv -g log  -v /dev/tpcc_log -s 65536 -D /data/test/dss_home
 
    # Start the DSS server
-   dssserver -D /data/ss_test/dss_home &
+   dssserver -D /data/test/dss_home &
    ```
 
 5. <a name="li23296624419"></a>Initialize the resource pooling database using `gs_initdb`.
 
    ```
-   gs_initdb -D /data/ss_test/dn_primary --nodename=single_node -w ****** \
+   gs_initdb -D /data/test/dn_primary --nodename=single_node -w ****** \
      --vgname="+data,+log" \
      --enable-dss \
      --dms_url="0:127.0.0.1:1611,1:127.0.0.1:1711" \
      -I 0 \
-     --socketpath="UDS:/data/ss_test/dss_home/.dss_unix_d_socket"
+     --socketpath="UDS:/data/test/dss_home/.dss_unix_d_socket"
    ```
 
    **New Parameters:**
@@ -111,7 +111,7 @@ Compared to traditional `gs_initdb` database creation, resource pooling divides 
 6. Upon successful creation, start the database process using `gs_ctl`.
 
    ```
-   gs_ctl start -D /data/ss_test/dn_primary
+   gs_ctl start -D /data/test/dn_primary
    ```
 
 7. Repeat the above steps to deploy the standby node(s).

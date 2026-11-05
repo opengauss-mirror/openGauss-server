@@ -125,6 +125,8 @@ This section only contains the system common functions added by the shark plugin
     Example:
 
 ```
+    openGauss=#SET XACT_ABORT = ON;
+    SET
     openGauss=#CREATE TABLE test(a int);
     openGauss=#CREATE OR REPLACE PROCEDURE p1()
                AS
@@ -160,6 +162,8 @@ This section only contains the system common functions added by the shark plugin
     NOTICE:  ERROR_PROCEDURE() is p1()
     NOTICE:  ERROR_LINE() is 2
     NOTICE:  ERROR_MESSAGE() is division by zero
+    openGauss=#RESET XACT_ABORT;
+    RESET
 
 ```
 
