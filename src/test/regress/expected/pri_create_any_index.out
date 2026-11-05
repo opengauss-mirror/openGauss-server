@@ -25,6 +25,7 @@ CREATE INDEX pri_index_schema.ds_ship_mode_t1_index4 ON pri_index_schema.pri_ind
 CREATE INDEX pri_index_schema.ds_ship_mode_t1_index2 ON pri_index_schema.pri_index(SUBSTR(SM_CODE,1 ,4));
 --在表上的SM_SHIP_MODE_SK字段上创建SM_SHIP_MODE_SK大于10的部分索引。
 CREATE UNIQUE INDEX pri_index_schema.ds_ship_mode_t1_index3 ON pri_index_schema.pri_index(SM_SHIP_MODE_SK) WHERE SM_SHIP_MODE_SK>10;
+ERROR:  Create PREDICATE index failed.
 --不能删除成功
 SET ROLE test_create_any_index_role_test PASSWORD 'Gauss@1234';
 DROP INDEX pri_index_schema.ds_ship_mode_t1_index1;
@@ -34,8 +35,7 @@ DROP INDEX pri_index_schema.ds_ship_mode_t1_index2;
 ERROR:  permission denied for relation ds_ship_mode_t1_index2
 DETAIL:  N/A
 DROP INDEX pri_index_schema.ds_ship_mode_t1_index3;
-ERROR:  permission denied for relation ds_ship_mode_t1_index3
-DETAIL:  N/A
+ERROR:  index "ds_ship_mode_t1_index3" does not exist
 DROP INDEX pri_index_schema.ds_ship_mode_t1_index4;
 ERROR:  permission denied for relation ds_ship_mode_t1_index4
 DETAIL:  N/A
@@ -70,8 +70,7 @@ DROP INDEX pri_index_schema.ds_ship_mode_t1_index2;
 ERROR:  permission denied for relation ds_ship_mode_t1_index2
 DETAIL:  N/A
 DROP INDEX pri_index_schema.ds_ship_mode_t1_index3;
-ERROR:  permission denied for relation ds_ship_mode_t1_index3
-DETAIL:  N/A
+ERROR:  index "ds_ship_mode_t1_index3" does not exist
 DROP INDEX pri_index_schema.ds_ship_mode_t1_index4;
 ERROR:  permission denied for relation ds_ship_mode_t1_index4
 DETAIL:  N/A
