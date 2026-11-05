@@ -940,6 +940,7 @@ Datum analyze_workload(PG_FUNCTION_ARGS)
     pg_atomic_write_u32(&g_instance.adv_cxt.isUsingGWC, 0);
 
     if (queryList == NULL) {
+        (void)MemoryContextSwitchTo(oldcxt);
         ereport(ERROR,
             (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("There is not query to analyze.")));
