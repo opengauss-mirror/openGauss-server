@@ -1,6 +1,48 @@
 label: Resource Pooling
 isManual: true
 sections:
+  - label: Resource Pooling Feature Description
+    sections:
+      - label: Overview
+        href: ./resource_pooling_overview.md
+      - label: rResource Pooling Installation And Usage
+        href: ./resource_pooling_installation_and_usage.md
+  - label: DSS Feature Enhancements
+    href: ./feature_enhancement.md
+  - label: DSS Thread Pool
+    href: ./dss_thread_pool.md
+  - label: MES SHM Communication Optimization
+    href: ./mes_ub_shared_memory_communication_optimization.md
+  - label: UB Transaction Snapshot Acceleration for Resource Pooling
+    href: ./ub_transaction_snapshot_acceleration_introduction.md
+  - label: Resource Pooling High Availability System Configuration
+    href: ./resource_pooling_ha_system_configuration.md    
+  - label: Resource Pooling Active-Standby Dual-Cluster DR
+    sections:
+      - label: Overview
+        href: ./resource_pooling_active_standby_dual_cluster_dr.md
+      - label: Ultimate RTO On-Demand Playback
+        href: ./ultimate_rto_on_demand_playback.md
+      - label: Resource Pooling Maintainability Enhancement
+        sections:
+          - label: gs_collector adaptation resource pooling
+            href: ./gs_collector_adaptation_resource_pooling.md
+          - label: DMS Resource Statistics Functions
+            href: ./dms_resource_statistics_function.md
+          - label: gs_probackup Adaptation for Resource Pooling
+            href: ./gs_probackup_adaptation_resource_pooling.md
+          - label: CM Supports Switchover for the Standby Cluster in Dual-Cluster Deployments
+            href: ./cm_supports_dual_cluster_backup_clusters_switchover.md
+          - label: Resource Pooling Support for Primary-Backup Parameter Synchronization
+            href: ./resource_pooling_support_for_primary_and_backup_parameter_synchronization.md
+          - label: Resource Pooling XLOG Archiving Support
+            href: ./resource_pooling_xlog_support_archive.md
+          - label: CM SysSentry Fault Detection
+            href: ./cm_syssentry_fault_detection.md
+      - label: Online Reform
+        href: ./online_reform.md
+      - label: openGauss Support for Online Failover
+        href: ./online_ddl_adapt_failover.md
   - label: Common Faults and Identification
     sections:
       - label: Common Fault Locating Methods
@@ -61,3 +103,189 @@ sections:
             href: ./shared_memory_leakage.md
           - label: A Query Error Is Reported Due to Predicate Pushdown
             href: ./a_query_error_is_reported_due_to_predicate_pushdown.md
+  - label: Common Faults and Identification(Resource Pooling)
+    sections:
+      - label: Resource Pooling Enterprise Edition Installation Phase Issues
+        sections:
+          - label: Pre-installation Failure Due to CheckOS Validation Errors
+            href: ./pre_installation_failure_due_to_checkos_check_not_passing.md
+          - label: Installation Failure Due to OpenSSL Malfunction
+            href: ./installation_failure_due_to_openssl_malfunction.md
+          - label: Pre-installation Failure Caused by Missing or Incorrect XML Parameters
+            href: ./pre_installation_failure_caused_by_missing_or_incorrectly_written_xml_parameters.md
+          - label: Installation Already Exists Due to an Existing Installation Directory
+            href: ./installation_already_exists_due_to_the_installation_directory_already_being_present.md
+          - label: Installation Already Exists Due to Environment Variable GAUSS_ENV=2
+            href: ./installation_already_exists_due_to_environment_variable_gauss_env_2.md
+          - label: Pre-installation or Installation Failure Due to Missing Software Dependencies
+            href: ./pre_installation_or_installation_failure_due_to_missing_software_dependencies_such_as_glibc.md
+          - label: Installation Failure Due to Python Missing the --enable-shared Compilation Parameter
+            href: ./installation_failure_due_to_python_missing_the_enable_shared_compilation_parameter.md
+          - label: Pre-installation Failure Due to Automated Mutual Trust Setup Failure
+            href: ./pre_installation_failure_due_to_automated_mutual_trust_establishment_failure.md
+          - label: Installation Failure Due to Unestablished Mutual Trust Between Nodes
+            href: ./installation_failure_due_to_unestablished_mutual_trust_between_nodes.md
+          - label: Installation Failure Due to Using Default Parameters During Pre-Installation
+            href: ./installation_failure_due_to_using_default_parameters_during_pre_installation.md
+          - label: Installation Failure Caused by a Three-Node Disk Being Used by Two Nodes Without Being Deregistered
+            href: ./installation_failure_caused_by_a_three_node_disk_being_used_by_two_nodes_without_being_deregistered.md
+          - label: Database Installation Failure Due to DSS Failing to Load Shared Disks During Startup
+            href: ./database_installation_failure_due_to_dss_failing_to_load_the_shared_disk_during_startup.md
+          - label: Cluster Unavailability Due to Authentication Failure Caused by Excessive Disk Permissions
+            href: ./cm_unavailability_due_to_authentication_failure_caused_by_excessive_disk_permissions.md            
+          - label: Installation Failure Due to Abnormal Disk Ownership
+            href: ./installation_failure_due_to_abnormal_disk_ownership.md
+          - label: Installation Failure Due to Insufficient Disk Space
+            href: ./installation_failure_due_to_insufficient_disk_space.md
+          - label: Installation Failure Due to Port Conflicts
+            href: ./installation_failure_due_to_port_conflicts.md
+          - label: Resource Pool Storage Dual-Cluster Installation Failure Due to Abnormal Disk Array Write Permissions
+            href: ./resource_pool_storage_dual_cluster_installation_failure_due_to_abnormal_disk_array_write_permissions.md
+          - label: Resource Pool Storage Dual-Cluster Installation Failure Due to Abnormal Disk Array Write Permissions
+            href: ./installation_startup_failure_due_to_inconsistent_cm_drive_letters.md
+      - label: "Resource Pooling Enterprise Edition: Usage Phase Issues"
+        sections:
+          - label: Failure to Set Parameters Due to Abnormal Hostname File Permissions
+            href: ./failure_to_set_parameters_due_to_abnormal_hostname_file_permissions.md
+          - label: "Cluster Startup Failure Due to Incorrect Parameters in pg_hba.conf"
+            href: ./cluster_startup_failure_due_to_incorrect_parameters_in_pg_hba_conf.md
+          - label: "Cluster Startup Failure Due to Incorrect Parameters in postgresql.conf"
+            href: ./cluster_startup_failure_due_to_incorrect_parameters_in_postgres_conf.md
+          - label: Cluster Startup Failure Due to Random Port Conflicts
+            href: ./cluster_startup_failure_due_to_random_port_conflicts.md
+          - label: Cluster Startup Failure Due to Insufficient Semaphores
+            href: ./cluster_startup_failure_due_to_insufficient_semaphores.md
+          - label: Cluster Startup Failure Due to Insufficient Shared Memory
+            href: ./cluster_startup_failure_due_to_insufficient_shared_memory.md
+          - label: Cluster Startup Failure Due to Insufficient Memory
+            href: ./cluster_startup_failure_due_to_insufficient_memory.md
+          - label: Cluster Startup Failure Due to Abnormal Control File
+            href: ./cluster_startup_failure_due_to_abnormal_control_file.md
+          - label: Cluster Startup Failure Due to Missing Files or Directories
+            href: ./cluster_startup_failure_due_to_missing_files_or_directories.md
+          - label: Cluster Startup Failure Due to Abnormal File Permissions
+            href: ./cluster_startup_failure_due_to_abnormal_file_permissions.md
+          - label: Cluster Startup Failure Due to Abnormal Directory Permissions
+            href: ./cluster_startup_failure_due_to_abnormal_directory_permissions.md
+          - label: Cluster Startup Failure Due to Abnormal Disk Array Permissions
+            href: ./cluster_startup_failure_due_to_abnormal_disk_array_permissions.md
+          - label: Cluster Startup Failure Due to Disk Array Disconnection
+            href: ./cluster_startup_failure_due_to_disk_array_disconnection.md
+          - label: Cluster Startup Failure Due to Port Conflicts
+            href: ./cluster_startup_failure_due_to_port_conflicts.md
+          - label: Connection Failure Due to Missing DSS Socket File
+            href: ./connection_failure_due_to_missing_dss_socket_file.md
+          - label: Connection Failure Due to Abnormal DSS Socket File Permissions
+            href: ./connection_failure_due_to_abnormal_dss_socket_file_permissions.md
+          - label: Connection Failure Due to Abnormal Shared Disk Permissions
+            href: ./connection_failure_due_to_abnormal_shared_disk_permissions.md
+          - label: Connection Failure Due to Missing Database Socket File
+            href: ./connection_failure_due_to_missing_database_socket_file.md
+          - label: Connection Failure Due to Abnormal Database Socket File
+            href: ./connection_failure_due_to_abnormal_database_socket_file.md
+          - label: Connection Failure Due to Database Maximum Connections Exceeded
+            href: ./connection_failure_due_to_database_maximum_connections_exceeded.md
+          - label: Performance Degradation Due to Slow Storage Array I/O
+            href: ./performance_anomaly_due_to_slow_disk_array_io.md
+          - label: Cluster Service Hang Due to Disk Array Being Stuck
+            href: ./cluster_service_hang_due_to_disk_array_being_stuck.md
+          - label: Connection Failure Due to Incorrect Account Password
+            href: ./connection_failure_due_to_incorrect_account_password.md
+          - label: Connection Failure Due to Incorrect Connection Authentication Configuration
+            href: ./connection_failure_due_to_incorrect_connection_authentication_configuration.md
+          - label: ode Eviction Due to Report Timeout
+            href: ./node_being_kicked_out_due_to_report_timeout.md
+          - label: Cluster Startup Failure Due to Network Issues
+            href: ./cluster_unable_to_start_due_to_network_issues.md
+          - label: Node Entering ReadOnly State Due to Insufficient Local Disk Space
+            href: ./node_entering_readonly_state_due_to_insufficient_local_disk_space.md
+          - label: Cluster Entering ReadOnly State Due to Insufficient Shared Drive Space
+            href: ./cluster_entering_readonly_state_due_to_insufficient_shared_disk_space.md
+          - label: Node Eviction Due to Heartbeat Timeout
+            href: ./node_being_kicked_out_due_to_heartbeat_timeout.md
+          - label: DMS Initialization Failure Due to Port Conflict
+            href: ./dms_initialization_failure_due_to_port_conflict.md
+          - label: Business Execution Failure Due to Insufficient Local Drive Space
+            href: ./business_execution_failure_due_to_insufficient_local_disk_space.md
+          - label: Replay Mode Changes to Extreme RTO Due to Failure During On-Demand Replay Phase
+            href: ./issue_of_replay_mode_changing_to_extreme_rto_due_to_failure_during_on_demand_replay_phase.md
+          - label: Resource Pool Environment Operation Failure Due to Network Flap
+            href: ./resource_pool_environment_operation_failure_due_to_network_disconnection.md                       
+          - label: Error When Executing Certain DDL Statements During On-Demand Redo Replay Phase
+            href: ./error_when_executing_certain_ddl_statements_during_on_demand_redo_replay_phase.md
+          - label: Resource Pool Environment Operation Failure Due to Shared Memory Being Cleared
+            href: ./resource_pool_environment_operation_failure_due_to_shared_memory_being_cleared.md
+          - label: Resource Pool Environment Operation Failure Due to Insufficient Memory
+            href: ./resource_pool_environment_operation_failure_due_to_insufficient_memory.md
+          - label: Common Causes and Analysis Methods for openGauss Failing to Start
+            href: ./common_causes_and_analysis_methods_for_opengauss_failing_to_start.md
+          - label: Troubleshooting and Analysis of Slow Checkpoint During Database Shutdown or Switchover
+            href: ./troubleshooting_and_analysis_of_slow_checkpoint_during_database_shutdown_or_switchover.md
+          - label: Node Exit Due to Failure of the First Round of Reform During Database Startup
+            href: ./node_exit_due_to_failure_of_the_first_round_of_reform_during_database_startup.md
+          - label: Automatic Exit of the Original Primary Due to the New Primary Failing to Take Over After Lock Transfer
+            href: ./automatic_exit_of_the_original_primary_due_to_the_new_primary_failing_to_take_over_after_lock_transfer_during_switchover.md
+          - label: Transaction Rollback Due to Other Errors
+            href: ./transaction_rollback_due_to_other_errors.md
+          - label: Transaction Rollback Due to Deadlock
+            href: ./transaction_rollback_due_to_deadlock.md
+          - label: Node Eviction Due to Storage Array NIC Failure
+            href: ./node_being_kicked_out_due_to_disk_array_network_card_being_down.md
+          - label: Transaction Rollback Due to Lock Timeout
+            href: ./transaction_rollback_due_to_lock_timeout.md
+          - label: Remote Incremental Backup Failure Due to Residual Logical Replication Slots
+            href: ./remote_incremental_backup_failure_due_to_residual_logical_replication_slots_in_the_environment.md
+          - label: Core Dump During Full Backup in gs_probackup Due to Insufficient System Resources
+            href: ./core_dump_during_full_backup_in_gs_probackup_due_to_insufficient_system_resources.md
+          - label: Backup and Recovery Failure Due to Failure in Rebuilding the Standby Node of the Cluster
+            href: ./backup_and_recovery_failure_due_to_failure_in_rebuilding_the_standby_node_of_the_cluster.md
+          - label: Cluster Failover Process Hang Due to Background Thread Failing to Exit
+            href: ./cluster_failover_process_hang_due_to_background_thread_failing_to_exit.md
+          - label: Cluster Unable to Start Due to Lack of Permissions for the Voting Disk
+            href: ./cluster_unable_to_start_due_to_lack_of_permissions_for_the_voting_disk.md
+          - label: Installation Failure Due to Excessively Small Limit Configuration
+            href: ./installation_failure_due_to_limit_configuration_being_too_small.md
+          - label: Node Down Due to Cleared om_monitor Scheduled Task
+            href: ./node_down_due_to_the_om_monitor_scheduled_task_being_cleared.md
+          - label: Cluster Unable to Start Due to Not Meeting the Majority Principle
+            href: ./cluster_unable_to_start_due_to_not_meeting_the_majority_principle.md
+          - label: Cluster Startup and Shutdown Failure Due to Missing Mutual Trust Files
+            href: ./cluster_startup_shutdown_failure_due_to_missing_mutual_trust_files.md
+          - label: Prolonged Database Shutdown Time Due to Replay State
+            href: ./prolonged_database_shutdown_time_due_to_being_in_replay_state.md
+          - label: Arbitration Unresponsive Due to Executing Pause
+            href: ./arbitration_unresponsive_due_to_executing_pause.md
+          - label: Cluster Restart Due to DSS Expansion
+            href: ./cluster_restart_due_to_dss_expansion.md
+          - label: Node Being in Starting State Due to Database Hang
+            href: ./reasons_for_node_being_in_starting_state_due_to_database_hang.md
+          - label: Node Clean Restart Due to Abnormal Resource Instance State
+            href: ./node_being_cleaned_and_restarted_due_to_abnormal_resource_instance_state.md
+          - label: Primary Node Change Caused by Cluster Restart
+            href: ./primary_node_change_due_to_cluster_restart.md
+          - label: Slow Startup Success Feedback Due to Periodic Instance Status Checks
+            href: ./slow_startup_success_feedback_due_to_periodic_instance_status_checks.md
+          - label: Database Error due to Local File System Failures in Resource Pool Environments
+            href: ./database_error_due_to_local_file_system_failure_in_resource_pool_environment.md
+          - label: Database Startup Failure Due to Lack of Permissions for DSS Component perctrl
+            href: ./database_startup_failure_due_to_lack_of_permissions_for_dss_component_perctrl.md
+          - label: Cluster Service Hang Due to Disk Array Being Stuck
+            href: ./cluster_startup_failure_due_to_disk_array_being_busy_and_inaccessible.md
+          - label: DSS Server Startup Failure Due to Port Conflict
+            href: ./dssserver_startup_failure_due_to_port_conflict.md
+          - label: Prolonged Failover Recovery Time Due to Excessive Redo Logs
+            href: ./prolonged_failover_recovery_time_due_to_excessive_redo_logs.md
+          - label: Cluster Restart Timeout Due to Forced Shutdown with Excessive Redo Logs
+            href: ./cluster_restart_timeout_due_to_forced_shutdown_with_excessive_redo_logs.md
+          - label: Cluster Arbitration Failure Due to delay_arbitrate_max_cluster_timeout Parameter Being Set to 0
+            href: ./cluster_arbitration_failure_due_to_delay_arbitrate_max_cluster_timeout_parameter_being_set_to_0.md
+          - label: Cluster Unusable Due to CM Not Meeting the Majority Principle
+            href: ./cluster_unusable_due_to_cm_not_meeting_the_majority_principle.md
+          - label: Database Anomaly in a One-Primary-Two-Standby Cluster After Shutting Down Two Nodes
+            href: ./database_anomaly_in_a_one_primary_two_standby_cluster_after_shutting_down_two_nodes.md            
+      - label: "Resource Pooling: Uninstallation Phase Issues"
+        sections:
+          - label: Uninstallation Failure Due to Lack of Permissions for Some Directories
+            href: ./uninstallation_failure_due_to_lack_of_permissions_for_some_directories.md
+          - label: Uninstallation Failure Due to Errors on Some Nodes
+            href: ./uninstallation_failure_due_to_failure_on_some_nodes.md
