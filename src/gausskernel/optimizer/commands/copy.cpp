@@ -303,7 +303,7 @@ static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate,
     ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
     HeapTuple* bufferedTuples, bool isLast, Relation heapRelation, Partition partition, int2 bucketId);
 
-CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect = false);
+CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect = false, bool isPartKeyConst = false);
 void deinitCopyFromManager(CopyFromManager mgr);
 static void newMemCxt(CopyFromManager mgr, int num);
 static CopyFromMemCxt findMemCxt(CopyFromManager mgr, bool* found);
@@ -3816,7 +3816,7 @@ static void newMemCxt(CopyFromManager mgr, int num)
     (void)MemoryContextSwitchTo(oldCxt);
 }
 
-CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect)
+CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect, bool isPartKeyConst)
 {
     MemoryContext oldCxt = NULL;
     CopyFromManager mgr = NULL;
@@ -3829,7 +3829,7 @@ CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool
 
     mgr = (CopyFromManager)palloc0(sizeof(CopyFromManagerData));
     mgr->parent = parent;
-    mgr->isPartRel = RELATION_IS_PARTITIONED(heapRel) || RELATION_OWN_BUCKET(heapRel);
+    mgr->isPartRel = (RELATION_IS_PARTITIONED(heapRel) && !isPartKeyConst) || RELATION_OWN_BUCKET(heapRel);
     if (!mgr->isPartRel) {
         CopyFromBulk bulk;
 
@@ -3958,6 +3958,7 @@ CopyFromBulk findBulk(CopyFromManager mgr, Oid partOid, int2 bucketId, bool* toF
 
     /* case1: without partition tables */
     if (!mgr->isPartRel && bucketId == InvalidBktId) {
+        Assert(InvalidOid == mgr->bulk->partOid || mgr->bulk->partOid == partOid);
         return mgr->bulk;
     }
 
@@ -4002,7 +4003,7 @@ CopyFromBulk findBulk(CopyFromManager mgr, Oid partOid, int2 bucketId, bool* toF
     return bulk;
 }
 
-bool isBulkFull(CopyFromBulk bulk)
+bool isBulkFull(CopyFromBulk bulk, Size maxBulkSize)
 {
     CopyFromMemCxt copyFromMemCxt = bulk->memCxt;
 
@@ -4011,7 +4012,7 @@ bool isBulkFull(CopyFromBulk bulk)
         return ((bulk->numTuples >= MAX_BUFFERED_TUPLES) || (bulk->sizeTuples >= MAX_TUPLES_SIZE));
     }
 
-    if (copyFromMemCxt->memCxtSize > MAX_SIZE_PER_MEMCXT) {
+    if (bulk->sizeTuples > maxBulkSize || copyFromMemCxt->memCxtSize > MAX_SIZE_PER_MEMCXT) {
         return true;
     }
 
@@ -5869,6 +5870,7 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
         needflush = true;
     }
 
+    List** partListForChunkInsert = (needflush && RelationIsPartitioned(resultRelationDesc) ? partitionList : NULL);
     if (node->mgr->isPartRel) {
         int cnt = 0;
         Assert(RELATION_IS_PARTITIONED(resultRelationDesc) || RELATION_CREATE_BUCKET(resultRelationDesc));
@@ -5876,13 +5878,6 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
             CopyFromMemCxt copyFromMemCxt = node->mgr->memCxt[cnt];
             if (copyFromMemCxt->memCxtSize > 0) {
                 Assert(copyFromMemCxt->nextBulk > 0);
-
-                /* partition oid for sync */
-                if (needflush) {
-                    for (int16 i = 0; i < copyFromMemCxt->nextBulk; i++) {
-                        *partitionList = list_append_unique_oid(*partitionList, copyFromMemCxt->chunk[i]->partOid);
-                    }
-                }
 
                 (void)CopyFromChunkInsert<true>(NULL,
                     estate,
@@ -5893,7 +5888,8 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
                     hi_options,
                     resultRelInfo,
                     slot,
-                    node->bistate);
+                    node->bistate,
+                    partListForChunkInsert);
             }
 
             /* the following code should be placed into function deinitCopyFromManager()
@@ -5915,14 +5911,15 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
             hi_options,
             resultRelInfo,
             slot,
-            node->bistate);
+            node->bistate,
+            partListForChunkInsert);
     }
 
     if (!needflush) {
         return;
     }
 
-    if (resultRelationDesc->rd_rel->parttype ==  PARTTYPE_PARTITIONED_RELATION) {
+    if (RelationIsPartitioned(resultRelationDesc)) {
         ListCell *cell = NULL;
         foreach(cell, *partitionList) {
             Oid partitionOid = lfirst_oid(cell);

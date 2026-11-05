@@ -36,6 +36,7 @@
 #include "nodes/supportnodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
+#include "optimizer/pathnode.h"
 #include "optimizer/planmain.h"
 #include "optimizer/planner.h"
 #include "optimizer/pgxcplan.h"
@@ -5749,6 +5750,29 @@ static bool pull_paramids_walker(Node *node, Bitmapset **context)
 
     return expression_tree_walker(node, (bool(*)()) pull_paramids_walker,
                                   (void *) context);
+}
+
+/*
+ * IsPseudoConstantTargetEntry
+ *       Determine whether a target entry is "pseudo constant", that is, its
+ *       value is guaranteed to stay the same across an entire single scan of
+ *       the current query. It is used to test whether partition table routing
+ *       only needs to be computed for the first row.
+ *
+ *       Accept literal constants, including rewritten constant defaults, even
+ *       when there is no EquivalenceClass. Otherwise, match the complete target
+ *       expression to a constant EquivalenceClass.
+ *       Do not strip casts to find an underlying Var: a constant cast result
+ *       does not imply a constant argument when the cast loses information.
+ *       For example, k::real = 1 does not make a double precision k constant.
+ *       get_expr_eqClass(..., true) also preserves casts on the EC member side.
+ */
+bool IsPseudoConstantTargetEntry(PlannerInfo *root, TargetEntry *entry)
+{
+    if (entry->expr == NULL || IsA(entry->expr, Const)) {
+        return true;
+    }
+    return get_expr_eqClass(root, entry->expr, true) != NULL;
 }
 #ifdef USE_SPQ
 

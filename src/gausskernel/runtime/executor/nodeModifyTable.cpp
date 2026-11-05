@@ -106,7 +106,8 @@ static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, C
 #endif
 
 static TupleTableSlot* ExecModifyTable(PlanState* state);
-extern CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect);
+extern CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool isInsertSelect,
+                                           bool isPartKeyConst = false);
 extern void deinitCopyFromManager(CopyFromManager mgr);
 extern void FlushInsertSelectBulk(
     DistInsertSelectState* node, EState* estate, bool canSetTag, int hi_options, List** partitionList);
@@ -1311,31 +1312,73 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     ExecClearTuple(tmp_slot);
                 }
 
-                bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
+                /*
+                 * batchInsert means the tuples are generated continuously by the
+                 * upstream node and inserted step by step, i.e., a streaming pipeline.
+                 * In that case we limit the batch size to 3 BLCKSZ so that a batch is
+                 * flushed back frequently, keeping the upstream and downstream nodes
+                 * flowing smoothly; otherwise a too-large batch would block the
+                 * pipeline while it is processed, degrading performance. For the
+                 * other INSERT commands (no massive streaming), we can afford a
+                 * batch as large as INT_MAX to maximize the flush efficiency.
+                 */
+                const Size maxBulkSize = ((ModifyTable*)(state->ps.plan))->batchInsert ? (BLCKSZ * 3) : INT_MAX;
+                const bool partKeyIsConst = ((ModifyTable*)(state->ps.plan))->partKeyIsConst;
+                bool isPart = RelationIsPartitioned(result_relation_desc);
+                List **flushPartList = (isPart && need_flush ? partitionList : NULL);
                 Oid targetOid = InvalidOid;
-                if (is_partition_rel) {
-                    if (RelationIsSubPartitioned(result_relation_desc)) {
-                        targetOid = heapTupleGetSubPartitionOid(result_relation_desc, tuple, estate, slot);
+                if (isPart) {
+                    if (OidIsValid(state->mt_part_oid[0])) {
+                        /* re-use the cached partition OID when partKeyIsConst */
+                        targetOid = state->mt_part_oid[0];
                     } else {
-                        targetOid = heapTupleGetPartitionOid(result_relation_desc, tuple, NULL, false, false, !partExprKeyStr);
+                        bool canIgnore = estate->es_plannedstmt->hasIgnore;
+                        if (RelationIsSubPartitioned(result_relation_desc)) {
+                            targetOid =
+                                heapTupleGetSubPartitionOid(result_relation_desc, tuple, estate, slot, canIgnore);
+                        } else if (partExprKeyStr != NULL) {
+                            /* Expression-key routing requires the evaluated key, not the input tuple. */
+                            PartKeyExprResult partKeyExprTuple =
+                                ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
+                            targetOid = heapTupleGetPartitionOid(result_relation_desc, (void*)(&partKeyExprTuple),
+                                NULL, false, canIgnore, false);
+                        } else {
+                            targetOid =
+                                heapTupleGetPartitionOid(result_relation_desc, tuple, NULL, false, canIgnore, true);
+                        }
+                        /* IGNORE skips an unroutable row before checking, caching or buffering its target. */
+                        if (canIgnore && !OidIsValid(targetOid)) {
+                            return NULL;
+                        }
+                        /* Check the specified partition before buffering or caching this target. */
+                        RangeTblEntry* rte = exec_rt_fetch(result_rel_info->ri_RangeTableIndex, estate);
+                        if (rte->isContainPartition || rte->isContainSubPartition) {
+                            Oid partitionOid = RelationIsSubPartitioned(result_relation_desc) ?
+                                partid_get_parentid(targetOid) : targetOid;
+                            if (!CheckPartitionOidForSpecifiedPartition(rte, partitionOid, canIgnore) ||
+                                !CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionOid, targetOid,
+                                                                              canIgnore)) {
+                                return NULL;
+                            }
+                        }
+                        if (partKeyIsConst) {
+                            /* cache the partition OID when partKeyIsConst */
+                            state->mt_part_oid[0] = targetOid;
+                        }
                     }
                 } else {
                     targetOid = RelationGetRelid(result_relation_desc);
                 }
-                bulk = findBulk(distState->mgr, targetOid, bucket_id, &to_flush);
-
+                bulk = findBulk(((DistInsertSelectState *)state)->mgr, targetOid, bucket_id, &to_flush);
+                if (partKeyIsConst && targetOid != bulk->partOid) {
+                    Assert(InvalidOid == bulk->partOid);
+                    bulk->partOid = targetOid;
+                }
                 if (to_flush) {
-                    if (is_partition_rel && need_flush) {
-                        /* partition oid for sync */
-                        CopyFromMemCxt tmpCopyFromMemCxt = bulk->memCxt;
-                        for (int16 i = 0; i < tmpCopyFromMemCxt->nextBulk; i++) {
-                            *partitionList = list_append_unique_oid(*partitionList, 
-                                                                    tmpCopyFromMemCxt->chunk[i]->partOid);
-                        }
-                    }
-                    CopyFromChunkInsert<true>(NULL, estate, bulk, distState->mgr,
-                        distState->pcState, estate->es_output_cid,
-                        options, result_rel_info, tmp_slot, distState->bistate);
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
+                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid,
+                        options, result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate,
+                        flushPartList);
                 }
 
                 /* check and record insertion into user chain table */
@@ -1347,18 +1390,20 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                 tableam_tops_add_to_bulk_insert_select(result_relation_desc, bulk, tuple, true);
 
-                if (isBulkFull(bulk)) {
-                    if (is_partition_rel && need_flush) {
-                        /* partition oid for sync */
-                        CopyFromMemCxt tmpCopyFromMemCxt = bulk->memCxt;
-                        for (int16 i = 0; i < tmpCopyFromMemCxt->nextBulk; i++) {
-                            *partitionList = list_append_unique_oid(*partitionList, 
-                                                                    tmpCopyFromMemCxt->chunk[i]->partOid);
-                        }
+                if (isBulkFull(bulk, maxBulkSize)) {
+                    CopyFromChunkInsert<true>(NULL, estate, bulk, ((DistInsertSelectState*)state)->mgr,
+                        ((DistInsertSelectState*)state)->pcState, estate->es_output_cid, options,
+                        result_rel_info, tmp_slot, ((DistInsertSelectState*)state)->bistate, flushPartList);
+                    if (partKeyIsConst) {
+                        /*
+                         * CopyFromChunkInsert may switch bulk->partOid during its very
+                         * first flush, so we refresh the cached partition Oid after every
+                         * flush to keep it in sync. Subsequent batches are not expected to
+                         * change bulk->partOid because we hold ROW_EXCLUSIVE_LOCK, so the
+                         * refresh is merely a cheap, safe resync.
+                         */
+                        state->mt_part_oid[0] = bulk->partOid;
                     }
-                    CopyFromChunkInsert<true>(NULL, estate, bulk, distState->mgr,
-                        distState->pcState, estate->es_output_cid, options,
-                        result_rel_info, tmp_slot, distState->bistate);
                 }
             } else if (state->mt_upsert->us_action != UPSERT_NONE && result_rel_info->ri_NumIndices > 0) {
                 TupleTableSlot* returning = NULL;
@@ -1445,15 +1490,26 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
                         int partitionno = INVALID_PARTITION_NO;
-                        if (partExprKeyStr) {
-                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
-                                                                                         slot, NULL, partExprKeyStr);
-                            partition_id = heapTupleGetPartitionOid(result_relation_desc, (void *) (&partKeyExprTuple),
-                                                                    &partitionno,
-                                                                    false, estate->es_plannedstmt->hasIgnore, false);
+                        if (OidIsValid(state->mt_part_oid[0])) {
+                            /*
+                             * Re-use the cached partition OID directly; the cache is
+                             * populated only when partKeyIsConst holds. We deliberately
+                             * skip recomputing partitionno here: since we already hold
+                             * ROW_EXCLUSIVE_LOCK, the cached entry can neither be split
+                             * nor dropped, so it stays valid for every row in the batch.
+                             */
+                            partition_id = state->mt_part_oid[0];
                         } else {
-                            partition_id = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno, false,
-                                estate->es_plannedstmt->hasIgnore, true);
+                            if (partExprKeyStr) {
+                                PartKeyExprResult partKeyExprTuple =
+                                    ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
+                                partition_id = heapTupleGetPartitionOid(result_relation_desc,
+                                                                        (void*)(&partKeyExprTuple), &partitionno, false,
+                                                                        estate->es_plannedstmt->hasIgnore, false);
+                            } else {
+                                partition_id = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno,
+                                                                        false, estate->es_plannedstmt->hasIgnore, true);
+                            }
                         }
                         /* if cannot find valid partition oid and sql has keyword ignore, return and don't insert */
                         if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
@@ -1469,6 +1525,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                             result_relation_desc, &partition_id, partitionno, &heap_rel, &partition, RowExclusiveLock);
                         if (!res) {
                             return NULL;
+                        }
+                        if (((ModifyTable*)(state->ps.plan))->partKeyIsConst) {
+                            /* trySearchFakeReationForPartitionOid() my change partition_id, so recache it */
+                            state->mt_part_oid[0] = partition_id;
                         }
                         if (RelationIsColStore(result_relation_desc)) {
                             HeapInsertCStore(heap_rel, estate->es_result_relation_info, (HeapTuple)tuple, 0);
@@ -1513,15 +1573,26 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         Partition subPart = NULL;
 
                         /* get partition oid for insert the record */
-                        if (partExprKeyStr) {
-                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate,
-                                                                                         slot, NULL, partExprKeyStr);
-                            partitionId = heapTupleGetPartitionOid(result_relation_desc, (void *) (&partKeyExprTuple),
-                                                                   &partitionno,
-                                                                   false, estate->es_plannedstmt->hasIgnore, false);
+                        if (OidIsValid(state->mt_part_oid[0])) {
+                            /*
+                             * Re-use the cached partition OID directly; the cache is
+                             * populated only when partKeyIsConst holds. We deliberately
+                             * skip recomputing partitionno here: since we already hold
+                             * ROW_EXCLUSIVE_LOCK, the cached entry can neither be split
+                             * nor dropped, so it stays valid for every row in the batch.
+                             */
+                            partitionId = state->mt_part_oid[0];
                         } else {
-                            partitionId = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno, false,
-                                estate->es_plannedstmt->hasIgnore, true);
+                            if (partExprKeyStr) {
+                                PartKeyExprResult partKeyExprTuple =
+                                    ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL, partExprKeyStr);
+                                partitionId = heapTupleGetPartitionOid(result_relation_desc, (void*)(&partKeyExprTuple),
+                                                                       &partitionno, false,
+                                                                       estate->es_plannedstmt->hasIgnore, false);
+                            } else {
+                                partitionId = heapTupleGetPartitionOid(result_relation_desc, tuple, &partitionno, false,
+                                    estate->es_plannedstmt->hasIgnore, true);
+                            }
                         }
 
                         if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
@@ -1538,17 +1609,34 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (!res) {
                             return NULL;
                         }
+                        if (((ModifyTable*)(state->ps.plan))->partKeyIsConst) {
+                            /* trySearchFakeReationForPartitionOid() my change partition_id, so recache it */
+                            state->mt_part_oid[0] = partitionId;
+                        }
 
                         /* get subpartititon oid for insert the record */
-                        char* subpartExprKeyStr = NULL;
-                        bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
-                        if (!subpartExprKeyIsNull) {
-                            PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
-                            subPartitionId = heapTupleGetPartitionOid(partRel, (void *)(&partKeyExprTuple), &subpartitionno, false,
-                                estate->es_plannedstmt->hasIgnore, false);
+                        if (OidIsValid(state->mt_part_oid[1])) {
+                            /*
+                             * Re-use the cached partition OID directly; the cache is
+                             * populated only when partKeyIsConst holds. We deliberately
+                             * skip recomputing partitionno here: since we already hold
+                             * ROW_EXCLUSIVE_LOCK, the cached entry can neither be split
+                             * nor dropped, so it stays valid for every row in the batch.
+                             */
+                            subPartitionId = state->mt_part_oid[1];
                         } else {
-                            subPartitionId = heapTupleGetPartitionOid(partRel, tuple, &subpartitionno, false,
-                                estate->es_plannedstmt->hasIgnore, true);
+                            char* subpartExprKeyStr = NULL;
+                            bool subpartExprKeyIsNull = PartExprKeyIsNull(partRel, &subpartExprKeyStr);
+                            if (!subpartExprKeyIsNull) {
+                                PartKeyExprResult partKeyExprTuple = ComputePartKeyExprTuple(
+                                    result_relation_desc, estate, slot, partRel, subpartExprKeyStr);
+                                subPartitionId =
+                                    heapTupleGetPartitionOid(partRel, (void*)(&partKeyExprTuple), &subpartitionno,
+                                                             false, estate->es_plannedstmt->hasIgnore, false);
+                            } else {
+                                subPartitionId = heapTupleGetPartitionOid(partRel, tuple, &subpartitionno, false,
+                                    estate->es_plannedstmt->hasIgnore, true);
+                            }
                         }
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
                             return NULL;
@@ -1564,6 +1652,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (!res) {
                             partitionClose(result_relation_desc, part, RowExclusiveLock);
                             return NULL;
+                        }
+                        if (((ModifyTable*)(state->ps.plan))->partKeyIsConst) {
+                            /* trySearchFakeReationForPartitionOid() my change subPartitionId, so recache it */
+                            state->mt_part_oid[1] = subPartitionId;
                         }
 
                         partition_id = subPartitionId;
@@ -3554,6 +3646,18 @@ static void ModifyTableFetchPlanSlot(TupleTableSlot*& planSlot, ProjectionInfo**
     }
 }
 
+/*
+ * Keep the planner and executor checks for heap multi-insert in sync.
+ * The planner applies additional query restrictions before setting batchInsert.
+ */
+bool CanUseHeapMultiInsert(Relation rel, const TriggerDesc* trigDesc, UpsertAction upsertAction, bool isReplace)
+{
+    return ENABLE_HEAP_MULTI_INSERT_FOR_INSERT_SELECT && RelationIsAstoreFormat(rel) &&
+        upsertAction == UPSERT_NONE && !isReplace &&
+        (trigDesc == NULL || (!trigDesc->trig_insert_before_row && !trigDesc->trig_insert_instead_row)) &&
+        !RelHasAutoInc(rel) && !RelationIsPartition(rel);
+}
+
 /* ----------------------------------------------------------------
  *	   ExecModifyTable
  *
@@ -3671,23 +3775,13 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 #endif
 
     if (operation == CMD_INSERT) {
-        if (node->ps.type == T_ModifyTableState ||
-                node->mt_upsert->us_action != UPSERT_NONE ||
-                node->isReplace ||
-                (result_rel_info->ri_TrigDesc != NULL && (result_rel_info->ri_TrigDesc->trig_insert_before_row ||
-                                                           result_rel_info->ri_TrigDesc->trig_insert_instead_row)) ||
-                !ENABLE_HEAP_MULTI_INSERT_FOR_INSERT_SELECT ||
-                (result_rel_info->ri_RelationDesc->rd_att->constr != NULL &&
-                     result_rel_info->ri_RelationDesc->rd_att->constr->cons_autoinc != NULL) ||
-                RelationIsPartition(result_rel_info->ri_RelationDesc)) {
-            ExecInsert = ExecInsertT<false>;
+        if (node->ps.type != T_ModifyTableState &&
+            CanUseHeapMultiInsert(result_rel_info->ri_RelationDesc, result_rel_info->ri_TrigDesc,
+                node->mt_upsert->us_action, node->isReplace)) {
+            use_heap_multi_insert = true;
+            ExecInsert = ExecInsertT<true>;
         } else {
-            if (RelationIsAstoreFormat(result_rel_info->ri_RelationDesc)) {
-                use_heap_multi_insert = true;
-                ExecInsert = ExecInsertT<true>;
-            } else {
-                ExecInsert = ExecInsertT<false>;
-            }
+            ExecInsert = ExecInsertT<false>;
         }
 
         if (use_heap_multi_insert) {
@@ -4125,7 +4219,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     /*
      * create state structure
      */
-    if (node->is_dist_insertselect)
+    if (node->is_dist_insertselect || node->batchInsert)
         mt_state = (ModifyTableState*)makeNode(DistInsertSelectState);
     else
         mt_state = makeNode(ModifyTableState);
@@ -4172,6 +4266,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->operation = operation;
     mt_state->canSetTag = node->canSetTag;
     mt_state->mt_done = false;
+    mt_state->mt_part_oid[0] = mt_state->mt_part_oid[1] = InvalidOid;
 
     mt_state->mt_plans = (PlanState**)palloc0(sizeof(PlanState*) * nplans);
 #ifdef ENABLE_MULTIPLE_NDOES
@@ -4532,7 +4627,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         }
     }
 
-    if (node->is_dist_insertselect) {
+    if (node->is_dist_insertselect || node->batchInsert) {
         DistInsertSelectState* distInsertSelectState = (DistInsertSelectState*)mt_state;
         distInsertSelectState->rows = 0;
         distInsertSelectState->tmp_slot = NULL;
@@ -4541,9 +4636,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
             ALLOCSET_DEFAULT_MAXSIZE);
-        distInsertSelectState->mgr =
-            initCopyFromManager(CurrentMemoryContext, mt_state->resultRelInfo->ri_RelationDesc, true);
-        distInsertSelectState->bistate = GetBulkInsertState();
+        distInsertSelectState->mgr = initCopyFromManager(CurrentMemoryContext, mt_state->resultRelInfo->ri_RelationDesc,
+                                                         true, node->partKeyIsConst);
+        distInsertSelectState->bistate = GetBulkInsertState(node->batchInsert);
         if (RowRelationIsCompressed(mt_state->resultRelInfo->ri_RelationDesc))
             distInsertSelectState->pcState =
                 New(CurrentMemoryContext) PageCompress(mt_state->resultRelInfo->ri_RelationDesc, CurrentMemoryContext);

@@ -105,7 +105,7 @@ EXPLAIN ANALYZE SELECT * INTO select_into_tbl FROM tmp_table;
 --?.*
 --?.*
  [Bypass]
---? Insert on select_into_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Insert (batch mode) on select_into_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .*
 (4 rows)
@@ -123,7 +123,7 @@ EXPLAIN ANALYZE CREATE TABLE ctas_tbl AS SELECT * FROM tmp_table;
 --?.*
 --?.*
  [Bypass]
---? Insert on ctas_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Insert (batch mode) on ctas_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .*
 (4 rows)

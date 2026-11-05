@@ -57,7 +57,7 @@ EXPLAIN (COSTS OFF) INSERT INTO DISABLE_VECTOR_ENGINE.VECTOR_TABLE_01 SELECT * F
 EXPLAIN (COSTS OFF) INSERT INTO DISABLE_VECTOR_ENGINE.ROW_TABLE_01 SELECT * FROM DISABLE_VECTOR_ENGINE.VECTOR_TABLE_02;
                  QUERY PLAN                 
 --------------------------------------------
- Insert on row_table_01
+ Insert (batch mode) on row_table_01
    ->  Row Adapter
          ->  CStore Scan on vector_table_02
 (3 rows)

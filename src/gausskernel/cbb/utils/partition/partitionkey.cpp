@@ -33,12 +33,13 @@
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 #include "nodes/value.h"
+#include "optimizer/clauses.h"
+#include "optimizer/paths.h"
 #include "parser/parse_utilcmd.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
 #include "utils/partitionkey.h"
-
 
 /*
  * @@GaussDB@@
@@ -331,22 +332,66 @@ int partitonKeyCompare(Const** value1, Const** value2, int len, bool nullEqual)
     return compare;
 }
 
-bool IsPartkeyInTargetList(Relation rel, List* targetList)
+void IsPartkeyInTargetList(PlannerInfo* root, Relation rel, List* targetList, bool *hasPartKey, bool *constPartKey)
 {
-    Assert (rel != NULL && rel->partMap != NULL);
+    Assert(rel != NULL && rel->partMap != NULL);
     int2vector* partKey = rel->partMap->partitionKey;
     ListCell *lc = NULL;
-    
+    bool hasPartKeyInList = false;
+    bool constPartKeyVal = *constPartKey;
+    AttrNumber autoIncAttr = RelAutoIncAttrNum(rel);
+
     foreach (lc, targetList) {
         TargetEntry *entry = (TargetEntry *)lfirst(lc);
-
         if (entry->resjunk) {
             continue;
         }
 
-        /* check partkey has the column */
+        /* check whether the current target column is a partition key column */
         for (int j = 0; j < partKey->dim1; j++) {
-            if (partKey->values[j] == entry->resno) {
+            if (partKey->values[j] != entry->resno) {
+                continue;
+            }
+
+            hasPartKeyInList = true;
+            if (constPartKeyVal) {
+                /*
+                 * Ordinary defaults have already been expanded into the target
+                 * expression. Auto-increment keys can still be changed by the
+                 * executor, even when their target expression is a constant.
+                 */
+                constPartKeyVal = entry->resno != autoIncAttr && IsPseudoConstantTargetEntry(root, entry);
+            }
+
+            if (!constPartKeyVal) {
+                *hasPartKey = true;
+                *constPartKey = false;
+                return;
+            }
+            break;
+        }
+    }
+
+    *hasPartKey = hasPartKeyInList;
+    *constPartKey = *constPartKey && hasPartKeyInList;
+}
+
+static bool PartkeyHasGeneratedCol(Relation rel)
+{
+    Assert(rel != NULL && rel->partMap != NULL);
+    int2vector *part_key = rel->partMap->partitionKey;
+    if (part_key == NULL) {
+        return false;
+    }
+
+    if (rel->rd_att && rel->rd_att->constr && rel->rd_att->constr->has_generated_stored &&
+        rel->rd_att->constr->generatedCols != NULL) {
+        char *generateCols = rel->rd_att->constr->generatedCols;
+        int natts = rel->rd_att->natts;
+        for (int j = 0; j < part_key->dim1; j++) {
+            int attno = part_key->values[j];
+            if (attno <= natts && (generateCols[attno - 1] == ATTRIBUTE_GENERATED_STORED ||
+                generateCols[attno - 1] == ATTRIBUTE_GENERATED_PERSISTED)) {
                 return true;
             }
         }
@@ -359,16 +404,21 @@ bool IsPartkeyInTargetList(Relation rel, List* targetList)
  * Target		: data partition
  * Brief		: check the partition key in the targetlist
  */
-bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
+void targetListHasPartitionKey(PlannerInfo* root, List* targetList, Oid partitiondtableid, bool* hasPartKey,
+                               bool* constPartKey)
 {
-    bool ret = false;
     Relation rel;
+    *hasPartKey = false;
 
     rel = heap_open(partitiondtableid, AccessShareLock);
     if (RELATION_IS_PARTITIONED(rel)) {
+        *constPartKey = ((*constPartKey) && (NULL == rel->trigdesc ||
+            (!rel->trigdesc->trig_insert_before_row && !rel->trigdesc->trig_insert_instead_row)) &&
+            !RELATION_OWN_BUCKET(rel));
         if (RelationIsSubPartitioned(rel)) {
-            ret = IsPartkeyInTargetList(rel, targetList);
-            if (!ret) {
+            IsPartkeyInTargetList(root, rel, targetList, hasPartKey, constPartKey);
+            /* check subpartition part key */
+            if (!(*hasPartKey) || (*constPartKey)) {
                 List *partOidList = relationGetPartitionOidList(rel);
                 ListCell *cell = NULL;
                 Oid partOid = InvalidOid;
@@ -387,18 +437,30 @@ bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
 
                 Partition part = partitionOpen(rel, partOid, NoLock);
                 Relation partRel = partitionGetRelation(rel, part);
-
-                ret = IsPartkeyInTargetList(partRel, targetList);
+                /* The attribute number alone cannot prove an expression subpartition key is constant. */
+                *constPartKey = *constPartKey && PartExprKeyIsNull(partRel, NULL);
+                bool subHasPartKey = false;
+                bool subConstPartKey = *constPartKey;
+                IsPartkeyInTargetList(root, partRel, targetList, &subHasPartKey, &subConstPartKey);
+                if (subHasPartKey) {
+                    *hasPartKey = true;
+                    *constPartKey = subConstPartKey;
+                }
 
                 releaseDummyRelation(&partRel);
                 partitionClose(rel, part, AccessShareLock);
             }
         } else {
-            ret = IsPartkeyInTargetList(rel, targetList);
+            IsPartkeyInTargetList(root, rel, targetList, hasPartKey, constPartKey);
         }
+        if (DB_IS_CMPT_BD && !(*hasPartKey)) {
+            /* B and D database support generate as xx storage/persisted, check the generated column */
+            *hasPartKey = PartkeyHasGeneratedCol(rel);
+        }
+    } else {
+        *constPartKey = false;
     }
     heap_close(rel, AccessShareLock);
-    return ret;
 }
 
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq)

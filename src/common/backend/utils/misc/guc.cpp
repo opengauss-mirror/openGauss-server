@@ -467,6 +467,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "heap_bulk_read_size",
     "restrict_nonsystem_relation_kind",
     "enable_func_cache",
+    "batch_insert_min_rows",
 #ifndef ENABLE_LITE_MODE
     "enable_adio_debug"
 #endif

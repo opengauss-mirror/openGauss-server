@@ -10266,10 +10266,12 @@ void check_support_smp_dml_scenario(PlannerInfo *root, Path* path, RedistributeC
 #ifdef STREAMPLAN
 Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
+    bool partKeyIsConst, bool useHeapMultiInsert,
     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause)
 #else
 ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
+    bool partKeyIsConst, bool useHeapMultiInsert,
     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause)
 #endif
 {
@@ -10375,9 +10377,11 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     node->rowMarks = rowMarks;
     node->epqParam = epqParam;
     node->partKeyUpdated = partKeyUpdated;
+    node->partKeyIsConst = partKeyIsConst;
     node->mergeTargetRelation = mergeTargetRelation;
     node->mergeSourceTargetList = mergeSourceTargetList;
     node->mergeActionList = mergeActionList;
+    node->batchInsert = useHeapMultiInsert;
     if (upsertClause != NULL) {
         node->upsertAction = upsertClause->upsertAction;
         node->updateTlist = upsertClause->updateTlist;
@@ -10560,6 +10564,8 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
         rowMarks,
         epqParam,
         partKeyUpdated,
+        false,
+        false,
         mergeTargetRelation,
         mergeSourceTargetList,
         mergeActionList,
@@ -10578,6 +10584,8 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
         rowMarks,
         epqParam,
         partKeyUpdated,
+        false,
+        false,
         mergeTargetRelation,
         mergeSourceTargetList,
         mergeActionList,
@@ -10594,6 +10602,8 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
         rowMarks,
         epqParam,
         partKeyUpdated,
+        false,
+        false,
         mergeTargetRelation,
         mergeSourceTargetList,
         mergeActionList,

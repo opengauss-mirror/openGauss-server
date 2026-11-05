@@ -182,7 +182,7 @@ extern List* trim_mergeclauses_for_inner_pathkeys(PlannerInfo* root, List* merge
 extern List* truncate_useless_pathkeys(PlannerInfo* root, RelOptInfo* rel, List* pathkeys);
 extern bool has_useful_pathkeys(PlannerInfo* root, RelOptInfo* rel);
 extern void set_path_rows(Path* path, double rows, double multiple = 1);
-extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr);
+extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr, bool checkConst = false);
 extern void delete_eq_member(PlannerInfo* root, List* tlist, List* collectiveGroupExpr);
 extern bool CheckPathUseGlobalPartIndex(Path* path);
 

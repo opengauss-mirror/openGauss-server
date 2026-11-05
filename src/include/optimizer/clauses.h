@@ -169,6 +169,7 @@ extern Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod,
     List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context);
 extern Bitmapset *pull_paramids(Expr *expr); 
 extern List *expand_function_arguments_interface(List *args, Oid result_type, HeapTuple func_tuple);
+extern bool IsPseudoConstantTargetEntry(PlannerInfo *root, TargetEntry *entry);
 #ifdef USE_SPQ
 extern Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundParams, Size max_size);
 extern Query *flatten_join_alias_var_optimizer(Query *query, int queryLevel);

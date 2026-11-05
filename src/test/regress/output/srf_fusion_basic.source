@@ -37,10 +37,10 @@ partition test_bypass_sql_partition_8 values less than(80)
 create index itest_bypass_sql_partition on test_bypass_sql_partition(col1,col2) local;
 --nobypass
 explain insert into test_bypass_sql_partition values(0,generate_series(1,100),'test');
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
  [No Bypass]reason: Bypass not executed because query combines insert operator with others.
- Insert on test_bypass_sql_partition  (cost=0.00..7.52 rows=1000 width=40)
+ Insert (batch mode, const partition key) on test_bypass_sql_partition  (cost=0.00..7.52 rows=1000 width=40)
    ->  ProjectSet  (cost=0.00..7.52 rows=1000 width=40)
          ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (4 rows)

@@ -7,7 +7,7 @@ create table reduce_orderby_t2(a int, b varchar(10));
 explain (costs off) insert into reduce_orderby_t1 select a, b from reduce_orderby_t1 order by b;
                       QUERY PLAN                      
 ------------------------------------------------------
- Insert on reduce_orderby_t1
+ Insert (batch mode) on reduce_orderby_t1
    ->  Sort
          Sort Key: reduce_orderby.reduce_orderby_t1.b
          ->  Seq Scan on reduce_orderby_t1
@@ -38,7 +38,7 @@ explain (costs off) insert into reduce_orderby_t1 select v.b from (select * from
 explain (costs off) insert into reduce_orderby_t1 select * from (select * from (select * from reduce_orderby_t1 order by 1));
                       QUERY PLAN                      
 ------------------------------------------------------
- Insert on reduce_orderby_t1
+ Insert (batch mode) on reduce_orderby_t1
    ->  Sort
          Sort Key: reduce_orderby.reduce_orderby_t1.a
          ->  Seq Scan on reduce_orderby_t1

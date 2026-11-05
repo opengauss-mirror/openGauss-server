@@ -129,9 +129,10 @@ extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type,
 
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
-    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
-    UpsertExpr* upsertClause);
+                              List* subplans, List* withCheckOptionLists, List* returningLists, List* rowMarks,
+                              int epqParam, bool partKeyUpdated, bool partKeyIsConst, bool useHeapMultiInsert,
+                              Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+                              UpsertExpr* upsertClause);
 extern Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
                                List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List *mergeActionList, UpsertExpr *upsertClause);
@@ -140,10 +141,11 @@ extern Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* 
 extern Plan* make_stream_plan(PlannerInfo* root, Plan* lefttree, List* redistribute_keys, double multiple,
     Distribution* target_distribution = NULL);
 #else
-extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
-    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
-    UpsertExpr* upsertClause);
+extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
+                                     List* withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
+                                     bool partKeyUpdated, bool partKeyIsConst, bool useHeapMultiInsert,
+                                     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+                                     UpsertExpr* upsertClause);
 extern ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);

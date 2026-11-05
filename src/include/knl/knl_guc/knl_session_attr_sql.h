@@ -252,6 +252,7 @@ typedef struct knl_session_attr_sql {
     bool enableParseFusion;
     bool enable_beta_opfusion;
     bool enable_partition_opfusion;
+    bool enable_partition_oid_caching;
     int opfusion_debug_mode;
     double cost_weight_index;
     double default_limit_rows;
@@ -289,6 +290,7 @@ typedef struct knl_session_attr_sql {
     bool enable_func_cache;
     int vectorEngineStrategy;
     int gms_stats_history_retention;
+    int batch_insert_min_rows;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     bool enable_custom_parser;
     bool dolphin;

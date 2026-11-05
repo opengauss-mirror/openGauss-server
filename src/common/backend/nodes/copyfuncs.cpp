@@ -398,6 +398,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(rowMarks);
     COPY_SCALAR_FIELD(epqParam);
     COPY_SCALAR_FIELD(partKeyUpdated);
+    COPY_SCALAR_FIELD(partKeyIsConst);
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         COPY_SCALAR_FIELD(isReplace);
     }
@@ -408,6 +409,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(remote_delete_plans);
 #endif
     COPY_SCALAR_FIELD(is_dist_insertselect);
+    COPY_SCALAR_FIELD(batchInsert);
     COPY_NODE_FIELD(cacheEnt);
 
     COPY_SCALAR_FIELD(mergeTargetRelation);
@@ -2197,9 +2199,11 @@ static VecModifyTable* _copyVecModifyTable(const VecModifyTable* from)
     COPY_NODE_FIELD(rowMarks);
     COPY_SCALAR_FIELD(epqParam);
     COPY_SCALAR_FIELD(partKeyUpdated);
+    COPY_SCALAR_FIELD(partKeyIsConst);
 #ifdef PGXC
     COPY_NODE_FIELD(remote_plans);
 #endif
+    COPY_SCALAR_FIELD(batchInsert);
     COPY_NODE_FIELD(cacheEnt);
 
     COPY_SCALAR_FIELD(mergeTargetRelation);
