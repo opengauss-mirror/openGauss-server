@@ -29,6 +29,8 @@ sections:
         href: ./ivfflat_npu.md
       - label: DISKANN
         href: ./diskann.md
+      - label: GV_GRAPH Vector Index
+        href: ./gv_graph.md
       - label: LSG
         href: ./lsg.md
   - label: Full-Text Search Index
