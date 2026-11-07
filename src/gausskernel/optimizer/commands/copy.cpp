@@ -10797,7 +10797,7 @@ static void bulkload_init_time_format(CopyState cstate)
  */
 void ProcessCopyErrorLogOptions(CopyState cstate, bool isRejectLimitSpecified)
 {
-    if ((!cstate->log_errors || !cstate->logErrorsData) && !isRejectLimitSpecified) {
+    if (!cstate->log_errors && !cstate->logErrorsData && !isRejectLimitSpecified) {
         return;
     }
 

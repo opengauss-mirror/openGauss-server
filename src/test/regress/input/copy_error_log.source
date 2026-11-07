@@ -139,5 +139,27 @@ encoding 'utf8');
 drop table pgxc_copy_error_log;
 drop table copy_create_err_tab_001_01;
 drop table err_copy_create_err_tab_001_01;
+--case 5: error logging options are only valid for COPY FROM
+create table copy_error_options (a int);
+insert into copy_error_options values (1);
+-- Reject COPY TO before attempting to open the absent error table.
+copy copy_error_options to stdout log errors;
+copy copy_error_options to stdout log errors data;
+do $$ begin perform copy_error_log_create(); end $$;
+-- An existing error table must not make these options valid for COPY TO.
+copy copy_error_options to stdout log errors;
+copy copy_error_options to stdout log errors data;
+copy copy_error_options to stdout log errors reject limit '1';
+copy copy_error_options to stdout log errors data reject limit '1';
+-- COPY FROM still accepts either logging option without an explicit limit.
+copy copy_error_options from stdin log errors;
+2
+\.
+copy copy_error_options from stdin log errors data;
+3
+\.
+copy (select a from copy_error_options order by a) to stdout;
+drop table pgxc_copy_error_log;
+drop table copy_error_options;
 \c regression;
 drop database copy_error_log;
