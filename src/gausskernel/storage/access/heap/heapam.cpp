@@ -3076,6 +3076,8 @@ BulkInsertState GetBulkInsertState(void)
     bistate->next_free = InvalidBlockNumber;
     bistate->last_free = InvalidBlockNumber;
     bistate->already_extended_by = 0;
+    errno_t rc = memset_s(&bistate->extended_rnode, sizeof(RelFileNode), 0, sizeof(RelFileNode));
+    securec_check(rc, "\0", "\0");
     return bistate;
 }
 

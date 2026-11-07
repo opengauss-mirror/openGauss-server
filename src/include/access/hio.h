@@ -45,10 +45,15 @@ typedef struct BulkInsertStateData {
      * already_extended_by remembers the size of the most recent contended
      * extension. It may guide another contended extension, but must not make
      * later uncontended extensions allocate speculative pages.
+     *
+     * extended_rnode is the relation those block numbers belong to. One
+     * BulkInsertState is reused across partitions, so the numbers must be
+     * dropped when the relation changes.
      */
     BlockNumber next_free;
     BlockNumber last_free;
     uint32 already_extended_by;
+    RelFileNode extended_rnode;
 } BulkInsertStateData;
 
 extern void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tuple, TransactionId xid);
