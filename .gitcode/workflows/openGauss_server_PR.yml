@@ -405,6 +405,29 @@ stages:
                 exit 1
               fi
 
+      lite_x86:
+        name: lite_x86
+        timeout-minutes: 60
+        if: ${{ jobs.Detect_file_changes.outputs.need_run_ut == 'yes' }}
+        continue-on-error: true
+        runs-on: [self-hosted, server_x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/opengauss-ci/opengauss-ci-x86:lite-1.0.1
+          options: --user root
+        outputs:
+          result: ${{ steps.run_fastcheck_lite_x86.outputs.result }}
+        steps:
+          - name: run_fastcheck_lite_x86
+            id: run_fastcheck_lite_x86
+            run: |
+              sh /usr/local/bin/entrypoint_lite.sh 
+              if [ "$?" == "0" ]; then
+                echo "result=0" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "result=1" >> "$ATOMGIT_OUTPUT"
+                exit 1
+              fi
+
   report_result:
     name: Report pipeline result
     select: selected_by_default
@@ -438,6 +461,7 @@ stages:
               OM_UPGRADE_X86: ${{ jobs.om_upgrade_x86.outputs.result }}
               SS_HATEST_X86: ${{ jobs.ss_hatest_x86.outputs.result }}
               SS_X86: ${{ jobs.ss_x86.outputs.result }}
+              LITE_X86: ${{ jobs.lite_x86.outputs.result }}
             run: |
               set -eu
               umask 077
@@ -450,13 +474,15 @@ stages:
               echo "OM_INSTALL_X86=${OM_INSTALL_X86}"
               echo "OM_UPGRADE_X86=${OM_UPGRADE_X86}"
               echo "SS_HATEST_X86=${SS_HATEST_X86}"
+              echo "SS_X86=${SS_X86}"
+              echo "LITE_X86=${LITE_X86}"
 
               pipeline_success=-1
               if [ "$LLT_A_ARM" = 0 ] && [ "$LLT_B_ARM" = 0 ] && \
                 [ "$LLT_C_ARM" = 0 ] && [ "$LLT_A_X86" = 0 ] &&  \
                 [ "$LLT_B_X86" = 0 ] && [ "$LLT_C_X86" = 0 ] &&  \
                 [ "$OM_INSTALL_X86" = 0 ] && [ "$OM_UPGRADE_X86" = 0 ] && \
-                [ "$SS_HATEST_X86" = 0 ] && [ "$SS_X86" = 0 ]; then
+                [ "$SS_HATEST_X86" = 0 ] && [ "$SS_X86" = 0 ] && [ "$LITE_X86" = 0 ]; then
                 echo "全部为 0"
                 pipeline_success=0
               else
