@@ -38,6 +38,9 @@
 #define BM25_VERSION 1
 #define BM25_VERSION_VARBLOCK_POSTING 2
 #define BM25_MAGIC_NUMBER 0x14FF1A8
+/* Keep legacy pages unchanged. Old binaries must reject standard_v1 pages,
+ * not silently use Jieba queries against different persisted term statistics. */
+#define BM25_MAGIC_STANDARD_V1 0x14FF1A9
 
 /*
  * Raw BM25DocumentItem / BM25DocForwardItem arrays on index pages: indexes built before
@@ -98,6 +101,9 @@ typedef struct BM25ScanOpaqueData {
     uint32 expandedTimes;
     unsigned char* docIdMask;
     uint32 docIdMaskSize;
+    /* Opt-in by a consumer that proves raw BM25 scores are unused.  This
+     * affects only score-key materialization, never candidate ranking. */
+    bool skipScoreKeys;
 } BM25ScanOpaqueData;
 
 typedef BM25ScanOpaqueData *BM25ScanOpaque;
@@ -106,6 +112,7 @@ typedef BM25ScanOpaqueData *BM25ScanOpaque;
 typedef struct Bm25Options {
     int32 vl_len_;   /* varlena header */
     char *dictPath;  /* base directory for custom Jieba dictionary */
+    int analyzerOffset; /* offset of immutable analyzer name in reloptions */
 } Bm25Options;
 
 /* Validate dict_path and return canonical path (caller should pfree). */
@@ -127,6 +134,23 @@ static inline const char* Bm25GetDictPath(Relation index)
     if (index == NULL || index->rd_options == NULL)
         return NULL;
     return Bm25OptionsGetDictPath(index->rd_options);
+}
+
+static inline const char* Bm25OptionsGetAnalyzer(const void* basePtr)
+{
+    if (basePtr == NULL || ((const Bm25Options*)basePtr)->analyzerOffset == 0)
+        return "jieba";
+    return (const char*)basePtr + ((const Bm25Options*)basePtr)->analyzerOffset;
+}
+
+static inline bool Bm25UsesStandardAnalyzer(Relation index)
+{
+    return strcmp(Bm25OptionsGetAnalyzer(index->rd_options), "standard_v1") == 0;
+}
+
+static inline uint32 Bm25ExpectedMagic(Relation index)
+{
+    return Bm25UsesStandardAnalyzer(index) ? BM25_MAGIC_STANDARD_V1 : BM25_MAGIC_NUMBER;
 }
 
 typedef struct BM25EntryPages {
@@ -409,7 +433,7 @@ void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
     BlockNumber newDocBlkno, bool building, ForkNumber forkNum);
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlknoTable);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
-BM25TokenizedDocData BM25DocumentTokenize(const char* doc, const char* dictPath = nullptr, bool cutForSearch = false);
+BM25TokenizedDocData BM25DocumentTokenize(Relation index, const char* doc, bool cutForSearch = false);
 void RecordDocForwardBlkno2DocForwardBlknoTable(Relation index, BM25DocForwardMetaPage metaForwardPage,
     BlockNumber newDocForwardBlkno, bool building, ForkNumber forkNum);
 BlockNumber SeekBlocknoForForwardToken(Relation index, uint64 forwardIdx, BlockNumber docForwardBlknoTable);

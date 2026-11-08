@@ -29,12 +29,107 @@
 #include "access/datavec/halfutils.h"
 #include "access/datavec/halfvec.h"
 #include "access/datavec/bm25.h"
+#include "access/datavec/bm25_unicode_v1.h"
+#include "access/hash.h"
 #include "access/datavec/utils.h"
+#include "mb/pg_wchar.h"
 #include "storage/buf/bufmgr.h"
+#include "utils/hsearch.h"
 #include "tokenizer.h"
 
-BM25TokenizedDocData BM25DocumentTokenize(const char* doc, const char* dictPath, bool cutForSearch)
+typedef struct BM25StandardTokenEntry {
+    char term[BM25_MAX_TOKEN_LEN];
+    uint32 frequency;
+} BM25StandardTokenEntry;
+
+static int BM25CompareTokens(const void* a, const void* b)
 {
+    return strcmp(((const BM25TokenData*)a)->tokenValue, ((const BM25TokenData*)b)->tokenValue);
+}
+
+/* Locale-independent, frozen Unicode rules. Do not change standard_v1 after
+ * indexes have been persisted; add a new analyzer/magic for future semantics.
+ * No C++ heap objects cross an ereport/interrupt longjmp. */
+static BM25TokenizedDocData BM25StandardTokenize(const char* doc)
+{
+    if (GetDatabaseEncoding() != PG_UTF8) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("BM25 standard_v1 analyzer requires UTF8 database encoding")));
+    }
+    HASHCTL ctl = {0};
+    ctl.keysize = BM25_MAX_TOKEN_LEN;
+    ctl.entrysize = sizeof(BM25StandardTokenEntry);
+    ctl.hcxt = CurrentMemoryContext;
+    HTAB* terms = hash_create("BM25 standard_v1 terms", 64, &ctl, HASH_ELEM | HASH_CONTEXT);
+    BM25TokenizedDocData result = {0};
+    char term[BM25_MAX_TOKEN_LEN];
+    int used = 0;
+    const unsigned char* cursor = (const unsigned char*)doc;
+    uint32 iterations = 0;
+    for (;;) {
+        if ((iterations++ & 1023) == 0)
+            CHECK_FOR_INTERRUPTS();
+        uint32 cp = *cursor < 128 ? *cursor : utf8_to_unicode(cursor);
+        if (cp != 0 && BM25UnicodeIsAlnum(cp)) {
+            uint32 lower[2];
+            int count = BM25UnicodeLower(cp, lower);
+            for (int i = 0; i < count; i++) {
+                unsigned char bytes[4];
+                unicode_to_utf8(lower[i], bytes);
+                int size = pg_utf_mblen(bytes);
+                if (used + size >= BM25_MAX_TOKEN_LEN) {
+                    ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("BM25 standard_v1 token exceeds %d UTF8 bytes", BM25_MAX_TOKEN_LEN - 1),
+                        errdetail("Long tokens are rejected, never truncated or silently discarded.")));
+                }
+                for (int j = 0; j < size; j++)
+                    term[used++] = (char)bytes[j];
+            }
+        } else if (used > 0) {
+            term[used] = '\0';
+            bool found;
+            BM25StandardTokenEntry* entry = (BM25StandardTokenEntry*)hash_search(terms, term, HASH_ENTER, &found);
+            if (!found)
+                entry->frequency = 0;
+            entry->frequency++;
+            result.docLength++;
+            used = 0;
+        }
+        if (cp == 0)
+            break;
+        cursor += *cursor < 128 ? 1 : pg_utf_mblen(cursor);
+    }
+    long entries = hash_get_num_entries(terms);
+    if ((Size)entries > MaxAllocSize / sizeof(BM25TokenData)) {
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("too many distinct BM25 tokens")));
+    }
+    result.tokenCount = (uint32)entries;
+    if (result.tokenCount > 0) {
+        result.tokenDatas = (BM25TokenData*)palloc0(sizeof(BM25TokenData) * result.tokenCount);
+        HASH_SEQ_STATUS seq;
+        hash_seq_init(&seq, terms);
+        BM25StandardTokenEntry* entry;
+        uint32 i = 0;
+        while ((entry = (BM25StandardTokenEntry*)hash_seq_search(&seq)) != NULL) {
+            BM25TokenData* token = &result.tokenDatas[i++];
+            Size len = strlen(entry->term);
+            errno_t rc = memcpy_s(token->tokenValue, BM25_MAX_TOKEN_LEN, entry->term, len + 1);
+            securec_check(rc, "\0", "\0");
+            token->hashValue = DatumGetUInt32(hash_any((const unsigned char*)entry->term, (int)len));
+            token->tokenFreq = entry->frequency;
+        }
+        /* Stable accumulation order, independent of hash bucket layout. */
+        qsort(result.tokenDatas, result.tokenCount, sizeof(BM25TokenData), BM25CompareTokens);
+    }
+    hash_destroy(terms);
+    return result;
+}
+
+BM25TokenizedDocData BM25DocumentTokenize(Relation index, const char* doc, bool cutForSearch)
+{
+    if (Bm25UsesStandardAnalyzer(index))
+        return BM25StandardTokenize(doc);
+    const char* dictPath = Bm25GetDictPath(index);
     uint32 docLength = 0;
     EmbeddingMap embeddingMap{0};
     if (!ConvertString2Embedding(doc, &embeddingMap, true, cutForSearch, dictPath)) {
@@ -171,7 +266,7 @@ void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap)
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
     metapBuf = BM25PageGetMeta(page);
-    if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+    if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index)))
         elog(ERROR, "bm25 index is not valid");
     Assert(metapBuf->version == BM25_VERSION || metapBuf->version == BM25_VERSION_VARBLOCK_POSTING);
     errno_t rc = memcpy_s(metap, sizeof(BM25MetaPageData), metapBuf, sizeof(BM25MetaPageData));
@@ -191,7 +286,7 @@ uint32 BM25AllocateNewDocId(Relation index, bool building)
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
     metapBuf = BM25PageGetMeta(page);
-    if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+    if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index)))
         elog(ERROR, "bm25 index is not valid");
     docId = metapBuf->nextDocId;
     if (unlikely(docId == BM25_INVALID_DOC_ID)) {
@@ -271,7 +366,7 @@ uint32 BM25AllocateTokenId(Relation index)
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     page = BufferGetPage(buf);
     metapBuf = BM25PageGetMeta(page);
-    if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+    if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index)))
         elog(ERROR, "bm25 index is not valid");
     tokenId = metapBuf->nextTokenId;
     metapBuf->nextTokenId++;
@@ -291,7 +386,7 @@ void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgd
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
     metapBuf = BM25PageGetMeta(page);
-    if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+    if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index)))
         elog(ERROR, "bm25 index is not valid");
     metapBuf->documentCount++;
     metapBuf->tokenCount += tokenCount;
@@ -526,7 +621,7 @@ void BM25BatchInsertAbort()
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &page, buf, &state, false);
         metapBuf = BM25PageGetMeta(page);
-        if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER)) {
+        if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index))) {
             index_close(index, NoLock);
             elog(ERROR, "bm25 index is not valid");
         }

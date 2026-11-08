@@ -130,6 +130,10 @@ void ThreadPoolStream::InitStream()
     SetStreamWorkerInfo(m_producer);
 
     u_sess->proc_cxt.MyProcPort = (Port*)palloc0(sizeof(Port));
+    /* A pooled Stream has no frontend socket.  Match PortInitialize();
+     * zero is a real descriptor and GUC hooks must not probe or close it. */
+    u_sess->proc_cxt.MyProcPort->sock = PGINVALID_SOCKET;
+    u_sess->proc_cxt.MyProcPort->gs_sock = GS_INVALID_GSOCK;
     SetStreamWorkerInfo(m_producer);
     ExtractProduerInfo();
 

@@ -97,6 +97,7 @@ typedef enum NodeTag {
     T_SetOp,
     T_LockRows,
     T_Limit,
+    T_HybridRecall,
     T_Stream,
 #ifdef PGXC
     /*
@@ -220,6 +221,7 @@ typedef enum NodeTag {
     T_SetOpState,
     T_LockRowsState,
     T_LimitState,
+    T_HybridRecallState,
 #ifdef PGXC
     T_RemoteQueryState,
 #endif
@@ -369,6 +371,7 @@ typedef enum NodeTag {
     T_NestPath,
     T_MergePath,
     T_HashPath,
+    T_HybridRecallPath,
     T_AsofPath,
     T_TidPath,
     T_ForeignPath,

@@ -872,6 +872,11 @@ VECTOR_TARGET_CLONES float VectorInnerProduct(int dim, float *ax, float *bx)
         distance += ax[i] * bx[i];
     }
 
+#ifdef __AVX__
+    /* HNSW callers use legacy SSE; keep the AVX-to-SSE boundary clean without
+     * changing accumulation, contraction, or scalar-tail rounding. */
+    _mm256_zeroupper();
+#endif
     return distance;
 }
 

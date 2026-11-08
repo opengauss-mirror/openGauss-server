@@ -477,7 +477,7 @@ static void UpdateBM25Statistics(Relation index, Vector<BM25DocumentItem> &delet
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, false);
     metapBuf = BM25PageGetMeta(page);
-    if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+    if (unlikely(metapBuf->magicNumber != Bm25ExpectedMagic(index)))
         elog(ERROR, "bm25 index is not valid");
     metapBuf->documentCount -= deleteDocCount;
     metapBuf->tokenCount -= deleteDocLen;

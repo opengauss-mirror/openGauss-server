@@ -1,0 +1,81 @@
+-- Statistics affect visited allocation only, never the search or its capacity.
+SET client_min_messages = error;
+\pset format unaligned
+SET enable_seqscan = off;
+SET hnsw_ef_search = 1024;
+SET hnsw_iterative_scan = relaxed_order;
+CREATE TABLE hnsw_visited_docs(id int PRIMARY KEY, embedding vector(3))
+WITH (autovacuum_enabled=false);
+INSERT INTO hnsw_visited_docs
+SELECT i, ARRAY[i::real, (i % 7)::real, (i % 11)::real]::vector
+FROM generate_series(1, 4) i;
+CREATE INDEX hnsw_visited_idx ON hnsw_visited_docs
+USING hnsw(embedding vector_l2_ops) WITH(m=4, ef_construction=16);
+ANALYZE hnsw_visited_docs;
+INSERT INTO hnsw_visited_docs
+SELECT i, ARRAY[i::real, (i % 7)::real, (i % 11)::real]::vector
+FROM generate_series(5, 256) i;
+SELECT reltuples = 4 AS stale_small_estimate
+FROM pg_class WHERE oid = 'hnsw_visited_idx'::regclass;
+CREATE FUNCTION hnsw_visited_check() RETURNS boolean AS $$
+DECLARE
+    q vector;
+    ann int[];
+    exact_ids int[];
+    n int;
+    expected_n int;
+    distinct_n int;
+    k int;
+    cache_kb int;
+    plan_line text;
+    ann_plan boolean := false;
+BEGIN
+    FOR plan_line IN EXECUTE
+        'EXPLAIN (COSTS OFF) SELECT id FROM hnsw_visited_docs
+         ORDER BY embedding <-> ''[30.25,0.7,0.8]''::vector LIMIT 512'
+    LOOP
+        ann_plan := ann_plan OR plan_line LIKE '%Ann Index Scan%';
+    END LOOP;
+    IF NOT ann_plan THEN RETURN false; END IF;
+    SELECT count(*) INTO expected_n FROM hnsw_visited_docs;
+    FOR cache_kb IN SELECT unnest(ARRAY[0,4096]) LOOP
+        PERFORM set_config('hnsw_scan_cache_size', cache_kb::text, false);
+        FOR k IN 1..4 LOOP
+            q := ARRAY[(k * 30 + 0.25)::real, 0.7::real, 0.8::real]::vector;
+            SELECT count(*), count(DISTINCT id) INTO n, distinct_n
+            FROM (SELECT id FROM hnsw_visited_docs
+                  ORDER BY embedding <-> q LIMIT 512) AS scanned;
+            IF n <> expected_n OR distinct_n <> expected_n THEN RETURN false; END IF;
+            SELECT array_agg(id ORDER BY distance, id) INTO ann
+            FROM (SELECT id, embedding <-> q AS distance FROM hnsw_visited_docs
+                  WHERE id % 3 = 0 ORDER BY embedding <-> q LIMIT 20) AS nearest;
+            -- The added zero prevents use of the ordered ANN path for truth.
+            SELECT array_agg(id ORDER BY distance, id) INTO exact_ids
+            FROM (SELECT id, (embedding <-> q) + 0 AS distance FROM hnsw_visited_docs
+                  WHERE id % 3 = 0 ORDER BY (embedding <-> q) + 0, id LIMIT 20) AS exact;
+            IF ann IS DISTINCT FROM exact_ids THEN RETURN false; END IF;
+        END LOOP;
+    END LOOP;
+    RETURN true;
+END;
+$$ LANGUAGE plpgsql;
+SELECT hnsw_visited_check() AS stale_small_grows;
+ANALYZE hnsw_visited_docs;
+SELECT hnsw_visited_check() AS current_estimate_equal;
+DELETE FROM hnsw_visited_docs WHERE id > 32;
+SELECT hnsw_visited_check() AS stale_large_equal;
+VACUUM ANALYZE hnsw_visited_docs;
+SELECT hnsw_visited_check() AS after_vacuum_equal;
+TRUNCATE hnsw_visited_docs;
+INSERT INTO hnsw_visited_docs
+SELECT i, ARRAY[i::real, (i % 7)::real, (i % 11)::real]::vector
+FROM generate_series(1, 64) i;
+SELECT reltuples <= 0 AS unknown_estimate
+FROM pg_class WHERE oid = 'hnsw_visited_idx'::regclass;
+SELECT hnsw_visited_check() AS unknown_estimate_equal;
+DROP FUNCTION hnsw_visited_check();
+DROP TABLE hnsw_visited_docs;
+RESET hnsw_scan_cache_size;
+RESET hnsw_iterative_scan;
+RESET hnsw_ef_search;
+RESET enable_seqscan;

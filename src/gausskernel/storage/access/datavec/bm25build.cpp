@@ -824,8 +824,7 @@ static bool BM25InsertDocument(Relation index, Datum *values, ItemPointerData &c
                                                   ALLOCSET_DEFAULT_MAXSIZE);
     MemoryContext oldCtx = MemoryContextSwitchTo(tempCtx);
     /* new */
-    BM25TokenizedDocData tokenizedDoc = BM25DocumentTokenize(TextDatumGetCString(values[0]),
-        Bm25GetDictPath(index), false);
+    BM25TokenizedDocData tokenizedDoc = BM25DocumentTokenize(index, TextDatumGetCString(values[0]), false);
     if (tokenizedDoc.tokenCount == 0) {
         MemoryContextSwitchTo(oldCtx);
         MemoryContextDelete(tempCtx);
@@ -1017,7 +1016,7 @@ static void CreateMetaPage(Relation index, BM25BuildState *buildstate, ForkNumbe
 
     /* Set metapage data */
     metap = BM25PageGetMeta(page);
-    metap->magicNumber = BM25_MAGIC_NUMBER;
+    metap->magicNumber = Bm25ExpectedMagic(index);
     metap->version = BM25_VERSION_VARBLOCK_POSTING;
     metap->entryPageList = CreateEntryPages(index, forkNum);
     metap->documentCount = 0;

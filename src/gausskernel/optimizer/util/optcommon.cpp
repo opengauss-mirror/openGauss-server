@@ -545,6 +545,10 @@ void GetPlanNodePlainText(
         case T_Limit:
             *pname = *sname = *pt_operation = "Limit";
             break;
+        case T_HybridRecall:
+            /* [P1-3] two-branch recall fusion parent (hybrid recall design doc) */
+            *pname = *sname = *pt_operation = "Hybrid Recall";
+            break;
         case T_Hash:
             *pname = *sname = *pt_operation = "Hash";
             break;

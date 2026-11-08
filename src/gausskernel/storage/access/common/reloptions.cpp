@@ -644,6 +644,13 @@ static relopt_string stringRelOpts[] = {
         NULL,
         NULL
     },
+    {
+        { "analyzer", "Immutable BM25 analyzer: jieba or standard_v1", RELOPT_KIND_BM25 },
+        0,
+        true,
+        NULL,
+        NULL
+    },
     /* list terminator */
     {{NULL}}
 };

@@ -20531,6 +20531,12 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX: {
             if (strcmp(rel->rd_am->amname.data, "bm25") == 0 &&
+                (CheckDefListContainsOption(defList, "analyzer") || operation == AT_ReplaceRelOptions)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("changing the analyzer of an existing bm25 index is not supported"),
+                    errhint("Create a new index with the desired analyzer; existing term statistics cannot be reused.")));
+            }
+            if (strcmp(rel->rd_am->amname.data, "bm25") == 0 &&
                 CheckDefListContainsOption(defList, "dict_path")) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("ALTER INDEX SET/RESET for bm25 option \"dict_path\" is not supported"),

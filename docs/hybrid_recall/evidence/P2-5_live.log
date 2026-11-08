@@ -1,0 +1,45 @@
+P2-5 live verification summary
+date: 2026-08-26
+database: postgres
+port: 55440
+build: debug + cassert
+script: docs/hybrid_recall/evidence/P2-5_test.sql
+exit: 0
+
+SHOW hybrid_recall_parallel_mode
+--------------------------------
+auto
+
+mode=off plan assertions
+------------------------
+Hybrid Recall: present
+text branch: Limit -> BM25 Index Scan
+vector branch: Limit -> Ann Index Scan
+Streaming(type: LOCAL GATHER): absent
+
+mode=force plan assertions
+--------------------------
+Hybrid Recall: present
+text branch: LOCAL GATHER -> Limit -> BM25 Index Scan
+vector branch: LOCAL GATHER -> Limit -> Ann Index Scan
+Streaming(type: LOCAL GATHER): 2
+
+mode=off vs mode=force result assertion
+----------------------------------------
+P2_5_SERIAL_PARALLEL_MATCH=ok
+
+mode=auto plan selected for the 500-row short-query fixture
+-----------------------------------------------------------
+Hybrid Recall: present
+Streaming(type: LOCAL GATHER): absent
+reason: P2-5 crossing placeholder costs prefer serial startup for this query;
+        P2-6 replaces them with branch-derived costs.
+
+compatibility reruns
+--------------------
+P2-4 filter/recheck: exit=0, P2_4_SERIAL_MATCH=ok
+P2-2/P2-3 planner/payload: exit=0, Top-10 unchanged
+
+build/install/restart
+---------------------
+build_logs/incremental_20260826_113242.log: exit=0

@@ -3210,19 +3210,28 @@ typedef struct knl_u_ndp_context {
     char *crl_path;
 } knl_u_ndp_context;
 
+struct HnswBufferHintCache;
+
 typedef struct knl_u_datavec_context {
     int hnsw_ef_search;
     int hnsw_earlystop_threshold;
     int hnsw_iterative_scan;
     int hnsw_max_scan_tuples;
+    int hnsw_scan_cache_size;
     int rbq_query_bits;
     int rbq_sample_rows;
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    int hybrid_recall_rrf_k;
     double rbq_refinek;
     bool enable_npu;
     bool hnsw_use_mmap;
+    int hybrid_recall_max_candidate_memory_kb;
+    /* Lazily allocated in session cache memory; contains no persistent pins. */
+    struct HnswBufferHintCache* hnsw_buffer_hints;
+    /* At most one reset context; active scans are owned by their query. */
+    MemoryContext hnsw_scan_scratch;
 } knl_u_datavec_context;
 
 #ifdef ENABLE_HTAP

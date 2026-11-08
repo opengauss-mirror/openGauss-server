@@ -1261,6 +1261,37 @@ typedef struct IndexPath {
     bool is_ustore;
 } IndexPath;
 
+/*
+ * [P0-1] HybridRecallPath - planner-side candidate for two-branch recall
+ * (hybrid recall design doc §6.1). Carries the two branch paths plus the
+ * marker-derived parameters; createplan turns it into a HybridRecall Plan.
+ * Full designed field set added up front to avoid repeated header edits
+ * (each one costs a global rebuild). No path enumeration produces this
+ * node yet (P2-1+). V1 rejects branch paths that reference the other
+ * branch's output.
+ */
+typedef struct HybridRecallPath {
+    Path path;
+    Path* text_path;
+    Path* vector_path;
+    Index relid;
+    AttrNumber id_attno;
+    AttrNumber text_attno;
+    AttrNumber vector_attno;
+    Expr* query_text;
+    Expr* query_vector;
+    List* common_quals;
+    int64 final_topk_est;
+    int64 text_candidates_est;
+    int64 vector_candidates_est;
+    HybridFusionKind fusion;
+    double rrf_k;
+    double text_weight;
+    double vector_weight;
+    bool parallel_branches;
+    bool require_parallel;
+} HybridRecallPath;
+
 typedef struct PartIteratorPath {
     Path path;
     PartitionType partType;

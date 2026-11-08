@@ -1,0 +1,149 @@
+P3-5 debug/release/memcheck runtime-stability evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Validated commit: 4c032d0fb7b4f90f6a05a5f45e23cdaaa29dc096
+
+Scope
+  - one QueryDesc executed 100 times with ExecutorRewind between runs
+  - 100 real parallel OGAI executions with alternating RRF parameters
+  - deterministic statement timeout while both task-stream producers run
+  - successful parallel query and instance-liveness check after cancellation
+  - isolated clean release and official memcheck builds
+
+Test vehicle changes
+  docs/hybrid_recall/p04_test_module/hybrid_recall_test.cpp adds the test-only
+  hybrid_recall_debug_rescan entry point.  It constructs one serial
+  HybridRecall QueryDesc, calls ExecutorRun, then repeats
+  ExecutorRewind -> ExecReScanHybridRecall -> ExecutorRun 99 times.  The
+  return value is the total number of emitted rows, so 3 rows * 100 loops
+  must equal 300.
+
+  hybrid_recall_debug_parallel now restores the process-wide producer-delay
+  hook in PG_CATCH before rethrowing timeout/cancel.  Executor resources
+  continue to unwind through the statement ResourceOwner.
+
+  p04_test_module/build.sh checks the rescan symbol and installs a unique
+  hybrid_recall_p35_test.so alias so the old pg_plugin library cache cannot
+  reuse an earlier test module.
+
+Debug + cassert runtime
+  instance: topk_test_data, port 55440, PID 398090
+  database: hybrid_recall_p31_20260826
+  command:
+    gsql -X -p 55440 -U qiumc -d hybrid_recall_p31_20260826 \
+      -f docs/hybrid_recall/evidence/P3-5_test.sql
+  exit: 0
+  elapsed: 7406 ms
+  postmaster threads: 32 before, 32 after
+
+  true ExecutorRewind result:
+    rescan_rows = 300
+  parallel loop result:
+    P35_PARALLEL_EXECUTIONS=100 TOTAL_ROWS=300
+  alternating first-row assertions:
+    odd iterations, rrf_k=10 and weights=[1,0]: id=5
+    even iterations, rrf_k=60 and weights=[0.5,0.5]: id=245
+  cancellation result:
+    ERROR: canceling statement due to statement timeout
+    two server workers logged HRTEST producer sleep 2000 ms at the same time
+  post-cancel result:
+    ids = 245,165,25
+    instance_alive_after_timeout = 1
+  server log scan:
+    FailedAssertion=0, PANIC=0, segmentation fault=0
+
+Release clean build
+  isolated worktree: /home/qiumc/data/code/cpp/openGauss-p35-release
+  command:
+    sh build.sh -m release -3rd /home/qiumc/data/code/cpp/binarylibs
+  exit: 0
+  elapsed: 3044 s (50 min 44 s)
+  terminal: openGauss installation complete; now, all build has finished
+  configure evidence:
+    CFLAGS=-O2 -g3
+    enable_debug=no
+    enable_cassert=no
+  build log error/fatal lines: 0/0
+
+Release runtime
+  isolated PGDATA: openGauss-p35-release/p35_release_data
+  port: 55541 (55542 internal auxiliary listener)
+  database: hybrid_recall_p35_release_20260826
+  server version: openGauss 7.0.0-RC3 build 4c032d0f
+  fixture: 500 deterministic rows, BM25 and HNSW indexes
+  exit: 0
+  elapsed: 3629 ms
+  postmaster threads: 33 before, 33 after
+  rescan_rows: 300
+  P35_RELEASE_PARALLEL_EXECUTIONS=100 TOTAL_ROWS=300
+  expected timeout observed: yes
+  post-cancel ids: 245,165,25
+  release_alive_after_timeout: 1
+  server log: assertion/PANIC/segmentation fault = 0/0/0
+  cleanup: release instance stopped; main debug instance remained online
+
+Official memcheck clean build
+  isolated worktree: /home/qiumc/data/code/cpp/openGauss-p35-memcheck
+  command:
+    sh build.sh -m memcheck -3rd /home/qiumc/data/code/cpp/binarylibs
+  exit: 0
+  elapsed: 2358 s (39 min 18 s)
+  terminal: openGauss installation complete; session-layout check; all build finished
+  build log error/fatal lines: 0/0
+  instrumentation evidence:
+    -O0
+    -fsanitize=address
+    -fsanitize=leak
+    enable_debug=yes
+    enable_cassert=yes
+    gaussdb resolves libasan.so.6 from the project GCC 10.3 runtime
+
+Memcheck initialization boundary
+  The official memcheck gs_initdb executable recursively emitted
+  AddressSanitizer:DEADLYSIGNAL even for --version and produced no symbolized
+  ASAN report.  The same command works in the older hand-configured ASAN tree;
+  this is therefore recorded as an official memcheck utility/runtime boundary,
+  not hidden as a successful initdb run.
+
+  Kernel runtime validation used an offline copy of the release PGDATA created
+  by the same commit 4c032d0fb7.  The release instance was already stopped;
+  the copied data directory was assigned port 55641 and started with the
+  current official-memcheck gaussdb.  No user or main-instance PGDATA was used.
+
+Memcheck/ASAN runtime
+  ASAN_OPTIONS:
+    detect_leaks=0:detect_odr_violation=0:handle_segv=0:
+    abort_on_error=1:halt_on_error=1:log_path=/tmp/P3-5_memcheck_server_asan
+  Notes:
+    detect_odr_violation=0 avoids the documented openGauss client/parser ODR
+    duplicate; handle_segv=0 avoids recursive handling between openGauss and
+    ASAN.  Address/UAF/double-free/bounds instrumentation remains active.
+    Exit-time LSan scanning is disabled for the persistent multithread server;
+    loop/context/thread stability is checked separately.
+
+  instance: isolated official-memcheck gaussdb, port 55641
+  server version: openGauss 7.0.0-RC3 build 4c032d0f debug
+  test module: -O0 -fsanitize=address -fsanitize=leak
+  exit: 0
+  elapsed: 15167 ms
+  rescan_rows: 300
+  P35_MEMCHECK_PARALLEL_EXECUTIONS=100 TOTAL_ROWS=300
+  expected timeout observed: yes
+  post-cancel ids: 245,165,25
+  memcheck_alive_after_timeout: 1
+  post-test thread samples: 29,29,29,29,29
+  residual stream/producer threads: 0
+  ASAN report files: 0
+  server/start log scan:
+    AddressSanitizer=0, LeakSanitizer=0, FailedAssertion=0, PANIC=0,
+    segmentation fault=0, heap-use-after-free=0, double-free=0,
+    buffer-overflow=0
+  cleanup: memcheck instance stopped; main debug instance remained online
+
+Verdict
+  HybridRecall P3-5 passes debug/cassert, clean release and official memcheck
+  compilation plus runtime stress.  True executor rescan, repeated parallel
+  execution and cancellation recovery preserve results and leave no worker
+  threads or ASAN reports.  The official-memcheck gs_initdb startup defect is
+  explicitly retained as a tooling boundary; it does not affect the validated
+  ASAN gaussdb execution path.

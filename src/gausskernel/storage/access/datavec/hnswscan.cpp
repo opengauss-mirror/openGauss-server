@@ -23,6 +23,7 @@
 #include "postgres.h"
 
 #include <cmath>
+#include <new>
 
 #include "access/amapi.h"
 #include "access/relscan.h"
@@ -90,7 +91,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
                         base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL, NULL, enablePQ, &pqinfo));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
+            w = HnswSearchLayer(base, q, ep, 8, lc, index, procinfo, collation, m, false, NULL,
                                 NULL, NULL, true, NULL, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
             ep = w;
         }
@@ -101,7 +102,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     } else {
         ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, so->enableRabitQ, so->rbqParams, NULL));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
+            w = HnswSearchLayer(base, q, ep, 8, lc, index, procinfo, collation, m, false, NULL,
                                 NULL, NULL, true, NULL, so->enableRabitQ, so->rbqParams, NULL, true);
             ep = w;
         }
@@ -115,6 +116,51 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 /*
  * Resume scan at ground level with discarded candidates
  */
+static bool MaterializeDiscardedElement(IndexScanDesc scan, HnswCandidate *candidate)
+{
+    char *base = NULL;
+    HnswElement element = (HnswElement)HnswPtrAccess(base, candidate->element);
+
+    /* Evictions from W were already materialized; only rejected candidates
+     * use the block/offset/version stub representation. */
+    if (BlockNumberIsValid(element->neighborPage)) {
+        return true;
+    }
+
+    Buffer buf = ReadBuffer(scan->indexRelation, element->blkno);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    HnswElementTuple etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
+
+    Assert(HnswIsElementTuple(etup));
+
+    /* The distance belongs to the old tuple occupying this index TID.  Do
+     * not resume through a slot vacuum deleted or reused between batches. */
+    if (etup->deleted || !ItemPointerIsValid(&etup->heaptids[0]) || etup->version != element->version) {
+        UnlockReleaseBuffer(buf);
+        return false;
+    }
+
+    HnswLoadElementFromTuple(element, etup, true, false, (Datum)0);
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+static HnswCandidate *PopMaterializedDiscarded(IndexScanDesc scan)
+{
+    HnswScanOpaque so = (HnswScanOpaque)scan->opaque;
+
+    while (!pairingheap_is_empty(so->discarded)) {
+        HnswCandidate *candidate = HnswGetPairingHeapCandidate(
+            w_node, pairingheap_remove_first(so->discarded));
+        if (MaterializeDiscardedElement(scan, candidate)) {
+            return candidate;
+        }
+    }
+
+    return NULL;
+}
+
 static List *ResumeScanItems(IndexScanDesc scan)
 {
     HnswScanOpaque so = (HnswScanOpaque) scan->opaque;
@@ -129,13 +175,9 @@ static List *ResumeScanItems(IndexScanDesc scan)
 
     /* Get next batch of candidates */
     for (int i = 0; i < batchSize; i++) {
-        HnswCandidate *hc;
-
-        if (pairingheap_is_empty(so->discarded)) {
+        HnswCandidate *hc = PopMaterializedDiscarded(scan);
+        if (hc == NULL)
             break;
-        }
-
-        hc = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(so->discarded));
         ep = lappend(ep, hc);
     }
 
@@ -171,6 +213,174 @@ static Datum GetScanValue(IndexScanDesc scan)
 }
 
 /*
+ * A pooled Stream is tied to one OS thread, but its session is destroyed after
+ * every task. Keep its optional empty workspace under a thread-owned parent,
+ * never by reparenting a session-owned context or changing session_id. A reset
+ * callback on the borrowing query owns failure cleanup; normal scan end resets
+ * all contents before returning the workspace. The idle keeper is bounded by
+ * hnsw_scan_cache_size (at most 16 MiB per participating Stream thread), and a
+ * different parent session discards it. Nested scans use the ordinary
+ * query/session path while this single slot is borrowed. Ordinary backends
+ * and migrating client workers retain the session-owned implementation below.
+ */
+struct HnswWorkerScratchLease {
+    MemoryContextCallback callback;
+    MemoryContext context;
+};
+
+static void HnswDiscardWorkerScratch(std::shared_ptr<void> arg)
+{
+    HnswWorkerScratchLease *lease = (HnswWorkerScratchLease *)arg.get();
+    HnswWorkerCache *cache = t_thrd.storage_cxt.hnsw_worker_cache;
+    Assert(cache != NULL);
+    if (cache->scratchLease == lease) {
+        /* Also catches an allocation failure before lease->context is set. */
+        cache->scratchLease = NULL;
+        cache->scratchIdle = NULL;
+        MemoryContextDeleteChildren(cache->scratchOwner, NULL);
+    }
+    /* The aliasing shared_ptr has no control block and owns no heap storage. */
+    lease->~HnswWorkerScratchLease();
+}
+
+static MemoryContext HnswGetWorkerScanContext(bool *reusable)
+{
+    HnswWorkerCache *cache = HnswGetWorkerCache();
+    Size bytes = (Size)u_sess->datavec_ctx.hnsw_scan_cache_size * 1024;
+    MemoryContext workerParent = THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+    bool allowed = bytes > 0 && MEMORY_TRACKING_MODE <= MEMORY_TRACKING_PEAKMEMORY &&
+        IsA(CurrentMemoryContext, AllocSetContext) && ((AllocSet)CurrentMemoryContext)->track == NULL &&
+        !MemoryContextIsShared(CurrentMemoryContext) && workerParent->session_id == 0 &&
+        !MemoryContextIsShared(workerParent) &&
+        !(g_instance.attr.attr_memory.disable_memory_stats && g_instance.attr.attr_memory.enable_cached_size > 0);
+
+    if (cache->scratchLease != NULL)
+        return NULL;
+
+    if (cache->scratchIdle != NULL && (!allowed ||
+        cache->scratchSession != u_sess->session_id ||
+        GetMemoryTotalSpace(cache->scratchIdle, false) != bytes)) {
+        MemoryContext idle = cache->scratchIdle;
+        cache->scratchIdle = NULL;
+        MemoryContextDelete(idle);
+    }
+    if (!allowed)
+        return NULL;
+
+    if (cache->scratchOwner == NULL) {
+        cache->scratchOwner = AllocSetContextCreate(workerParent,
+            "Hnsw pooled scratch owner", ALLOCSET_DEFAULT_SIZES);
+    }
+
+    HnswWorkerScratchLease *lease = new (palloc(sizeof(HnswWorkerScratchLease))) HnswWorkerScratchLease();
+    lease->callback.func = HnswDiscardWorkerScratch;
+    lease->callback.arg = std::shared_ptr<void>(std::shared_ptr<void>(), lease);
+    MemoryContextRegisterResetCallback(CurrentMemoryContext, &lease->callback);
+    cache->scratchLease = lease;
+    cache->scratchSession = u_sess->session_id;
+
+    if (cache->scratchIdle != NULL) {
+        lease->context = cache->scratchIdle;
+        cache->scratchIdle = NULL;
+    } else {
+        lease->context = AllocSetContextCreate(cache->scratchOwner, "Hnsw pooled scan workspace",
+            bytes, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    }
+    Assert(lease->context->session_id == 0 && lease->context->thread_id == gs_thread_self());
+    *reusable = false; /* Not the session-owned cache used by the generic path. */
+    return lease->context;
+}
+
+static bool HnswReleaseWorkerScanContext(MemoryContext context)
+{
+    HnswWorkerCache *cache = t_thrd.storage_cxt.hnsw_worker_cache;
+    HnswWorkerScratchLease *lease = cache == NULL ? NULL : cache->scratchLease;
+    if (lease == NULL || lease->context != context)
+        return false;
+
+    Assert(t_thrd.role == THREADPOOL_STREAM && context->session_id == 0 &&
+        context->thread_id == gs_thread_self());
+    /* Keep the lease armed until all possibly-failing cleanup has completed. */
+    MemoryContextResetAndDeleteChildren(context);
+    Size bytes = (Size)u_sess->datavec_ctx.hnsw_scan_cache_size * 1024;
+    if (bytes > 0 && MEMORY_TRACKING_MODE <= MEMORY_TRACKING_PEAKMEMORY &&
+        GetMemoryTotalSpace(context, false) <= bytes) {
+        cache->scratchIdle = context;
+    } else {
+        MemoryContextDelete(context);
+    }
+    lease->context = NULL;
+    cache->scratchLease = NULL;
+    return true;
+}
+
+/*
+ * Retain logically empty, bounded storage, never live query/index objects.
+ * The idle slot is session-owned (including thread-pool worker migration).
+ * While borrowed, a context belongs to the query exactly as before, and is
+ * absent from the idle slot: ERROR/subtransaction cleanup can delete it without
+ * leaving a dangling session pointer. Overlapping scans never share a context.
+ */
+static bool HnswCanReuseScanContext(MemoryContext context)
+{
+    MemoryContext cache = u_sess->cache_mem_cxt;
+    /* Detailed tracking nodes belong to the query, not the session cache. */
+    return MEMORY_TRACKING_MODE <= MEMORY_TRACKING_PEAKMEMORY &&
+        IsA(context, AllocSetContext) && ((AllocSet)context)->track == NULL &&
+        cache != NULL && !MemoryContextIsShared(cache) &&
+        !MemoryContextIsShared(context) && context->session_id == cache->session_id;
+}
+
+static MemoryContext HnswGetScanContext(bool *reusable)
+{
+    if (t_thrd.role == THREADPOOL_STREAM) {
+        MemoryContext pooled = HnswGetWorkerScanContext(reusable);
+        if (pooled != NULL)
+            return pooled;
+    }
+    Size bytes = (Size)u_sess->datavec_ctx.hnsw_scan_cache_size * 1024;
+    MemoryContext idle = u_sess->datavec_ctx.hnsw_scan_scratch;
+    *reusable = bytes > 0 && HnswCanReuseScanContext(CurrentMemoryContext);
+
+    /* Apply a changed setting on the next scan, without touching active scans. */
+    if (idle != NULL && (!*reusable || GetMemoryTotalSpace(idle, false) != bytes)) {
+        u_sess->datavec_ctx.hnsw_scan_scratch = NULL;
+        MemoryContextDelete(idle);
+        idle = NULL;
+    }
+    if (!*reusable) {
+        return AllocSetContextCreate(CurrentMemoryContext, "Hnsw scan temporary context", ALLOCSET_DEFAULT_SIZES);
+    }
+    if (idle != NULL) {
+        u_sess->datavec_ctx.hnsw_scan_scratch = NULL;
+        MemoryContextSetParent(idle, CurrentMemoryContext);
+        return idle;
+    }
+    /* Only this keeper survives reset. Overflow blocks retain normal lifetime. */
+    return AllocSetContextCreate(CurrentMemoryContext, "Hnsw scan temporary context",
+        bytes, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+}
+
+static void HnswReleaseScanContext(HnswScanOpaque so)
+{
+    MemoryContext context = so->tmpCtx;
+    if (t_thrd.role == THREADPOOL_STREAM && HnswReleaseWorkerScanContext(context))
+        return;
+    Size bytes = (Size)u_sess->datavec_ctx.hnsw_scan_cache_size * 1024;
+    if (so->reuseTmpCtx && bytes > 0 && HnswCanReuseScanContext(context) &&
+        u_sess->datavec_ctx.hnsw_scan_scratch == NULL) {
+        /* Reset before reparenting, so a failure still has query ownership. */
+        MemoryContextResetAndDeleteChildren(context);
+        if (GetMemoryTotalSpace(context, false) <= bytes) {
+            MemoryContextSetParent(context, u_sess->cache_mem_cxt);
+            u_sess->datavec_ctx.hnsw_scan_scratch = context;
+            return;
+        }
+    }
+    MemoryContextDelete(context);
+}
+
+/*
  * Prepare for an index scan
  */
 IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
@@ -185,7 +395,7 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so = (HnswScanOpaque)palloc(sizeof(HnswScanOpaqueData));
     so->typeInfo = HnswGetTypeInfo(index);
     so->first = true;
-    so->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "Hnsw scan temporary context", ALLOCSET_DEFAULT_SIZES);
+    so->tmpCtx = HnswGetScanContext(&so->reuseTmpCtx);
 
     so->vs.buf = InvalidBuffer;
     so->vs.lastSelfModifiedItup = NULL;
@@ -365,13 +575,15 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
             /* Reached max number of tuples */
             if (u_sess->datavec_ctx.hnsw_max_scan_tuples > 0 &&
                 so->tuples >= u_sess->datavec_ctx.hnsw_max_scan_tuples) {
-                if (pairingheap_is_empty(so->discarded)) {
+                LockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+                HnswCandidate *hc = PopMaterializedDiscarded(scan);
+                UnlockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+                if (hc == NULL) {
                     break;
                 }
 
                 /* Return remaining tuples */
-                so->w = lcons(HnswGetPairingHeapCandidate(w_node,
-                    pairingheap_remove_first(so->discarded)), so->w);
+                so->w = lcons(hc, so->w);
             } else {
                 /*
                 * Locking ensures when neighbors are read, the elements they
@@ -438,7 +650,7 @@ void hnswendscan_internal(IndexScanDesc scan)
 
     FREE_POINTER(so->vs.lastSelfModifiedItup);
 
-    MemoryContextDelete(so->tmpCtx);
+    HnswReleaseScanContext(so);
 
     if (so->rbqParams) {
         if (so->rbqParams->rbqConfig) {

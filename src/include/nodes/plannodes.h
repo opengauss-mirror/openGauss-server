@@ -911,6 +911,35 @@ typedef struct AnnIndexScan {
 } AnnIndexScan;
 
 /* ----------------
+ * [P0-1] HybridRecall - blocking fusion parent for two-branch recall
+ * (hybrid recall design doc §6.2). lefttree = text branch (BM25 Top-K),
+ * righttree = vector branch (ANN Top-K); each branch carries its own
+ * candidate Limit when planned. The parent dedups by the stable doc key,
+ * computes RRF and emits the final Top-K. Fields hold the full designed
+ * set from day one: header edits trigger a global rebuild, so growing the
+ * struct task-by-task would re-pay that cost every time. No executor or
+ * planner consumes these fields yet (P0-4+); *resno are 1-based positions
+ * into the branch targetlists, validated at ExecInit time.
+ * ----------------
+ */
+typedef struct HybridRecall {
+    Plan plan;
+    AttrNumber id_resno;          /* handmade: branch key resno; planner path: base key attno */
+    AttrNumber text_score_resno;  /* BM25 score position, text branch */
+    AttrNumber vector_distance_resno; /* ANN distance position, vector branch */
+    Expr* final_topk;             /* evaluated at runtime, >= branch tops */
+    Expr* text_candidates;        /* branch-level candidate limits */
+    Expr* vector_candidates;
+    HybridFusionKind fusion;
+    double rrf_k;
+    double text_weight;
+    double vector_weight;
+    bool parallel_branches;       /* two task streams vs serial children */
+    bool require_parallel;        /* error instead of degrade when set */
+    List* recheck_quals;          /* common filter, rechecked above fusion */
+} HybridRecall;
+
+/* ----------------
  *		tid scan node
  *
  * tidquals is an implicitly OR'ed list of qual expressions of the form

@@ -1,0 +1,112 @@
+P3-6 primary/standby query and failover/retry evidence
+Date: 2026-08-26
+Kernel: openGauss 7.0.0-RC3 release build 4c032d0fb7
+Current feature HEAD: f048f6a464 (P3-5 is test/documentation-only)
+
+Isolation
+  template PGDATA (stopped): openGauss-p35-release/p35_release_data
+  run directory: .runtime/hybrid_recall_p36_20260826
+  primary SQL/repl ports: 55740/55742
+  standby SQL/repl ports: 55750/55752
+  database/task/table:
+    hybrid_recall_p35_release_20260826 / p35_release_task / public.p35_docs
+  start mode: gs_ctl start -o "--single_node" -M primary|standby
+  main debug PGDATA topk_test_data was not read, stopped, restarted or copied.
+
+Initial HA state
+  old primary:
+    local_role=Primary, db_state=Normal, peer_role=Standby
+    sender state=Streaming, sync_percent=100%, sync_state=Sync
+  standby:
+    local_role=Standby, db_state=Normal, receiver state=Normal
+    sender/receiver replay LSNs were equal
+
+Read-only HybridRecall on both roles
+  session settings:
+    enable_hybrid_recall=on
+    hybrid_recall_parallel_mode=force
+  old primary: pg_is_in_recovery=false, transaction_read_only=off
+  standby:     pg_is_in_recovery=true,  transaction_read_only=on
+  both ogai.hybrid_search_v2 calls returned, in order:
+    245
+    165
+    25
+
+Fault injection and old-client result
+  The old-primary statement executed the real hybrid_search_v2 and then
+  pg_sleep(30) before emitting its first result row. pg_stat_activity proved
+  P36_FAILOVER_INFLIGHT count=1 and state=active.
+  The isolated old primary was stopped with:
+    gs_ctl stop -w -t 30 -m immediate
+  stop exit: 0
+  old client exit: 2
+  old client terminal output after the three SET acknowledgements:
+    connection to server was lost
+  result_record/id rows observed by old client: 0
+
+  P3-5 separately proves cancellation while both producer workers themselves
+  are delayed. P3-6 deliberately tests the HA/client boundary after a real
+  HybridRecall statement and before first-row delivery; it does not claim that
+  SQL pg_sleep is a worker-overlap hook.
+
+Promotion and whole-statement retry
+  command:
+    gs_ctl failover -w -t 60 -D <standby PGDATA>
+  exit: 0
+  elapsed reported by command: about 1 second
+  final HA state:
+    local_role=Primary, db_state=Normal, detail_information=Normal
+  promoted node SQL state:
+    pg_is_in_recovery=false, transaction_read_only=off
+  whole hybrid_search_v2 retry result:
+    245
+    165
+    25
+  old primary port 55740: not connectable (expected)
+  20 additional new-primary retries: all first_id=245
+  leaked P36_FAILOVER_INFLIGHT sessions after promotion: 0
+
+Post-failover EXPLAIN ANALYZE
+  Strategy: Parallel RRF
+  Planned Branch Workers: 2
+  Actual Branch Workers: 2
+  Parallel Fallback: false
+  Text/Vector/Deduplicated/Final rows: 25/100/104/3
+  Text/Vector/Fusion time: 0.675/1.012/0.015 ms
+  Branch Overlap: 0.675 ms
+  Candidate Memory Usage: 10 kB
+  total runtime: 4.971 ms
+  branches: BM25 Index Scan + HNSW Ann Index Scan, both under LOCAL GATHER
+
+Log gate
+  failed assertion: 0
+  PANIC: 0
+  segmentation fault: 0
+  ASAN/UAF/double-free marker: 0
+
+Test harness
+  docs/hybrid_recall/evidence/P3-6_ha_test.sh codifies the same scenario.
+  It refuses to overwrite an existing run directory, requires a stopped
+  template, leaves evidence in a unique directory, and stops its test nodes.
+  bash -n exit: 0
+  independent end-to-end self-test:
+    ports: 55840/55842 and 55850/55852
+    run directory: .runtime/hybrid_recall_p36_harness2_20260826
+    exit: 0
+    elapsed: 13.5 s
+    verdict: P3-6 PASS; initial primary/standby IDs=245,165,25;
+             old connection failed before first row; promoted-primary retries=20
+    cleanup: both harness nodes stopped; evidence directory retained
+
+Semantic conclusion
+  1. A hot standby can execute the read-only HybridRecall path in this build,
+     but the V1 support contract remains centered on the primary.
+  2. There is no transparent session/statement migration. Connection loss is
+     an error; clients must discard every row from that attempt and retry the
+     complete idempotent SELECT on a confirmed read-write primary.
+  3. A retry opens a new statement snapshot. Results may legitimately differ
+     if WAL/data/index visibility changed across failover; the frozen fixture
+     returned byte-for-byte identical IDs.
+  4. Session GUCs and prepared plans do not migrate. Reconnect logic must
+     reapply HybridRecall GUCs and prepare again. Supplying query_vector avoids
+     invoking an external embedding service twice during retry.

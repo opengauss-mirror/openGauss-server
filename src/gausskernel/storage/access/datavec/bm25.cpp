@@ -28,6 +28,7 @@
 #include "storage/smgr/fd.h"
 #include "utils/rel.h"
 #include "access/datavec/bm25.h"
+#include "mb/pg_wchar.h"
 
 #include <ctype.h>
 #include <sys/stat.h>
@@ -348,6 +349,7 @@ Datum bm25options(PG_FUNCTION_ARGS)
 
     static const relopt_parse_elt tab[] = {
         {"dict_path", RELOPT_TYPE_STRING, offsetof(Bm25Options, dictPath)},
+        {"analyzer", RELOPT_TYPE_STRING, offsetof(Bm25Options, analyzerOffset)},
     };
 
     relopt_value *options;
@@ -372,6 +374,24 @@ Datum bm25options(PG_FUNCTION_ARGS)
 
     rdopts = (Bm25Options *)allocateReloptStruct(sizeof(Bm25Options), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(Bm25Options), options, numoptions, validate, tab, lengthof(tab));
+
+    /* Check even on relcache reload: unknown semantics must never fall back. */
+    const char* analyzer = Bm25OptionsGetAnalyzer(rdopts);
+    if (strcmp(analyzer, "jieba") != 0 && strcmp(analyzer, "standard_v1") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid BM25 analyzer: \"%s\"", analyzer),
+            errhint("Supported analyzers are jieba and standard_v1.")));
+    }
+    if (strcmp(analyzer, "standard_v1") == 0) {
+        if (GetDatabaseEncoding() != PG_UTF8) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("BM25 standard_v1 analyzer requires UTF8 database encoding")));
+        }
+        if (Bm25OptionsGetDictPath(rdopts) != NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("BM25 dict_path cannot be used with standard_v1 analyzer")));
+        }
+    }
 
     if (rdopts != NULL) {
         PG_RETURN_BYTEA_P(rdopts);

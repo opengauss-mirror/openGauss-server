@@ -107,7 +107,7 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
 static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentence, uint32 &tokenCount,
     uint32 &tokenFoundCount, bool cutForSearch = false)
 {
-    BM25TokenizedDocData tokenizedQuery = BM25DocumentTokenize(sentence, Bm25GetDictPath(index), cutForSearch);
+    BM25TokenizedDocData tokenizedQuery = BM25DocumentTokenize(index, sentence, cutForSearch);
     if (tokenizedQuery.tokenCount == 0) {
         tokenCount = 0;
         tokenFoundCount = 0;
@@ -173,7 +173,7 @@ static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
     uint32 tokenCount = 0;
     uint32 tokenFoundCount = 0;
     BM25QueryToken *queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount);
-    if (queryTokens == nullptr) {
+    if (queryTokens == nullptr && !Bm25UsesStandardAnalyzer(index)) {
         /* no token found, try to use cutForSearch to get tokens */
         queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount, true);
     }
@@ -857,6 +857,7 @@ IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
     so->expandedTimes = 0;
     so->docIdMaskSize = bm25MetaData.nextDocId / 8 + 1;
     so->docIdMask = (unsigned char*)palloc0(sizeof(unsigned char) * (so->docIdMaskSize));
+    so->skipScoreKeys = false;
 
     scan->opaque = so;
     return scan;
@@ -903,7 +904,11 @@ static bool CheckIfNeedExpandSearch(BM25ScanOpaque so)
         so->candNums = 0;
         pfree_ext(so->candDocs);
         so->expandedTimes++;
-        DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        /* Rank-only scans never allocate a raw-score table.  DELETE_EX
+         * invokes Destroy() unconditionally, so guard it before expanding. */
+        if (u_sess->bm25_ctx.scoreHashTable != NULL) {
+            DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        }
         return true;
     }
 
@@ -912,7 +917,9 @@ static bool CheckIfNeedExpandSearch(BM25ScanOpaque so)
         so->expectedCandNums = 0;
         so->candNums = 0;
         pfree_ext(so->candDocs);
-        DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        if (u_sess->bm25_ctx.scoreHashTable != NULL) {
+            DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        }
         return true;
     }
 
@@ -954,7 +961,12 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         float avgdl = (meta.tokenCount * 1.0) / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.nextDocId, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so, meta.version);
-        ConstructScanScoreKeys(scan->indexRelation, so, queryString);
+        /* RRF needs the ordered TIDs, not the text-keyed raw-score lookup.
+         * The normal IndexScan still fetches each tuple under its snapshot;
+         * candidate expansion and MVCC visibility are not bypassed here. */
+        if (!so->skipScoreKeys) {
+            ConstructScanScoreKeys(scan->indexRelation, so, queryString);
+        }
         if (queryTokenInfo.queryTokens != nullptr) {
             pfree(queryTokenInfo.queryTokens);
             queryTokenInfo.queryTokens = nullptr;

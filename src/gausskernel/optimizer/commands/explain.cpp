@@ -138,6 +138,7 @@ static void CalculateProcessedRows(
 
 static void show_plan_execnodes(PlanState* planstate, ExplainState* es);
 static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState* es);
+static void show_hybrid_recall_info(HybridRecallState* state, ExplainState* es);
 static bool ContainRlsQualInRteWalker(Node* node, void* unused_info);
 static void show_expression(
     Node* node, const char* qlabel, PlanState* planstate, List* ancestors, bool useprefix, ExplainState* es);
@@ -2062,6 +2063,106 @@ static void PredGetInfo(Plan* plan, ExplainState* es)
 } 
 #endif
 
+/* Return the producer-root instrumentation below a local task Stream.  The
+ * branch query text/vector never enters this path; only numeric runtime data
+ * is consumed for HybridRecall EXPLAIN output. */
+static Instrumentation* get_hybrid_branch_instrument(Plan* branch)
+{
+    if (branch == NULL || !IsA(branch, Stream) || outerPlan(branch) == NULL ||
+        u_sess->instr_cxt.global_instr == NULL)
+        return NULL;
+
+    Plan* producer = outerPlan(branch);
+    if (producer->plan_node_id <= 0)
+        return NULL;
+
+    return u_sess->instr_cxt.global_instr->getInstrSlot(0, producer->plan_node_id, 0);
+}
+
+static double get_hybrid_overlap_ms(const Instrumentation* text_instr,
+                                    const Instrumentation* vector_instr)
+{
+    if (text_instr == NULL || vector_instr == NULL ||
+        text_instr->enter_time <= 0 || vector_instr->enter_time <= 0 ||
+        text_instr->total <= 0.0 || vector_instr->total <= 0.0)
+        return 0.0;
+
+    int64 text_start = text_instr->enter_time;
+    int64 vector_start = vector_instr->enter_time;
+    int64 text_end = text_start + (int64)(text_instr->total * 1000000.0);
+    int64 vector_end = vector_start + (int64)(vector_instr->total * 1000000.0);
+    int64 overlap_start = Max(text_start, vector_start);
+    int64 overlap_end = Min(text_end, vector_end);
+
+    return overlap_end > overlap_start ? (double)(overlap_end - overlap_start) / 1000.0 : 0.0;
+}
+
+static double get_hybrid_elapsed_ms(instr_time start, instr_time end)
+{
+    instr_time elapsed;
+
+    INSTR_TIME_SET_ZERO(elapsed);
+    INSTR_TIME_ACCUM_DIFF(elapsed, end, start);
+    return INSTR_TIME_GET_MILLISEC(elapsed);
+}
+
+static void show_hybrid_recall_info(HybridRecallState* state, ExplainState* es)
+{
+    HybridRecall* plan = (HybridRecall*)state->ps.plan;
+
+    ExplainPropertyText("Strategy", plan->parallel_branches ? "Parallel RRF" : "Serial RRF", es);
+    ExplainPropertyLong("Final Top-K", (long)state->final_topk, es);
+    ExplainPropertyLong("Text Candidates", (long)state->text_limit, es);
+    ExplainPropertyLong("Vector Candidates", (long)state->vector_limit, es);
+    ExplainPropertyFloat("RRF k", plan->rrf_k, 3, es);
+    ExplainPropertyFloat("Text Weight", plan->text_weight, 3, es);
+    ExplainPropertyFloat("Vector Weight", plan->vector_weight, 3, es);
+    ExplainPropertyInteger("Planned Branch Workers", plan->parallel_branches ? 2 : 0, es);
+
+    if (!es->analyze)
+        return;
+
+    bool executed = state->phase != HYBRID_PHASE_BUILD;
+    Instrumentation* text_instr = executed ? get_hybrid_branch_instrument(plan->plan.lefttree) : NULL;
+    Instrumentation* vector_instr = executed ? get_hybrid_branch_instrument(plan->plan.righttree) : NULL;
+    int actual_workers = 0;
+    if (text_instr != NULL && text_instr->nloops > 0.0)
+        actual_workers++;
+    if (vector_instr != NULL && vector_instr->nloops > 0.0)
+        actual_workers++;
+
+    ExplainPropertyInteger("Actual Branch Workers", actual_workers, es);
+    ExplainProperty("Parallel Fallback", state->serial_fallback ? "true" : "false", true, es);
+    ExplainPropertyLong("Text Candidate Rows", (long)state->text_rows, es);
+    ExplainPropertyLong("Vector Candidate Rows", (long)state->vector_rows, es);
+    ExplainPropertyLong("Deduplicated Candidate Rows", (long)state->dedup_rows, es);
+    ExplainPropertyLong("Final Rows", (long)state->final_rows, es);
+
+    if (!executed)
+        return;
+
+    double text_ms = text_instr != NULL && text_instr->total > 0.0 ?
+        text_instr->total * 1000.0 :
+        get_hybrid_elapsed_ms(state->text_first_tuple, state->text_end);
+    double vector_ms = vector_instr != NULL && vector_instr->total > 0.0 ?
+        vector_instr->total * 1000.0 :
+        get_hybrid_elapsed_ms(state->vector_first_tuple, state->vector_end);
+    instr_time drain_end = INSTR_TIME_GET_MICROSEC(state->text_end) >
+            INSTR_TIME_GET_MICROSEC(state->vector_end) ?
+        state->text_end : state->vector_end;
+    double fusion_ms = get_hybrid_elapsed_ms(drain_end, state->fusion_time);
+    double overlap_ms = plan->parallel_branches ?
+        get_hybrid_overlap_ms(text_instr, vector_instr) : 0.0;
+    Size candidate_bytes = state->candidate_cxt == NULL ? 0 :
+        AllocSetContextUsedSpace((AllocSet)state->candidate_cxt);
+
+    ExplainPropertyFloat("Text Branch Time", text_ms, 3, es);
+    ExplainPropertyFloat("Vector Branch Time", vector_ms, 3, es);
+    ExplainPropertyFloat("Fusion Time", fusion_ms, 3, es);
+    ExplainPropertyFloat("Branch Overlap", overlap_ms, 3, es);
+    ExplainPropertyLong("Candidate Memory Usage (kB)", (long)((candidate_bytes + 1023) / 1024), es);
+}
+
 /*
  * ExplainNode -
  *	  Appends a description of a plan tree to es->str
@@ -2690,6 +2791,9 @@ static void ExplainNode(
 
     /* quals, sort keys, etc */
     switch (nodeTag(plan)) {
+        case T_HybridRecall:
+            show_hybrid_recall_info((HybridRecallState*)planstate, es);
+            break;
 #ifdef USE_SPQ
         case T_SpqIndexScan:
 #endif

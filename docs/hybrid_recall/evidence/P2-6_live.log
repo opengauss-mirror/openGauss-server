@@ -1,0 +1,42 @@
+P2-6 initial HybridRecall cost model live evidence
+Date: 2026-08-26
+Branch: feature/hybrid-recall
+Base commit: 593fd734c5
+Instance: topk_test_data, port 55440, user qiumc
+
+BUILD
+  command: opengauss_build_install_restart.sh incremental
+  log: build_logs/incremental_20260826_141019.log
+  result: exit=0; install, restart and SQL connectivity check succeeded
+
+AUTO / SMALL FIXTURE (hybrid_recall_docs, 500 rows)
+  Limit  (cost=20.42..20.42 rows=10 width=36)
+    ->  Hybrid Recall  (cost=20.42..20.42 rows=10 width=36)
+          ->  Limit -> BM25 Index Scan
+          ->  Limit -> Ann Index Scan
+  task streams: 0
+  decision: serial
+
+AUTO / LARGE FIXTURE (hybrid_recall_cost_docs, 20,000 rows)
+  Limit  (cost=25.76..25.76 rows=10 width=46)
+    ->  Hybrid Recall  (cost=25.76..25.76 rows=10 width=46)
+          ->  Streaming(type: LOCAL GATHER) -> Limit -> BM25 Index Scan
+          ->  Streaming(type: LOCAL GATHER) -> Limit -> Ann Index Scan
+  task streams: 2
+  decision: parallel
+
+P2-6 TEST
+  script: docs/hybrid_recall/evidence/P2-6_test.sql
+  exit: 0
+  elapsed: 34679 ms
+
+REGRESSION
+  P2-5_test.sql: exit=0; P2_5_SERIAL_PARALLEL_MATCH=ok; auto small plan serial
+  P2-4_test.sql: exit=0; P2_4_SERIAL_MATCH=ok; unsafe filters remain legacy plans
+  P2-2_P2-3_test.sql: exit=0; two task streams and cached-plan executions remain correct
+
+VERDICT
+  The initial blocking-latency model distinguishes serial sum from parallel
+  max(branch) plus stream overhead and fusion. It avoids parallel startup for
+  the short fixture and amortizes it for the larger fixture. P3 benchmark work
+  remains responsible for coefficient and worker/I/O-pressure calibration.

@@ -1,0 +1,2 @@
+# Frozen Unicode BM25 analyzer requires a UTF8 regression database.
+test: bm25_standard

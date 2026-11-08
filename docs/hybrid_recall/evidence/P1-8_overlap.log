@@ -1,0 +1,21 @@
+P1-8 并行真实性（overlap）证明 — 2026-08-23 16:13
+
+机制：内核测试 hook（设计文档 §12.3）——streamMain.cpp execute_stream_plan 入口
+的同进程全局 g_hybrid_test_producer_delay_ms（extern "C"），由 debug_parallel
+第 12 参数设置；每个 stream producer 在自己线程内计划执行前睡 N ms。
+自定义 GUC 方案已弃用：SET 不随 stream worker 继承（实测）。
+
+热基线（delay=0）  ：0.152 s
+延迟注入（delay=2000，双 producer 各睡 2s）：2.196 s
+服务端日志（不同线程 ID，起跑差 4ms）：
+  16:13:25.866 HRTEST: producer node=2 sleeping 2000 ms  (tid ...67438592)
+  16:13:25.870 HRTEST: producer node=5 sleeping 2000 ms  (tid ...251463680)
+
+判定：
+  总墙钟 2.196s ≈ 单路延迟 2s + 基线 0.15s ⇒ 两个 2s 睡眠完全重叠；
+  若为串行执行则总墙钟 >= 4.1s。overlap ratio = 2.0s/2.0s = 1.0 >= 0.50
+  （设计文档 §12.2 验收线），同时满足 C01（双 worker 同时存活，线程 ID 与
+  node id 均不同）与 C02（总耗时接近 max 而非 sum）。
+
+结论：两条索引支路在两个 stream worker 中真实并发执行——
+设计文档两大核心判据之一（并行真实性）达成。

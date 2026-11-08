@@ -1,0 +1,107 @@
+-- HNSW advisory buffer hints and bounded prefetch: wide-vector regression.
+-- Compare ordered IDs and exact projected distances with the generic loader.
+SET client_min_messages = error;
+\pset format unaligned
+SET enable_seqscan = off;
+SET hnsw_ef_search = 64;
+SET hnsw_iterative_scan = relaxed_order;
+CREATE TABLE hnsw_hint_docs(id int PRIMARY KEY, embedding vector(256));
+INSERT INTO hnsw_hint_docs
+SELECT i, ARRAY(SELECT ((i * d) % 257)::real / 257
+                FROM generate_series(1, 256) AS d)::vector
+FROM generate_series(1, 128) AS i;
+CREATE INDEX hnsw_hint_idx ON hnsw_hint_docs
+USING hnsw(embedding vector_cosine_ops) WITH(m=8, ef_construction=32);
+ANALYZE hnsw_hint_docs;
+
+CREATE FUNCTION hnsw_hint_compare() RETURNS boolean AS $$
+DECLARE
+    q vector;
+    fast text[];
+    generic text[];
+    k int;
+    plan_line text;
+    ann_plan boolean := false;
+BEGIN
+    FOR plan_line IN EXECUTE
+        'EXPLAIN (COSTS OFF) SELECT id FROM hnsw_hint_docs
+         ORDER BY embedding <=> array_fill(1, ARRAY[256])::vector LIMIT 40'
+    LOOP
+        ann_plan := ann_plan OR plan_line LIKE '%Ann Index Scan%';
+    END LOOP;
+    IF NOT ann_plan THEN
+        RETURN false;
+    END IF;
+    FOR k IN 1..4 LOOP
+        q := ARRAY(SELECT ((k * d * 13) % 263)::real / 263
+                   FROM generate_series(1, 256) AS d)::vector;
+        PERFORM set_config('hnsw_earlystop_threshold', '2147483647', false);
+        SELECT array_agg(id::text || '/' || distance::text) INTO fast
+        FROM (SELECT id, embedding <=> q AS distance FROM hnsw_hint_docs
+              WHERE id % 3 = 0 ORDER BY embedding <=> q LIMIT 40) AS nearest;
+        -- Exclude prefetch via its existing early-stop shape guard. This
+        -- threshold exceeds the fixture cardinality, so no search stops early.
+        PERFORM set_config('hnsw_earlystop_threshold', '2147483646', false);
+        SELECT array_agg(id::text || '/' || distance::text) INTO generic
+        FROM (SELECT id, embedding <=> q AS distance FROM hnsw_hint_docs
+              WHERE id % 3 = 0 ORDER BY embedding <=> q LIMIT 40) AS nearest;
+        IF array_length(fast, 1) IS DISTINCT FROM 40 OR fast IS DISTINCT FROM generic THEN
+            RETURN false;
+        END IF;
+    END LOOP;
+    RETURN true;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT hnsw_hint_compare() AS initial_equal;
+SELECT hnsw_hint_compare() AS warm_equal;
+-- Exercise the empty-workspace reuse independently of the prefetch control.
+CREATE FUNCTION hnsw_scratch_compare() RETURNS boolean AS $$
+DECLARE
+    q vector;
+    uncached text[];
+    cached text[];
+    k int;
+BEGIN
+    PERFORM set_config('hnsw_earlystop_threshold', '2147483647', false);
+    FOR k IN 1..4 LOOP
+        q := ARRAY(SELECT ((k * d * 17) % 263)::real / 263
+                   FROM generate_series(1, 256) AS d)::vector;
+        PERFORM set_config('hnsw_scan_cache_size', '0', false);
+        SELECT array_agg(id::text || '/' || distance::text) INTO uncached
+        FROM (SELECT id, embedding <=> q AS distance FROM hnsw_hint_docs
+              WHERE id % 3 = 0 ORDER BY embedding <=> q LIMIT 40) AS nearest;
+        PERFORM set_config('hnsw_scan_cache_size', '2048', false);
+        SELECT array_agg(id::text || '/' || distance::text) INTO cached
+        FROM (SELECT id, embedding <=> q AS distance FROM hnsw_hint_docs
+              WHERE id % 3 = 0 ORDER BY embedding <=> q LIMIT 40) AS nearest;
+        IF array_length(cached, 1) IS DISTINCT FROM 40 OR cached IS DISTINCT FROM uncached THEN
+            RETURN false;
+        END IF;
+    END LOOP;
+    RETURN true;
+END;
+$$ LANGUAGE plpgsql;
+SELECT hnsw_scratch_compare() AS scratch_equal;
+SELECT hnsw_hint_compare() AS scratch_reused_equal;
+UPDATE hnsw_hint_docs SET embedding = array_fill(0.25, ARRAY[256])::vector WHERE id <= 8;
+DELETE FROM hnsw_hint_docs WHERE id = 5;
+VACUUM hnsw_hint_docs;
+SELECT hnsw_hint_compare() AS after_vacuum_equal;
+REINDEX INDEX hnsw_hint_idx;
+SELECT hnsw_hint_compare() AS after_reindex_equal;
+TRUNCATE hnsw_hint_docs;
+INSERT INTO hnsw_hint_docs
+SELECT 1000 + i, ARRAY(SELECT ((i * d * 7) % 257)::real / 257
+                       FROM generate_series(1, 256) AS d)::vector
+FROM generate_series(1, 128) AS i;
+SELECT hnsw_hint_compare() AS after_truncate_equal;
+SELECT hnsw_scratch_compare() AS scratch_after_truncate_equal;
+DROP FUNCTION hnsw_scratch_compare();
+DROP FUNCTION hnsw_hint_compare();
+DROP TABLE hnsw_hint_docs;
+RESET hnsw_earlystop_threshold;
+RESET hnsw_scan_cache_size;
+RESET hnsw_iterative_scan;
+RESET hnsw_ef_search;
+RESET enable_seqscan;

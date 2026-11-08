@@ -1,0 +1,96 @@
+CREATE DATABASE
+You are now connected to database "test" as user "qiumc".
+gsql:src/test/regress/sql/diskann_vector.sql:10: NOTICE:  CREATE TABLE will create implicit sequence "diskann_t1_id_seq" for serial column "diskann_t1.id"
+gsql:src/test/regress/sql/diskann_vector.sql:10: NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "diskann_t1_pkey" for table "diskann_t1"
+CREATE TABLE
+INSERT 0 10
+ANALYZE
+CREATE INDEX
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_vectors_l2 on diskann_t1
+         Order By: (embedding <-> '[0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+(4 rows)
+
+CREATE INDEX
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_vectors_cosine on diskann_t1
+         Order By: (embedding <=> '[0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+(4 rows)
+
+CREATE INDEX
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_vectors_ip on diskann_t1
+         Order By: (embedding <#> '[0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+(4 rows)
+
+gsql:src/test/regress/sql/diskann_vector.sql:51: NOTICE:  CREATE TABLE will create implicit sequence "diskann_t2_id_seq" for serial column "diskann_t2.id"
+gsql:src/test/regress/sql/diskann_vector.sql:51: NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "diskann_t2_pkey" for table "diskann_t2"
+CREATE TABLE
+INSERT 0 10
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+gsql:src/test/regress/sql/diskann_vector.sql:70: ERROR:  value 15 out of bounds for option "index_size"
+DETAIL:  Valid values are between "16" and "1000".
+gsql:src/test/regress/sql/diskann_vector.sql:71: ERROR:  value 1001 out of bounds for option "index_size"
+DETAIL:  Valid values are between "16" and "1000".
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_vectors_10d_100 on diskann_t2
+         Order By: (embedding <-> '[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]'::vector)
+(4 rows)
+
+gsql:src/test/regress/sql/diskann_vector.sql:83: NOTICE:  CREATE TABLE / UNIQUE will create implicit index "diskann_t3_id_key" for table "diskann_t3"
+CREATE TABLE
+INSERT 0 10
+CREATE INDEX
+ id |                            vector                            
+----+--------------------------------------------------------------
+  8 | [31,79,19,39,23,82,56,39,25,19,58,12,67,46,68,84,1,54,18,81]
+  7 | [93,96,8,51,15,94,50,6,6,10,78,66,36,45,7,26,60,80,65,7]
+(2 rows)
+
+DELETE 1
+ id |                            vector                            
+----+--------------------------------------------------------------
+  7 | [93,96,8,51,15,94,50,6,6,10,78,66,36,45,7,26,60,80,65,7]
+  6 | [12,32,96,61,9,20,76,85,89,32,10,19,69,23,87,37,100,8,14,34]
+(2 rows)
+
+INSERT 0 1
+ id |                          vector                          
+----+----------------------------------------------------------
+ 10 | [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+  7 | [93,96,8,51,15,94,50,6,6,10,78,66,36,45,7,26,60,80,65,7]
+(2 rows)
+
+UPDATE 1
+ id |                        vector                        
+----+------------------------------------------------------
+ 10 | [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+  7 | [20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1]
+(2 rows)
+
+DELETE 2
+ id |                            vector                            
+----+--------------------------------------------------------------
+  6 | [12,32,96,61,9,20,76,85,89,32,10,19,69,23,87,37,100,8,14,34]
+  9 | [43,78,87,41,21,32,23,1,83,93,23,1,73,65,19,36,39,89,96,37]
+(2 rows)
+
+gsql:src/test/regress/sql/diskann_vector.sql:128: NOTICE:  CREATE TABLE / UNIQUE will create implicit index "diskann_t4_id_key" for table "diskann_t4"
+CREATE TABLE
+gsql:src/test/regress/sql/diskann_vector.sql:130: ERROR:  column cannot have more than 1536 dimensions for diskann index
+gsql:src/test/regress/sql/diskann_vector.sql:132: \connect: FATAL:  database "regression" does not exist
+total time: 1209  ms

@@ -1,0 +1,49 @@
+P2-7 prepared/custom/generic plan live evidence
+Date: 2026-08-26
+Instance: topk_test_data, port 55440, user qiumc
+Base commit: 3b5f35a576
+
+Build/install/restart
+  build_logs/incremental_20260826_144850.log
+  script exit: 0
+  server restart/connectivity check: ok
+
+Test
+  gsql -X -p 55440 -U qiumc -d postgres \
+    -f docs/hybrid_recall/evidence/P2-7_test.sql
+  exit: 0
+  total time: 9933 ms
+
+force_custom_plan
+  plan: Hybrid Recall + 2 x Streaming(type: LOCAL GATHER)
+  database/vector/tenant=1, K=3: 245, 165, 25
+  database/vector/tenant=1, K=1: 245
+  alpha/alternate-vector/tenant=2, K=3: 294, 42, 378
+
+force_generic_plan
+  plan: Hybrid Recall + 2 x Streaming(type: LOCAL GATHER)
+  text branch retains $1 and $3; vector branch retains $2 and $3
+  database/vector/tenant=1, K=3: 245, 165, 25
+  database/vector/tenant=1, K=1: 245
+  alpha/alternate-vector/tenant=2, K=3: 294, 42, 378
+  Result sets are identical to force_custom_plan for all three executions.
+
+Runtime final-K validation (generic plan)
+  K=0:   ERROR HybridRecall final_topk must be >= 1
+  K=101: ERROR HybridRecall branch candidate caps must be >= final_topk
+  K=NULL: ERROR HybridRecall final_topk must not be NULL
+
+Regression
+  P2-6_test.sql: exit=0; auto serial cost=20.42, auto parallel cost=25.76
+  P2-5_test.sql: exit=0; P2_5_SERIAL_PARALLEL_MATCH=ok
+  P2-4_test.sql: exit=0; P2_4_SERIAL_MATCH=ok; unsafe filters fall back
+  P2-2_P2-3_test.sql: exit=0; Hybrid Recall + both index branches
+  P0-4_test.sql: exit=0; golden Top-10 unchanged
+  P0-6_test.sql: exit=0; tie-break/NULL-key/NaN boundary suite unchanged
+
+Failure found and fixed during P2-7
+  The first generic-plan prototype preserved external Params in the Plan, but
+  final_topk evaluation passed a NULL ExprContext to ExecEvalExpr.  Generic
+  execution therefore blocked before producing a row.  The executor now uses
+  the owning PlanState ExprContext, and validates options during ExecutorStart
+  so an outer LIMIT 0 cannot bypass the positive-K contract.

@@ -1,0 +1,5 @@
+# HybridRecall BM25 + HNSW native regression, runnable independently.
+test: hybrid_recall
+test: hybrid_bm25_worker_guc
+test: hnsw_buffer_hints
+test: hnsw_visited_sizing

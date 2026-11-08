@@ -942,6 +942,11 @@ void StreamNodeGroup::restoreStreamEnter()
 
     streamLock.lock();
     m_streamEnter--;
+    /* This is the worker's last access to the group.  Wake the destructor
+     * under the same mutex that protects its lifetime predicate, so a signal
+     * cannot be lost between checking the counters and entering the wait. */
+    if (m_streamEnter <= 0 && m_streamEnterCount >= m_createThreadNum)
+        pthread_cond_broadcast(&m_cond);
     streamLock.unLock();
 }
 
@@ -1188,17 +1193,19 @@ void StreamNodeGroup::deInit(StreamObjStatus status)
     ListCell* cell = NULL;
     StreamConsumer* consumer = NULL;
     StreamProducer* producer = NULL;
-    bool saveQuit = false;
     AutoMutexLock streamLock1(&m_mutex);
 
-    do {
-        streamLock1.lock();
-        if (m_streamEnter <= 0 && m_streamEnterCount >= m_createThreadNum)
-            saveQuit = true;
-        streamLock1.unLock();
-
-        pg_usleep(1000);
-    } while (saveQuit == false);
+    /* quitSyncPoint has rendezvoused with all successfully created workers,
+     * but they may still be cleaning up objects owned by this group.  Wait
+     * for their final restoreStreamEnter notification, not a 1ms timer.
+     * Recheck under the mutex after every wake (including a spurious wake or
+     * a quitSyncPoint broadcast).  Zero/partially created groups use exactly
+     * the old lifetime predicate; never free the group on cancellation alone.
+     * Reuse m_cond only until all workers have left; it is destroyed below. */
+    streamLock1.lock();
+    while (m_streamEnter > 0 || m_streamEnterCount < m_createThreadNum)
+        pthread_cond_wait(&m_cond, &m_mutex);
+    streamLock1.unLock();
 
     /* release the socket in case not release. */
     foreach (cell, m_streamProducerList) {

@@ -459,6 +459,17 @@ typedef enum CoercionContext {
 } CoercionContext;
 
 /*
+ * [P0-1] HybridRecall fusion kind (hybrid recall design doc §6.1/§6.2).
+ * Defined in primnodes.h because both relation.h (Path side) and
+ * plannodes.h (Plan side) reach it through parsenodes/primnodes without
+ * introducing a new cross-include. V1 ships RRF only; the enum exists so
+ * plan serialization can persist the discriminator from day one.
+ */
+typedef enum HybridFusionKind {
+    HYBRID_FUSION_RRF = 0
+} HybridFusionKind;
+
+/*
  * CoercionForm - information showing how to display a function-call node
  *
  * NB: equal() ignores CoercionForm fields, therefore this *must* not carry

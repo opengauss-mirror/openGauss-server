@@ -41,7 +41,9 @@
 #include "nodes/primnodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
+#include "catalog/namespace.h"
 #include "optimizer/dataskew.h"
+#include "optimizer/hybrid_recall_path.h"
 #include "optimizer/nodegroups.h"
 #include "optimizer/pgxcship.h"
 #include "optimizer/paths.h"
@@ -85,6 +87,7 @@
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
 static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_change = NULL);
+static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_path, List* tlist);
 static List* build_path_tlist(PlannerInfo* root, Path* path);
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path);
 static List* build_relation_tlist(RelOptInfo* rel);
@@ -610,6 +613,10 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_c
     check_stack_depth();
 
     switch (best_path->pathtype) {
+        case T_HybridRecall:
+            plan = create_hybridrecall_plan(root, (HybridRecallPath*)best_path,
+                                            root->parse->targetList);
+            break;
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
@@ -826,8 +833,11 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    /* if number of producer and consumer is 1, means stream node is not needed */
-    if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1) {
+    /* if number of producer and consumer is 1, means stream node is not needed.
+     * [P1-2] Task-parallel 1:1 streams are the concurrency primitive of
+     * HybridRecall's two recall branches (design doc §5.4) - never fold. */
+    if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1 &&
+        !stream->is_task_parallel) {
         pfree(stream);
         return subplan;
     }
@@ -881,6 +891,390 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
  * create_scan_plan
  *	 Create a scan plan for the parent relation of 'best_path'.
  */
+
+/*
+ * [P2-2/P2-3] create_hybridrecall_plan (hybrid recall design doc §7.2/§7.3)
+ *
+ * Builds the two-branch plan by handing SYNTHESIZED branch queries to the
+ * real planner: each branch is "SELECT <id>, <score-op> FROM <rel> WHERE
+ * <common quals> ORDER BY <score> LIMIT 100", so the planner itself picks
+ * the BM25-ordered IndexScan and the AnnIndexScan with a real Limit - the
+ * exact shapes the debug vehicle validated in P1. Each branch is wrapped
+ * in a 1:1 local task stream (recursive LOCAL GATHER precedent), then the
+ * HybridRecall parent is assembled.  Its executor re-exposes the query
+ * targetlist from the common branch schema (key=1, score=2, payload=3..N)
+ * and replaces the eliminated marker target with the fused score.
+ */
+static bool hybrid_attno_in_list(List* attnos, AttrNumber attno)
+{
+    ListCell* lc = NULL;
+    foreach (lc, attnos) {
+        if ((AttrNumber)lfirst_int(lc) == attno)
+            return true;
+    }
+    return false;
+}
+
+/*
+ * V1 branch tuples use one positional contract on both streams:
+ *
+ *   1 = doc key, 2 = branch score/distance, 3..N = requested payload Vars.
+ *
+ * Keeping both branch descriptors identical lets the first hit own a single
+ * MinimalTuple payload regardless of which worker produced it.
+ */
+static List* hybrid_collect_payload_attnos(List* tlist, HybridRecallPath* path)
+{
+    List* attnos = NIL;
+    ListCell* lc = NULL;
+
+    foreach (lc, tlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (IsA(tle->expr, Var)) {
+            Var* var = (Var*)tle->expr;
+            if (var->varno != path->relid || var->varlevelsup != 0 || var->varattno <= 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("hybrid recall V1 only supports payload columns from the recalled table")));
+            if (var->varattno != path->id_attno && !hybrid_attno_in_list(attnos, var->varattno))
+                attnos = lappend_int(attnos, var->varattno);
+        } else if (!IsA(tle->expr, Const)) {
+            /* The marker has already become its float8 Const sentinel. */
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("hybrid recall V1 only supports plain payload columns and constants")));
+        }
+    }
+
+    /*
+     * [P2-4] Parent recheck runs on the common branch tuple, so columns used
+     * only by WHERE (tenant/status/time-range are the usual examples) must
+     * be carried as hidden payload too.  Append them after visible payloads;
+     * this keeps existing output positions stable while making the tuple
+     * descriptor sufficient for every recheck expression.
+     */
+    List* qual_vars = pull_var_clause((Node*)path->common_quals,
+                                      PVC_RECURSE_AGGREGATES,
+                                      PVC_RECURSE_PLACEHOLDERS);
+    foreach (lc, qual_vars) {
+        Var* var = (Var*)lfirst(lc);
+        if (var->varno != path->relid || var->varlevelsup != 0 || var->varattno <= 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("hybrid recall V1 only supports common filters on ordinary columns of the recalled table")));
+        if (var->varattno != path->id_attno && !hybrid_attno_in_list(attnos, var->varattno))
+            attnos = lappend_int(attnos, var->varattno);
+    }
+    list_free(qual_vars);
+    return attnos;
+}
+
+static bool hybrid_plan_contains_node(Plan* plan, NodeTag tag)
+{
+    if (plan == NULL)
+        return false;
+    if (nodeTag(plan) == tag)
+        return true;
+    return hybrid_plan_contains_node(plan->lefttree, tag) || hybrid_plan_contains_node(plan->righttree, tag);
+}
+
+/*
+ * RRF consumes the position of each candidate, not its raw branch score.
+ * Once the nested planner has chosen a directly ordered index scan, computing
+ * that score again in the output projection only refetches/detoasts the heap
+ * value (and repeats the distance/BM25 calculation).  Keep column 2 as a typed
+ * NULL so both branch tuple descriptors and payload positions stay unchanged.
+ *
+ * Restrict this to Limit -> ordered IndexScan/AnnIndexScan.  In particular a
+ * Sort, Result or other intervening consumer may need the score, so leave
+ * those plans alone.  The AM's ORDER BY expressions and all quals remain
+ * intact; they still determine candidate order and visibility.  Do this
+ * after nested planning and before wrapping either branch in a task stream.
+ */
+static void hybrid_elide_unused_score(Plan* branch, bool is_text, Oid score_op)
+{
+    if (branch == NULL || !IsA(branch, Limit) || branch->righttree != NULL)
+        return;
+
+    Plan* scan = branch->lefttree;
+    NodeTag scan_tag = is_text ? T_IndexScan : T_AnnIndexScan;
+    if (scan == NULL || nodeTag(scan) != scan_tag ||
+        scan->lefttree != NULL || scan->righttree != NULL)
+        return;
+
+    List* orderby = is_text ? ((IndexScan*)scan)->indexorderbyorig :
+                             ((AnnIndexScan*)scan)->indexorderbyorig;
+    TargetEntry* scan_score = get_tle_by_resno(scan->targetlist, 2);
+    TargetEntry* output_score = get_tle_by_resno(branch->targetlist, 2);
+    if (list_length(orderby) != 1 || scan_score == NULL || output_score == NULL ||
+        !IsA(scan_score->expr, OpExpr) ||
+        ((OpExpr*)scan_score->expr)->opno != score_op ||
+        !equal(scan_score->expr, linitial(orderby)) ||
+        contain_volatile_functions((Node*)scan_score->expr))
+        return;
+
+    Oid score_type = exprType((Node*)scan_score->expr);
+    if ((score_type != FLOAT4OID && score_type != FLOAT8OID) ||
+        exprType((Node*)output_score->expr) != score_type)
+        return;
+
+    /* Replace only the projection entries, never mutate a possibly shared
+     * OpExpr also referenced by indexorderbyorig or the scan's filter. */
+    scan_score->expr = (Expr*)makeNullConst(score_type, -1, InvalidOid);
+    output_score->expr = (Expr*)makeNullConst(score_type, -1, InvalidOid);
+}
+
+static Plan* hybrid_plan_branch(PlannerInfo* root, HybridRecallPath* path, List* payload_attnos, bool is_text)
+{
+    Query* branch = makeNode(Query);
+    branch->commandType = CMD_SELECT;
+    branch->canSetTag = true;
+
+    RangeTblEntry* rte = (RangeTblEntry*)copyObject(rt_fetch(path->relid, root->parse->rtable));
+    rte->inh = false;
+    branch->rtable = list_make1(rte);
+    RangeTblRef* rtr = makeNode(RangeTblRef);
+    rtr->rtindex = 1;
+    branch->jointree = makeFromExpr(list_make1(rtr), (Node*)copyObject(path->common_quals));
+
+    Oid rel_oid = rte->relid; /* the relation OID, for attribute types */
+    Oid id_type = InvalidOid;
+    int32 id_typmod = -1;
+    Oid id_collation = InvalidOid;
+    Oid score_col_type = InvalidOid;
+    int32 score_col_typmod = -1;
+    Oid score_col_collation = InvalidOid;
+    get_atttypetypmodcoll(rel_oid, path->id_attno, &id_type, &id_typmod, &id_collation);
+    get_atttypetypmodcoll(rel_oid,
+                          is_text ? path->text_attno : path->vector_attno,
+                          &score_col_type,
+                          &score_col_typmod,
+                          &score_col_collation);
+    Oid q_type = exprType((Node*)(is_text ? path->query_text : path->query_vector));
+
+    Var* idv = makeVar(1, path->id_attno, id_type, id_typmod, id_collation, 0);
+    Var* colv = makeVar(1, is_text ? path->text_attno : path->vector_attno,
+                        score_col_type, score_col_typmod, score_col_collation, 0);
+
+    Oid oprid = OpernameGetOprid(list_make1(makeString(pstrdup(is_text ? "<&>" : "<=>"))),
+                                 score_col_type, q_type);
+    if (!OidIsValid(oprid))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("hybrid recall: %s operator not found for branch",
+                               is_text ? "bm25 score" : "ann distance")));
+
+    Oid opfuncid = get_opcode(oprid);
+    Oid score_type = get_func_rettype(opfuncid);
+    if (!OidIsValid(opfuncid) || !OidIsValid(score_type))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("hybrid recall: invalid %s operator metadata",
+                               is_text ? "bm25 score" : "ann distance")));
+
+    OpExpr* score = (OpExpr*)make_opclause(oprid,
+                                           score_type,
+                                           false,
+                                           (Expr*)colv,
+                                           is_text ? path->query_text : path->query_vector,
+                                           get_typcollation(score_type),
+                                           score_col_collation);
+    score->opfuncid = opfuncid;
+
+    TargetEntry* tle1 = makeTargetEntry((Expr*)idv, 1, NULL, false);
+    tle1->ressortgroupref = 0;
+    TargetEntry* tle2 = makeTargetEntry((Expr*)score, 2, NULL, false);
+    tle2->ressortgroupref = 1;
+    branch->targetList = list_make2(tle1, tle2);
+
+    AttrNumber payload_resno = 3;
+    ListCell* payload_lc = NULL;
+    foreach (payload_lc, payload_attnos) {
+        AttrNumber attno = (AttrNumber)lfirst_int(payload_lc);
+        Oid payload_type = InvalidOid;
+        int32 payload_typmod = -1;
+        Oid payload_collation = InvalidOid;
+        get_atttypetypmodcoll(rel_oid, attno, &payload_type, &payload_typmod, &payload_collation);
+        Var* payload_var = makeVar(1, attno, payload_type, payload_typmod, payload_collation, 0);
+        branch->targetList = lappend(
+            branch->targetList,
+            makeTargetEntry((Expr*)payload_var, payload_resno++, NULL, false));
+    }
+
+    SortGroupClause* sgc = makeNode(SortGroupClause);
+    sgc->tleSortGroupRef = 1;
+    sgc->eqop = OpernameGetOprid(list_make1(makeString(pstrdup("="))), score_type, score_type);
+    sgc->sortop = OpernameGetOprid(
+        list_make1(makeString(pstrdup(is_text ? ">" : "<"))), score_type, score_type);
+    if (!OidIsValid(sgc->eqop) || !OidIsValid(sgc->sortop))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("hybrid recall: comparison operators are missing for score type %u", score_type)));
+    sgc->nulls_first = false;
+    sgc->hashable = false;
+    branch->sortClause = list_make1(sgc);
+    branch->limitCount = (Node*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
+        Int64GetDatum(is_text ? path->text_candidates_est : path->vector_candidates_est),
+        false, true);
+
+    /*
+     * Both marker branches are index Top-K by definition.  Small relations
+     * otherwise lose the ANN ordered path to SeqScan+Sort, which changes the
+     * approximate candidate set and violates the branch contract.  Scope the
+     * standard cost switch to this nested branch planning call and restore it
+     * on both success and ERROR; the user's surrounding query GUC is untouched.
+     */
+    volatile bool saved_enable_seqscan = u_sess->attr.attr_sql.enable_seqscan;
+    PlannedStmt* planned = NULL;
+    PG_TRY();
+    {
+        u_sess->attr.attr_sql.enable_seqscan = false;
+        planned = planner(branch, 0, NULL);
+        u_sess->attr.attr_sql.enable_seqscan = saved_enable_seqscan;
+    }
+    PG_CATCH();
+    {
+        u_sess->attr.attr_sql.enable_seqscan = saved_enable_seqscan;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    NodeTag required_tag = is_text ? T_IndexScan : T_AnnIndexScan;
+    if (planned == NULL || !hybrid_plan_contains_node(planned->planTree, required_tag))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("hybrid recall could not build the required %s Top-K index branch",
+                        is_text ? "BM25" : "ANN")));
+    if (path->fusion == HYBRID_FUSION_RRF)
+        hybrid_elide_unused_score(planned->planTree, is_text, oprid);
+    return planned->planTree;
+}
+
+/* 1:1 local task stream, mirrors the recursive LOCAL GATHER construction
+ * (see createplan.cpp make_recursive_local precedent; producer executes
+ * copyObject(stream->scan.plan.lefttree) in its own worker). */
+static Plan* make_hybrid_task_stream(Plan* branch, int branch_id)
+{
+    Stream* stream = makeNode(Stream);
+    stream->type = STREAM_REDISTRIBUTE;
+    stream->is_sorted = false;
+    stream->sort = NULL;
+    stream->smpDesc.consumerDop = 1;
+    stream->smpDesc.producerDop = 1;
+    stream->smpDesc.distriType = LOCAL_ROUNDROBIN;
+    stream->origin_consumer_nodes = NULL;
+    stream->distribute_keys = NIL;
+    stream->consumer_nodes = (ExecNodes*)copyObject(branch->exec_nodes);
+    stream->is_task_parallel = true;
+    stream->task_group_id = 1;
+    stream->task_branch_id = branch_id;
+
+    Plan* plan = &stream->scan.plan;
+    plan->dop = 1;
+    /* Passthrough tlist, hand-built with scan-style Vars: the branch plan's
+     * own tlist carries child-internal Vars (varno 65000/65001) that the
+     * stream consumer would try to evaluate against its (empty) econtext -
+     * the P0 vehicle hit this as a TRAP. Column n of the consumer slot is
+     * column n of the branch output, positionally. */
+    {
+        List* pass = NIL;
+        ListCell* tc = NULL;
+        foreach (tc, branch->targetlist) {
+            TargetEntry* t = (TargetEntry*)lfirst(tc);
+            Oid ty = exprType((Node*)t->expr);
+            int32 mod = exprTypmod((Node*)t->expr);
+            Oid coll = exprCollation((Node*)t->expr);
+            pass = lappend(pass, makeTargetEntry((Expr*)makeVar(1, t->resno, ty, mod, coll, 0),
+                                                 t->resno, NULL, t->resjunk));
+        }
+        plan->targetlist = pass;
+    }
+    plan->lefttree = branch;
+    plan->righttree = NULL;
+    inherit_plan_locator_info(plan, branch);
+    copy_plan_costsize(plan, branch);
+    return plan;
+}
+
+static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_path, List* tlist)
+{
+    List* payload_attnos = hybrid_collect_payload_attnos(tlist, best_path);
+    Plan* text_branch = hybrid_plan_branch(root, best_path, payload_attnos, true);
+    Plan* vector_branch = hybrid_plan_branch(root, best_path, payload_attnos, false);
+    if (text_branch == NULL || vector_branch == NULL)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("hybrid recall: branch planning failed")));
+
+    Plan* text_input = best_path->parallel_branches ? make_hybrid_task_stream(text_branch, 0) : text_branch;
+    Plan* vector_input = best_path->parallel_branches ? make_hybrid_task_stream(vector_branch, 1) : vector_branch;
+    /* VECTOR flavour (half force): stream only the vector branch.  The serial
+     * drain order (text first, vector second) then overlaps naturally - the
+     * vector producer starts during ExecInitStream and computes while the
+     * driving thread drains the inlined text branch.  Verified byte-identical
+     * output against serial by the OPT-2 PoC; the local Stream sizes its
+     * bounded delivery batch from the branch's constant LIMIT. */
+    if (best_path->parallel_branches &&
+        u_sess->attr.attr_sql.hybrid_recall_parallel_mode == HYBRID_RECALL_PARALLEL_VECTOR) {
+        text_input = text_branch;
+    }
+
+    /* Raw scores are diagnostic-only; rank drives RRF.  An elided score
+     * retains a NULL placeholder at column 2 but needs no executor read. */
+    AttrNumber text_score_resno = 0;
+    AttrNumber vector_dist_resno = 0;
+    {
+        ListCell* tc = NULL;
+        foreach (tc, text_branch->targetlist) {
+            TargetEntry* t = (TargetEntry*)lfirst(tc);
+            if (t->resno > 1 && !IsA(t->expr, Var) && !IsA(t->expr, Const))
+                text_score_resno = t->resno;
+        }
+        foreach (tc, vector_branch->targetlist) {
+            TargetEntry* t = (TargetEntry*)lfirst(tc);
+            if (t->resno > 1 && !IsA(t->expr, Var) && !IsA(t->expr, Const))
+                vector_dist_resno = t->resno;
+        }
+    }
+    HybridRecall* node = makeNode(HybridRecall);
+    node->plan.lefttree = text_input;
+    node->plan.righttree = vector_input;
+    node->plan.targetlist = NIL; /* populated with the query targetlist below */
+    node->plan.qual = NIL;
+    /* Planner-generated nodes keep the original key attribute here.  At
+     * ExecInit, after all plan-copy/cache processing is complete, it anchors
+     * the output-Var to branch-position mapping.  Handmade P0 plans have a
+     * NIL targetlist and retain the historical branch-resno meaning. */
+    node->id_resno = best_path->id_attno;
+    node->text_score_resno = text_score_resno;
+    node->vector_distance_resno = vector_dist_resno;
+    /* Preserve an external LIMIT Param in generic plans.  final_topk_est is
+     * only a Path estimate; the executor validates and evaluates this Expr
+     * for every prepared execution/rescan. */
+    node->final_topk = (Expr*)copyObject(root->parse->limitCount);
+    node->text_candidates = (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
+        Int64GetDatum(best_path->text_candidates_est), false, true);
+    node->vector_candidates = (Expr*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
+        Int64GetDatum(best_path->vector_candidates_est), false, true);
+    node->fusion = best_path->fusion;
+    node->rrf_k = best_path->rrf_k;
+    node->text_weight = best_path->text_weight;
+    node->vector_weight = best_path->vector_weight;
+    node->parallel_branches = best_path->parallel_branches;
+    node->require_parallel = best_path->require_parallel;
+    node->recheck_quals = (List*)copyObject(best_path->common_quals);
+    /* SetCheckInfo (execStream.h) dereferences planTree->exec_nodes. */
+    node->plan.exec_nodes = (ExecNodes*)copyObject(text_branch->exec_nodes);
+
+    /* Keep the original base-table Vars for stable plan labelling and
+     * serialization.  ExecInitHybridRecall maps them to the common branch
+     * tuple contract after every plan-copy/cache stage has finished. */
+    node->plan.targetlist = (List*)copyObject(tlist);
+    copy_plan_costsize(&node->plan, text_branch);
+    /* HybridRecall is blocking and owns both branches; expose the selected
+     * HybridRecallPath cost rather than the left branch's copied cost. */
+    node->plan.startup_cost = best_path->path.startup_cost;
+    node->plan.total_cost = best_path->path.total_cost;
+    node->plan.plan_rows = best_path->final_topk_est;
+    return (Plan*)node;
+}
+
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
 {
     RelOptInfo* rel = best_path->parent;
@@ -951,6 +1345,9 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
     }
 
     switch (best_path->pathtype) {
+        case T_HybridRecall:
+            plan = (Plan*)create_hybridrecall_plan(root, (HybridRecallPath*)best_path, tlist);
+            break;
         case T_SeqScan:
             plan = (Plan*)create_seqscan_plan(root, best_path, tlist, scan_clauses);
             break;

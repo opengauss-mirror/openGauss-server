@@ -2872,6 +2872,8 @@ typedef struct knl_t_storage_context {
     union CRBufferDescPadded* CRBufferDescriptors;
     char *CRBufferBlocks;
     struct HTAB* ShmemMmap;
+    /* Lazily allocated, bounded HNSW cache for non-migrating pooled Streams. */
+    struct HnswWorkerCache* hnsw_worker_cache;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {

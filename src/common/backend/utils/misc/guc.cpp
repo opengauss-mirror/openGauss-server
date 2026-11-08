@@ -467,8 +467,28 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "restrict_nonsystem_relation_kind",
     "enable_func_cache",
 #ifndef ENABLE_LITE_MODE
-    "enable_adio_debug"
+    "enable_adio_debug",
 #endif
+    /*
+     * Vector-index (datavec) search-time GUCs. HybridRecall parallel branches
+     * run in stream worker threads, whose u_sess only receives GUCs listed
+     * here (see repair_guc_variables). Without these entries the HNSW branch
+     * silently falls back to the process-default hnsw_ef_search and returns
+     * a wrong-topic candidate set at the same plan shape.
+     */
+    "hnsw_ef_search",
+    "hnsw_earlystop_threshold",
+    "hnsw_max_scan_tuples",
+    "hnsw_scan_cache_size",
+    "hnsw_iterative_scan",
+    "rbq_query_bits",
+    "rbq_refinek",
+    /* The text branch also executes in a task-stream worker. Preserve its
+     * scoring parameters and initial batch: defaulting either can change
+     * candidate ranks/IDs, and default batch 5 adds repeated BM25 scans. */
+    "bm25_topk",
+    "bm25_k1",
+    "bm25_b"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);

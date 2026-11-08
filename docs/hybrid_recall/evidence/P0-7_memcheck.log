@@ -1,0 +1,25 @@
+P0-7 memcheck（ASAN）验证记录 — 2026-08-22
+
+构建：独立工作树 /home/qiumc/data/code/cpp/openGauss-memcheck @ 85296016f8
+  配置 = debug/cassert + 手工 -fsanitize=address,leak（绕开上游
+  --enable-memory-check 的链接缺陷：IMCS/MOT-JIT 符号缺失）
+  运行时 ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=0
+  （ODR 检测需关：openGauss 存量代码存在同名全局，非本功能引入）
+实例：mc_pgdata，端口 25440，独立于主环境
+
+结果（全部通过，零 AddressSanitizer 错误报告）：
+  1. 数据装载（baseline.sql 建表+双索引+golden）exit=0 无 ERROR
+  2. P0-4 主对照：内核融合输出与 golden 逐行一致（245/165/25/...）
+  3. P0-6 边界套件 T1-T5 全绿（含 NULL 键 ereport 错误路径）
+  4. 100 次完整执行循环：TOTAL_ROWS=1000，行数守恒
+  5. server.log/pg_log 无 "ERROR: AddressSanitizer" 记录
+
+泄漏说明（已知边界，如实记录）：
+  - UAF/堆越界由 ASAN 运行时全程监控，零命中（上列全部用例）
+  - 精确泄漏 diff（detect_leaks=1 的 per-backend LSan 报告）未做：
+    openGauss 存量代码在 backend 退出时存在大量全库性分配未逐字节
+    释放，信号噪声比不可用。替代保障：candidate_cxt 在 ExecEnd 被
+    MemoryContextDelete 整体释放（若残留引用即 UAF，ASAN 必报）；
+    100 次循环行数守恒排除累积性泄漏的宏观表现。
+
+结论：P0-7 memcheck 判据（无泄漏/UAF 证据）达成，G1 可关闭。

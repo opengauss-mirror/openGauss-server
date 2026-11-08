@@ -51,6 +51,7 @@
 #include "libpq/pqformat.h"
 #include <sys/poll.h>
 #include "executor/exec/execStream.h"
+#include "executor/exec/localStreamPoll.h"
 #include "postmaster/postmaster.h"
 #include "access/transam.h"
 #include "gssignal/gs_signal.h"
@@ -443,6 +444,29 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     }
 
     sharedContext->vectorized = IsA(&(streamNode->scan.plan), VecStream);
+    /* HybridRecall must collect both bounded candidate lists before output.
+     * A small first batch does not shorten that dependency, but repeatedly
+     * stalls the producer on the single shared buffer. Fit a constant LIMIT
+     * in one batch when possible, bounded by the ordinary receiver capacity.
+     * Larger lists still stream in bounded batches; unknown task shapes keep
+     * the conservative fallback. This changes delivery, never the LIMIT or
+     * per-branch order, and partial batches still use the normal EOF path. */
+    sharedContext->tupleBatchSize =
+        streamNode->is_task_parallel ? HYBRID_TASK_STREAM_BATCH : TupleVectorMaxSize;
+    if (streamNode->is_task_parallel) {
+        const Plan* branch = streamNode->scan.plan.lefttree;
+        if (branch != NULL && IsA(branch, Limit)) {
+            const Node* count = ((const Limit*)branch)->limitCount;
+            if (count != NULL && IsA(count, Const)) {
+                const Const* cap = (const Const*)count;
+                if (!cap->constisnull && cap->consttype == INT8OID && cap->constbyval) {
+                    int64 rows = DatumGetInt64(cap->constvalue);
+                    if (rows > 0)
+                        sharedContext->tupleBatchSize = (int)Min(rows, (int64)TupleVectorMaxSize);
+                }
+            }
+        }
+    }
     sharedContext->localStreamMemoryCtx = localStreamMemoryCtx;
     sharedContext->sharedBatches = sharedBatches;
     sharedContext->sharedTuples = sharedTuples;
@@ -2373,6 +2397,9 @@ StreamState* ExecInitStream(Stream* node, EState* estate, int eflags)
         state->StreamScan = ScanMemoryStream;
         TupleDesc typeInfo = ExecTypeFromTL(node->scan.plan.targetlist, false);
 
+        /* Consumer receive buffer keeps the historical full capacity; small
+         * task-stream delivery batches only ever copy their own row count
+         * into it (gs_consume_memory_data copies tuplePointer rows). */
         state->tempTupleVec = (TupleVector*)palloc0(sizeof(TupleVector));
         state->tempTupleVec->tupleVector = (TupleTableSlot**)palloc0(sizeof(TupleTableSlot*) * (TupleVectorMaxSize));
 
@@ -2433,6 +2460,56 @@ static TupleTableSlot* ExecStream(PlanState* state)
 
         return NULL;
     }
+}
+
+/*
+ * Non-blocking counterpart used only by operators that coordinate multiple
+ * local Stream inputs.  It preserves Stream preparation and instrumentation,
+ * but returns STREAM_POLL_WAIT instead of sleeping on this Stream alone.
+ */
+StreamPollStatus ExecPollLocalStream(StreamState* node)
+{
+    PlanState* state = &node->ss.ps;
+    Stream* plan = (Stream*)state->plan;
+    MemoryContext old_context = NULL;
+
+    if (!STREAM_IS_LOCAL_NODE(plan->smpDesc.distriType) || plan->sort != NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("non-blocking Stream polling requires an unsorted local Stream")));
+
+    if (unlikely(state->nodeContext != NULL))
+        old_context = MemoryContextSwitchTo(state->nodeContext);
+
+    if (state->chgParam != NULL)
+        ExecReScan(state);
+
+    if (unlikely(!node->isReady))
+        StreamPrepareRequest(node);
+
+    node->receive_message = true;
+    if (state->instrument != NULL)
+        InstrStartNode(state->instrument);
+
+    StreamPollStatus status = gs_memory_poll(node);
+
+    /* Like ScanMemoryStream(), surface a saved producer error before EOF.
+     * HandleStreamError() only records the error; treating its FINISH as
+     * successful completion would fuse a partial set of branch results. */
+    if (status == STREAM_POLL_FINISH)
+        StreamReportError(node);
+
+    if (state->instrument != NULL) {
+        InstrStopNode(state->instrument, status == STREAM_POLL_DATA ? 1.0 : 0.0);
+        if (status == STREAM_POLL_FINISH)
+            state->instrument->status = true;
+    }
+    state->ps_rownum++;
+
+    if (old_context != NULL)
+        (void)MemoryContextSwitchTo(old_context);
+
+    return status;
 }
 
 /*

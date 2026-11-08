@@ -1,0 +1,324 @@
+CREATE DATABASE
+You are now connected to database "test" as user "qiumc".
+gsql:src/test/regress/sql/ai_vector.sql:7: NOTICE:  CREATE TABLE will create implicit sequence "dimens3_scan_l2_100_id_seq" for serial column "dimens3_scan_l2_100.id"
+gsql:src/test/regress/sql/ai_vector.sql:7: NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "dimens3_scan_l2_100_pkey" for table "dimens3_scan_l2_100"
+CREATE TABLE
+CREATE INDEX
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+SET
+ANALYZE
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+ 12 | item12 | [0.60868204,0.60846287,0.81605655]
+  3 | item3  | [0.564357,0.9264987,0.8182802]
+ 11 | item11 | [0.6052496,0.62827665,0.7768472]
+ 22 | item22 | [0.50915307,0.64196414,0.92056113]
+ 18 | item18 | [0.7649143,0.52333325,0.44966766]
+  6 | item6  | [0.972023,0.9026957,0.10480514]
+ 17 | item17 | [0.76680326,0.16413908,0.5166021]
+  8 | item8  | [0.49208698,0.6714301,0.71550953]
+  5 | item5  | [0.9748988,0.37120444,0.09020154]
+ 23 | item23 | [0.43124378,0.9630822,0.7278073]
+  7 | item7  | [0.34085152,0.6611158,0.979039]
+ 15 | item15 | [0.6947581,0.8751624,0.23263198]
+ 20 | item20 | [0.78923064,0.5646975,0.13470227]
+  4 | item4  | [0.79131657,0.46089557,0.06720783]
+ 21 | item21 | [0.71745884,0.26742905,0.17897958]
+(20 rows)
+
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+ 12 | item12 | [0.60868204,0.60846287,0.81605655]
+  3 | item3  | [0.564357,0.9264987,0.8182802]
+ 11 | item11 | [0.6052496,0.62827665,0.7768472]
+ 22 | item22 | [0.50915307,0.64196414,0.92056113]
+ 18 | item18 | [0.7649143,0.52333325,0.44966766]
+  6 | item6  | [0.972023,0.9026957,0.10480514]
+ 17 | item17 | [0.76680326,0.16413908,0.5166021]
+  8 | item8  | [0.49208698,0.6714301,0.71550953]
+  5 | item5  | [0.9748988,0.37120444,0.09020154]
+ 23 | item23 | [0.43124378,0.9630822,0.7278073]
+  7 | item7  | [0.34085152,0.6611158,0.979039]
+ 15 | item15 | [0.6947581,0.8751624,0.23263198]
+ 20 | item20 | [0.78923064,0.5646975,0.13470227]
+  4 | item4  | [0.79131657,0.46089557,0.06720783]
+ 21 | item21 | [0.71745884,0.26742905,0.17897958]
+ 24 | item24 | [0.8275961,0.1344125,0.004161737]
+ 25 | item25 | [0.2582034,0.6599453,0.5974597]
+ 16 | item16 | [0.02151876,0.5658726,0.6430642]
+ 13 | item13 | [0.36143646,0.5525224,0.010793276]
+ 19 | item19 | [0.21292055,0.985841,0.093416855]
+  1 | item1  | [0.211557,0.076130316,0.048887435]
+(26 rows)
+
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit
+   Output: id, name, embedding, ((embedding <-> '[3,1,2]'::vector))
+   ->  Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+         Output: id, name, embedding, (embedding <-> '[3,1,2]'::vector)
+         Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(6 rows)
+
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ [Bypass]
+ Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+   Output: id, name, embedding, (embedding <-> '[3,1,2]'::vector)
+   Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(4 rows)
+
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+ 12 | item12 | [0.60868204,0.60846287,0.81605655]
+  3 | item3  | [0.564357,0.9264987,0.8182802]
+ 11 | item11 | [0.6052496,0.62827665,0.7768472]
+ 22 | item22 | [0.50915307,0.64196414,0.92056113]
+ 18 | item18 | [0.7649143,0.52333325,0.44966766]
+  6 | item6  | [0.972023,0.9026957,0.10480514]
+ 17 | item17 | [0.76680326,0.16413908,0.5166021]
+  8 | item8  | [0.49208698,0.6714301,0.71550953]
+  5 | item5  | [0.9748988,0.37120444,0.09020154]
+ 23 | item23 | [0.43124378,0.9630822,0.7278073]
+  7 | item7  | [0.34085152,0.6611158,0.979039]
+ 15 | item15 | [0.6947581,0.8751624,0.23263198]
+ 20 | item20 | [0.78923064,0.5646975,0.13470227]
+  4 | item4  | [0.79131657,0.46089557,0.06720783]
+ 21 | item21 | [0.71745884,0.26742905,0.17897958]
+ 24 | item24 | [0.8275961,0.1344125,0.004161737]
+ 25 | item25 | [0.2582034,0.6599453,0.5974597]
+ 16 | item16 | [0.02151876,0.5658726,0.6430642]
+ 13 | item13 | [0.36143646,0.5525224,0.010793276]
+ 19 | item19 | [0.21292055,0.985841,0.093416855]
+  1 | item1  | [0.211557,0.076130316,0.048887435]
+(26 rows)
+
+PREPARE
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+PREPARE
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+PREPARE
+ id |  name  |             embedding              
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit
+   Output: embedding, id, name, ((embedding <-> '[3,1,2]'::vector))
+   ->  Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+         Output: embedding, id, name, (embedding <-> '[3,1,2]'::vector)
+         Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(6 rows)
+
+             embedding              | id |  name  
+------------------------------------+----+--------
+ [0.85667425,0.39547122,0.98898655] | 14 | item14
+ [0.81576276,0.6386655,0.94059604]  |  9 | item9
+ [0.94438016,0.70233214,0.5453055]  | 26 | item26
+ [0.8229326,0.487093,0.74873024]    |  2 | item2
+ [0.5982644,0.62692505,0.8370629]   | 10 | item10
+(5 rows)
+
+SET
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used annindexscan with unsupport targetlist.
+ Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+   Output: id, name, embedding, (embedding <#> '[3,1,2]'::vector), (embedding <-> '[3,1,2]'::vector)
+   Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(4 rows)
+
+SET
+CREATE TABLE
+INSERT 0 5
+gsql:src/test/regress/sql/ai_vector.sql:58: NOTICE:  ivfflat index created with little data
+DETAIL:  This will cause low recall.
+HINT:  Drop the index until the table has more data.
+CREATE INDEX
+SET
+ embedding  
+------------
+ [1,2,3]
+ [4,5,6]
+ [7,8,9]
+ [10,11,12]
+ [13,14,15]
+(5 rows)
+
+SET
+ embedding  
+------------
+ [1,2,3]
+ [4,5,6]
+ [7,8,9]
+ [10,11,12]
+ [13,14,15]
+(5 rows)
+
+CREATE TABLE
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+CREATE INDEX
+SET
+SET
+      val      
+---------------
+ [1,2,3,0]
+ [1,1,1,0]
+ [4,2,3,0]
+ [0,0,0,0]
+ [4,1,1,0]
+ [4,0,0,0]
+ [24,20,20,20]
+ [24,21,21,20]
+ [25,20,20,22]
+ [25,21,21,21]
+ [24,22,23,20]
+ [25,22,23,26]
+(12 rows)
+
+DROP TABLE
+gsql:src/test/regress/sql/ai_vector.sql:75: NOTICE:  CREATE TABLE will create implicit sequence "t1_id_seq" for serial column "t1.id"
+gsql:src/test/regress/sql/ai_vector.sql:75: NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+CREATE TABLE
+ALTER TABLE
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+INSERT 0 3
+gsql:src/test/regress/sql/ai_vector.sql:83: NOTICE:  index "idx_t1" does not exist, skipping
+DROP INDEX
+CREATE INDEX
+DROP INDEX
+CREATE INDEX
+DROP INDEX
+CREATE INDEX
+SET
+SET
+SET
+SET
+SET
+                     QUERY PLAN                     
+----------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_t1 on t1
+         Order By: (val <=> '[6,7,3,10,1]'::vector)
+(4 rows)
+
+DROP INDEX
+CREATE INDEX
+                     QUERY PLAN                     
+----------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_t1 on t1
+         Order By: (val <-> '[6,7,3,10,1]'::vector)
+(4 rows)
+
+DROP INDEX
+CREATE INDEX
+                     QUERY PLAN                     
+----------------------------------------------------
+ [Bypass]
+ Limit
+   ->  Ann Index Scan using idx_t1 on t1
+         Order By: (val <#> '[6,7,3,10,1]'::vector)
+(4 rows)
+
+ vector_l2_norm  
+-----------------
+ 1.4142135623731
+(1 row)
+
+gsql:src/test/regress/sql/ai_vector.sql:102: ERROR:  This input type is not supported for l2_norm()
+HINT:  Use explicit casts to vector, sparsevec, or halfvec.
+CONTEXT:  referenced column: l2_norm
+gsql:src/test/regress/sql/ai_vector.sql:103: \connect: FATAL:  database "regression" does not exist
+total time: 2128  ms

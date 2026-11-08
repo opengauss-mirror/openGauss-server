@@ -516,7 +516,8 @@ bool has_subplan(Plan* result_plan, Plan* parent, ListCell* cell, bool is_left, 
                     stream->smpDesc.consumerDop = 1;
                 }
 
-                if (!stream->is_recursive_local) {
+                /* [P1-2] task-parallel 1:1 streams stay, same as recursive_local */
+                if (!stream->is_recursive_local && !stream->is_task_parallel) {
                     removed = remove_local_plan(result_plan, parent, cell, is_left);
                 } else {
                     /* For MPP Recursive, don't remove LOCAL GATHER(1:1) upon CteScan, just keep it */
@@ -1465,7 +1466,7 @@ bool remove_local_plan(Plan* stream_plan, Plan* parent, ListCell* lc, bool is_le
 
     /* Delete useless local stream node. */
     if (STREAM_IS_LOCAL_NODE(stream->smpDesc.distriType) && stream->smpDesc.consumerDop == 1 &&
-        stream->smpDesc.producerDop == 1) {
+        stream->smpDesc.producerDop == 1 && !stream->is_task_parallel) {
         if (lc != NULL) {
             lfirst(lc) = (void*)stream_plan->lefttree;
         } else if (is_left) {

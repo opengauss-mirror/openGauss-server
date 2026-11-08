@@ -25,6 +25,7 @@
 #include <cmath>
 
 #include "access/tableam.h"
+#include "access/xlog.h"
 #include "access/generic_xlog.h"
 #include "catalog/pg_type.h"
 #include "catalog/index.h"
@@ -35,12 +36,16 @@
 #include "access/datavec/sparsevec.h"
 #include "access/datavec/utils.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_internals.h"
+#include "pg_trace.h"
+#include "pgstat.h"
 #include "catalog/pg_partition.h"
 #include "catalog/pg_partition_fn.h"
 #include "utils/datum.h"
 #include "utils/partcache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/resowner.h"
 
 #include "utils/hashutils.h"
 #include "access/datavec/hnswlsg.h"
@@ -395,6 +400,7 @@ HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, i
     element->deleted = 0;
     /* Start at one to make it easier to find issues */
     element->version = 1;
+    element->hash = 0;
 
     HnswInitNeighbors(base, element, m, allocator);
 
@@ -423,6 +429,11 @@ HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
 
     element->blkno = blkno;
     element->offno = offno;
+    element->neighborPage = InvalidBlockNumber;
+    element->neighborOffno = InvalidOffsetNumber;
+    element->heaptidsLength = 0;
+    element->version = 0;
+    element->hash = 0;
     HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)NULL);
     HnswPtrStore(base, element->value, (Pointer)NULL);
     element->fromMmap = false;
@@ -1024,6 +1035,238 @@ Datum HnswGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *inde
 }
 
 static inline void HnswScaleDistanceByIso(float *distance, Datum lhs, Datum rhs, FmgrInfo *procinfo, bool enableLsg);
+
+/*
+ * The built-in vector IP and cosine HNSW opclasses both use
+ * vector_negative_inner_product (IP_FUNC_OID).  During an index scan the
+ * query has already been detoasted/normalized by GetScanValue(), while HNSW
+ * stores the vector inline in HnswElementTupleData.  Distance-only callers do
+ * not request a copy of the visited vector (loadVec is false), so use that as
+ * the hot-path discriminator and avoid paying the fmgr and detoast checks
+ * once per visited element.
+ *
+ * Callers that need a vector copy, specialized encodings, LSG, and custom
+ * opclasses retain the generic path.
+ */
+static inline float HnswDirectVectorNegativeInnerProduct(Datum query, HnswElementTuple etup)
+{
+    Vector *queryVector = (Vector *)DatumGetPointer(query);
+    Vector *elementVector = &etup->data;
+
+    if (unlikely(queryVector->dim != elementVector->dim)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("different vector dimensions %d and %d", queryVector->dim, elementVector->dim)));
+    }
+
+    return -VectorInnerProduct(queryVector->dim, queryVector->x, elementVector->x);
+}
+
+/*
+ * Most unquantized vector element tuples are stored on the same page as
+ * their neighbor tuple.  HnswLoadElement already holds that page locked, so
+ * copy the compact TID array for candidates that survive the distance gate
+ * and avoid another ReadBuffer/lock when they are expanded later.  Keep this
+ * private representation out of HnswElementData to avoid changing the shared
+ * in-memory build layout.
+ */
+typedef struct HnswPrefetchedNeighborTids {
+    uint8 version;
+    uint16 count;
+    ItemPointerData indextids[FLEXIBLE_ARRAY_MEMBER];
+} HnswPrefetchedNeighborTids;
+
+#define HNSW_PREFETCHED_NEIGHBORS_MAGIC 0x48504E54U
+
+static inline void HnswPrefetchNeighborTids(HnswElement element, Page page)
+{
+    HnswNeighborTuple ntup =
+        (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
+
+    if (!HnswIsNeighborTuple(ntup) || ntup->version != element->version || ntup->count == 0 ||
+        ntup->count > (element->level + 2) * HNSW_MAX_M) {
+        return;
+    }
+
+    int expectedCount = ntup->count;
+    Size size = offsetof(HnswPrefetchedNeighborTids, indextids) +
+                expectedCount * sizeof(ItemPointerData);
+    HnswPrefetchedNeighborTids *prefetched = (HnswPrefetchedNeighborTids *)palloc(size);
+    prefetched->version = ntup->version;
+    prefetched->count = ntup->count;
+    errno_t rc = memcpy_s(prefetched->indextids, expectedCount * sizeof(ItemPointerData),
+                          ntup->indextids, expectedCount * sizeof(ItemPointerData));
+    securec_check(rc, "\0", "\0");
+
+    char *base = NULL;
+    HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)prefetched);
+    element->hash = HNSW_PREFETCHED_NEIGHBORS_MAGIC;
+}
+
+/*
+ * Advisory buffer locations, never cached page contents or persistent pins.
+ * Keep one physical index per owner and a fixed ~32 KiB table. A buffer can
+ * be evicted/reused without touching this table: pin first, then validate its
+ * full tag and BM_VALID, exactly as BufferAlloc does after its mapping lookup.
+ * No Relation or tuple pointers survive a call. Ordinary sessions own their
+ * table even when migrating between workers. A pooled Stream instead uses
+ * thread-owned storage: its task sessions are short-lived, while the Stream
+ * never migrates to another OS thread. Only advisory buffer numbers survive
+ * tasks, never page contents, pins, locks, snapshots or permission decisions.
+ * Every use is revalidated for the current relation and ResourceOwner. Do not
+ * use rd_amcache: GSC assumes B-tree data.
+ */
+#define HNSW_BUFFER_HINT_SLOTS 4096
+typedef struct HnswBufferHintCache {
+    bool initialized;
+    RelFileNode rnode;
+    BlockNumber blocks[HNSW_BUFFER_HINT_SLOTS];
+    Buffer buffers[HNSW_BUFFER_HINT_SLOTS];
+} HnswBufferHintCache;
+
+HnswWorkerCache *HnswGetWorkerCache()
+{
+    Assert(t_thrd.role == THREADPOOL_STREAM);
+    if (t_thrd.storage_cxt.hnsw_worker_cache == NULL) {
+        t_thrd.storage_cxt.hnsw_worker_cache = (HnswWorkerCache *)MemoryContextAllocZero(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(HnswWorkerCache));
+    }
+    return t_thrd.storage_cxt.hnsw_worker_cache;
+}
+
+static HnswBufferHintCache *HnswInitBufferHints(Relation index)
+{
+#ifdef ENABLE_NEON
+    return NULL;
+#else
+    /* Specialized storage/recovery must continue through ReadBuffer's gates. */
+    if (index->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT ||
+        IsSegmentFileNode(index->rd_node) || ENABLE_DMS || ENABLE_DSS ||
+        g_instance.attr.attr_storage.nvm_attr.enable_nvm || g_instance.smb_cxt.use_smb ||
+        g_instance.attr.attr_security.enable_tde || RecoveryInProgress() ||
+        u_sess->proc_cxt.clientIsCMAgent) {
+        return NULL;
+    }
+    RelationOpenSmgr(index);
+    HnswBufferHintCache *hints;
+    if (t_thrd.role == THREADPOOL_STREAM) {
+        HnswWorkerCache *cache = HnswGetWorkerCache();
+        if (cache->bufferHints == NULL) {
+            cache->bufferHints = (HnswBufferHintCache *)MemoryContextAllocZero(
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(HnswBufferHintCache));
+        }
+        hints = cache->bufferHints;
+    } else {
+        hints = u_sess->datavec_ctx.hnsw_buffer_hints;
+        if (hints == NULL) {
+            hints = (HnswBufferHintCache *)MemoryContextAllocZero(u_sess->cache_mem_cxt, sizeof(HnswBufferHintCache));
+            u_sess->datavec_ctx.hnsw_buffer_hints = hints;
+        }
+    }
+    if (!hints->initialized || !RelFileNodeEquals(hints->rnode, index->rd_node)) {
+        MemSet(hints->buffers, 0, sizeof(hints->buffers));
+        hints->rnode = index->rd_node;
+        hints->initialized = true;
+    }
+    return hints;
+#endif
+}
+
+static Buffer HnswReadBufferWithHint(Relation index, BlockNumber block, HnswBufferHintCache *hints)
+{
+    if (hints == NULL || block == P_NEW) {
+        return ReadBuffer(index, block);
+    }
+
+    uint32 slot = block & (HNSW_BUFFER_HINT_SLOTS - 1);
+    Buffer buf = hints->buffers[slot];
+    if (buf > 0 && buf <= NORMAL_SHARED_BUFFER_NUM && hints->blocks[slot] == block) {
+        BufferDesc *desc = GetBufferDescriptor(buf - 1);
+        BufferTag tag;
+        INIT_BUFFERTAG(tag, index->rd_node, MAIN_FORKNUM, block);
+        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+        bool valid = PinBuffer(desc, NULL);
+        if (valid && BUFFERTAGS_PTR_EQUAL(&desc->tag, &tag)) {
+            /* Mirror the ordinary ReadBuffer cache-hit accounting. */
+            TRACE_POSTGRESQL_BUFFER_READ_START(MAIN_FORKNUM, block, index->rd_node.spcNode,
+                index->rd_node.dbNode, index->rd_node.relNode, index->rd_smgr->smgr_rnode.backend, false);
+            pgstat_count_buffer_read(index);
+            pgstatCountBlocksFetched4SessionLevel();
+            u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
+            pgstat_count_buffer_hit(index);
+            t_thrd.vacuum_cxt.VacuumPageHit++;
+            if (t_thrd.vacuum_cxt.VacuumCostActive) {
+                t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageHit;
+            }
+            TRACE_POSTGRESQL_BUFFER_READ_DONE(MAIN_FORKNUM, block, index->rd_node.spcNode,
+                index->rd_node.dbNode, index->rd_node.relNode, index->rd_smgr->smgr_rnode.backend, false, true);
+            return buf;
+        }
+        /* Includes BM_VALID=false, tag mismatch and buffer-slot reuse. */
+        ReleaseBuffer(buf);
+        hints->buffers[slot] = InvalidBuffer;
+    }
+
+    buf = ReadBuffer(index, block);
+    if (buf > 0 && buf <= NORMAL_SHARED_BUFFER_NUM) {
+        hints->blocks[slot] = block;
+        hints->buffers[slot] = buf;
+    }
+    return buf;
+}
+
+/*
+ * A bounded lookahead for the ordinary, unquantized vector scan.  A pin keeps
+ * the page address valid, but is NOT permission to inspect its contents.  Take
+ * a short shared content lock to locate the tuple and hint only its header and
+ * first vector cache lines; whole-page hints cost more than they save.  Do not
+ * retain a tuple pointer or any tuple contents across the unlock.  The actual
+ * load below re-reads the line pointer and tuple under its own content lock.
+ *
+ * This is query-local pin ownership, not a page/tuple cache.  ReadBuffer's
+ * ResourceOwner registration handles ERROR cleanup.  Normal and early exits
+ * release every outstanding pin before leaving the neighbor batch.
+ */
+#define HNSW_ELEMENT_PREFETCH_DISTANCE 4
+
+static Buffer HnswPrefetchElementPage(Relation index, HnswElement element, HnswBufferHintCache *hints)
+{
+    Buffer buf = HnswReadBufferWithHint(index, element->blkno, hints);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    ItemId itemId = PageGetItemId(page, element->offno);
+    const char *tuple = (const char *)PageGetItem(page, itemId);
+
+    for (Size offset = 0; offset < Min((Size)ItemIdGetLength(itemId), (Size)512); offset += 64) {
+        __builtin_prefetch(tuple + offset, 0, 3);
+    }
+    LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+    return buf;
+}
+
+/* The caller has proved the plain built-in vector distance-only scan shape. */
+static void HnswLoadPrefetchedVectorElement(HnswElement element, float *distance, Datum q,
+                                          float *maxDistance, Buffer buf)
+{
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    HnswElementTuple etup =
+        (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
+
+    Assert(HnswIsElementTuple(etup));
+    if (maxDistance != NULL && !BlockNumberIsValid(element->neighborPage)) {
+        element->version = etup->version;
+    }
+    *distance = HnswDirectVectorNegativeInnerProduct(q, etup);
+    if (maxDistance == NULL || *distance < *maxDistance) {
+        HnswLoadElementFromTuple(element, etup, true, false, (Datum)0);
+        if (element->neighborPage == element->blkno && HnswPtrIsNull(NULL, element->neighbors)) {
+            HnswPrefetchNeighborTids(element, page);
+        }
+    }
+    UnlockReleaseBuffer(buf);
+}
+
 /*
  * Load an element and optionally get its distance from q
  */
@@ -1055,6 +1298,15 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
 
     Assert(HnswIsElementTuple(etup));
+
+    /*
+     * A rejected iterative-scan candidate can remain deliberately
+     * unmaterialized.  Preserve the tuple version so ResumeScanItems can
+     * reject a slot that vacuum deleted and reused between scan iterations.
+     */
+    if (maxDistance != NULL && !BlockNumberIsValid(element->neighborPage)) {
+        element->version = etup->version;
+    }
 
     if (enableRabitQ && HnswElementTupleIsDead(etup)) {
         if (distance != NULL) {
@@ -1109,6 +1361,8 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
         } else {
             if (DatumGetPointer(*q) == NULL) {
                 *distance = 0;
+            } else if (!loadVec && !enableLsg && procinfo->fn_oid == IP_FUNC_OID) {
+                *distance = HnswDirectVectorNegativeInnerProduct(*q, etup);
             } else {
                 *distance = (float)DatumGetFloat8(FunctionCall2Coll(
                             procinfo, collation, *q, PointerGetDatum(&etup->data)));
@@ -1132,6 +1386,10 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     /* Load element */
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
         HnswLoadElementFromTuple(element, etup, true, loadVec, eRbqDiskData);
+        if (!loadVec && !enablePQ && !enableRabitQ && !enableLsg &&
+            element->neighborPage == element->blkno && HnswPtrIsNull(NULL, element->neighbors)) {
+            HnswPrefetchNeighborTids(element, page);
+        }
         if (enablePQ) {
             params = &pqinfo->params;
             Vector *vd1 = &etup->data;
@@ -1278,10 +1536,22 @@ static HnswPairingHeapNode *CreatePairingHeapNode(HnswCandidate *c)
 /*
  * Init visited
  */
-static inline void InitVisited(char *base, VisitedHash *v, Relation index, int ef, int m)
+static inline void InitVisited(char *base, VisitedHash *v, Relation index, int ef, int m, bool inserting)
 {
     if (index != NULL) {
-        v->tids = tidhash_create(CurrentMemoryContext, ef * m * 2, NULL);
+        uint32 initialSize = (uint32)ef * m * 2;
+        /*
+         * A high ef or graph degree can vastly over-size the visited set for
+         * a small index.  reltuples is only an initial allocation hint: it can
+         * be stale after inserts or VACUUM, and simplehash must still grow on
+         * demand.  Never use this estimate to limit visits or candidates.
+         * Unknown/nonpositive estimates and insertion retain the old sizing.
+         */
+        double tupleEstimate = index->rd_rel->reltuples;
+        if (!inserting && tupleEstimate > 0 && tupleEstimate < initialSize) {
+            initialSize = (uint32)ceil(tupleEstimate);
+        }
+        v->tids = tidhash_create(CurrentMemoryContext, initialSize, NULL);
     } else if (base != NULL) {
         v->offsets = offsethash_create(CurrentMemoryContext, ef * m * 2, NULL);
     } else {
@@ -1364,17 +1634,30 @@ void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int 
     int start;
     ItemPointerData indextids[HNSW_MAX_M * 2];
 
-    buf = ReadBuffer(index, element->neighborPage);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    page = BufferGetPage(buf);
-
-    ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
     start = (element->level - lc) * m;
+    HnswPrefetchedNeighborTids *prefetched = NULL;
+    if (element->hash == HNSW_PREFETCHED_NEIGHBORS_MAGIC) {
+        prefetched = (HnswPrefetchedNeighborTids *)HnswPtrAccess(NULL, element->neighbors);
+    }
+    if (prefetched != NULL && prefetched->version == element->version &&
+        prefetched->count == (element->level + 2) * m) {
+        errno_t rc = memcpy_s(indextids, sizeof(indextids),
+                              prefetched->indextids + start, lm * sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+    } else {
+        buf = ReadBuffer(index, element->neighborPage);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
 
-    /* Copy to minimize lock time */
-    memcpy(&indextids, ntup->indextids + start, lm * sizeof(ItemPointerData));
+        ntup = (HnswNeighborTuple)PageGetItem(page, PageGetItemId(page, element->neighborOffno));
 
-    UnlockReleaseBuffer(buf);
+        /* Copy to minimize lock time */
+        errno_t rc = memcpy_s(indextids, sizeof(indextids),
+                              ntup->indextids + start, lm * sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+
+        UnlockReleaseBuffer(buf);
+    }
 
     *unvisitedLength = 0;
 
@@ -1454,6 +1737,23 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
     int threshold = u_sess->datavec_ctx.hnsw_earlystop_threshold;
     bool enableEarlyStop = threshold == INT32_MAX ? false : true;
     int candidateNum = 0;
+    /* Do not look ahead across a possible early-stop or into specialized paths. */
+    bool prefetchElements = index != NULL && !inserting && !enableEarlyStop &&
+                            !enablePQ && !enableRabitQ && !enableLsg && !CanUseMmap(index) &&
+                            procinfo->fn_oid == IP_FUNC_OID && DatumGetPointer(q) != NULL &&
+                            ((Vector *)DatumGetPointer(q))->dim >= 256;
+    HnswBufferHintCache *bufferHints = prefetchElements ? HnswInitBufferHints(index) : NULL;
+    /*
+     * Iterative scans traditionally materialize every discarded element so
+     * it is ready if the executor later asks for another batch.  Most
+     * unfiltered LIMIT queries never resume, making that metadata copy pure
+     * overhead.  For the plain buffer-managed representation, keep rejected
+     * elements as block/offset/version stubs and materialize them on demand
+     * in ResumeScanItems.  Specialized encodings and mmap retain the proven
+     * eager path until they have dedicated resume coverage.
+     */
+    bool lazyDiscarded = discarded != NULL && index != NULL && !enablePQ && !enableRabitQ &&
+                         !enableLsg && !CanUseMmap(index);
 
     if (v == NULL) {
         v = &vh;
@@ -1461,7 +1761,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
     }
 
     if (initVisited) {
-        InitVisited(base, v, index, ef, m);
+        InitVisited(base, v, index, ef, m, inserting);
 
         if (discarded != NULL) {
             *discarded = pairingheap_allocate(CompareNearestDiscardedCandidates, NULL);
@@ -1530,6 +1830,15 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
             (*tuples) += unvisitedLength;
         }
 
+        Buffer prefetchedBuffers[HNSW_ELEMENT_PREFETCH_DISTANCE] = {
+            InvalidBuffer, InvalidBuffer, InvalidBuffer, InvalidBuffer
+        };
+        if (prefetchElements) {
+            for (int i = 0; i < Min(unvisitedLength, HNSW_ELEMENT_PREFETCH_DISTANCE); i++) {
+                prefetchedBuffers[i] = HnswPrefetchElementPage(index, unvisited[i], bufferHints);
+            }
+        }
+
         for (int i = 0; i < unvisitedLength; i++) {
             HnswElement eElement = unvisited[i];
             float eDistance;
@@ -1550,13 +1859,25 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 }
             } else {
                 bool vacuumVisibility;
-                if (tryMmap) {
+                if (prefetchElements) {
+                    int slot = i % HNSW_ELEMENT_PREFETCH_DISTANCE;
+                    Buffer buf = prefetchedBuffers[slot];
+                    prefetchedBuffers[slot] = InvalidBuffer;
+                    HnswLoadPrefetchedVectorElement(eElement, &eDistance, q,
+                        alwaysAdd || (discarded != NULL && !lazyDiscarded) ? NULL : &f->distance, buf);
+                    vacuumVisibility = true;
+                    int next = i + HNSW_ELEMENT_PREFETCH_DISTANCE;
+                    if (next < unvisitedLength) {
+                        prefetchedBuffers[slot] = HnswPrefetchElementPage(index, unvisited[next], bufferHints);
+                    }
+                } else if (tryMmap) {
                     vacuumVisibility = MmapLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ, rbqParams,
+                                    alwaysAdd || (discarded != NULL && !lazyDiscarded) ? NULL : &f->distance,
+                                    enableRabitQ, rbqParams,
                                     rbqDiskParams, NULL, enablePQ, pqinfo);
                 } else {
                     vacuumVisibility = HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                    alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ,
+                                    alwaysAdd || (discarded != NULL && !lazyDiscarded) ? NULL : &f->distance, enableRabitQ,
                                     rbqParams, rbqDiskParams, NULL, enablePQ, pqinfo, enableLsg);
                 }
                 if (enableRabitQ && !vacuumVisibility) {
@@ -1593,7 +1914,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 if (CountElement(base, skipElement, eElement)) {
                     wlen++;
 
-                   /* No need to decrement wlen */
+                    /* No need to decrement wlen */
                     if (wlen > ef) {
                         HnswCandidate *d = HnswGetPairingHeapCandidate(w_node, pairingheap_remove_first(W));
                         candidateNum--;
@@ -1620,6 +1941,11 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
 
             if (enableEarlyStop && vNum == threshold) {
                 break;
+            }
+        }
+        for (int i = 0; i < HNSW_ELEMENT_PREFETCH_DISTANCE; i++) {
+            if (BufferIsValid(prefetchedBuffers[i])) {
+                ReleaseBuffer(prefetchedBuffers[i]);
             }
         }
     }

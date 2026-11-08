@@ -1,0 +1,219 @@
+-- Stream workers must inherit BM25 scoring and initial-batch session GUCs.
+SET client_min_messages = error;
+\pset format unaligned
+CREATE EXTENSION IF NOT EXISTS ogai;
+CREATE TABLE hybrid_bm25_worker_guc_docs (
+    id int PRIMARY KEY, content text NOT NULL, embedding vector(4) NOT NULL
+);
+INSERT INTO hybrid_bm25_worker_guc_docs
+SELECT i, repeat('database ', 1 + (i * 7) % 17)
+          || repeat('kernel ', 1 + (i * 11) % 13)
+          || repeat('memory ', 1 + (i * 13) % 101),
+       ('[' || (i::float8 / 200) || ',1,0.5,0.25]')::vector
+FROM generate_series(1,200) AS i;
+CREATE INDEX hybrid_bm25_worker_guc_text ON hybrid_bm25_worker_guc_docs USING bm25(content);
+CREATE INDEX hybrid_bm25_worker_guc_vec ON hybrid_bm25_worker_guc_docs USING hnsw(embedding vector_cosine_ops);
+ANALYZE hybrid_bm25_worker_guc_docs;
+SET enable_hybrid_recall = on;
+SET hnsw_ef_search = 400;
+CREATE FUNCTION hybrid_bm25_worker_guc_ids(run_mode text, batch int, k1 float8,
+                                          b float8, cache_mode text)
+RETURNS int[] AS $$
+DECLARE
+    result_ids int[] := ARRAY[]::int[];
+    item record;
+BEGIN
+    PERFORM set_config('hybrid_recall_parallel_mode', run_mode, false);
+    PERFORM set_config('bm25_topk', batch::text, false);
+    PERFORM set_config('bm25_k1', k1::text, false);
+    PERFORM set_config('bm25_b', b::text, false);
+    PERFORM set_config('plan_cache_mode', cache_mode, false);
+    EXECUTE 'PREPARE hybrid_bm25_worker_stmt(text,vector) AS
+        SELECT id FROM hybrid_bm25_worker_guc_docs
+        ORDER BY ogai.hybrid_rrf_marker(id,content,embedding,$1,$2,
+            ''{"text_candidates":60,"vector_candidates":60,"rrf_k":60,"weights":[1,0]}''::jsonb)
+        DESC LIMIT 10';
+    FOR item IN EXECUTE 'EXECUTE hybrid_bm25_worker_stmt(''database kernel'', ''[0.1,1,0.5,0.25]''::vector)'
+    LOOP
+        result_ids := array_append(result_ids, item.id);
+    END LOOP;
+    EXECUTE 'DEALLOCATE hybrid_bm25_worker_stmt';
+    RETURN result_ids;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION hybrid_bm25_worker_guc_check()
+RETURNS TABLE(check_name text, passed boolean) AS $$
+DECLARE
+    cache_mode text;
+    cfg int;
+    batch int;
+    k1 float8;
+    b float8;
+    serial_ids int[];
+    default_ids int[];
+    comparisons int := 0;
+    mismatches int := 0;
+    parameter_effect boolean := false;
+    run_mode text;
+BEGIN
+    FOREACH cache_mode IN ARRAY ARRAY['force_custom_plan','force_generic_plan'] LOOP
+        default_ids := hybrid_bm25_worker_guc_ids('off',5,1.2,0.75,cache_mode);
+        FOR cfg IN 1..4 LOOP
+            batch := CASE WHEN cfg = 1 THEN 5 ELSE 60 END;
+            k1 := CASE WHEN cfg = 3 THEN 2.5 ELSE 1.2 END;
+            b := CASE WHEN cfg = 4 THEN 0.0 ELSE 0.75 END;
+            serial_ids := hybrid_bm25_worker_guc_ids('off',batch,k1,b,cache_mode);
+            parameter_effect := parameter_effect OR serial_ids <> default_ids;
+            FOREACH run_mode IN ARRAY ARRAY['auto','vector','force'] LOOP
+                comparisons := comparisons + 1;
+                IF serial_ids <> hybrid_bm25_worker_guc_ids(run_mode,batch,k1,b,cache_mode) THEN
+                    mismatches := mismatches + 1;
+                END IF;
+            END LOOP;
+        END LOOP;
+    END LOOP;
+    RETURN QUERY SELECT '24 ordered mode comparisons', comparisons = 24 AND mismatches = 0;
+    RETURN QUERY SELECT 'nondefault parameters affect ranks', parameter_effect;
+END;
+$$ LANGUAGE plpgsql;
+SELECT * FROM hybrid_bm25_worker_guc_check();
+check_name|passed
+24 ordered mode comparisons|t
+nondefault parameters affect ranks|t
+(2 rows)
+-- A worker error must not become successful EOF for the polling consumer.
+CREATE FUNCTION hybrid_worker_error_mode(run_mode text, cache_mode text)
+RETURNS boolean AS $$
+DECLARE
+    caught boolean := false;
+    ids int[];
+BEGIN
+    PERFORM set_config('hybrid_recall_parallel_mode', run_mode, false);
+    PERFORM set_config('plan_cache_mode', cache_mode, false);
+    EXECUTE 'PREPARE hybrid_worker_error_stmt(text,vector) AS
+        SELECT id FROM hybrid_bm25_worker_guc_docs
+        ORDER BY ogai.hybrid_rrf_marker(id,content,embedding,$1,$2,
+            ''{"text_candidates":60,"vector_candidates":60,"rrf_k":60,"weights":[1,1]}''::jsonb)
+        DESC LIMIT 10';
+    BEGIN
+        EXECUTE 'EXECUTE hybrid_worker_error_stmt(''database kernel'', ''[1,2]''::vector)';
+    EXCEPTION WHEN SQLSTATE '22000' THEN
+        caught := true;
+    END;
+    EXECUTE 'DEALLOCATE hybrid_worker_error_stmt';
+    ids := hybrid_bm25_worker_guc_ids(run_mode,60,1.2,0.75,cache_mode);
+    RETURN caught AND array_length(ids,1) = 10;
+END;
+$$ LANGUAGE plpgsql;
+SELECT bool_and(hybrid_worker_error_mode(run_mode,cache_mode)) AS worker_error_and_recovery
+FROM unnest(ARRAY['off','auto','vector','force']) AS run_mode,
+     unnest(ARRAY['force_custom_plan','force_generic_plan']) AS cache_mode;
+worker_error_and_recovery
+t
+(1 row)
+DROP FUNCTION hybrid_worker_error_mode(text,text);
+-- Fresh custom/generic plans must see search work, not just output caps.
+CREATE FUNCTION hybrid_search_cost(run_mode text, search_ef int, cache_mode text, filtered boolean)
+RETURNS float8 AS $$
+DECLARE
+    line text;
+    result_cost float8;
+BEGIN
+    PERFORM set_config('hybrid_recall_parallel_mode', run_mode, false);
+    PERFORM set_config('hnsw_ef_search', search_ef::text, false);
+    PERFORM set_config('plan_cache_mode', cache_mode, false);
+    EXECUTE 'PREPARE hybrid_cost_stmt(text,vector) AS
+        SELECT id FROM hybrid_bm25_worker_guc_docs ' ||
+        CASE WHEN filtered THEN 'WHERE id % 2 = 0 ' ELSE '' END ||
+        'ORDER BY ogai.hybrid_rrf_marker(id,content,embedding,$1,$2,
+            ''{"text_candidates":60,"vector_candidates":60,"rrf_k":60,"weights":[1,1]}''::jsonb)
+        DESC LIMIT 10';
+    FOR line IN EXECUTE 'EXPLAIN EXECUTE hybrid_cost_stmt(''database kernel'', ''[0.1,1,0.5,0.25]''::vector)'
+    LOOP
+        IF line LIKE '%Hybrid Recall%cost=%' THEN
+            result_cost := split_part(split_part(split_part(line,'cost=',2),'..',2),' ',1)::float8;
+        END IF;
+    END LOOP;
+    EXECUTE 'DEALLOCATE hybrid_cost_stmt';
+    RETURN result_cost;
+END;
+$$ LANGUAGE plpgsql;
+SELECT cache_mode,
+       hybrid_search_cost('off',160,cache_mode,false) >
+           hybrid_search_cost('off',40,cache_mode,false) AS ef_increases_cost,
+       hybrid_search_cost('force',160,cache_mode,false) >
+           hybrid_search_cost('vector',160,cache_mode,false) AS two_workers_cost_more,
+       hybrid_search_cost('off',160,cache_mode,true) =
+           hybrid_search_cost('off',40,cache_mode,true) AS unmodelled_filter_fallback
+FROM unnest(ARRAY['force_custom_plan','force_generic_plan']) AS cache_mode;
+cache_mode|ef_increases_cost|two_workers_cost_more|unmodelled_filter_fallback
+force_custom_plan|t|t|t
+force_generic_plan|t|t|t
+(2 rows)
+DROP FUNCTION hybrid_search_cost(text,int,text,boolean);
+-- Worker-local rank-only opt-in must preserve payload/RRF, small-batch
+-- expansion and cached execution. Filtered branches must retain the original
+-- score-key path. Interleaved ordinary BM25 still needs its raw scores.
+CREATE FUNCTION hybrid_worker_payload(run_mode text, cache_mode text, filtered boolean)
+RETURNS text[] AS $$
+DECLARE
+    result_rows text[] := ARRAY[]::text[];
+    item record;
+    iteration int;
+    positive_scores boolean;
+BEGIN
+    PERFORM set_config('hybrid_recall_parallel_mode',run_mode,false);
+    PERFORM set_config('plan_cache_mode',cache_mode,false);
+    PERFORM set_config('bm25_topk','5',false);
+    EXECUTE 'PREPARE hybrid_payload_worker_stmt(text,vector,bigint) AS
+        SELECT id,content,ogai.hybrid_rrf_marker(id,content,embedding,$1,$2,
+            ''{"text_candidates":60,"vector_candidates":60,"rrf_k":60,"weights":[1,1]}''::jsonb)
+            AS fusion_score FROM hybrid_bm25_worker_guc_docs ' ||
+        CASE WHEN filtered THEN 'WHERE id % 3 = 0 ' ELSE '' END ||
+        'ORDER BY fusion_score DESC LIMIT $3';
+    FOR iteration IN 1..4 LOOP
+        FOR item IN EXECUTE 'EXECUTE hybrid_payload_worker_stmt(' ||
+            quote_literal(CASE WHEN iteration % 2 = 0 THEN 'memory kernel' ELSE 'database' END) ||
+            ',''[0.1,1,0.5,0.25]''::vector,' || (5 + iteration)::text || ')'
+        LOOP
+            result_rows := array_append(result_rows, row(item.id,item.content,item.fusion_score)::text);
+        END LOOP;
+        PERFORM set_config('enable_seqscan','off',false);
+        SELECT count(*) = 10 AND bool_and(score > 0) INTO positive_scores
+        FROM (SELECT content <&> 'database' AS score FROM hybrid_bm25_worker_guc_docs
+              ORDER BY content <&> 'database' DESC LIMIT 10) AS scores;
+        PERFORM set_config('enable_seqscan','on',false);
+        IF NOT positive_scores THEN
+            RAISE EXCEPTION 'ordinary BM25 raw scores were lost';
+        END IF;
+    END LOOP;
+    EXECUTE 'DEALLOCATE hybrid_payload_worker_stmt';
+    RETURN result_rows;
+END;
+$$ LANGUAGE plpgsql;
+SELECT cache_mode,filtered,
+       hybrid_worker_payload('off',cache_mode,filtered) =
+           hybrid_worker_payload('auto',cache_mode,filtered) AS auto_same,
+       hybrid_worker_payload('off',cache_mode,filtered) =
+           hybrid_worker_payload('vector',cache_mode,filtered) AS vector_same,
+       hybrid_worker_payload('off',cache_mode,filtered) =
+           hybrid_worker_payload('force',cache_mode,filtered) AS force_same
+FROM unnest(ARRAY['force_custom_plan','force_generic_plan']) AS cache_mode,
+     unnest(ARRAY[false,true]) AS filtered;
+cache_mode|filtered|auto_same|vector_same|force_same
+force_custom_plan|f|t|t|t
+force_custom_plan|t|t|t|t
+force_generic_plan|f|t|t|t
+force_generic_plan|t|t|t|t
+(4 rows)
+DROP FUNCTION hybrid_worker_payload(text,text,boolean);
+RESET hybrid_recall_parallel_mode;
+RESET enable_hybrid_recall;
+RESET hnsw_ef_search;
+RESET bm25_topk;
+RESET bm25_k1;
+RESET bm25_b;
+RESET plan_cache_mode;
+DROP FUNCTION hybrid_bm25_worker_guc_check();
+DROP FUNCTION hybrid_bm25_worker_guc_ids(text,int,float8,float8,text);
+DROP TABLE hybrid_bm25_worker_guc_docs;

@@ -1786,6 +1786,45 @@ static Limit* _copyLimit(const Limit* from)
 }
 
 /*
+ * _copyHybridRecall
+ *
+ * [P0-2] HybridRecall fusion parent (hybrid recall design doc §6.2).
+ * Branch plans travel in plan.lefttree/righttree and are deep-copied by
+ * CopyPlanFields. No workingVersionNum gate: the node type cannot occur
+ * in plans produced by older binaries, and V1 is single-node so the plan
+ * is never shipped cross-version; mixed-version gating is tracked as a
+ * P3-6 requirement (design doc §19.2).
+ */
+static HybridRecall* _copyHybridRecall(const HybridRecall* from)
+{
+    HybridRecall* newnode = makeNode(HybridRecall);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((const Plan*)from, (Plan*)newnode);
+
+    /*
+     * copy remainder of node
+     */
+    COPY_SCALAR_FIELD(id_resno);
+    COPY_SCALAR_FIELD(text_score_resno);
+    COPY_SCALAR_FIELD(vector_distance_resno);
+    COPY_NODE_FIELD(final_topk);
+    COPY_NODE_FIELD(text_candidates);
+    COPY_NODE_FIELD(vector_candidates);
+    COPY_SCALAR_FIELD(fusion);
+    COPY_SCALAR_FIELD(rrf_k);
+    COPY_SCALAR_FIELD(text_weight);
+    COPY_SCALAR_FIELD(vector_weight);
+    COPY_SCALAR_FIELD(parallel_branches);
+    COPY_SCALAR_FIELD(require_parallel);
+    COPY_NODE_FIELD(recheck_quals);
+
+    return newnode;
+}
+
+/*
  * _copyNestLoopParam
  */
 static NestLoopParam* _copyNestLoopParam(const NestLoopParam* from)
@@ -2321,6 +2360,10 @@ static VecStream* _copyVecStream(const VecStream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers (design doc §5.3) */
+    COPY_SCALAR_FIELD(is_task_parallel);
+    COPY_SCALAR_FIELD(task_group_id);
+    COPY_SCALAR_FIELD(task_branch_id);
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif
@@ -2448,6 +2491,10 @@ static Stream* _copyStream(const Stream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
+    /* [P1-1] HybridRecall task-parallel markers (design doc §5.3) */
+    COPY_SCALAR_FIELD(is_task_parallel);
+    COPY_SCALAR_FIELD(task_group_id);
+    COPY_SCALAR_FIELD(task_branch_id);
 #ifdef USE_SPQ
     COPY_SCALAR_FIELD(streamID);
 #endif
@@ -8483,6 +8530,9 @@ void* copyObject(const void* from)
             break;
         case T_Limit:
             retval = _copyLimit((Limit*)from);
+            break;
+        case T_HybridRecall:
+            retval = _copyHybridRecall((HybridRecall*)from);
             break;
         case T_NestLoopParam:
             retval = _copyNestLoopParam((NestLoopParam*)from);

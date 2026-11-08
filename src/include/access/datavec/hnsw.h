@@ -35,6 +35,17 @@
 #include "access/datavec/rabitq.h"
 #include "access/datavec/hnswlsg.h"
 
+/* One lazy cache per pooled Stream thread; never a session/scan object cache. */
+typedef struct HnswWorkerCache {
+    MemoryContext scratchOwner;
+    MemoryContext scratchIdle;
+    struct HnswWorkerScratchLease *scratchLease;
+    uint64 scratchSession;
+    struct HnswBufferHintCache *bufferHints;
+} HnswWorkerCache;
+
+HnswWorkerCache *HnswGetWorkerCache();
+
 /* Hash tables */
 typedef struct TidHashEntry {
     ItemPointerData tid;
@@ -668,6 +679,7 @@ typedef struct HnswScanOpaqueData {
     int64 tuples;
     double previousDistance;
     MemoryContext tmpCtx;
+    bool reuseTmpCtx;
 
     /* Support functions */
     FmgrInfo *procinfo;

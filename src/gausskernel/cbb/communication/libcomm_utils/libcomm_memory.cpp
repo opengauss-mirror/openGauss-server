@@ -51,12 +51,14 @@
 #include "libpq/auth.h"
 #include "libpq/pqsignal.h"
 #include "storage/ipc.h"
+#include "storage/barrier.h"
 #include "utils/ps_status.h"
 #include "utils/dynahash.h"
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
 #include "executor/exec/execStream.h"
+#include "executor/exec/localStreamPoll.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -255,7 +257,7 @@ void gs_memory_send(
         int n = tupleVec->tuplePointer;
         ExecCopySlot(tupleVec->tupleVector[n], tuple);
         tupleVec->tuplePointer++;
-        if (TupleVectorMaxSize == tupleVec->tuplePointer) {
+        if (sharedContext->tupleBatchSize == tupleVec->tuplePointer) {
             ready_to_send = true;
         }
     }
@@ -388,8 +390,19 @@ char gs_find_memory_data(StreamState* node, int* waitnode_count)
 
         /* Update scan location. */
         node->sharedContext->scanLoc[u_sess->stream_cxt.smp_id] = i;
-        dataStatus = node->sharedContext->dataStatus[u_sess->stream_cxt.smp_id][i];
+        /*
+         * Observe completion before inspecting the queue. A producer can
+         * publish its last batch and finish between these two loads. Reading
+         * DATA_EMPTY first would then combine an old empty queue with a new
+         * end flag and return EOF with unread tuples still in shared memory.
+         *
+         * Pair with the publication barrier in gs_memory_send_finish(): once
+         * completion is visible, inspect the final queue/message state. If
+         * completion was not yet visible, this scan cannot declare EOF.
+         */
         is_conn_end = node->sharedContext->is_connect_end[u_sess->stream_cxt.smp_id][i];
+        pg_read_barrier();
+        dataStatus = node->sharedContext->dataStatus[u_sess->stream_cxt.smp_id][i];
 
         if (!is_conn_end) {
             finished = false;
@@ -530,6 +543,30 @@ bool gs_memory_recv(StreamState* node)
 }
 
 /*
+ * Inspect a local Stream once without waiting on its per-stream semaphore.
+ * This is intentionally separate from gs_memory_recv(): normal single-input
+ * consumers retain the established blocking behavior, while a multi-input
+ * consumer can poll every input and avoid blocking a ready peer Stream.
+ */
+StreamPollStatus gs_memory_poll(StreamState* node)
+{
+    int waitnode_count = 0;
+
+    if (!node->sharedContext->vectorized && gs_return_tuple(node))
+        return STREAM_POLL_DATA;
+
+    if (executorEarlyStop())
+        return STREAM_POLL_FINISH;
+
+    char result = gs_find_memory_data(node, &waitnode_count);
+    if (result == STREAM_SCAN_DATA)
+        return STREAM_POLL_DATA;
+    if (result == STREAM_SCAN_FINISH)
+        return STREAM_POLL_FINISH;
+    return STREAM_POLL_WAIT;
+}
+
+/*
  * @Description: Inform all related consuemrs that there is no more data to send.
  *
  * @param[IN] sharedContext: context for shared memory stream
@@ -540,10 +577,8 @@ void gs_memory_send_finish(StreamSharedContext* sharedContext, int connNum)
     struct hash_entry* entry = NULL;
 
     for (int i = 0; i < connNum; i++) {
-#ifdef __aarch64__
-    pg_memory_barrier();
-#endif
-        /* Set flags. */
+        /* Publish the final batch/messages before the completion flag. */
+        pg_write_barrier();
         sharedContext->is_connect_end[i][u_sess->stream_cxt.smp_id] = true;
 
         /* send signal */
@@ -579,4 +614,3 @@ void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int c
         entry->_signal();
     }
 }
-

@@ -1459,6 +1459,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     errno_t rc;
 
     storage_cxt->latestObservedXid = InvalidTransactionId;
+    storage_cxt->hnsw_worker_cache = NULL;
     storage_cxt->CurrentRunningXacts = (RunningTransactionsData*)palloc0(sizeof(RunningTransactionsData));
     storage_cxt->proc_vxids = NULL;
     storage_cxt->xminArray = NULL;

@@ -1,0 +1,129 @@
+=== P2-4 PLAN: HIDDEN FILTER PAYLOAD ON BOTH BRANCHES ===
+ enable_seqscan
+----------------
+ on
+(1 row)
+
+                                                       QUERY PLAN
+-------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: id, (0::double precision)
+   ->  Hybrid Recall
+         Output: id, 0::double precision
+         ->  Streaming(type: LOCAL GATHER)
+               Output: id, ((content <&> 'database'::text)), tenant_id, title
+               ->  Limit
+                     Output: id, ((content <&> 'database'::text)), tenant_id, title
+                     ->  Index Scan using hrd_bm25_idx on public.hybrid_recall_docs
+                           Output: id, (content <&> 'database'::text), tenant_id, title
+                           Order By: (hybrid_recall_docs.content <&> 'database'::text)
+                           Filter: ((hybrid_recall_docs.title ~~ 'doc-2%'::text) AND (hybrid_recall_docs.tenant_id = 1))
+         ->  Streaming(type: LOCAL GATHER)
+               Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id, title
+               ->  Limit
+                     Output: id, ((embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)), tenant_id, title
+                     ->  Ann Index Scan using hrd_hnsw_idx on public.hybrid_recall_docs
+                           Output: id, (embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector), tenant_id, title
+                           Order By: (hybrid_recall_docs.embedding <=> '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector)
+                           Filter Mode: Post-Filter
+                           Filter: ((hybrid_recall_docs.title ~~ 'doc-2%'::text) AND (hybrid_recall_docs.tenant_id = 1))
+(21 rows)
+
+Output format is unaligned.
+Showing only tuples.
+SET
+RESET
+=== P2-4 NATIVE FILTERED TOP-5 ===
+245|.0161332292479833
+205|.0154430981230696
+265|.0151654411764706
+225|.014821272885789
+285|.0141858141858142
+=== P2-4 SERIAL FILTERED TOP-5 ===
+245|.0161332292479833
+205|.0154430981230696
+265|.0151654411764706
+225|.014821272885789
+285|.0141858141858142
+P2_4_SERIAL_MATCH=ok
+Output format is aligned.
+Tuples only is off.
+=== P2-4 CANDIDATE COUNT BELOW FINAL K ===
+ id  |       score
+-----+-------------------
+ 245 | .0163934426229508
+(1 row)
+
+ id | score
+----+-------
+(0 rows)
+
+=== P2-4 CACHED PLAN RECHECK MAPPING ===
+PREPARE
+ id  |       score
+-----+-------------------
+ 245 | .0161332292479833
+ 205 | .0154430981230696
+ 265 | .0151654411764706
+ 225 |  .014821272885789
+ 285 | .0141858141858142
+(5 rows)
+
+ id  |       score
+-----+-------------------
+ 245 | .0161332292479833
+ 205 | .0154430981230696
+ 265 | .0151654411764706
+ 225 |  .014821272885789
+ 285 | .0141858141858142
+(5 rows)
+
+DEALLOCATE
+=== P2-4 UNSAFE FILTERS MUST NOT PARALLELIZE ===
+                                                                                                  QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+   ->  Sort
+         Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+         Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_docs.id, hybrid_recall_docs.content, hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+         ->  Seq Scan on public.hybrid_recall_docs
+               Output: id, ogai.hybrid_rrf_marker(id, content, embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)
+               Filter: (hybrid_recall_docs.tenant_id = (floor((random() * 4::double precision)))::integer)
+(8 rows)
+
+                                                                                                                          QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: public.hybrid_recall_docs.id, (ogai.hybrid_rrf_marker(public.hybrid_recall_docs.id, public.hybrid_recall_docs.content, public.hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: min(public.hybrid_recall_docs.tenant_id)
+           ->  Seq Scan on public.hybrid_recall_docs
+                 Output: public.hybrid_recall_docs.id, public.hybrid_recall_docs.tenant_id, public.hybrid_recall_docs.title, public.hybrid_recall_docs.content, public.hybrid_recall_docs.embedding
+   ->  Sort
+         Output: public.hybrid_recall_docs.id, (ogai.hybrid_rrf_marker(public.hybrid_recall_docs.id, public.hybrid_recall_docs.content, public.hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+         Sort Key: (ogai.hybrid_rrf_marker(public.hybrid_recall_docs.id, public.hybrid_recall_docs.content, public.hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+         ->  Seq Scan on public.hybrid_recall_docs
+               Output: public.hybrid_recall_docs.id, ogai.hybrid_rrf_marker(public.hybrid_recall_docs.id, public.hybrid_recall_docs.content, public.hybrid_recall_docs.embedding, 'database'::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)
+               Filter: (public.hybrid_recall_docs.tenant_id = $0)
+(13 rows)
+
+                                                                                                  QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, (random())::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+   ->  Sort
+         Output: id, (ogai.hybrid_rrf_marker(id, content, embedding, (random())::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb))
+         Sort Key: (ogai.hybrid_rrf_marker(hybrid_recall_docs.id, hybrid_recall_docs.content, hybrid_recall_docs.embedding, (random())::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)) DESC
+         ->  Seq Scan on public.hybrid_recall_docs
+               Output: id, ogai.hybrid_rrf_marker(id, content, embedding, (random())::text, '[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]'::vector, '{}'::jsonb)
+               Filter: (hybrid_recall_docs.tenant_id = 1)
+(8 rows)
+
+ enable_seqscan
+----------------
+ on
+(1 row)
+
+total time: 10265  ms

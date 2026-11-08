@@ -868,6 +868,10 @@ extern size_t GetHashMemoryLimit(void);
 #endif
 
 #define UPSERT_ROW_STORE_VERSION_NUM 92073 /* Version control for UPSERT */
+
+/* [P1-1] Version control for HybridRecall task-stream fields on the Stream
+ * plan node (is_task_parallel/task_group_id/task_branch_id). */
+#define HYBRID_RECALL_VERSION_NUM 93100
 #ifdef ENABLE_NEON
 extern void InitStandaloneProcess(const char* argv0);
 #endif
