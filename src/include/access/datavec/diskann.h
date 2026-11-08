@@ -41,6 +41,13 @@
 #define DISKANN_MAGIC_NUMBER 0x14FF1A7
 #define DISKANN_PAGE_ID 0xFF84
 
+/* All formats use MVCC-safe deferred deletion, including legacy v1. */
+bool DiskAnnIndexUsesDeferredDelete(Relation index);
+
+/* Executor requests complete candidate batches before publishing sorted rows. */
+bool diskann_advance_ordered_batch(struct IndexScanDescData* scan);
+bool diskann_orderby_vector_matches(struct IndexScanDescData* scan, Datum value);
+
 /* Support functions */
 #define DISKANN_DISTANCE_PROC 1
 #define DISKANN_NORM_PROC 2
@@ -102,6 +109,7 @@ typedef struct BlockNumberHashEntry {
 #define DiskAnnBench(name, code) (code)
 #endif
 
+
 #define DiskAnnPageGetMeta(page) ((DiskAnnMetaPageData*)PageGetContents(page))
 #define DiskAnnPageGetNode(itup) ((DiskAnnNodePage)((char*)(itup) + IndexTupleSize(itup)))
 #define DiskAnnPageGetOpaque(page) ((DiskAnnPageOpaque)PageGetSpecialPointer(page))
@@ -146,6 +154,8 @@ struct Neighbor {
     bool expanded;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
     uint8 heaptidsLength;
+    /* Captured with the final distance and TID list under one page lock. */
+    ItemPointerData vectorTid;
 
     Neighbor() = default;
 
@@ -318,7 +328,7 @@ struct DiskAnnGraphStore : public BaseObject {
     void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
     void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const;
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
-    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
+    bool AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, const Vector* vector, bool building);
     bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
     void Clear() const;
 
@@ -468,9 +478,32 @@ struct DiskAnnIdxScanData {
     float distance;
 };
 
+/* Provenance is deliberately independent of output readiness and quality.
+ * A numeric value alone cannot tell whether it came from the graph-search
+ * estimate, PQ, or the final full-vector distance. */
+enum DiskAnnDistanceSource {
+    DISKANN_DISTANCE_UNKNOWN = 0,
+    DISKANN_DISTANCE_SEARCH_ESTIMATE,
+    DISKANN_DISTANCE_PQ_ESTIMATE,
+    DISKANN_DISTANCE_FULL_INTERNAL
+};
+
 struct DiskAnnCandidatesData {
     BlockNumber id;
     ItemPointerData heapTid;
+    /*
+     * [P1-7] Exact distance carried with the candidate so gettuple can fill
+     * xs_orderbyvals and the executor can verify ORDER BY monotonicity
+     * (design doc 9.4/16.2). Stored as double; the producing GetDistance
+     * is float today - a full double rerank is a separate change.
+     */
+    double distance;
+    double outputDistance;
+    bool outputDistanceReady;
+    bool heapRecheck;
+    AnnOrderByDistanceQuality outputQuality;
+    DiskAnnDistanceSource distanceSource;
+    uint64 outputEpoch;
     bool operator==(const DiskAnnCandidatesData &other) const
     {
         return this->id == other.id && this->heapTid == other.heapTid;
@@ -479,6 +512,7 @@ struct DiskAnnCandidatesData {
 
 struct DiskAnnScanOpaqueData {
     Relation rel;
+    IndexScanDesc scan;
     MemoryContext tmpCtx;
     uint32_t nodeSize;
     uint32_t nexpextedCandidates;
@@ -490,6 +524,7 @@ struct DiskAnnScanOpaqueData {
     Datum value;
     double querySqrSum;
     bool delSearch;
+    bool orderedBatch;
 
     FmgrInfo *procinfo;
     FmgrInfo *normprocinfo;
@@ -497,6 +532,10 @@ struct DiskAnnScanOpaqueData {
 
     bool enablePQ;
     DiskPQParams params;
+
+    /* Monotonically advances on rescan; tags every published row value. */
+    uint64 scanEpoch;
+    uint64 rowToken;
 
     blockhash_hash *blocks;
     VectorList<BlockNumber> frozenBlks;
@@ -625,7 +664,8 @@ void diskannendscan_internal(IndexScanDesc scan);
 void diskannsearch(DiskAnnScanOpaque so);
 bool IsMarkDeleted(Relation index, BlockNumber master);
 void SearchFixedPoint(DiskAnnScanOpaque so);
-float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, uint8* heaptidsLength);
+float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids,
+                  uint8* heaptidsLength, ItemPointer vectorTid = NULL);
 int CmpIdxScanData(const void *a, const void *b);
 Neighbor *GetNextNeighbor(NeighborPriorityQueue* queue, size_t *idx);
 VamanaVertexNbIterator *CreateIterator(BlockNumber blk, DiskAnnScanOpaque so, uint32_t infoFlag);
@@ -697,4 +737,3 @@ void LoadPQInfo(Relation index, dataT *&data, BlockNumber startBlkno, uint16 nbl
 }
 
 #endif
-

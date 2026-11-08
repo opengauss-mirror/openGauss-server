@@ -1,0 +1,212 @@
+-- DiskANN: ordered candidate publication, MVCC deletion and recycled TIDs.
+SET client_min_messages = warning;
+DROP SCHEMA IF EXISTS ann_reuse_lifecycle CASCADE;
+CREATE SCHEMA ann_reuse_lifecycle;
+SET search_path = ann_reuse_lifecycle, public;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_expr_fusion = off;
+SET diskann_probes = 128;
+
+-- Execute the tested SELECT independently: a surrounding CTAS/aggregate
+-- must not change the optimizer's distance-consumer safety decision.
+CREATE FUNCTION capture(q text) RETURNS SETOF record AS $$
+BEGIN
+    RETURN QUERY EXECUTE q;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION capture_order(q text)
+RETURNS TABLE(pos integer, id integer, distance float8, heap_distance float8) AS $$
+DECLARE r record; n integer := 0;
+BEGIN
+    FOR r IN EXECUTE q LOOP
+        n := n + 1;
+        pos := n; id := r.id; distance := r.distance; heap_distance := r.heap_distance;
+        RETURN NEXT;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE delta_t(id integer, title text, embedding vector(4));
+INSERT INTO delta_t VALUES
+ (1,'a','[10000,20000,30000,40000]'),(2,'b','[10001,20000,30000,40000]'),
+ (3,'c','[10002,20000,30000,40000]'),(4,'d','[10000,20001,30000,40000]'),
+ (5,'e','[100000,200000,300000,400000]'),(6,'f','[10,20,30,40]'),
+ (7,'g','[10.00001,20,30,40]'),(8,'h','[10.00002,20,30,40]'),
+ (9,'i','[10,20.00001,30,40]'),(10,'j','[10020,20000,30000,40000]'),
+ (11,'k','[10032,20000,30000,40000]'),(12,'l','[10045,20000,30000,40000]');
+CREATE INDEX delta_idx ON delta_t USING diskann(embedding vector_l2_ops) WITH(index_size=16);
+ANALYZE delta_t;
+
+SET ann_orderby_distance_reuse = off;
+CREATE TEMP TABLE ordered_off AS SELECT * FROM capture_order($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id, embedding <-> '[10000,20000,30000,40000]'::vector AS distance,
+ l2_distance(embedding,'[10000,20000,30000,40000]'::vector) AS heap_distance
+ FROM delta_t WHERE id>0 ORDER BY distance LIMIT 10$q$);
+SET ann_orderby_distance_reuse = l2;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT /*+ indexscan(delta_t delta_idx) */ id FROM delta_t WHERE id>0
+ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
+CREATE TEMP TABLE ordered_l2 AS SELECT * FROM capture_order($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id, embedding <-> '[10000,20000,30000,40000]'::vector AS distance,
+ l2_distance(embedding,'[10000,20000,30000,40000]'::vector) AS heap_distance
+ FROM delta_t WHERE id>0 ORDER BY distance LIMIT 10$q$);
+SET enable_expr_fusion = on;
+CREATE TEMP TABLE ordered_fused AS SELECT * FROM capture_order($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id, embedding <-> '[10000,20000,30000,40000]'::vector AS distance,
+ l2_distance(embedding,'[10000,20000,30000,40000]'::vector) AS heap_distance
+ FROM delta_t WHERE id>0 ORDER BY distance LIMIT 10$q$);
+SET enable_expr_fusion = off;
+SELECT mode, count(*) AS rows,
+       sum(CASE WHEN distance<previous THEN 1 ELSE 0 END) AS inversions,
+       sum(CASE WHEN float8send(distance) IS DISTINCT FROM float8send(heap_distance) THEN 1 ELSE 0 END) AS wrong_values
+FROM (SELECT mode,distance,heap_distance,lag(distance) OVER(PARTITION BY mode ORDER BY pos) AS previous
+      FROM (SELECT 'off' AS mode,* FROM ordered_off UNION ALL
+            SELECT 'l2',* FROM ordered_l2 UNION ALL SELECT 'fused',* FROM ordered_fused) a) b
+GROUP BY mode ORDER BY mode;
+
+-- The private sorter must preserve heap system columns and defer projection.
+CREATE TEMP TABLE system_columns AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id,ctid,tableoid,xmin
+ FROM delta_t WHERE id>0 ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10$q$)
+ AS r(id integer,tid tid,rel oid,insert_xid xid);
+SELECT count(*) AS system_column_rows,
+       sum(CASE WHEN r.tid=t.ctid AND r.rel=t.tableoid AND r.insert_xid=t.xmin THEN 0 ELSE 1 END) AS wrong_system_columns
+FROM system_columns r JOIN delta_t t ON t.id=r.id;
+
+-- A narrow first beam can contain only rows rejected by the post-filter.
+SET diskann_probes = 1;
+SELECT /*+ indexscan(delta_t delta_idx) */ id FROM delta_t WHERE id=5
+ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 1;
+SET diskann_probes = 128;
+
+CREATE SEQUENCE qual_calls;
+CREATE TEMP TABLE qualified_once AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id FROM delta_t
+ WHERE nextval('qual_calls')>0 ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10$q$)
+ AS r(id integer);
+SELECT count(*) AS qualified_rows FROM qualified_once;
+SELECT last_value=(SELECT count(*) FROM delta_t) AS qual_evaluated_once FROM qual_calls;
+
+-- Candidate collection must not execute projections discarded by LIMIT.
+CREATE SEQUENCE projection_calls;
+CREATE TEMP TABLE projected_once AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id,nextval('projection_calls')::bigint AS call_no
+ FROM delta_t WHERE id>0 ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 1$q$)
+ AS r(id integer,call_no bigint);
+SELECT last_value=1 AS projection_only_for_emitted_row FROM projection_calls;
+
+-- SRFs may suppress every row of a narrow beam; OFFSET also needs more than K.
+SET diskann_probes = 1;
+CREATE TEMP TABLE srf_rows AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id,
+ generate_series(1,CASE WHEN id=5 THEN 1 ELSE 0 END) AS gs
+ FROM delta_t WHERE id>0 ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 1$q$)
+ AS r(id integer,gs integer);
+SELECT count(*) AS srf_count,min(id) AS surviving_id FROM srf_rows;
+CREATE TEMP TABLE offset_rows AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(delta_t delta_idx) */ id FROM delta_t WHERE id>0
+ ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 2 OFFSET 10$q$)
+ AS r(id integer);
+SELECT count(*) AS offset_count FROM offset_rows;
+SET diskann_probes = 128;
+
+-- Typical delta UNION ALL (snapshot anti-join delete), final Top-10.
+CREATE TABLE snapshot_t(id integer PRIMARY KEY,title text,embedding vector(4));
+INSERT INTO snapshot_t SELECT 100+g,'snapshot',
+ ('['||(10000+3*g+0.25)||',20000,30000,40000]')::vector FROM generate_series(1,12) g;
+CREATE TABLE delete_t(id integer PRIMARY KEY);
+INSERT INTO delete_t VALUES(103),(108),(111);
+CREATE VIEW live_t AS SELECT * FROM delta_t UNION ALL
+ SELECT s.* FROM snapshot_t s WHERE NOT EXISTS(SELECT 1 FROM delete_t d WHERE s.id=d.id);
+ANALYZE snapshot_t;
+ANALYZE delete_t;
+SET enable_union_all_diskann_topk_pushdown = on;
+SET enable_union_all_required_columns_pushdown = on;
+EXPLAIN (VERBOSE, COSTS OFF)
+SELECT id FROM live_t WHERE title IS NOT NULL
+ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
+CREATE TEMP TABLE union_top10 AS SELECT * FROM capture_order($q$
+ SELECT id,embedding <-> '[10000,20000,30000,40000]'::vector AS distance,
+ l2_distance(embedding,'[10000,20000,30000,40000]'::vector) AS heap_distance
+ FROM live_t WHERE title IS NOT NULL ORDER BY distance LIMIT 10$q$);
+-- Exact function ordering supplies an independent, non-AM baseline.
+CREATE TEMP TABLE union_truth AS SELECT id FROM live_t WHERE title IS NOT NULL
+ORDER BY l2_distance(embedding,'[10000,20000,30000,40000]'::vector) LIMIT 10;
+SELECT count(*) AS union_rows FROM union_top10;
+SELECT count(*) AS union_id_differences FROM
+ ((SELECT id FROM union_top10 EXCEPT SELECT id FROM union_truth) UNION ALL
+  (SELECT id FROM union_truth EXCEPT SELECT id FROM union_top10)) d;
+SELECT count(*) AS union_inversions FROM
+ (SELECT distance,lag(distance) OVER(ORDER BY pos) AS previous FROM union_top10) s WHERE distance<previous;
+RESET enable_union_all_diskann_topk_pushdown;
+RESET enable_union_all_required_columns_pushdown;
+
+-- Force the tuple sorter to spill; raw tuple copies must outlive heap pins.
+CREATE TABLE spill_t(id integer,title text,embedding vector(4));
+ALTER TABLE spill_t ALTER COLUMN title SET STORAGE PLAIN;
+INSERT INTO spill_t SELECT g,repeat('x',6000),('['||g||',20,30,40]')::vector FROM generate_series(1,80) g;
+CREATE INDEX spill_idx ON spill_t USING diskann(embedding vector_l2_ops) WITH(index_size=16);
+SET work_mem = '64kB';
+CREATE TEMP TABLE spilled AS SELECT * FROM capture($q$
+ SELECT /*+ indexscan(spill_t spill_idx) */ id,length(title) AS len FROM spill_t WHERE id>0
+ ORDER BY embedding <-> '[0,20,30,40]'::vector LIMIT 10$q$) AS r(id integer,len integer);
+SELECT count(*) AS spill_rows,min(id) AS first_id,max(id) AS last_id,min(len) AS title_length FROM spilled;
+RESET work_mem;
+
+-- Physical deletion must respect rollback even when immediate_delete=true.
+CREATE TABLE rollback_t(id integer PRIMARY KEY,grp text,embedding vector(4));
+INSERT INTO rollback_t SELECT g,'A','[10,20,30,40]'::vector FROM generate_series(1,6) g
+UNION ALL SELECT g,'B','[40,30,20,10]'::vector FROM generate_series(101,106) g;
+CREATE INDEX rollback_idx ON rollback_t USING diskann(embedding vector_l2_ops) WITH(index_size=16);
+ALTER TABLE rollback_t SET(immediate_delete=true);
+BEGIN;
+SAVEPOINT before_delete;
+DELETE FROM rollback_t;
+ROLLBACK TO SAVEPOINT before_delete;
+SELECT grp,count(*) FROM (SELECT /*+ indexscan(rollback_t rollback_idx) */ id,grp FROM rollback_t
+ WHERE id>0 ORDER BY embedding <-> '[10,20,30,40]'::vector LIMIT 20) s GROUP BY grp ORDER BY grp;
+UPDATE rollback_t SET embedding='[100,200,300,400]';
+ROLLBACK;
+SELECT grp,count(*) FROM (SELECT /*+ indexscan(rollback_t rollback_idx) */ id,grp FROM rollback_t
+ WHERE id>0 ORDER BY embedding <-> '[10,20,30,40]'::vector LIMIT 20) s GROUP BY grp ORDER BY grp;
+SET ann_orderby_distance_reuse = off;
+SELECT count(*) AS rollback_off_rows FROM (SELECT /*+ indexscan(rollback_t rollback_idx) */ id FROM rollback_t
+ WHERE id>0 ORDER BY embedding <-> '[10,20,30,40]'::vector LIMIT 20) s;
+SET ann_orderby_distance_reuse = l2;
+
+-- Actually recycle the heap slot. SQL success without ctid reuse is not a pass.
+CREATE TABLE recycle_t(id integer PRIMARY KEY,embedding vector(4));
+INSERT INTO recycle_t VALUES(1,'[10,20,30,40]');
+CREATE INDEX recycle_idx ON recycle_t USING diskann(embedding vector_l2_ops) WITH(index_size=16);
+CREATE TEMP TABLE original_tid AS SELECT ctid AS tid FROM recycle_t;
+DELETE FROM recycle_t;
+-- Advance two generations of the instance's deferred cleanup horizon.
+DO $$ BEGIN PERFORM txid_current(); END $$;
+DO $$ BEGIN PERFORM pg_sleep(6); END $$;
+DO $$ BEGIN PERFORM txid_current(); END $$;
+DO $$ BEGIN PERFORM pg_sleep(6); END $$;
+DO $$ BEGIN PERFORM txid_current(); END $$;
+VACUUM FREEZE recycle_t;
+INSERT INTO recycle_t VALUES(2,'[100,200,300,400]');
+SELECT t.ctid=o.tid AS tid_really_reused FROM recycle_t t,original_tid o;
+CREATE TEMP TABLE recycled_recursive AS SELECT * FROM capture_order($q$
+ SELECT /*+ indexscan(recycle_t recycle_idx) */ id,embedding <-> '[10,20,30,40]'::vector AS distance,
+ l2_distance(embedding,'[10,20,30,40]'::vector) AS heap_distance
+ FROM recycle_t WHERE id>0 ORDER BY distance LIMIT 10$q$);
+SET enable_expr_fusion = on;
+CREATE TEMP TABLE recycled_fused AS SELECT * FROM capture_order($q$
+ SELECT /*+ indexscan(recycle_t recycle_idx) */ id,embedding <-> '[10,20,30,40]'::vector AS distance,
+ l2_distance(embedding,'[10,20,30,40]'::vector) AS heap_distance
+ FROM recycle_t WHERE id>0 ORDER BY distance LIMIT 10$q$);
+SELECT mode,count(*) AS rows,
+ sum(CASE WHEN id=2 AND float8send(distance)=float8send(heap_distance) THEN 0 ELSE 1 END) AS wrong_values
+FROM (SELECT 'recursive' AS mode,* FROM recycled_recursive UNION ALL SELECT 'fused',* FROM recycled_fused) s
+GROUP BY mode ORDER BY mode;
+
+RESET ann_orderby_distance_reuse;
+RESET enable_expr_fusion;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+RESET diskann_probes;
+DROP SCHEMA ann_reuse_lifecycle CASCADE;

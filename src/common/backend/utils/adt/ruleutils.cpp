@@ -10533,6 +10533,13 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "CASE_TEST_EXPR");
         } break;
 
+        case T_AnnOrderByRef: {
+            /* Keep EXPLAIN stable: show the original SQL expression, not
+             * the executor-only reference node. */
+            AnnOrderByRef* ref = (AnnOrderByRef*)node;
+            get_rule_expr((Node*)ref->original_expr, context, showimplicit, no_alias);
+        } break;
+
         case T_ArrayExpr: {
             ArrayExpr* arrayexpr = (ArrayExpr*)node;
 

@@ -3310,6 +3310,17 @@ static CaseTestExpr* _copyCaseTestExpr(const CaseTestExpr* from)
     return newnode;
 }
 
+static AnnOrderByRef* _copyAnnOrderByRef(const AnnOrderByRef* from)
+{
+    AnnOrderByRef* newnode = makeNode(AnnOrderByRef);
+
+    COPY_SCALAR_FIELD(orderby_index);
+    COPY_SCALAR_FIELD(quality);
+    COPY_NODE_FIELD(original_expr);
+
+    return newnode;
+}
+
 /*
  * _copyArrayExpr
  */
@@ -8709,6 +8720,9 @@ void* copyObject(const void* from)
             break;
         case T_CaseTestExpr:
             retval = _copyCaseTestExpr((CaseTestExpr*)from);
+            break;
+        case T_AnnOrderByRef:
+            retval = _copyAnnOrderByRef((AnnOrderByRef*)from);
             break;
         case T_ArrayExpr:
             retval = _copyArrayExpr((ArrayExpr*)from);

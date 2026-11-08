@@ -457,6 +457,13 @@ typedef enum {
     HNSW_ITERATIVE_SCAN_STRICT
 } HnswIterativeScanOptions;
 
+typedef enum {
+    ANN_ORDERBY_REUSE_OFF = 0,
+    ANN_ORDERBY_REUSE_L2 = 1 << 0,
+    ANN_ORDERBY_REUSE_COSINE = 1 << 1,
+    ANN_ORDERBY_REUSE_ALL = ANN_ORDERBY_REUSE_L2 | ANN_ORDERBY_REUSE_COSINE
+} AnnOrderByDistanceReuseMode;
+
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
 

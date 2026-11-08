@@ -126,6 +126,9 @@ GlobalPlanCache::FillEnvSignatures(GPCEnv *env)
     env->plainenv.env_signature2 |= u_sess->attr.attr_sql.enable_opfusion << 17;
     env->plainenv.env_signature2 |= u_sess->attr.attr_sql.enable_partition_opfusion << 18;
     env->plainenv.env_signature2 |= u_sess->attr.attr_sql.partition_iterator_elimination << 19;
+    /* bitmask values off/l2/cosine/all require two bits */
+    env->plainenv.env_signature2 |=
+        ((uint32)u_sess->attr.attr_sql.ann_orderby_distance_reuse & 0x3U) << 20;
 }
 
 void

@@ -3610,13 +3610,28 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
     /* Deparse each result column (we now include resjunk ones) */
     foreach (lc, plan->targetlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        char* output = NULL;
 
         /* skip pseudo columns once startwith exist */
         if (IsPseudoReturnTargetEntry(tle) || IsPseudoInternalTargetEntry(tle)) {
             continue;
         }
 
-        result = lappend(result, deparse_expression((Node*)tle->expr, context, useprefix, false));
+        output = deparse_expression((Node*)tle->expr, context, useprefix, false);
+        /*
+         * AnnOrderByRef is executor-only, so ruleutils deliberately prints
+         * its original SQL expression.  Add one display-only wrapper at the
+         * producing AnnIndexScan boundary: together with the OpExpr's own
+         * parentheses this mirrors the familiar "referenced result" form.
+         * Keep the generic deparser transparent so upper OUTER_VAR expansion
+         * does not grow a third pair of parentheses.
+         */
+        if (IsA(plan, AnnIndexScan) && IsA(tle->expr, AnnOrderByRef)) {
+            char* referencedOutput = psprintf("(%s)", output);
+            pfree_ext(output);
+            output = referencedOutput;
+        }
+        result = lappend(result, output);
     }
 
     if (IsA(plan, ForeignScan) || IsA(plan, VecForeignScan)) {

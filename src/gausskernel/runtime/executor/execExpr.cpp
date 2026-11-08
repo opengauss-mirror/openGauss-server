@@ -1484,6 +1484,22 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				ExprEvalPushStep(state, &scratch);
 				break;
 			}
+		case T_AnnOrderByRef:
+			{
+				AnnOrderByRef *ref = (AnnOrderByRef *) node;
+				AnnOrderByRefExprRuntime *runtime =
+					(AnnOrderByRefExprRuntime *) palloc0(sizeof(AnnOrderByRefExprRuntime));
+
+				runtime->scanstate = (state->parent != NULL && IsA(state->parent, AnnIndexScanState))
+					? (AnnIndexScanState *) state->parent
+					: NULL;
+				runtime->fallback = ExecInitExprByRecursion(ref->original_expr, state->parent);
+				runtime->quality = (AnnOrderByDistanceQuality) ref->quality;
+				scratch.opcode = EEOP_ANN_ORDERBY_REF;
+				scratch.d.annorderby.runtime = runtime;
+				ExprEvalPushStep(state, &scratch);
+				break;
+			}
 		case T_ArrayExpr:
 			{
 				ArrayExpr  *arrayexpr = (ArrayExpr *) node;
@@ -2504,6 +2520,8 @@ if (node == NULL)
 	if (IsA(node, WindowFunc))
 		return false;
 	if (IsA(node, GroupingFunc))
+		return false;
+	if (IsA(node, AnnOrderByRef))
 		return false;
 	return expression_tree_walker(node, (bool (*)())get_last_attnums_walker,
 								  (void *) info);

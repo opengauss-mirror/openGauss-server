@@ -29,6 +29,35 @@
  */
 #define IsValidScanDesc(sd)  (sd != NULL)
 
+/* Quality of a distance published by an ANN access method. */
+typedef enum AnnOrderByDistanceQuality {
+    ANN_ORDERBY_DISTANCE_UNAVAILABLE = 0,
+    ANN_ORDERBY_DISTANCE_EXACT_L2,
+    ANN_ORDERBY_DISTANCE_APPROX_COSINE
+} AnnOrderByDistanceQuality;
+
+/*
+ * Dedicated current-row channel for ANN ORDER BY result reuse.  It is
+ * separate from xs_orderbyvals because approximate values must not be
+ * exposed as generic exact ordering-operator results.
+ */
+typedef struct AnnOrderByDistanceChannel {
+    bool requested;
+    int requested_mode;
+    bool valid;
+    bool isnull;
+    /* L2 only: a merged TID need not own the node's stored vector. */
+    bool heap_recheck;
+    Datum value;
+    AnnOrderByDistanceQuality quality;
+    uint64 scan_epoch;
+    uint64 row_token;
+    ItemPointerData heap_tid;
+    uint64 full_distance_evaluations;
+    uint64 output_conversions;
+    uint64 publications;
+} AnnOrderByDistanceChannel;
+
 /*
  * Shared state for parallel heap scan.
  *
@@ -190,6 +219,7 @@ typedef struct IndexScanDescData {
     int dop;
     BlockNumber btps_end_block;
     uint32 plan_nodeid;
+    AnnOrderByDistanceChannel xs_ann_orderby;
     HeapTupleHeaderData xs_ctbuf_hdr;
     /* DO NOT add any other members here. xs_ctbuf_hdr must be the last one. */
 } IndexScanDescData;

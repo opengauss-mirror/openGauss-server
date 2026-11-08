@@ -2186,7 +2186,36 @@ typedef struct AnnIndexScanState {
     Relation iss_CurrentIndexPartition;
     double annCount; // limitValue/selectvity
     int64 limitCount;
+    /* Current heap row's value copied from IndexScanDesc.xs_ann_orderby. */
+    Datum iss_AnnOrderByValue;
+    bool iss_AnnOrderByIsNull;
+    bool iss_AnnOrderByValid;
+    bool iss_AnnOrderByHeapRecheck;
+    AnnOrderByDistanceQuality iss_AnnOrderByQuality;
+    AnnOrderByDistanceQuality iss_AnnOrderByExpectedQuality;
+    uint64 iss_AnnOrderByEpoch;
+    uint64 iss_AnnOrderByRowToken;
+    uint64 iss_AnnOrderByReads;
+    uint64 iss_AnnOrderByFallbacks;
+    /* DiskANN materializes qualified candidates before first output. The
+     * sorter spills under work_mem; its private tuples preserve heap system
+     * attributes as well as the exact/approximate key used for this scan. */
+    bool iss_DiskannOrdered;
+    bool iss_OrderedReady;
+    bool iss_OrderedHasSRF;
+    struct Tuplesortstate* iss_OrderedSort;
+    TupleTableSlot* iss_OrderedSlot;
+    ExprState* iss_OrderedExpr;
+    List* iss_OrderedQual;
 } AnnIndexScanState;
+
+/* Shared private payload used by recursive and flattened evaluation of an
+ * AnnOrderByRef. */
+typedef struct AnnOrderByRefExprRuntime {
+    AnnIndexScanState* scanstate;
+    ExprState* fallback;
+    AnnOrderByDistanceQuality quality;
+} AnnOrderByRefExprRuntime;
 
 /* ----------------
  *	 TidScanState information

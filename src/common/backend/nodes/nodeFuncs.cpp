@@ -202,6 +202,9 @@ Oid exprType(const Node* expr)
         case T_CaseTestExpr:
             type = ((const CaseTestExpr*)expr)->typeId;
             break;
+        case T_AnnOrderByRef:
+            type = FLOAT8OID;
+            break;
         case T_ArrayExpr:
             type = ((const ArrayExpr*)expr)->array_typeid;
             break;
@@ -411,6 +414,8 @@ int32 exprTypmod(const Node* expr)
         } break;
         case T_CaseTestExpr:
             return ((const CaseTestExpr*)expr)->typeMod;
+        case T_AnnOrderByRef:
+            return -1;
         case T_ArrayExpr: {
             /*
              * If all the elements agree on type/typmod, return that
@@ -952,6 +957,9 @@ Oid exprCollation(const Node* expr)
             break;
         case T_CaseTestExpr:
             coll = ((const CaseTestExpr*)expr)->collation;
+            break;
+        case T_AnnOrderByRef:
+            coll = InvalidOid;
             break;
         case T_ArrayExpr:
             coll = ((const ArrayExpr*)expr)->array_collid;
@@ -2158,6 +2166,8 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
 
         case T_CursorExpression:
             return false;
+        case T_AnnOrderByRef:
+            return p2walker((Node*)((AnnOrderByRef*)node)->original_expr, context);
 
         case T_TableFunc: {
             TableFunc* tf = (TableFunc*)node;
@@ -2487,6 +2497,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             } else {
                 return node;
             }
+        case T_AnnOrderByRef: {
+            AnnOrderByRef* oldnode = (AnnOrderByRef*)node;
+            AnnOrderByRef* newnode = NULL;
+
+            FLATCOPY(newnode, oldnode, AnnOrderByRef, isCopy);
+            MUTATE(newnode->original_expr, oldnode->original_expr, Expr*);
+            return (Node*)newnode;
+        }
         case T_WithCheckOption: {
                 WithCheckOption* wco = (WithCheckOption*)node;
                 WithCheckOption* newnode;

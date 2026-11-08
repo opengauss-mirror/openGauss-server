@@ -3006,6 +3006,17 @@ static CaseTestExpr* _readCaseTestExpr(void)
     READ_DONE();
 }
 
+static AnnOrderByRef* _readAnnOrderByRef(void)
+{
+    READ_LOCALS(AnnOrderByRef);
+
+    READ_INT_FIELD(orderby_index);
+    READ_INT_FIELD(quality);
+    READ_NODE_FIELD(original_expr);
+
+    READ_DONE();
+}
+
 /*
  * _readArrayExpr
  */
@@ -7176,6 +7187,8 @@ Node* parseNodeString(void)
         return_value = _readCaseWhen();
     } else if (MATCH("CASETESTEXPR", 12)) {
         return_value = _readCaseTestExpr();
+    } else if (MATCH("ANNORDERBYREF", 13)) {
+        return_value = _readAnnOrderByRef();
     } else if (MATCH("ARRAY", 5)) {
         return_value = _readArrayExpr();
     } else if (MATCH("ROW", 3)) {

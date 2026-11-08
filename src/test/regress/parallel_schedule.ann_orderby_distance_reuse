@@ -1,0 +1,3 @@
+test: ann_orderby_distance_reuse
+test: ann_orderby_distance_reuse_safety
+test: ann_orderby_distance_reuse_lifecycle

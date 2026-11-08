@@ -20,7 +20,11 @@
 #include <math.h>
 
 #include "access/transam.h"
+#include "access/genam.h"
+#include "access/datavec/diskann.h"
+#include "access/datavec/utils.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_cast.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_constraint.h"
@@ -75,6 +79,8 @@
 #endif
 #include "optimizer/streamplan.h"
 #include "utils/relcache.h"
+#include "utils/guc.h"
+#include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
@@ -369,6 +375,20 @@ static bool implicit_cast_var_walker(Node *node, void *context);
 static void save_implicit_cast_var(Node *node, void *context);
 #endif
 
+typedef struct AnnOrderByReuseWalkerContext {
+    MethodPlanWalkerContext mpwc;
+    int mode;
+    bool approximatePlanSafe;
+} AnnOrderByReuseWalkerContext;
+
+typedef struct AnnOrderBySafetyWalkerContext {
+    MethodPlanWalkerContext mpwc;
+} AnnOrderBySafetyWalkerContext;
+
+static bool rewrite_ann_orderby_distance_walker(Node* node, void* context);
+static void rewrite_ann_orderby_distance_refs(PlannerGlobal* glob, Plan* topPlan);
+static bool ann_orderby_plan_is_unsafe(PlannerGlobal* glob, Plan* topPlan);
+
 void preprocess_const_params(PlannerInfo* root, Node* jtnode);
 static Node* preprocess_const_params_worker(PlannerInfo* root, Node* expr, int kind);
 
@@ -534,6 +554,316 @@ static void checkTsstoreQuery(Query* query)
             heap_close(rel, AccessShareLock);
         }
     }
+}
+
+/* Vector distance operator OIDs from the built-in vector catalog entries.
+ * The support procedure check below is independent and remains mandatory. */
+static const Oid VECTOR_L2_DISTANCE_OPERATOR_OID = 8311;
+static const Oid VECTOR_COSINE_DISTANCE_OPERATOR_OID = 8313;
+
+static bool ann_orderby_safety_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    /* These execution domains do not support AnnOrderByRef in V1. */
+    switch (nodeTag(node)) {
+        case T_Stream:
+        case T_VecStream:
+        case T_RemoteQuery:
+        case T_VecRemoteQuery:
+        case T_LockRows:
+        case T_VecLockRows:
+        case T_ModifyTable:
+        case T_VecModifyTable:
+            return true;
+        default:
+            break;
+    }
+
+    return plan_tree_walker(node, (MethodWalker)ann_orderby_safety_walker, context);
+}
+
+static bool ann_orderby_plan_is_unsafe(PlannerGlobal* glob, Plan* topPlan)
+{
+    AnnOrderBySafetyWalkerContext safety;
+    errno_t rc = memset_s(&safety, sizeof(safety), 0, sizeof(safety));
+    securec_check(rc, "\0", "\0");
+
+    safety.mpwc.base.node = (Node*)glob;
+    safety.mpwc.base.init_plans = NIL;
+    safety.mpwc.base.traverse_flag =
+        (bool*)palloc0(sizeof(bool) * Max(1, list_length(glob->subplans)));
+    bool unsafe = ann_orderby_safety_walker((Node*)topPlan, &safety);
+    list_free_ext(safety.mpwc.base.init_plans);
+    pfree_ext(safety.mpwc.base.traverse_flag);
+    return unsafe;
+}
+
+/*
+ * A transparent Join may carry an approximate ORDER BY value without using
+ * it to decide whether a row matches.  After setrefs, a consumed child
+ * distance can be a FLOAT8 Var/Param or a field hidden inside a whole-row
+ * reference.  Expression walking treats Vars/Params as leaves, so it cannot
+ * discover the fields of a RECORD/composite value (including a domain).
+ * Reject these opaque references as well as the original distance operators.
+ * Rejecting unrelated FLOAT8/composite join keys is deliberately conservative.
+ */
+static bool ann_orderby_join_expr_consumes_distance(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Var) || IsA(node, Param)) {
+        Oid typeId = getBaseType(exprType(node));
+        /* After setrefs a whole-row value can occupy an ordinary slot, so
+         * checking only Var.varattno == 0 would still miss the dependency. */
+        if (typeId == FLOAT8OID || type_is_rowtype(typeId)) {
+            return true;
+        }
+    }
+    if (IsA(node, AnnOrderByRef)) {
+        return true;
+    }
+    if (IsA(node, OpExpr)) {
+        Oid opno = ((OpExpr*)node)->opno;
+        if (opno == VECTOR_L2_DISTANCE_OPERATOR_OID ||
+            opno == VECTOR_COSINE_DISTANCE_OPERATOR_OID) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(
+        node, (bool (*)())ann_orderby_join_expr_consumes_distance, context);
+}
+
+static bool ann_orderby_join_allows_approx(Node* node)
+{
+    Join* join = (Join*)node;
+
+    /* plan.qual filters output rows; joinqual/nulleqqual determine matches. */
+    if (ann_orderby_join_expr_consumes_distance((Node*)join->plan.qual, NULL) ||
+        ann_orderby_join_expr_consumes_distance((Node*)join->joinqual, NULL) ||
+        ann_orderby_join_expr_consumes_distance((Node*)join->nulleqqual, NULL)) {
+        return false;
+    }
+
+    switch (nodeTag(node)) {
+        case T_NestLoop: {
+            ListCell* lc = NULL;
+            foreach (lc, ((NestLoop*)node)->nestParams) {
+                NestLoopParam* param = (NestLoopParam*)lfirst(lc);
+                if (ann_orderby_join_expr_consumes_distance((Node*)param->paramval, NULL)) {
+                    return false;
+                }
+            }
+            break;
+        }
+        case T_MergeJoin:
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((MergeJoin*)node)->mergeclauses, NULL)) {
+                return false;
+            }
+            break;
+        case T_HashJoin:
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((HashJoin*)node)->hashclauses, NULL)) {
+                return false;
+            }
+#ifdef USE_SPQ
+            if (ann_orderby_join_expr_consumes_distance(
+                    (Node*)((HashJoin*)node)->hashqualclauses, NULL)) {
+                return false;
+            }
+#endif
+            break;
+        default:
+            return false;
+    }
+
+    return true;
+}
+
+static bool ann_orderby_node_allows_approx(Node* node)
+{
+    /* Only transparent consumers may inherit an approximate distance.
+     * A blacklist of joins/aggregates misses SubqueryScan.qual and Result
+     * expressions, which can turn rounding into a different query result.
+     * This runs after setrefs: pass-through outputs are Vars, not copies
+     * of the original ORDER BY expression. Unknown consumers fail closed.
+     */
+    switch (nodeTag(node)) {
+        case T_List:
+            /* Append/MergeAppend children are visited through a List. */
+            return true;
+        case T_AnnIndexScan:
+            /* Scan quals and other scan outputs still evaluate their own
+             * exact expressions; only whole matching outputs are replaced. */
+            return true;
+        case T_BaseResult:
+            if (((BaseResult*)node)->resconstantqual != NULL) {
+                return false;
+            }
+            break;
+        case T_Limit:
+        case T_Sort:
+        case T_Material:
+        case T_Append:
+        case T_MergeAppend:
+        case T_SubqueryScan:
+            break;
+        case T_Hash:
+            /* Hash keys belong to the parent HashJoin, whose checks have
+             * already restricted the inherited safety context.  Hash stores
+             * child tuples (including the distance) unchanged, even across
+             * batches; retain the common qual/transparent-tlist checks below.
+             * Never restore a context rejected by an ancestor consumer. */
+            if (((Plan*)node)->lefttree == NULL || ((Plan*)node)->righttree != NULL) {
+                return false;
+            }
+            break;
+        case T_NestLoop:
+        case T_MergeJoin:
+        case T_HashJoin:
+            if (!ann_orderby_join_allows_approx(node)) {
+                return false;
+            }
+            break;
+        default:
+            /* Includes Param: plan_tree_walker can reach an InitPlan via
+             * its PARAM_EXEC without invoking our T_SubPlan callback. */
+            return false;
+    }
+
+    Plan* plan = (Plan*)node;
+    /* A qualifying Join has already proved that plan.qual is independent of
+     * the distance.  Other transparent nodes still require an empty qual. */
+    if (!IsA(node, NestLoop) && !IsA(node, MergeJoin) && !IsA(node, HashJoin) &&
+        plan->qual != NIL) {
+        return false;
+    }
+    ListCell* lc = NULL;
+    foreach (lc, plan->targetlist) {
+        Expr* expr = ((TargetEntry*)lfirst(lc))->expr;
+        if (!IsA(expr, Var) && !IsA(expr, Const)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Replace only a complete AnnIndexScan target entry that is exactly the
+ * scan's ORDER BY expression.  Running after set_plan_references() makes
+ * this a physical-plan decision and avoids rewriting semantically similar
+ * expressions owned by upper nodes or other UNION ALL branches.
+ */
+static bool rewrite_ann_orderby_distance_walker(Node* node, void* context)
+{
+    AnnOrderByReuseWalkerContext* walkerCxt = (AnnOrderByReuseWalkerContext*)context;
+    bool parentApproximatePlanSafe = walkerCxt->approximatePlanSafe;
+
+    if (node == NULL) {
+        return false;
+    }
+
+    if (!ann_orderby_node_allows_approx(node)) {
+        walkerCxt->approximatePlanSafe = false;
+    }
+
+    if (IsA(node, AnnIndexScan)) {
+        AnnIndexScan* scan = (AnnIndexScan*)node;
+
+        if ((walkerCxt->mpwc.status & UNDER_STREAM) == 0 &&
+            !scan->index_only_scan && !scan->is_ustore && !scan->scan.isPartTbl &&
+            scan->scan.plan.dop <= 1 && !ScanDirectionIsBackward(scan->indexorderdir) &&
+            list_length(scan->indexorderbyorig) == 1 && scan->scan.plan.targetlist != NIL) {
+            Relation indexRel = index_open(scan->indexid, AccessShareLock);
+            AnnOrderByDistanceQuality quality = ANN_ORDERBY_DISTANCE_UNAVAILABLE;
+
+            Expr* orderExpr = (Expr*)linitial(scan->indexorderbyorig);
+
+            if (indexRel->rd_rel->relam == DISKANN_AM_OID &&
+                TupleDescAttr(indexRel->rd_att, 0)->atttypid == VECTOROID &&
+                !RELATION_HAS_BUCKET(indexRel) && IsA(orderExpr, OpExpr)) {
+                DiskAnnOptions* opts = (DiskAnnOptions*)indexRel->rd_options;
+                Oid distanceProc = index_getprocid(indexRel, 1, DISKANN_DISTANCE_PROC);
+                Oid normProc = index_getprocid(indexRel, 1, DISKANN_NORM_PROC);
+                OpExpr* distanceOp = (OpExpr*)orderExpr;
+                bool operatorShapeMatches = list_length(distanceOp->args) == 2 &&
+                    distanceOp->opresulttype == FLOAT8OID &&
+                    distanceOp->opcollid == InvalidOid &&
+                    distanceOp->inputcollid == InvalidOid &&
+                    exprType((Node*)linitial(distanceOp->args)) == VECTOROID &&
+                    exprType((Node*)lsecond(distanceOp->args)) == VECTOROID;
+
+                /* PQ is excluded until its final rerank/value provenance is
+                 * independently covered by the reuse contract. */
+                if (operatorShapeMatches && (opts == NULL || !opts->enablePQ)) {
+                    if ((walkerCxt->mode & ANN_ORDERBY_REUSE_L2) != 0 &&
+                        distanceProc == L2_FUNC_OID && !OidIsValid(normProc) &&
+                        distanceOp->opno == VECTOR_L2_DISTANCE_OPERATOR_OID) {
+                        quality = ANN_ORDERBY_DISTANCE_EXACT_L2;
+                    } else if ((walkerCxt->mode & ANN_ORDERBY_REUSE_COSINE) != 0 &&
+                               walkerCxt->approximatePlanSafe &&
+                               distanceProc == IP_FUNC_OID && OidIsValid(normProc) &&
+                               distanceOp->opno == VECTOR_COSINE_DISTANCE_OPERATOR_OID) {
+                        quality = ANN_ORDERBY_DISTANCE_APPROX_COSINE;
+                    }
+                }
+            }
+            index_close(indexRel, AccessShareLock);
+
+            if (quality != ANN_ORDERBY_DISTANCE_UNAVAILABLE) {
+                ListCell* lc = NULL;
+
+                foreach (lc, scan->scan.plan.targetlist) {
+                    TargetEntry* tle = (TargetEntry*)lfirst(lc);
+
+                    if (equal(tle->expr, orderExpr)) {
+                        AnnOrderByRef* ref = makeNode(AnnOrderByRef);
+                        ref->orderby_index = 0;
+                        ref->quality = (int)quality;
+                        ref->original_expr = tle->expr;
+                        tle->expr = (Expr*)ref;
+                    }
+                }
+            }
+        }
+    }
+
+    bool found = plan_tree_walker(node, (MethodWalker)rewrite_ann_orderby_distance_walker, context);
+    walkerCxt->approximatePlanSafe = parentApproximatePlanSafe;
+    return found;
+}
+
+static void rewrite_ann_orderby_distance_refs(PlannerGlobal* glob, Plan* topPlan)
+{
+    /* V1 is local-only: do not introduce the new executor node into a plan
+     * that can be shipped to another server version. */
+    if (g_instance.role != VSINGLENODE ||
+        t_thrd.proc->workingVersionNum < ANN_ORDERBY_DISTANCE_REUSE_VERSION_NUM ||
+        ann_orderby_plan_is_unsafe(glob, topPlan)) {
+        return;
+    }
+
+    AnnOrderByReuseWalkerContext context;
+    errno_t rc = memset_s(&context, sizeof(context), 0, sizeof(context));
+    securec_check(rc, "\0", "\0");
+
+    context.mpwc.base.node = (Node*)glob;
+    context.mpwc.base.init_plans = NIL;
+    context.mpwc.base.traverse_flag =
+        (bool*)palloc0(sizeof(bool) * Max(1, list_length(glob->subplans)));
+    context.mode = u_sess->attr.attr_sql.ann_orderby_distance_reuse;
+    context.approximatePlanSafe = true;
+
+    (void)rewrite_ann_orderby_distance_walker((Node*)topPlan, &context);
+
+    list_free_ext(context.mpwc.base.init_plans);
+    pfree_ext(context.mpwc.base.traverse_flag);
 }
 
 PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
@@ -911,6 +1241,15 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         }
 #endif
         i++;
+    }
+
+    /*
+     * The reference must be introduced after every plan/subplan has passed
+     * setrefs, but before the optional copyObject boundary and PlannedStmt
+     * construction.  Default-off is a zero-cost compatibility path.
+     */
+    if (u_sess->attr.attr_sql.ann_orderby_distance_reuse != ANN_ORDERBY_REUSE_OFF) {
+        rewrite_ann_orderby_distance_refs(glob, top_plan);
     }
 
     /* Juse copy these fields only when the memory context total size meets the dropping condition. */

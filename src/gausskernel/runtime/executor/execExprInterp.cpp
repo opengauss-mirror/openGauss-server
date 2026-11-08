@@ -59,6 +59,7 @@
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
 #include "nodes/execExpr.h"
+#include "executor/executor.h"
 #include "executor/node/nodeSubplan.h"
 #include "funcapi.h"
 #include "utils/memutils.h"
@@ -72,6 +73,7 @@
 #include "utils/lsyscache.h"
 #include "utils/timestamp.h"
 #include "utils/typcache.h"
+#include "utils/guc.h"
 #include "utils/xml.h"
 #include "utils/elog.h"
 #include "utils/expandeddatum.h"
@@ -619,6 +621,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 		&&CASE_EEOP_PARAM_EXEC,
 		&&CASE_EEOP_PARAM_EXTERN,
 		&&CASE_EEOP_CASE_TESTVAL,
+		&&CASE_EEOP_ANN_ORDERBY_REF,
 		&&CASE_EEOP_MAKE_READONLY,
 		&&CASE_EEOP_IOCOERCE,
 		&&CASE_EEOP_DISTINCT,
@@ -1367,6 +1370,43 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull, ExprDoneCo
 			{
 				*op->resvalue = econtext->caseValue_datum;
 				*op->resnull = econtext->caseValue_isNull;
+			}
+
+			EEO_NEXT();
+		}
+
+		EEO_CASE(EEOP_ANN_ORDERBY_REF)
+		{
+			AnnOrderByRefExprRuntime *runtime = op->d.annorderby.runtime;
+			AnnIndexScanState *scanstate = runtime->scanstate;
+
+			if (scanstate == NULL)
+				ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("ANN ORDER BY reference is not owned by an AnnIndexScan")));
+
+			if (scanstate->iss_AnnOrderByExpectedQuality != ANN_ORDERBY_DISTANCE_UNAVAILABLE) {
+				if (!scanstate->iss_AnnOrderByValid ||
+					scanstate->iss_AnnOrderByQuality != runtime->quality ||
+					scanstate->iss_AnnOrderByExpectedQuality != runtime->quality)
+					ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("ANN ORDER BY distance publication does not match the planned reference")));
+				if (scanstate->iss_AnnOrderByHeapRecheck) {
+					if (runtime->quality != ANN_ORDERBY_DISTANCE_EXACT_L2)
+						ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+							errmsg("only exact L2 supports an ANN heap distance recheck")));
+					scanstate->iss_AnnOrderByValue = ExecEvalExpr(runtime->fallback, econtext,
+						&scanstate->iss_AnnOrderByIsNull, NULL);
+					scanstate->iss_AnnOrderByHeapRecheck = false;
+					scanstate->iss_AnnOrderByFallbacks++;
+				}
+				*op->resvalue = scanstate->iss_AnnOrderByValue;
+				*op->resnull = scanstate->iss_AnnOrderByIsNull;
+				scanstate->iss_AnnOrderByReads++;
+			} else {
+				scanstate->iss_AnnOrderByFallbacks++;
+				*op->resvalue = ExecEvalExpr(runtime->fallback, econtext, op->resnull, NULL);
 			}
 
 			EEO_NEXT();

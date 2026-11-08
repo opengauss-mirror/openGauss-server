@@ -146,6 +146,9 @@ typedef enum ExprEvalOp
 	/* return CaseTestExpr value */
 	EEOP_CASE_TESTVAL,
 
+	/* return current DiskANN candidate's ORDER BY distance, or fallback */
+	EEOP_ANN_ORDERBY_REF,
+
 	/* apply MakeExpandedObjectReadOnly() to target value */
 	EEOP_MAKE_READONLY,
 
@@ -405,6 +408,12 @@ typedef struct ExprEvalStep
 			Datum	   *value;	/* value to return */
 			bool	   *isnull;
 		}			casetest;
+
+		/* for EEOP_ANN_ORDERBY_REF */
+		struct
+		{
+			AnnOrderByRefExprRuntime *runtime;
+		}			annorderby;
 
 		/* for EEOP_MAKE_READONLY */
 		struct
