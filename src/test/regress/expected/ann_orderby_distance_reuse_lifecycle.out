@@ -189,10 +189,10 @@ ORDER BY embedding <-> '[10000,20000,30000,40000]'::vector LIMIT 10;
                            Output: s.id, ((s.embedding <-> '[10000,20000,30000,40000]'::vector))
                            Sort Key: ((s.embedding <-> '[10000,20000,30000,40000]'::vector))
                            ->  Merge Anti Join
-                                 Output: s.id, (s.embedding <-> '[10000,20000,30000,40000]'::vector)
+                                 Output: s.id, ((s.embedding <-> '[10000,20000,30000,40000]'::vector))
                                  Merge Cond: (s.id = d.id)
                                  ->  Index Scan using snapshot_t_pkey on ann_reuse_lifecycle.snapshot_t s
-                                       Output: s.id, s.embedding
+                                       Output: s.id, (s.embedding <-> '[10000,20000,30000,40000]'::vector)
                                        Filter: (s.title IS NOT NULL)
                                  ->  Index Only Scan using delete_t_pkey on ann_reuse_lifecycle.delete_t d
                                        Output: d.id

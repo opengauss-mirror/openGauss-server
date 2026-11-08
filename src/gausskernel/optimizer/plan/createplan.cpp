@@ -1222,6 +1222,15 @@ static bool use_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
     ListCell* lc = NULL;
 
     /*
+     * Required-column UNION ALL rewriting deliberately narrows every source
+     * boundary.  Re-expanding a descendant base scan to the table's physical
+     * rowtype would put dead attributes back into EXPLAIN Output and into
+     * join/stream slots.
+     */
+    if (root->union_all_required_columns_pruned && rel->rtekind == RTE_RELATION)
+        return false;
+
+    /*
      * We can do this for real relation scans, subquery scans, function scans,
      * values scans, and CTE scans (but not for, eg, joins).
      */

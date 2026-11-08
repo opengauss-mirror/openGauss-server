@@ -169,7 +169,8 @@ regress_data_files = \
 	$(wildcard $(srcdir)/output/*.source) \
 	$(filter-out $(addprefix $(srcdir)/,$(input_files)),$(wildcard $(srcdir)/sql/*.sql)) \
 	$(wildcard $(srcdir)/data/*.data) \
-	$(srcdir)/parallel_schedule $(srcdir)/serial_schedule $(srcdir)/resultmap
+	$(srcdir)/parallel_schedule $(srcdir)/serial_schedule \
+	$(srcdir)/parallel_schedule.union_all_required_columns $(srcdir)/resultmap
 
 install-tests: all install install-lib installdirs-tests
 	$(MAKE) -C $(top_builddir)/contrib/spi install
@@ -275,6 +276,11 @@ fastcheck_single: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+
+# Run only the UNION ALL required-column pushdown regression case.
+union_all_required_columns_check: all tablespace-setup
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule.union_all_required_columns -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
 # Run only the DiskANN ORDER BY distance-result reuse regression case.
 ann_orderby_distance_reuse_check: all tablespace-setup

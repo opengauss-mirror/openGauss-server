@@ -953,7 +953,7 @@ test: vec_sonic_hashjoin_number_nospill
 test: timeout
 test: dml
 test: hashfilter hashfilter_1
-test: reduce_orderby test_union_all_orderby
+test: reduce_orderby test_union_all_orderby union_all_required_columns union_all_required_columns_safety union_all_ann_feature_matrix
 #test: backtrace_log
 #test: bulkload_start
 test: bulkload_parallel_test_2 bulkload_parallel_test_3

@@ -603,10 +603,10 @@ LIMIT 10;
                            Sort Key: ((s.embedding <-> '[11,23,35,47]'::vector))
                            Sort Method: top-N heapsort  Memory: 26kB
                            ->  Merge Anti Join (actual rows=21 loops=1)
-                                 Output: s.row_id, (s.embedding <-> '[11,23,35,47]'::vector)
+                                 Output: s.row_id, ((s.embedding <-> '[11,23,35,47]'::vector))
                                  Merge Cond: (s.row_id = d.row_id)
                                  ->  Index Scan using snapshot_t_pkey on ann_orderby_reuse_test.snapshot_t s (actual rows=24 loops=1)
-                                       Output: s.row_id, s.embedding
+                                       Output: s.row_id, (s.embedding <-> '[11,23,35,47]'::vector)
                                        Filter: (s.title IS NOT NULL)
                                  ->  Index Only Scan using delete_t_pkey on ann_orderby_reuse_test.delete_t d (actual rows=3 loops=1)
                                        Output: d.row_id
@@ -695,10 +695,10 @@ LIMIT 10;
                            Sort Key: ((s.embedding <=> '[11,23,35,47]'::vector))
                            Sort Method: top-N heapsort  Memory: 27kB
                            ->  Merge Anti Join (actual rows=21 loops=1)
-                                 Output: s.row_id, (s.embedding <=> '[11,23,35,47]'::vector)
+                                 Output: s.row_id, ((s.embedding <=> '[11,23,35,47]'::vector))
                                  Merge Cond: (s.row_id = d.row_id)
                                  ->  Index Scan using snapshot_t_pkey on ann_orderby_reuse_test.snapshot_t s (actual rows=24 loops=1)
-                                       Output: s.row_id, s.embedding
+                                       Output: s.row_id, (s.embedding <=> '[11,23,35,47]'::vector)
                                        Filter: (s.title IS NOT NULL)
                                  ->  Index Only Scan using delete_t_pkey on ann_orderby_reuse_test.delete_t d (actual rows=3 loops=1)
                                        Output: d.row_id

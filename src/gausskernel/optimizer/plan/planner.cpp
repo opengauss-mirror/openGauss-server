@@ -385,9 +385,14 @@ typedef struct AnnOrderBySafetyWalkerContext {
     MethodPlanWalkerContext mpwc;
 } AnnOrderBySafetyWalkerContext;
 
+typedef struct UnionAllSourceProjectionContext {
+    MethodPlanWalkerContext mpwc;
+} UnionAllSourceProjectionContext;
+
 static bool rewrite_ann_orderby_distance_walker(Node* node, void* context);
 static void rewrite_ann_orderby_distance_refs(PlannerGlobal* glob, Plan* topPlan);
 static bool ann_orderby_plan_is_unsafe(PlannerGlobal* glob, Plan* topPlan);
+static void push_down_union_all_source_projections(PlannerGlobal* glob, Plan* topPlan);
 
 void preprocess_const_params(PlannerInfo* root, Node* jtnode);
 static Node* preprocess_const_params_worker(PlannerInfo* root, Node* expr, int kind);
@@ -560,6 +565,271 @@ static void checkTsstoreQuery(Query* query)
  * The support procedure check below is independent and remains mandatory. */
 static const Oid VECTOR_L2_DISTANCE_OPERATOR_OID = 8311;
 static const Oid VECTOR_COSINE_DISTANCE_OPERATOR_OID = 8313;
+
+typedef struct UnionAllVarMatchContext {
+    const Var* target;
+} UnionAllVarMatchContext;
+
+static bool union_all_expr_uses_var_walker(Node* node, UnionAllVarMatchContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Var)) {
+        return equal(node, context->target);
+    }
+    return expression_tree_walker(
+        node, (bool (*)())union_all_expr_uses_var_walker, (void*)context);
+}
+
+static bool union_all_expr_uses_var(Node* node, const Var* target)
+{
+    UnionAllVarMatchContext context;
+    context.target = target;
+    return union_all_expr_uses_var_walker(node, &context);
+}
+
+/*
+ * The leaf projection is normally evaluated by the Anti Join because its
+ * flattened target list mentions the source vector.  It is safe to move the
+ * built-in distance calculation to the preserved-side scan only when both
+ * dimensions are known now.  This avoids changing whether a deleted row can
+ * raise a run-time dimension error.
+ */
+static bool union_all_safe_vector_distance(Expr* expr, Index scanrelid, Var** sourceVar)
+{
+    OpExpr* op = NULL;
+    Node* first = NULL;
+    Node* second = NULL;
+    Var* var = NULL;
+    Const* query = NULL;
+    Vector* queryVector = NULL;
+
+    if (!IsA(expr, OpExpr)) {
+        return false;
+    }
+    op = (OpExpr*)expr;
+    if ((op->opno != VECTOR_L2_DISTANCE_OPERATOR_OID &&
+         op->opno != VECTOR_COSINE_DISTANCE_OPERATOR_OID) ||
+        op->opresulttype != FLOAT8OID || list_length(op->args) != 2) {
+        return false;
+    }
+
+    first = (Node*)linitial(op->args);
+    second = (Node*)lsecond(op->args);
+    if (IsA(first, Var) && IsA(second, Const)) {
+        var = (Var*)first;
+        query = (Const*)second;
+    } else if (IsA(first, Const) && IsA(second, Var)) {
+        var = (Var*)second;
+        query = (Const*)first;
+    } else {
+        return false;
+    }
+
+    if (var->varno != scanrelid || var->varlevelsup != 0 ||
+        var->vartype != VECTOROID || var->vartypmod <= 0 ||
+        query->consttype != VECTOROID || query->constisnull) {
+        return false;
+    }
+
+    queryVector = DatumGetVector(query->constvalue);
+    if (queryVector->dim != var->vartypmod) {
+        return false;
+    }
+
+    *sourceVar = var;
+    return true;
+}
+
+static TargetEntry* union_all_find_source_tle(Plan* plan, const Var* sourceVar)
+{
+    TargetEntry* found = NULL;
+    ListCell* lc = NULL;
+
+    foreach (lc, plan->targetlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (IsA(tle->expr, Var) && equal(tle->expr, sourceVar)) {
+            if (found != NULL) {
+                return NULL;
+            }
+            found = tle;
+        }
+    }
+    return found;
+}
+
+/* Collect projection-transparent nodes down to a heap-producing scan. */
+static bool union_all_collect_source_chain(Plan* plan, List** chain, Index* scanrelid)
+{
+    if (plan == NULL) {
+        return false;
+    }
+
+    *chain = lappend(*chain, plan);
+    switch (nodeTag(plan)) {
+        case T_SeqScan:
+        case T_IndexScan:
+        case T_AnnIndexScan:
+        case T_BitmapHeapScan:
+        case T_TidScan:
+        case T_TidRangeScan:
+            *scanrelid = ((Scan*)plan)->scanrelid;
+            return *scanrelid > 0;
+        case T_Hash:
+        case T_Material:
+        case T_Sort:
+            if (plan->righttree == NULL) {
+                return union_all_collect_source_chain(plan->lefttree, chain, scanrelid);
+            }
+            break;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool union_all_join_uses_source_elsewhere(Join* join, TargetEntry* candidate, const Var* sourceVar)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, join->plan.targetlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (tle != candidate && union_all_expr_uses_var((Node*)tle->expr, sourceVar)) {
+            return true;
+        }
+    }
+    if (union_all_expr_uses_var((Node*)join->plan.qual, sourceVar) ||
+        union_all_expr_uses_var((Node*)join->plan.var_list, sourceVar) ||
+        union_all_expr_uses_var((Node*)join->plan.distributed_keys, sourceVar) ||
+        union_all_expr_uses_var((Node*)join->joinqual, sourceVar) ||
+        union_all_expr_uses_var((Node*)join->nulleqqual, sourceVar)) {
+        return true;
+    }
+
+    if (IsA(join, MergeJoin) &&
+        union_all_expr_uses_var((Node*)((MergeJoin*)join)->mergeclauses, sourceVar)) {
+        return true;
+    }
+    if (IsA(join, HashJoin) &&
+        union_all_expr_uses_var((Node*)((HashJoin*)join)->hashclauses, sourceVar)) {
+        return true;
+    }
+    if (IsA(join, NestLoop)) {
+        foreach (lc, ((NestLoop*)join)->nestParams) {
+            NestLoopParam* param = (NestLoopParam*)lfirst(lc);
+            if (union_all_expr_uses_var((Node*)param->paramval, sourceVar)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool union_all_replace_source_chain(List* chain, TargetEntry* candidate, const Var* sourceVar)
+{
+    ListCell* lc = NULL;
+    List* sources = NIL;
+
+    /*
+     * Validate the complete chain and remember the matching entries before
+     * changing any node.  Projection-transparent nodes can share their
+     * targetlist verbatim (make_sort(), for example, assigns the child's
+     * targetlist pointer).  Re-finding a Var after changing an earlier alias
+     * would therefore fail and could leave a partially rewritten plan.
+     */
+    foreach (lc, chain) {
+        Plan* plan = (Plan*)lfirst(lc);
+        TargetEntry* source = union_all_find_source_tle(plan, sourceVar);
+        ListCell* tlc = NULL;
+
+        if (source == NULL) {
+            list_free(sources);
+            return false;
+        }
+        foreach (tlc, plan->targetlist) {
+            TargetEntry* tle = (TargetEntry*)lfirst(tlc);
+            if (tle != source && union_all_expr_uses_var((Node*)tle->expr, sourceVar)) {
+                list_free(sources);
+                return false;
+            }
+        }
+        if (IsA(plan, Sort)) {
+            Sort* sort = (Sort*)plan;
+            for (int i = 0; i < sort->numCols; i++) {
+                if (sort->sortColIdx[i] == source->resno) {
+                    list_free(sources);
+                    return false;
+                }
+            }
+        }
+
+        if (!list_member_ptr(sources, source)) {
+            sources = lappend(sources, source);
+        }
+    }
+
+    foreach (lc, sources) {
+        TargetEntry* source = (TargetEntry*)lfirst(lc);
+        source->expr = (Expr*)copyObject(candidate->expr);
+    }
+    list_free(sources);
+    return true;
+}
+
+static bool push_down_union_all_source_projection_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, NestLoop) || IsA(node, MergeJoin) || IsA(node, HashJoin)) {
+        Join* join = (Join*)node;
+        Plan* preservedSide = NULL;
+        List* chain = NIL;
+        Index scanrelid = 0;
+        ListCell* lc = NULL;
+
+        if (join->jointype == JOIN_ANTI || join->jointype == JOIN_LEFT_ANTI_FULL) {
+            preservedSide = join->plan.lefttree;
+        } else if (join->jointype == JOIN_RIGHT_ANTI || join->jointype == JOIN_RIGHT_ANTI_FULL) {
+            preservedSide = join->plan.righttree;
+        }
+
+        if (preservedSide != NULL &&
+            union_all_collect_source_chain(preservedSide, &chain, &scanrelid)) {
+            foreach (lc, join->plan.targetlist) {
+                TargetEntry* candidate = (TargetEntry*)lfirst(lc);
+                Var* sourceVar = NULL;
+
+                if (union_all_safe_vector_distance(candidate->expr, scanrelid, &sourceVar) &&
+                    !union_all_join_uses_source_elsewhere(join, candidate, sourceVar) &&
+                    union_all_replace_source_chain(chain, candidate, sourceVar)) {
+                    break;
+                }
+            }
+        }
+        list_free(chain);
+    }
+
+    return plan_tree_walker(
+        node, (MethodWalker)push_down_union_all_source_projection_walker, context);
+}
+
+static void push_down_union_all_source_projections(PlannerGlobal* glob, Plan* topPlan)
+{
+    UnionAllSourceProjectionContext context;
+    errno_t rc = memset_s(&context, sizeof(context), 0, sizeof(context));
+    securec_check(rc, "\0", "\0");
+
+    context.mpwc.base.node = (Node*)glob;
+    context.mpwc.base.init_plans = NIL;
+    context.mpwc.base.traverse_flag =
+        (bool*)palloc0(sizeof(bool) * Max(1, list_length(glob->subplans)));
+    (void)push_down_union_all_source_projection_walker((Node*)topPlan, &context);
+    list_free_ext(context.mpwc.base.init_plans);
+    pfree_ext(context.mpwc.base.traverse_flag);
+}
 
 static bool ann_orderby_safety_walker(Node* node, void* context)
 {
@@ -1072,6 +1342,16 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     if ((IS_STREAM_PLAN || (IS_PGXC_DATANODE && (!IS_STREAM || IS_STREAM_DATANODE))) && root->query_level == 1) {
         /* remote query and windowagg do not support vectorize rescan, so fallback to row plan */
         top_plan = try_vectorize_plan(top_plan, parse, cursorOptions & CURSOR_OPT_HOLD);
+    }
+
+    /*
+     * Required-column rewriting has already replaced the wide UNION key with
+     * a scalar leaf projection.  For a safe Anti Join leaf, evaluate that
+     * projection in the preserved-side scan as well, so the raw vector does
+     * not occupy the scan-to-join tuple slot.
+     */
+    if (root->union_all_required_columns_pruned) {
+        push_down_union_all_source_projections(glob, top_plan);
     }
 
     top_plan = set_plan_references(root, top_plan);
@@ -1869,6 +2149,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     List* newHaving = NIL;
     bool hasOuterJoins = false;
     bool hasResultRTEs = false;
+    bool unionAllColumnsRewritten = false;
     ListCell* l = NULL;
     StringInfoData buf;
     char RewriteContextName[NAMEDATALEN] = {0};
@@ -1905,6 +2186,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     root->subquery_type = options;
     root->param_upper = NULL;
 	root->hasRownumQual = false;
+    root->union_all_required_columns_pruned =
+        parent_root != NULL && parent_root->union_all_required_columns_pruned;
 
     /*
      * Apply memory context for query rewrite in optimizer.
@@ -2041,9 +2324,29 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     DEBUG_QRW("After preprocess rownum");
 #endif
 
+    /*
+     * Push safe outer WHERE clauses into pure UNION ALL leaves, and compact
+     * the set-operation output to columns that are actually needed above it.
+     * This must run before Top-K rewriting while column numbers still describe
+     * the original view output.
+     */
+    unionAllColumnsRewritten = preprocess_union_all_required_columns(root);
+    DEBUG_QRW("After union all required-column pushdown");
+
     /* Push ORDER BY + LIMIT to UNION ALL leaves for DiskANN vector TopK */
     preprocess_union_all_diskann_topk(root);
     DEBUG_QRW("After union all diskann top-k pushdown");
+
+    /*
+     * Top-K recognition above needs the original ORDER BY expression.  Once
+     * that decision is made, replace wide ordering inputs crossing UNION ALL
+     * with branch-local scalar keys.  The inherited pruned flag controls
+     * physical tlists only: it does not mean this Query passed the rewrite
+     * safety checks (a descendant may contain aggregates, SRFs, or LIMIT).
+     */
+    if (unionAllColumnsRewritten)
+        preprocess_union_all_order_key_projection(root);
+    DEBUG_QRW("After union all order-key projection");
 
     /*
      * Check to see if any subqueries in the jointree can be merged into this

@@ -1,0 +1,295 @@
+-- Required-column pruning now accepts an absent outer WHERE.
+-- Keep the complete UNION/Anti Join safety checks: only the syntactic WHERE
+-- requirement is relaxed. Repeated user projections must keep seven columns.
+SET client_min_messages = warning;
+DROP SCHEMA IF EXISTS union_all_no_where_test CASCADE;
+CREATE SCHEMA union_all_no_where_test;
+SET search_path = union_all_no_where_test, public;
+CREATE TABLE delta_t
+(
+    id bigint, row_id bigint, embedding vector(4),
+    n1 integer, n2 integer, n3 integer, n4 integer, unused_text text
+);
+CREATE TABLE snapshot_t
+(
+    id bigint, row_id bigint, embedding vector(4),
+    n1 integer, n2 integer, n3 integer, n4 integer, unused_text text
+);
+CREATE TABLE delete_t(row_id bigint);
+-- Small deterministic data: both distances increase strictly with the first
+-- coordinate. No snapshot primary key; only snapshot has vector indexes.
+INSERT INTO delta_t
+SELECT 100+g, 100+g, ('[' || (12+g) || ',2,2,2]')::vector,
+       g, g+1, g+2, g+3, 'unused-delta'
+FROM generate_series(1,4) g;
+INSERT INTO snapshot_t
+SELECT g, g, ('[' || (2+g) || ',2,2,2]')::vector,
+       g, g+1, g+2, g+3, 'unused-snapshot'
+FROM generate_series(1,6) g;
+INSERT INTO delete_t VALUES (2), (5);
+CREATE INDEX delete_row_id_idx ON delete_t(row_id);
+CREATE INDEX snapshot_l2_idx ON snapshot_t
+    USING diskann(embedding vector_l2_ops);
+CREATE INDEX snapshot_cosine_idx ON snapshot_t
+    USING diskann(embedding vector_cosine_ops);
+CREATE VIEW union_view AS
+SELECT id, embedding, n1, n2, n3, n4, unused_text FROM delta_t
+UNION ALL
+SELECT s.id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text
+FROM snapshot_t s
+WHERE NOT EXISTS (SELECT 1 FROM delete_t d WHERE d.row_id=s.row_id);
+ANALYZE delta_t;
+ANALYZE snapshot_t;
+ANALYZE delete_t;
+SET query_dop = 1;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+SET enable_nestloop = on;
+SET enable_union_all_diskann_topk_pushdown = on;
+-- L2: local Top-K alone does not export the branch resjunk key through UNION.
+-- Pruning must materialize that key, then setrefs can build transparent Vars.
+SET ann_orderby_distance_reuse = l2;
+SET enable_union_all_required_columns_pushdown = off;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <-> '[2,2,2,2]'::vector LIMIT 100;
+                                                                                             QUERY PLAN                                                                                              
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, (("*SELECT* 1".embedding <-> '[2,2,2,2]'::vector))
+   ->  Sort
+         Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, (("*SELECT* 1".embedding <-> '[2,2,2,2]'::vector))
+         Sort Key: (("*SELECT* 1".embedding <-> '[2,2,2,2]'::vector))
+         ->  Result
+               Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, ("*SELECT* 1".embedding <-> '[2,2,2,2]'::vector)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, "*SELECT* 1".embedding
+                           ->  Limit
+                                 Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                                 ->  Sort
+                                       Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                                       Sort Key: ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                                       ->  Seq Scan on union_all_no_where_test.delta_t
+                                             Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, (delta_t.embedding <-> '[2,2,2,2]'::vector)
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".id, "*SELECT* 2".n1, "*SELECT* 2".n2, "*SELECT* 2".n3, "*SELECT* 2".n4, "*SELECT* 2".embedding
+                           ->  Limit
+                                 Output: s.id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text, ((s.embedding <-> '[2,2,2,2]'::vector))
+                                 ->  Nested Loop Anti Join
+                                       Output: s.id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text, (s.embedding <-> '[2,2,2,2]'::vector)
+                                       Join Filter: (d.row_id = s.row_id)
+                                       ->  Ann Index Scan using snapshot_l2_idx on union_all_no_where_test.snapshot_t s
+                                             Output: s.id, s.row_id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text
+                                             Order By: (s.embedding <-> '[2,2,2,2]'::vector)
+                                       ->  Materialize
+                                             Output: d.row_id
+                                             ->  Index Only Scan using delete_row_id_idx on union_all_no_where_test.delete_t d
+                                                   Output: d.row_id
+(31 rows)
+
+SET enable_union_all_required_columns_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <-> '[2,2,2,2]'::vector LIMIT 100;
+                                                                    QUERY PLAN                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.id, delta_t.id, delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+   ->  Result
+         Output: delta_t.id, delta_t.id, delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+               ->  Limit
+                     Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                     ->  Sort
+                           Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                           Sort Key: ((delta_t.embedding <-> '[2,2,2,2]'::vector))
+                           ->  Seq Scan on union_all_no_where_test.delta_t
+                                 Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, (delta_t.embedding <-> '[2,2,2,2]'::vector)
+               ->  Limit
+                     Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <-> '[2,2,2,2]'::vector))
+                     ->  Nested Loop Anti Join
+                           Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <-> '[2,2,2,2]'::vector))
+                           Join Filter: (d.row_id = s.row_id)
+                           ->  Ann Index Scan using snapshot_l2_idx on union_all_no_where_test.snapshot_t s
+                                 Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <-> '[2,2,2,2]'::vector)), s.row_id
+                                 Order By: (s.embedding <-> '[2,2,2,2]'::vector)
+                           ->  Materialize
+                                 Output: d.row_id
+                                 ->  Index Only Scan using delete_row_id_idx on union_all_no_where_test.delete_t d
+                                       Output: d.row_id
+(25 rows)
+
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <-> '[2,2,2,2]'::vector LIMIT 100;
+ id  | id  | id  | n1 | n2 | n3 | n4 
+-----+-----+-----+----+----+----+----
+   1 |   1 |   1 |  1 |  2 |  3 |  4
+   3 |   3 |   3 |  3 |  4 |  5 |  6
+   4 |   4 |   4 |  4 |  5 |  6 |  7
+   6 |   6 |   6 |  6 |  7 |  8 |  9
+ 101 | 101 | 101 |  1 |  2 |  3 |  4
+ 102 | 102 | 102 |  2 |  3 |  4 |  5
+ 103 | 103 | 103 |  3 |  4 |  5 |  6
+ 104 | 104 | 104 |  4 |  5 |  6 |  7
+(8 rows)
+
+-- Cosine exercises the approximate-consumer gate. Do not relax the Result
+-- whitelist to compensate for a missing branch-local scalar projection.
+SET ann_orderby_distance_reuse = cosine;
+SET enable_union_all_required_columns_pushdown = off;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <=> '[2,2,2,2]'::vector LIMIT 100;
+                                                                                             QUERY PLAN                                                                                              
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, (("*SELECT* 1".embedding <=> '[2,2,2,2]'::vector))
+   ->  Sort
+         Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, (("*SELECT* 1".embedding <=> '[2,2,2,2]'::vector))
+         Sort Key: (("*SELECT* 1".embedding <=> '[2,2,2,2]'::vector))
+         ->  Result
+               Output: "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, ("*SELECT* 1".embedding <=> '[2,2,2,2]'::vector)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".id, "*SELECT* 1".n1, "*SELECT* 1".n2, "*SELECT* 1".n3, "*SELECT* 1".n4, "*SELECT* 1".embedding
+                           ->  Limit
+                                 Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                                 ->  Sort
+                                       Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                                       Sort Key: ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                                       ->  Seq Scan on union_all_no_where_test.delta_t
+                                             Output: delta_t.id, delta_t.embedding, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, delta_t.unused_text, (delta_t.embedding <=> '[2,2,2,2]'::vector)
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".id, "*SELECT* 2".n1, "*SELECT* 2".n2, "*SELECT* 2".n3, "*SELECT* 2".n4, "*SELECT* 2".embedding
+                           ->  Limit
+                                 Output: s.id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text, ((s.embedding <=> '[2,2,2,2]'::vector))
+                                 ->  Nested Loop Anti Join
+                                       Output: s.id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text, (s.embedding <=> '[2,2,2,2]'::vector)
+                                       Join Filter: (d.row_id = s.row_id)
+                                       ->  Ann Index Scan using snapshot_cosine_idx on union_all_no_where_test.snapshot_t s
+                                             Output: s.id, s.row_id, s.embedding, s.n1, s.n2, s.n3, s.n4, s.unused_text
+                                             Order By: (s.embedding <=> '[2,2,2,2]'::vector)
+                                       ->  Materialize
+                                             Output: d.row_id
+                                             ->  Index Only Scan using delete_row_id_idx on union_all_no_where_test.delete_t d
+                                                   Output: d.row_id
+(31 rows)
+
+SET enable_union_all_required_columns_pushdown = on;
+EXPLAIN (VERBOSE ON, COSTS OFF)
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <=> '[2,2,2,2]'::vector LIMIT 100;
+                                                                    QUERY PLAN                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: delta_t.id, delta_t.id, delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+   ->  Result
+         Output: delta_t.id, delta_t.id, delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+         ->  Merge Append
+               Sort Key: ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+               ->  Limit
+                     Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                     ->  Sort
+                           Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                           Sort Key: ((delta_t.embedding <=> '[2,2,2,2]'::vector))
+                           ->  Seq Scan on union_all_no_where_test.delta_t
+                                 Output: delta_t.id, delta_t.n1, delta_t.n2, delta_t.n3, delta_t.n4, (delta_t.embedding <=> '[2,2,2,2]'::vector)
+               ->  Limit
+                     Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <=> '[2,2,2,2]'::vector))
+                     ->  Nested Loop Anti Join
+                           Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <=> '[2,2,2,2]'::vector))
+                           Join Filter: (d.row_id = s.row_id)
+                           ->  Ann Index Scan using snapshot_cosine_idx on union_all_no_where_test.snapshot_t s
+                                 Output: s.id, s.n1, s.n2, s.n3, s.n4, ((s.embedding <=> '[2,2,2,2]'::vector)), s.row_id
+                                 Order By: (s.embedding <=> '[2,2,2,2]'::vector)
+                           ->  Materialize
+                                 Output: d.row_id
+                                 ->  Index Only Scan using delete_row_id_idx on union_all_no_where_test.delete_t d
+                                       Output: d.row_id
+(25 rows)
+
+SELECT id,id,id,n1,n2,n3,n4 FROM union_view
+ORDER BY embedding <=> '[2,2,2,2]'::vector LIMIT 100;
+ id  | id  | id  | n1 | n2 | n3 | n4 
+-----+-----+-----+----+----+----+----
+   1 |   1 |   1 |  1 |  2 |  3 |  4
+   3 |   3 |   3 |  3 |  4 |  5 |  6
+   4 |   4 |   4 |  4 |  5 |  6 |  7
+   6 |   6 |   6 |  6 |  7 |  8 |  9
+ 101 | 101 | 101 |  1 |  2 |  3 |  4
+ 102 | 102 | 102 |  2 |  3 |  4 |  5
+ 103 | 103 | 103 |  3 |  4 |  5 |  6
+ 104 | 104 | 104 |  4 |  5 |  6 |  7
+(8 rows)
+
+-- Each dynamic SELECT is planned independently, so the assertion aggregate
+-- cannot disable pruning/reuse inside the query being checked. Sorting only
+-- the captured IDs avoids depending on an unordered query's emission order.
+CREATE FUNCTION capture_ids(query_text text) RETURNS SETOF bigint AS $$
+BEGIN
+    RETURN QUERY EXECUTE query_text;
+END;
+$$ LANGUAGE plpgsql;
+SET ann_orderby_distance_reuse = l2;
+SET enable_union_all_required_columns_pushdown = off;
+SELECT 'plain' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids('SELECT id FROM union_view') AS captured(id);
+ scenario |            ids            
+----------+---------------------------
+ plain    | {1,3,4,6,101,102,103,104}
+(1 row)
+
+SELECT 'limit_only' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids('SELECT id FROM union_view LIMIT 100') AS captured(id);
+  scenario  |            ids            
+------------+---------------------------
+ limit_only | {1,3,4,6,101,102,103,104}
+(1 row)
+
+SELECT 'order_only' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids(
+    'SELECT id FROM union_view ORDER BY embedding <-> ''[2,2,2,2]''::vector') AS captured(id);
+  scenario  |            ids            
+------------+---------------------------
+ order_only | {1,3,4,6,101,102,103,104}
+(1 row)
+
+SET enable_union_all_required_columns_pushdown = on;
+SELECT 'plain' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids('SELECT id FROM union_view') AS captured(id);
+ scenario |            ids            
+----------+---------------------------
+ plain    | {1,3,4,6,101,102,103,104}
+(1 row)
+
+SELECT 'limit_only' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids('SELECT id FROM union_view LIMIT 100') AS captured(id);
+  scenario  |            ids            
+------------+---------------------------
+ limit_only | {1,3,4,6,101,102,103,104}
+(1 row)
+
+SELECT 'order_only' AS scenario, array_agg(id ORDER BY id) AS ids
+FROM capture_ids(
+    'SELECT id FROM union_view ORDER BY embedding <-> ''[2,2,2,2]''::vector') AS captured(id);
+  scenario  |            ids            
+------------+---------------------------
+ order_only | {1,3,4,6,101,102,103,104}
+(1 row)
+
+RESET ann_orderby_distance_reuse;
+RESET enable_union_all_required_columns_pushdown;
+RESET enable_union_all_diskann_topk_pushdown;
+RESET enable_nestloop;
+RESET enable_mergejoin;
+RESET enable_hashjoin;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+RESET query_dop;
+RESET search_path;
+DROP SCHEMA union_all_no_where_test CASCADE;
+RESET client_min_messages;
