@@ -3050,30 +3050,38 @@ static Scan* create_indexscan_plan(
         ListCell* exprCell;
         PathKey*  pathkey;
         Expr*     expr;
-        EquivalenceMember* em;
 
         indexorderbyops = (Oid *) palloc(numOrderBys * sizeof(Oid));
 
         /*
-         * PathKey contains pointer to the equivalence class, but that's not
-         * enough because we need the expression's datatype to look up the
-         * sort operator in the operator family.  We have to dig the
-         * equivalence member for the datatype.
+         * For each ORDER BY expression, get its datatype directly and look up
+         * the sort operator in the pathkey's operator family.
+         *
+         * This approach avoids depending on EquivalenceMember lookup, which can
+         * return NULL for child relations in UNION ALL scenarios (e.g., when
+         * find_ec_member_for_expr is called with relids=NULL but the member is
+         * a child member with non-NULL em_relids).
          */
+        Assert(list_length(best_path->path.pathkeys) == list_length(indexorderbys));
+
         i = 0;
         forboth (pathkeyCell, best_path->path.pathkeys, exprCell, indexorderbys) {
             pathkey = (PathKey *) lfirst(pathkeyCell);
             expr = (Expr *) lfirst(exprCell);
-
-            /* Find equivalence member for the order by expression */
-            em = find_ec_member_for_expr(pathkey->pk_eclass, expr, NULL);
+            Oid exprtype = exprType((Node *)expr);
+            Oid sortop;
 
             /* Get sort operator from opfamily */
-            indexorderbyops[i] = get_opfamily_member(pathkey->pk_opfamily,
-                                                     em->em_datatype,
-                                                     em->em_datatype,
-                                                     pathkey->pk_strategy);
-            i++;
+            sortop = get_opfamily_member(pathkey->pk_opfamily,
+                                         exprtype,
+                                         exprtype,
+                                         pathkey->pk_strategy);
+            if (!OidIsValid(sortop))
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                     errmsg("missing sort operator for index ORDER BY")));
+
+            indexorderbyops[i++] = sortop;
         }
     }
 
