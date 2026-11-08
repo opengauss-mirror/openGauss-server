@@ -876,6 +876,8 @@ extern size_t GetHashMemoryLimit(void);
  * server working version as its local compatibility floor; do not borrow
  * the unrelated DiskANN INCLUDE gate. */
 #define ANN_ORDERBY_DISTANCE_REUSE_VERSION_NUM 93098
+/* Local single-node query filtering; older workers cannot execute it. */
+#define DISKANN_QUERY_FILTER_VERSION_NUM 93098
 #ifdef ENABLE_NEON
 extern void InitStandaloneProcess(const char* argv0);
 #endif

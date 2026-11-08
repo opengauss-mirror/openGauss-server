@@ -16,6 +16,7 @@
 #define PLANNODES_H
 
 #include "access/sdir.h"
+#include "access/datavec/diskannqueryfilter.h"
 #include "foreign/foreign.h"
 #include "nodes/bitmapset.h"
 #include "nodes/primnodes.h"
@@ -908,6 +909,19 @@ typedef struct AnnIndexScan {
     bool is_partial;
     double annCount;
     int64 limitCount;
+    AnnFilterMode filterMode;
+    /* AStore query-local qualification and candidate search. */
+    bool ann_filter_enabled;
+    uint32 ann_request_id;
+    Expr* ann_query_vector;
+    Expr* ann_distance_expr;
+    Expr* ann_limit_expr;
+    bool ann_output_join_required;
+    int ann_initial_search_nodes;
+    int ann_filter_work_mem;
+    SubPlan* ann_in_filter;
+    int ann_candidate_tid_param;
+    AttrNumber ann_eligibility_tid_resno;
 } AnnIndexScan;
 
 /* ----------------

@@ -1047,7 +1047,7 @@ static bool rewrite_ann_orderby_distance_walker(Node* node, void* context)
         AnnIndexScan* scan = (AnnIndexScan*)node;
 
         if ((walkerCxt->mpwc.status & UNDER_STREAM) == 0 &&
-            !scan->index_only_scan && !scan->is_ustore && !scan->scan.isPartTbl &&
+            !scan->ann_filter_enabled && !scan->index_only_scan && !scan->is_ustore && !scan->scan.isPartTbl &&
             scan->scan.plan.dop <= 1 && !ScanDirectionIsBackward(scan->indexorderdir) &&
             list_length(scan->indexorderbyorig) == 1 && scan->scan.plan.targetlist != NIL) {
             Relation indexRel = index_open(scan->indexid, AccessShareLock);

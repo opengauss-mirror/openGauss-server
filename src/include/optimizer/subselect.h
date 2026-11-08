@@ -43,6 +43,7 @@ extern void convert_ORCLAUSE_to_join(PlannerInfo* root, BoolExpr* or_clause, Nod
 extern Node* SS_replace_correlation_vars(PlannerInfo* root, Node* expr);
 extern Node* SS_process_sublinks(PlannerInfo* root, Node* expr, bool isQual);
 extern void SS_finalize_plan(PlannerInfo* root, Plan* plan, bool attach_initplans);
+extern SubPlan* SS_make_ann_filter_subplan(PlannerInfo* root, Plan* plan, int tid_param);
 extern Param* SS_make_initplan_from_plan(
     PlannerInfo* root, Plan* plan, Oid resulttype, int32 resulttypmod, Oid resultcollation);
 extern Param* assign_nestloop_param_var(PlannerInfo* root, Var* var);

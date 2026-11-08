@@ -25,6 +25,8 @@ extern void ExecEndAnnIndexScan(AnnIndexScanState* node);
 extern void ExecAnnIndexMarkPos(AnnIndexScanState* node);
 extern void ExecAnnIndexRestrPos(AnnIndexScanState* node);
 extern void ExecReScanAnnIndexScan(AnnIndexScanState* node);
+extern bool ExecAnnIndexFilterStats(AnnIndexScanState* node, DiskAnnFilterCounters* counters,
+    uint64* epoch, bool* prepared);
 
 extern void ExecInitPartitionForAnnIndexScan(AnnIndexScanState* indexstate, EState* estate);
 

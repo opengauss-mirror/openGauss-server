@@ -3220,6 +3220,9 @@ typedef struct knl_u_datavec_context {
     int ivfflat_probes;
     int ivfpq_kreorder;
     int diskann_probes;
+    bool enable_diskann_filter;
+    int diskann_filter_mode;
+    int diskann_filter_work_mem;
     int hybrid_recall_rrf_k;
     double rbq_refinek;
     bool enable_npu;

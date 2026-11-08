@@ -293,6 +293,18 @@ ann_orderby_distance_reuse_check: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule.ann_orderby_distance_reuse -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
+# Existing-install baseline for the DiskANN filtering implementation. All
+# connection paths are explicit; the runner verifies the actual data directory.
+# This target does not build or start a server, or rewrite expected results.
+.PHONY: diskann_filter_baselinecheck
+diskann_filter_baselinecheck:
+	@test -n "$(DISKANN_FILTER_INSTALL)" -a -n "$(DISKANN_FILTER_DATA)" -a -n "$(DISKANN_FILTER_HOST)" -a -n "$(DISKANN_FILTER_PORT)" -a -n "$(DISKANN_FILTER_OUTPUT)" || \
+	  { echo "Set DISKANN_FILTER_INSTALL/DATA/HOST/PORT/OUTPUT for the isolated instance"; exit 2; }
+	python3 $(srcdir)/run_diskann_filter_tests.py \
+	  --install "$(DISKANN_FILTER_INSTALL)" --data "$(DISKANN_FILTER_DATA)" \
+	  --host "$(DISKANN_FILTER_HOST)" --port "$(DISKANN_FILTER_PORT)" \
+	  --output "$(DISKANN_FILTER_OUTPUT)"
+
 fastcheck_anomaly_single: all tablespace-setup
 	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \

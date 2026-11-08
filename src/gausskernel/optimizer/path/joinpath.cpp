@@ -25,6 +25,7 @@
 #include "parser/parse_hint.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
+#include "optimizer/diskann_filter_path.h"
 #include "optimizer/nodegroups.h"
 #include "optimizer/optimizerdebug.h"
 #include "optimizer/pathnode.h"
@@ -954,7 +955,7 @@ static void try_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
     int max_dop = (required_outer != NULL) ? 1 : u_sess->opt_cxt.query_dop;
     initial_cost_nestloop(root, &workspace, jointype, outer_path, inner_path, extra, max_dop);
 
-    if (root->ru_is_under_start_with ||
+    if (root->ru_is_under_start_with || ann_keep_join_inputs(root, joinrel) ||
         add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_NESTLOOP)) {
 
@@ -1166,7 +1167,7 @@ static void try_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     initial_cost_mergejoin(
         root, &workspace, jointype, mergeclauses, outer_path, inner_path, outersortkeys, innersortkeys, extra);
 
-    if (root->ru_is_under_start_with ||
+    if (root->ru_is_under_start_with || ann_keep_join_inputs(root, joinrel) ||
         add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_MERGEJOIN)) {
 #ifdef STREAMPLAN
@@ -1373,7 +1374,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
     initial_cost_hashjoin(
         root, &workspace, jointype, hashclauses, outer_path, inner_path, extra, max_dop);
 
-    if (root->ru_is_under_start_with ||
+    if (root->ru_is_under_start_with || ann_keep_join_inputs(root, joinrel) ||
         add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, NIL, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_HASHJOIN)) {
 #ifdef STREAMPLAN

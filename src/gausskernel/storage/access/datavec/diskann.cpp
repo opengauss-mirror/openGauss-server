@@ -60,10 +60,43 @@ static void diskanncostestimate_internal(PlannerInfo* root, IndexPath* path, dou
 
     index_close(index, NoLock);
 
-    costs.numIndexTuples = path->indexinfo->tuples;
+    costs.numIndexTuples = path->ann_filter_enabled ?
+        path->ann_estimated_members : path->indexinfo->tuples;
 
     genericcostestimate(root, path, loopCount, costs.numIndexTuples, &costs.indexStartupCost, &costs.indexTotalCost,
                         &costs.indexSelectivity, &costs.indexCorrelation);
+
+    if (path->ann_filter_enabled) {
+        /* A fixed beam limits delivery, not graph exploration or Probe
+         * calls. The planner separately estimates graph work; publish C/N
+         * for cost_index's heap-fetch part. Unknown distinct uses the
+         * physical member-slot upper bound, never K or K/selectivity. */
+        double n = path->indexinfo->rel->tuples;
+        if (!isfinite(n) || n < 0)
+            n = Max(path->indexinfo->rel->rows, 1.0);
+        n = Min(n, 1.0e100);
+        double t = DISKANN_HEAPTIDS;
+        VariableStatData vardata;
+        bool isdefault = true;
+        examine_variable(root, (Node*)linitial(((OpExpr*)path->ann_distance_expr)->args),
+            path->ann_target_rti, &vardata);
+        double raw_distinct = HeapTupleIsValid(vardata.statsTuple) ?
+            ((Form_pg_statistic)GETSTRUCT(vardata.statsTuple))->stadistinct : 0.0;
+        bool hasstats = isfinite(raw_distinct) && raw_distinct != 0.0;
+        /* This is the full index's member density. Native Poisson filtering
+         * is appropriate for qualified output distinct, not this input. */
+        vardata.enablePossion = false;
+        double distinct = get_variable_numdistinct(&vardata, &isdefault, false);
+        ReleaseVariableStats(vardata);
+        if (hasstats && !isdefault && isfinite(distinct) && distinct > 0)
+            t = Min(Max(Max(n, path->indexinfo->tuples) / distinct, 1.0), (double)DISKANN_HEAPTIDS);
+        double candidates = Min(path->ann_estimated_members,
+            (double)path->ann_initial_search_nodes * t);
+        costs.indexSelectivity = n > 0 ? Min(candidates / n, 1.0) : 0.0;
+        ereport(DEBUG2, (errmsg("DiskANN fixed beam estimate: members=%.0f members_per_node=%.8f "
+            "candidates=%.8f heap_selectivity=%.8f", path->ann_estimated_members, t,
+            candidates, costs.indexSelectivity)));
+    }
 
     /* Use total cost since most work happens before first tuple is returned */
     *indexStartupCost = costs.indexTotalCost;

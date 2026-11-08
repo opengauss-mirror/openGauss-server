@@ -1390,7 +1390,12 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      * to remove such unnecessary clauses from the qpquals list if this path
      * is selected for use.
      */
-    cost_qual_eval(&qpqual_cost, list_difference_ptr(allclauses, path->indexquals), root);
+    /* PRE quals execute in the complete source; IN quals in the real
+     * parameterized SubPlan. Charging them as scan qpquals as well would
+     * bill work which createplan deliberately removes from this scan. */
+    List* qpquals = path->ann_filter_enabled && path->ann_filter_mode != ANN_FILTER_POST ?
+        NIL : list_difference_ptr(allclauses, path->indexquals);
+    cost_qual_eval(&qpqual_cost, qpquals, root);
 
     startup_cost += qpqual_cost.startup;
 
@@ -1415,6 +1420,58 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
             errmsg("Computing IndexScanCost: cpu_per_tuple: %lf, tuples_fetched: %lf, cpu_run_cost: %lf",
                 cpu_per_tuple, tuples_fetched, cpu_per_tuple * tuples_fetched)));
 
+    if (path->ann_filter_enabled) {
+        /* New query filtering is single-node, single-epoch and unordered.
+         * The native heap estimate has already billed C visits. Supplement
+         * only the PRE/IN checks beyond C; reuse the same page-cache model,
+         * without adding another copy of the graph's index I/O. */
+        Assert(index->relam == DISKANN_AM_OID && dop == 1 && loop_count == 1.0);
+        double members = path->ann_estimated_members;
+        double sel = path->annQualSelectivity;
+        double fetches = path->ann_filter_mode == ANN_FILTER_PRE ? members * sel :
+            path->ann_filter_mode == ANN_FILTER_IN ? members : tuples_fetched;
+        double extra_fetches = Max(fetches - tuples_fetched, 0.0);
+        double total_pages = index_pages_fetched(Max(fetches, tuples_fetched),
+            (BlockNumber)baserel->pages, (double)index->pages, root, ispartitionedindex);
+        Cost extra_io = Max(total_pages * RANDOM_PAGE_COST(use_modded_cost,
+            old_random_page_cost, spc_seq_page_cost, total_pages) - max_IO_cost, 0.0);
+        /* A HOT resolution/key check and rejected-member lookup are new
+         * operations, as are delivery identity/dedup checks. IN also looks
+         * up/writes its business cache; initial hit discount remains zero. */
+        double operations = 3.0 * fetches + 2.0 * tuples_fetched;
+        if (path->ann_filter_mode == ANN_FILTER_PRE)
+            operations += members; /* membership, including rejected roots */
+        if (path->ann_filter_mode == ANN_FILTER_IN)
+            operations += 2.0 * members; /* eligibility cache lookup/write */
+        Cost extra = extra_io + extra_fetches * u_sess->attr.attr_sql.cpu_tuple_cost +
+            operations * u_sess->attr.attr_sql.cpu_operator_cost;
+        extra = isfinite(extra) ? Min(Max(extra, 0.0), 1.0e100) : 1.0e100;
+        /* The graph and its callbacks finish before the first output. Keep
+         * native POST qpqual/projection CPU as run cost. */
+        Cost blocking_heap = max_IO_cost +
+            u_sess->attr.attr_sql.cpu_tuple_cost * tuples_fetched;
+        startup_cost += blocking_heap + extra;
+        run_cost -= blocking_heap;
+        /* POST filters its retained navigation members. PRE/IN instead
+         * admit qualified members on discovery across the whole visited
+         * set, up to the separate result capacity. Applying selectivity
+         * to that capacity again can incorrectly reject a viable route
+         * as unable to satisfy LIMIT. Keep M for graph/probe work and C
+         * for the conservative native delivery charge above. Output Join
+         * routes retain the established estimate for now: changing their
+         * Join method can change a tied LIMIT boundary, and compatibility
+         * with the fixed Oracle output corpus is a separate release gate. */
+        bool qualified_output = path->ann_filter_mode != ANN_FILTER_POST &&
+            !path->ann_output_join_required;
+        double output_rows = !qualified_output ?
+            tuples_fetched * sel : Min(tuples_fetched, members * sel);
+        path->path.rows = clamp_row_est(Min(output_rows, MAXIMUM_ROWCOUNT));
+        ereport(DEBUG2, (errmsg("DiskANN filter heap cost: mode=%d delivery=%.8f "
+            "checks=%.8f extra_fetches=%.8f extra_io=%.8f operations=%.8f qpqual_per_tuple=%.8f",
+            (int)path->ann_filter_mode, tuples_fetched, fetches, extra_fetches,
+            extra_io, operations, qpqual_cost.per_tuple)));
+    }
+
     if (root->parse->is_flt_frame) {
         /* tlist eval costs are paid per output row, not per tuple scanned */
         startup_cost += path->path.pathtarget->cost.startup;
@@ -1422,6 +1479,12 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     }
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;
+    if (path->ann_filter_enabled) {
+        path->path.startup_cost = isfinite(path->path.startup_cost) ?
+            Min(Max(path->path.startup_cost, 0.0), 1.0e100) : 1.0e100;
+        path->path.total_cost = isfinite(path->path.total_cost) ?
+            Min(Max(path->path.total_cost, path->path.startup_cost), 1.0e100) : 1.0e100;
+    }
     path->path.stream_cost = 0;
 
     /*
@@ -4308,6 +4371,30 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
                     inner_path_rows;
     run_cost += u_sess->attr.attr_sql.cpu_operator_cost * num_hashclauses * outer_path_rows;
 
+    /* Controlled distance-only Top-K reverses native bucket links once after
+     * each build/reload (nodeHashjoin.cpp).  Charge the pointer work here,
+     * once per build row, so all native and derived routes inherit it. */
+    bool preserveVectorInput = false;
+    Query* vectorQuery = root->parse;
+    if (u_sess->datavec_ctx.enable_diskann_filter && root->ann_filter_controlled &&
+        g_instance.role == VSINGLENODE &&
+        u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE &&
+        u_sess->opt_cxt.query_dop <= 1 && !root->glob->vectorized && dop <= 1 &&
+        list_length(vectorQuery->sortClause) == 1 && !vectorQuery->limitIsPercent &&
+        !vectorQuery->limitWithTies && vectorQuery->limitCount != NULL &&
+        IsA(vectorQuery->limitCount, Const)) {
+        Const* count = (Const*)vectorQuery->limitCount;
+        SortGroupClause* sort = (SortGroupClause*)linitial(vectorQuery->sortClause);
+        Node* offset = vectorQuery->limitOffset;
+        bool zeroOffset = offset == NULL || (IsA(offset, Const) &&
+            (((Const*)offset)->constisnull || (((Const*)offset)->consttype == INT8OID &&
+             DatumGetInt64(((Const*)offset)->constvalue) == 0)));
+        if (!count->constisnull && count->consttype == INT8OID &&
+            DatumGetInt64(count->constvalue) > 0 && sort->sortop == FLOAT8LTOID && zeroOffset) {
+            preserveVectorInput = true;
+        }
+    }
+
     ereport(DEBUG2,
         (errmodule(MOD_OPT_JOIN),
             errmsg("Add hash function cost: startup_cost: %lf, run_cost: %lf", startup_cost, run_cost)));
@@ -4340,6 +4427,16 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
         u_sess->opt_cxt.op_work_mem / dop,
         root->glob->vectorized,
         &workspace->inner_mem_info);
+
+    if (preserveVectorInput) {
+        /* Empty buckets are visited too. Later batch reloads repeat only
+         * the bucket walk; each resident tuple's links are changed once. */
+        startup_cost += u_sess->attr.attr_sql.cpu_operator_cost *
+            (numbuckets + 2 * inner_path_rows / numbatches);
+        run_cost += u_sess->attr.attr_sql.cpu_operator_cost *
+            (numbuckets * (double)(numbatches - 1) +
+             2 * inner_path_rows * (1 - 1.0 / numbatches));
+    }
 
     innerpages = page_size(PATH_LOCAL_ROWS(inner_path), inner_width) / dop;
     outerpages = page_size(PATH_LOCAL_ROWS(outer_path), outer_width) / dop;

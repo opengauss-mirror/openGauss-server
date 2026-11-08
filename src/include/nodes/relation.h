@@ -16,6 +16,7 @@
 #define RELATION_H
 
 #include "access/sdir.h"
+#include "access/datavec/diskannqueryfilter.h"
 #include "lib/stringinfo.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
@@ -302,6 +303,8 @@ typedef struct PlannerInfo {
     NodeTag type;
 
     Query* parse; /* the Query being planned */
+    struct DiskAnnFilterRequest* ann_filter_request;
+    bool ann_filter_controlled; /* exclude legacy ANN from this request */
 
     PlannerGlobal* glob; /* global info for current planner run */
 
@@ -1264,7 +1267,38 @@ typedef struct IndexPath {
     double annCount; // restore limitValue/sel
     Cost allcost; // index cost + qual cost
     bool is_ustore;
+    bool ann_filter_enabled;
+    AnnFilterMode ann_filter_mode;
+    uint32 ann_request_id;
+    Index ann_target_rti;
+    Relids ann_qualification_relids;
+    Path* ann_eligibility_path;
+    Expr* ann_query_vector;
+    Expr* ann_distance_expr;
+    Expr* ann_limit_expr;
+    bool ann_output_join_required;
+    int ann_initial_search_nodes;
+    int ann_filter_work_mem;
+    double ann_estimated_members;
+    double ann_estimated_probe_calls;
+    int ann_candidate_tid_param;
 } IndexPath;
+
+/* Planner-owned metadata, never a node or a serialized executor object. */
+typedef struct DiskAnnFilterRequest {
+    uint32 request_id;
+    Index target_rti;
+    AttrNumber vector_attno;
+    OpExpr* distance_expr;
+    Expr* query_vector;
+    Expr* limit_expr;
+    Relids qualification_relids;
+    int requested_mode;
+    List* ann_candidates; /* privately owned, before ordinary path pruning */
+    List* ordinary_candidates; /* independent complete exact path trees */
+    bool deriving; /* private sources must never re-enter candidate capture */
+    const char* unsupported_reason;
+} DiskAnnFilterRequest;
 
 /*
  * [P0-1] HybridRecallPath - planner-side candidate for two-branch recall

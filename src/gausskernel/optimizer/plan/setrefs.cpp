@@ -410,6 +410,10 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             splan->indexqualorig = fix_scan_list(root, splan->indexqualorig, rtoffset);
             splan->indexorderby = fix_scan_list(root, splan->indexorderby, rtoffset);
             splan->indexorderbyorig = fix_scan_list(root, splan->indexorderbyorig, rtoffset);
+            splan->ann_query_vector = (Expr*)fix_scan_expr(root, (Node*)splan->ann_query_vector, rtoffset);
+            splan->ann_distance_expr = (Expr*)fix_scan_expr(root, (Node*)splan->ann_distance_expr, rtoffset);
+            splan->ann_limit_expr = (Expr*)fix_scan_expr(root, (Node*)splan->ann_limit_expr, rtoffset);
+            splan->ann_in_filter = (SubPlan*)fix_scan_expr(root, (Node*)splan->ann_in_filter, rtoffset);
         } break;
         case T_CStoreIndexScan: {
             CStoreIndexScan* splan = (CStoreIndexScan*)plan;

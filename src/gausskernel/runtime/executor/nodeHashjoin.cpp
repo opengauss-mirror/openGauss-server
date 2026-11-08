@@ -16,12 +16,15 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "catalog/pg_operator.h"
+#include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "executor/exec/execStream.h"
 #include "executor/hashjoin.h"
 #include "executor/node/nodeHash.h"
 #include "executor/node/nodeHashjoin.h"
 #include "miscadmin.h"
+#include "parser/parsetree.h"
 #include "utils/anls_opt.h"
 #include "utils/memutils.h"
 
@@ -45,6 +48,90 @@ static TupleTableSlot* ExecHashJoinOuterGetTuple(PlanState* outerNode, HashJoinS
 static TupleTableSlot* ExecHashJoinGetSavedTuple(
     HashJoinState* hjstate, BufFile* file, uint32* hashvalue, TupleTableSlot* tupleSlot);
 static bool ExecHashJoinNewBatch(HashJoinState* hjstate);
+
+/* The distance-only Top-K contract does not add a business sort key.  For
+ * controlled row-executor queries, undo the bucket's head insertion before
+ * probing.  This preserves business input order in the observed single-batch
+ * plans rather than making the last inserted match win a tied LIMIT boundary.
+ * It is not a claim about Oracle's internal tie algorithm or spill ordering.
+ * Keep the eligibility checks aligned with initial_cost_hashjoin. */
+static bool ExecHashJoinPreserveVectorInput(HashJoinState* node)
+{
+    if (!u_sess->datavec_ctx.enable_diskann_filter || g_instance.role != VSINGLENODE ||
+        u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE ||
+        u_sess->opt_cxt.query_dop > 1 || node->js.ps.state->es_plannedstmt == NULL)
+        return false;
+    Plan* top = node->js.ps.state->es_plannedstmt->planTree;
+    if (top == NULL || !IsA(top, Limit) || top->dop > 1)
+        return false;
+    Limit* limit = (Limit*)top;
+    if (limit->isPercent || limit->withTies || limit->limitCount == NULL ||
+        !IsA(limit->limitCount, Const))
+        return false;
+    Const* count = (Const*)limit->limitCount;
+    if (count->constisnull || count->consttype != INT8OID || DatumGetInt64(count->constvalue) <= 0)
+        return false;
+    if (limit->limitOffset != NULL &&
+        (!IsA(limit->limitOffset, Const) ||
+         (!((Const*)limit->limitOffset)->constisnull &&
+          (((Const*)limit->limitOffset)->consttype != INT8OID ||
+           DatumGetInt64(((Const*)limit->limitOffset)->constvalue) != 0))))
+        return false;
+    if (top->lefttree == NULL || !IsA(top->lefttree, Sort))
+        return false;
+    Sort* sort = (Sort*)top->lefttree;
+    if (sort->numCols != 1 || sort->sortOperators[0] != FLOAT8LTOID)
+        return false;
+    TargetEntry* key = get_tle_by_resno(sort->plan.targetlist, sort->sortColIdx[0]);
+    Plan* producer = &sort->plan;
+    /* setrefs replaces a Sort key expression with OUTER_VAR. Resolve that
+     * existing projection slot rather than treating the Var as a new key. */
+    while (key != NULL && IsA(key->expr, Var)) {
+        Var* var = (Var*)key->expr;
+        if (var->varlevelsup != 0 || var->varattno <= 0 ||
+            (var->varno != OUTER_VAR && var->varno != INNER_VAR))
+            return false;
+        producer = var->varno == OUTER_VAR ? producer->lefttree : producer->righttree;
+        if (producer == NULL)
+            return false;
+        key = get_tle_by_resno(producer->targetlist, var->varattno);
+    }
+    if (key == NULL || !IsA(key->expr, OpExpr))
+        return false;
+    OpExpr* distance = (OpExpr*)key->expr;
+    /* Builtin vector L2/cosine operators, as in ann_register_filter_request. */
+    return (distance->opno == 8311 || distance->opno == 8313) && distance->opresulttype == FLOAT8OID;
+}
+
+static HashJoinTuple ExecHashJoinReverseBucket(HashJoinTuple tuple)
+{
+    HashJoinTuple head = NULL;
+    while (tuple != NULL) {
+        CHECK_FOR_INTERRUPTS();
+        HashJoinTuple next = tuple->next;
+        tuple->next = head;
+        head = tuple;
+        tuple = next;
+    }
+    return head;
+}
+
+static void ExecHashJoinRestoreVectorInput(HashJoinState* node)
+{
+    if (!ExecHashJoinPreserveVectorInput(node))
+        return;
+    HashJoinTable table = node->hj_HashTable;
+    /* Only after a complete build/reload; reused tables must not be reversed
+     * again by ReScan.  No tuple data or outer-join match flag is modified. */
+    for (int i = 0; i < table->nbuckets; i++) {
+        CHECK_FOR_INTERRUPTS();
+        table->buckets[i] = ExecHashJoinReverseBucket(table->buckets[i]);
+    }
+    for (int i = 0; i < table->nSkewBuckets; i++) {
+        int bucket = table->skewBucketNums[i];
+        table->skewBucket[bucket]->tuples = ExecHashJoinReverseBucket(table->skewBucket[bucket]->tuples);
+    }
+}
 
 /* ----------------------------------------------------------------
  *		ExecHashJoin
@@ -221,6 +308,8 @@ CREATE_HASH_TABLE:
                 hashNode->ps.hbktScanSlot.currSlot = node->js.ps.hbktScanSlot.currSlot;
                 (void)MultiExecProcNode((PlanState*)hashNode);
                 (void)pgstat_report_waitstatus(oldStatus);
+
+                ExecHashJoinRestoreVectorInput(node);
 
                 /* Early free right tree after hash table built */
                 ExecEarlyFree((PlanState*)hashNode);
@@ -1004,6 +1093,8 @@ static bool ExecHashJoinNewBatch(HashJoinState* hjstate)
         BufFileClose(innerFile);
         hashtable->innerBatchFile[curbatch] = NULL;
     }
+
+    ExecHashJoinRestoreVectorInput(hjstate);
 
     /*
      * Rewind outer batch file (if present), so that we can start reading it.

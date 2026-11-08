@@ -1,0 +1,156 @@
+-- Ordinary AStore/DiskANN prerequisites for the PRE/IN/POST implementation.
+-- This does not claim that any new filtering mode is already supported.
+SET client_min_messages = warning;
+DROP SCHEMA IF EXISTS diskann_filter_baseline CASCADE;
+CREATE SCHEMA diskann_filter_baseline;
+SET search_path = diskann_filter_baseline, public;
+SET enable_opfusion = off;
+SET ann_orderby_distance_reuse = off;
+CREATE TABLE documents (
+    id integer PRIMARY KEY,
+    bucket_id integer NOT NULL,
+    embedding vector(8) NOT NULL,
+    payload text,
+    CHECK (vector_norm(embedding) > 0)
+) WITH (storage_type=astore, fillfactor=70);
+INSERT INTO documents SELECT i, i%4,
+    ('['||i||',1,2,3,4,5,6,7]')::vector, 'payload-'||i
+FROM generate_series(1,64) i;
+CREATE INDEX documents_diskann ON documents USING diskann (embedding vector_l2_ops) WITH (index_size=256);
+CREATE INDEX documents_bucket ON documents(bucket_id);
+CREATE TABLE allowed_buckets (acl_id integer PRIMARY KEY, bucket_id integer NOT NULL)
+WITH (storage_type=astore);
+INSERT INTO allowed_buckets SELECT i, i%4 FROM generate_series(1,8) i;
+CREATE INDEX allowed_bucket_key ON allowed_buckets(bucket_id);
+ANALYZE documents;
+ANALYZE allowed_buckets;
+SELECT reloptions::text LIKE '%storage_type=astore%' AS actual_astore
+FROM pg_class WHERE oid='documents'::regclass;
+ actual_astore 
+---------------
+ t
+(1 row)
+
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+CREATE TEMP TABLE exact_rows AS
+SELECT id FROM documents WHERE bucket_id=3
+ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 5;
+SET enable_seqscan = off;
+SET enable_indexscan = on;
+CREATE TEMP TABLE ann_rows AS
+SELECT /*+ indexscan(documents documents_diskann) */ id FROM documents WHERE bucket_id=3
+ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 5;
+SELECT NOT EXISTS (SELECT * FROM exact_rows EXCEPT ALL SELECT * FROM ann_rows)
+   AND NOT EXISTS (SELECT * FROM ann_rows EXCEPT ALL SELECT * FROM exact_rows) AS same_scalar_rows;
+ same_scalar_rows 
+------------------
+ t
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT /*+ indexscan(documents documents_diskann) */ id FROM documents
+ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit
+   ->  Ann Index Scan using documents_diskann on documents
+         Order By: (embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector)
+(3 rows)
+
+SET enable_seqscan = on;
+SET enable_indexscan = off;
+CREATE TEMP TABLE exact_join AS
+SELECT d.id,a.acl_id FROM documents d JOIN allowed_buckets a ON d.bucket_id=a.bucket_id
+ORDER BY d.embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 10;
+SET enable_indexscan = on;
+CREATE TEMP TABLE ann_join AS
+SELECT /*+ indexscan(d documents_diskann) */ d.id,a.acl_id
+FROM documents d JOIN allowed_buckets a ON d.bucket_id=a.bucket_id
+ORDER BY d.embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 10;
+SELECT NOT EXISTS (SELECT * FROM exact_join EXCEPT ALL SELECT * FROM ann_join)
+   AND NOT EXISTS (SELECT * FROM ann_join EXCEPT ALL SELECT * FROM exact_join) AS same_join_rows;
+ same_join_rows 
+----------------
+ t
+(1 row)
+
+SELECT count(*)=10 AND count(DISTINCT id)=5 AS business_duplicates_preserved FROM ann_join;
+ business_duplicates_preserved 
+-------------------------------
+ t
+(1 row)
+
+UPDATE documents SET payload=payload||'-hot' WHERE id=7;
+SELECT payload='payload-7-hot' AS scalar_update_visible FROM documents WHERE id=7;
+ scalar_update_visible 
+-----------------------
+ t
+(1 row)
+
+BEGIN;
+UPDATE documents SET embedding='[1000,1,2,3,4,5,6,7]' WHERE id=7;
+SELECT id=8 AS updated_key FROM (
+    SELECT /*+ indexscan(documents documents_diskann) */ id FROM documents
+    ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 1
+) s;
+ updated_key 
+-------------
+ t
+(1 row)
+
+ROLLBACK;
+SELECT id=7 AS rollback_visible FROM (
+    SELECT /*+ indexscan(documents documents_diskann) */ id FROM documents
+    ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 1
+) s;
+ rollback_visible 
+------------------
+ t
+(1 row)
+
+DELETE FROM documents WHERE id=8;
+VACUUM documents;
+REINDEX INDEX documents_diskann;
+SELECT count(*)=63 AS maintenance_rows FROM documents;
+ maintenance_rows 
+------------------
+ t
+(1 row)
+
+SELECT id=7 AS maintenance_query FROM (
+    SELECT /*+ indexscan(documents documents_diskann) */ id FROM documents
+    ORDER BY embedding <-> '[7.25,1,2,3,4,5,6,7]'::vector LIMIT 1
+) s;
+ maintenance_query 
+-------------------
+ t
+(1 row)
+
+PREPARE changing_vector(vector,integer) AS SELECT id FROM documents ORDER BY embedding <-> $1 LIMIT $2;
+EXECUTE changing_vector('[7.25,1,2,3,4,5,6,7]',1);
+ id 
+----
+  7
+(1 row)
+
+EXECUTE changing_vector('[51.25,1,2,3,4,5,6,7]',1);
+ id 
+----
+ 51
+(1 row)
+
+EXECUTE changing_vector('[7.25,1,2,3,4,5,6,7]',1);
+ id 
+----
+  7
+(1 row)
+
+DEALLOCATE changing_vector;
+RESET enable_opfusion;
+RESET ann_orderby_distance_reuse;
+RESET enable_seqscan;
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+RESET search_path;
+DROP SCHEMA diskann_filter_baseline CASCADE;

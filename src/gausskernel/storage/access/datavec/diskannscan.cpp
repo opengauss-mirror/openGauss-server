@@ -111,6 +111,342 @@ static Datum GetScanValue(IndexScanDesc scan)
     return value;
 }
 
+/* Query-local filtering uses one explicit beam search in phases 1/2.
+ * Its navigation queue includes rejected nodes; its result queue does not.
+ * All page data used by SQL callbacks is copied before releasing locks. */
+struct DiskAnnQueryNodeCopy {
+    BlockNumber id;
+    ItemPointerData owner_tid;
+    Datum key;
+    float distance;
+    uint8 members;
+    ItemPointerData roots[DISKANN_HEAPTIDS];
+    ItemPointerData visible[DISKANN_HEAPTIDS];
+    bool dead;
+    uint16 edges;
+    BlockNumber nexts[DISKANN_MAX_DEGREE];
+};
+
+struct DiskAnnQueryScanState {
+    const DiskAnnFilterSpec* spec; /* borrowed until ClearFilter */
+    MemoryContext context;
+    NeighborPriorityQueue navigation;
+    blockhash_hash* visited;
+    DiskAnnQueryNodeCopy* results;
+    int result_count;
+    int result_pos;
+    int member_pos;
+    bool searching;
+    bool done;
+    bool current_valid;
+    DiskAnnQueryMember current;
+};
+
+static void DiskAnnQueryCheckMemory(DiskAnnScanOpaque so)
+{
+    DiskAnnQueryScanState* state = so->queryScan;
+    Size owned = GetMemoryTotalSpace(so->tmpCtx, true) +
+        sizeof(DiskAnnScanOpaqueData) +
+        so->frozenBlks.myCapacity * sizeof(BlockNumber) +
+        so->candidates.myCapacity * sizeof(DiskAnnCandidatesData);
+    if (state->spec->owned_memory != NULL)
+        owned += state->spec->owned_memory(state->spec->context);
+    state->spec->counters->memory_peak = Max(state->spec->counters->memory_peak, owned);
+    if (owned > state->spec->memory_limit)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("DiskANN filtering exceeded diskann_filter_work_mem"),
+            errdetail("Query-owned search and filter memory: %zu bytes; limit: %zu bytes.",
+                owned, state->spec->memory_limit)));
+}
+
+/* Returned vectors, member identities and edges contain no page pointers. */
+static DiskAnnQueryNodeCopy DiskAnnQueryCopyNode(DiskAnnScanOpaque so, BlockNumber id, bool edges,
+    bool measure_distance = true)
+{
+    DiskAnnQueryNodeCopy node = {};
+    node.id = id;
+    Buffer buffer = ReadBuffer(so->rel, id);
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buffer);
+    if (DiskAnnPageGetOpaque(page)->pageId != DISKANN_PAGE_ID ||
+        PageGetMaxOffsetNumber(page) < FirstOffsetNumber)
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("invalid DiskANN node page")));
+    ItemId item = PageGetItemId(page, FirstOffsetNumber);
+    IndexTuple tuple = DiskAnnPageGetIndexTuple(page);
+    node.owner_tid = tuple->t_tid;
+    DiskAnnNodePage disk_node = DiskAnnPageGetNode(tuple);
+    if (disk_node->heaptidsLength > DISKANN_HEAPTIDS)
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("invalid DiskANN member count")));
+    node.dead = ItemIdIsDead(item);
+    node.members = node.dead ? 0 : disk_node->heaptidsLength;
+    for (int i = 0; i < node.members; i++)
+        node.roots[i] = disk_node->heaptids[i];
+    bool isnull = false;
+    Datum key = index_getattr(tuple, 1, RelationGetDescr(so->rel), &isnull);
+    /* Expansion only consumes copied edges. Discovery and admission copy
+     * the vector; avoid allocating and measuring it again for expansion. */
+    if (!isnull && !edges)
+        node.key = PointerGetDatum(PG_DETOAST_DATUM_COPY(key));
+    if (isnull && node.members != 0)
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("DiskANN member has a NULL vector key")));
+    BlockNumber master = DiskAnnNodeIsSlave(disk_node->tag) ? disk_node->master : InvalidBlockNumber;
+    if (edges && master == InvalidBlockNumber) {
+        DiskAnnEdgePage neighbours = (DiskAnnEdgePage)((char*)disk_node + so->nodeSize);
+        if (neighbours->count > DISKANN_MAX_DEGREE)
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("invalid DiskANN neighbour count")));
+        node.edges = neighbours->count;
+        for (int i = 0; i < node.edges; i++)
+            node.nexts[i] = neighbours->nexts[i];
+    }
+    UnlockReleaseBuffer(buffer);
+    if (edges && master != InvalidBlockNumber) {
+        /* Copy a slave's navigation from its master under a fresh pin/lock. */
+        buffer = ReadBuffer(so->rel, master);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buffer);
+        DiskAnnNodePage master_node = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+        if (!DiskAnnNodeIsMaster(master_node->tag))
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("invalid DiskANN master identity")));
+        DiskAnnEdgePage neighbours = (DiskAnnEdgePage)((char*)master_node + so->nodeSize);
+        if (neighbours->count > DISKANN_MAX_DEGREE)
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("invalid DiskANN neighbour count")));
+        node.edges = neighbours->count;
+        for (int i = 0; i < node.edges; i++)
+            node.nexts[i] = neighbours->nexts[i];
+        UnlockReleaseBuffer(buffer);
+    }
+    /* Distance kernels, interrupts and SQL all run after releasing locks. */
+    CHECK_FOR_INTERRUPTS();
+    if (node.key != (Datum)0) {
+        Vector* vector = DatumGetVector(node.key);
+        if (vector->dim != DatumGetVector(so->value)->dim)
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("DiskANN vector dimension changed")));
+        if (measure_distance)
+            node.distance = DatumGetFloat8(FunctionCall2Coll(so->procinfo,
+                so->collation, so->value, node.key));
+    }
+    return node;
+}
+
+static void DiskAnnQueryAdmit(DiskAnnScanOpaque so, DiskAnnQueryNodeCopy* node)
+{
+    DiskAnnQueryScanState* state = so->queryScan;
+    int admitted = 0;
+    for (int i = 0; i < node->members; i++) {
+        CHECK_FOR_INTERRUPTS();
+        state->spec->counters->candidate_members++;
+        if (!ItemPointerIsValid(&node->roots[i]))
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("DiskANN node contains an invalid member TID")));
+        DiskAnnQueryMember member = {};
+        member.node_block = node->id;
+        member.owner_tid = node->owner_tid;
+        member.root_tid = node->roots[i];
+        member.key = node->key;
+        member.normalized = so->normprocinfo != NULL;
+        ItemPointerData visible;
+        ItemPointerSetInvalid(&visible);
+        if (state->spec->qualify(state->spec->context, &member, &visible)) {
+            node->roots[admitted] = node->roots[i];
+            node->visible[admitted++] = visible;
+        }
+        DiskAnnQueryCheckMemory(so);
+    }
+    node->members = admitted;
+    int capacity = state->spec->search_nodes;
+    /* POST admits every retained navigation group. It does not trim or
+     * rank that set again: the ordinary SQL Sort ranks snapshot-visible
+     * heap vectors. Fresh keys/identities are still copied and checked. */
+    int pos = state->spec->mode == ANN_FILTER_POST ? state->result_count : 0;
+    int end = state->result_count;
+    while (pos < end) {
+        int mid = pos + (end - pos) / 2;
+        if (state->results[mid].distance < node->distance ||
+            (state->results[mid].distance == node->distance && state->results[mid].id < node->id))
+            pos = mid + 1;
+        else
+            end = mid;
+    }
+    if (admitted == 0 || pos >= capacity) {
+        if (node->key != (Datum)0)
+            pfree(DatumGetPointer(node->key));
+        return;
+    }
+    if (state->result_count == capacity) {
+        pfree(DatumGetPointer(state->results[capacity - 1].key));
+        state->result_count--;
+    }
+    if (state->result_count > pos) {
+        Size bytes = (state->result_count - pos) * sizeof(DiskAnnQueryNodeCopy);
+        errno_t rc = memmove_s(&state->results[pos + 1], bytes, &state->results[pos], bytes);
+        securec_check(rc, "", "");
+    }
+    state->results[pos] = *node;
+    state->result_count++;
+}
+
+static void DiskAnnQueryDiscover(DiskAnnScanOpaque so, BlockNumber id)
+{
+    DiskAnnQueryScanState* state = so->queryScan;
+    bool found = false;
+    blockhash_insert(state->visited, id, &found);
+    if (found)
+        return;
+    DiskAnnQueryNodeCopy node = DiskAnnQueryCopyNode(so, id, false);
+    state->spec->counters->visited_nodes++;
+    Neighbor neighbour(id, node.distance);
+    neighbour.heaptidsLength = 0;
+    state->navigation.insert(neighbour);
+    if (state->spec->mode != ANN_FILTER_POST)
+        DiskAnnQueryAdmit(so, &node); /* synchronously inside active search */
+    else if (node.key != (Datum)0)
+        pfree(DatumGetPointer(node.key));
+    DiskAnnQueryCheckMemory(so);
+}
+
+static void DiskAnnQuerySearch(DiskAnnScanOpaque so)
+{
+    DiskAnnQueryScanState* state = so->queryScan;
+    state->searching = true;
+    state->spec->counters->search_rounds++;
+    so->value = GetScanValue(so->scan); /* normalize once per scan epoch */
+    if (so->normprocinfo == NULL)
+        so->value = PointerGetDatum(PG_DETOAST_DATUM_COPY(so->value));
+    for (size_t i = 0; i < so->frozenBlks.size(); i++)
+        DiskAnnQueryDiscover(so, so->frozenBlks[i]);
+    while (state->navigation.has_unexpanded_node()) {
+        CHECK_FOR_INTERRUPTS();
+        size_t pos;
+        BlockNumber id = GetNextNeighbor(&state->navigation, &pos)->id;
+        DiskAnnQueryNodeCopy node = DiskAnnQueryCopyNode(so, id, true);
+        if (node.dead)
+            state->navigation.remove(pos);
+        if (node.key != (Datum)0)
+            pfree(DatumGetPointer(node.key));
+        for (int i = 0; i < node.edges; i++)
+            DiskAnnQueryDiscover(so, node.nexts[i]);
+    }
+    state->searching = false;
+    if (state->spec->mode == ANN_FILTER_POST) {
+        for (size_t i = 0; i < state->navigation.size(); i++) {
+            DiskAnnQueryNodeCopy node = DiskAnnQueryCopyNode(so, state->navigation[i].id, false, false);
+            DiskAnnQueryAdmit(so, &node); /* visibility/key only, no SQL qualification */
+        }
+    }
+    state->done = true;
+    DiskAnnQueryCheckMemory(so);
+}
+
+void diskann_clear_query_filter(IndexScanDesc scan)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    if (so->queryScan == NULL)
+        return;
+    MemoryContext context = so->queryScan->context;
+    so->queryScan->spec = NULL;
+    so->queryScan = NULL; /* release the borrowed executor state first */
+    so->value = (Datum)0;
+    MemoryContextDelete(context);
+}
+
+void diskann_set_query_filter(IndexScanDesc scan, const DiskAnnFilterSpec* filter)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    if (filter == NULL || filter->qualify == NULL || filter->counters == NULL ||
+        filter->epoch == 0 || filter->search_nodes < 1 || filter->memory_limit == 0 ||
+        (filter->mode != ANN_FILTER_PRE && filter->mode != ANN_FILTER_IN &&
+         filter->mode != ANN_FILTER_POST) || so->orderedBatch ||
+        so->enablePQ || scan->numberOfOrderBys != 1 || scan->xs_ann_orderby.requested)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("invalid DiskANN query filtering protocol")));
+    diskann_clear_query_filter(scan);
+    MemoryContext context = AllocSetContextCreate(so->tmpCtx,
+        "DiskANN query search", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext old = MemoryContextSwitchTo(context);
+    DiskAnnQueryScanState* state = (DiskAnnQueryScanState*)palloc0(sizeof(DiskAnnQueryScanState));
+    so->queryScan = state;
+    state->context = context;
+    state->spec = filter;
+    if ((Size)filter->search_nodes > MaxAllocSize / sizeof(DiskAnnQueryNodeCopy))
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("DiskANN search capacity exceeds the allocation limit")));
+    Size requested = (Size)filter->search_nodes *
+        (sizeof(DiskAnnQueryNodeCopy) + sizeof(Neighbor));
+    if (requested > filter->memory_limit)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("DiskANN filtering exceeded diskann_filter_work_mem")));
+    state->navigation._data = VectorList<Neighbor>();
+    state->navigation.reserve(filter->search_nodes);
+    state->visited = blockhash_create(context, 128, NULL);
+    state->results = (DiskAnnQueryNodeCopy*)palloc0(
+        (Size)filter->search_nodes * sizeof(DiskAnnQueryNodeCopy));
+    DiskAnnQueryCheckMemory(so);
+    MemoryContextSwitchTo(old);
+}
+
+bool diskann_current_query_member(IndexScanDesc scan, DiskAnnQueryMember* member)
+{
+    DiskAnnQueryScanState* state = ((DiskAnnScanOpaque)scan->opaque)->queryScan;
+    if (state == NULL || !state->current_valid)
+        return false;
+    *member = state->current;
+    return true;
+}
+
+bool diskann_query_search_active(IndexScanDesc scan)
+{
+    DiskAnnQueryScanState* state = ((DiskAnnScanOpaque)scan->opaque)->queryScan;
+    return state != NULL && state->searching;
+}
+
+void diskann_query_check_memory(IndexScanDesc scan)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    if (so->queryScan != NULL)
+        DiskAnnQueryCheckMemory(so);
+}
+
+static bool DiskAnnQueryGetTuple(IndexScanDesc scan)
+{
+    DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    DiskAnnQueryScanState* state = so->queryScan;
+    MemoryContext old = MemoryContextSwitchTo(state->context);
+    state->current_valid = false;
+    if (!state->done)
+        DiskAnnQuerySearch(so);
+    while (state->result_pos < state->result_count) {
+        DiskAnnQueryNodeCopy* group = &state->results[state->result_pos];
+        if (state->member_pos == group->members) {
+            state->result_pos++;
+            state->member_pos = 0;
+            continue; /* an internal group boundary is not EOF */
+        }
+        int member = state->member_pos++;
+        state->current.key = group->key;
+        state->current.node_block = group->id;
+        state->current.owner_tid = group->owner_tid;
+        state->current.root_tid = group->roots[member];
+        state->current.visible_tid = group->visible[member];
+        state->current.normalized = so->normprocinfo != NULL;
+        state->current_valid = true;
+        scan->xs_ctup.t_self = group->roots[member];
+        scan->xs_recheck = false;
+        scan->xs_recheckorderby = false;
+        scan->xs_orderbynulls[0] = true; /* actual SQL distance belongs to Sort */
+        MemoryContextSwitchTo(old);
+        return true;
+    }
+    MemoryContextSwitchTo(old);
+    return false; /* one completed configured search, all members delivered */
+}
+
 void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys)
 {
     errno_t rc = 0;
@@ -125,6 +461,7 @@ void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey
         securec_check(rc, "\0", "\0");
     }
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    diskann_clear_query_filter(scan);
     so->scanEpoch++;
     so->rowToken = 0;
     scan->xs_ann_orderby.scan_epoch = so->scanEpoch;
@@ -161,6 +498,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->curpos = 0;
     so->delSearch = false;
     so->orderedBatch = false;
+    so->queryScan = NULL;
     so->curIterNum = 0;
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
@@ -203,6 +541,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
 void diskannendscan_internal(IndexScanDesc scan)
 {
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    diskann_clear_query_filter(scan);
     so->candidates.clear();
     so->frozenBlks.clear();
     MemoryContextDelete(so->tmpCtx);
@@ -236,6 +575,9 @@ static bool DiskAnnCandidatesContainHeapTid(VectorList<DiskAnnCandidatesData>* c
 bool diskann_advance_ordered_batch(IndexScanDesc scan)
 {
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    if (so->queryScan != NULL)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("legacy batch expansion cannot control query filtering")));
     Assert(so->orderedBatch && so->curpos == so->ncandidates);
     if (so->curIterNum >= MAX_SEARCH_ITERATION || so->nfrozen == 0 ||
         (scan->orderByData[0].sk_flags & SK_ISNULL)) {
@@ -307,6 +649,13 @@ bool diskann_orderby_vector_matches(IndexScanDesc scan, Datum value)
 bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
 {
     DiskAnnScanOpaque so = (DiskAnnScanOpaque)scan->opaque;
+    if (so->queryScan != NULL) {
+        if (!ScanDirectionIsForward(dir))
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("DiskANN query filtering requires a forward scan")));
+        DiskAnnInvalidateOrderByDistance(scan);
+        return DiskAnnQueryGetTuple(scan);
+    }
     MemoryContext oldCtx = MemoryContextSwitchTo(so->tmpCtx);
 
     /* Never let a rejected, invisible or exhausted candidate inherit the

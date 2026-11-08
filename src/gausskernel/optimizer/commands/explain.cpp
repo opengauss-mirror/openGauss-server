@@ -13,6 +13,8 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "executor/node/nodeAnnIndexscan.h"
+#include "access/datavec/diskann.h"
 #include "knl/knl_variable.h"
 
 #include "access/tableam.h"
@@ -2825,6 +2827,43 @@ static void ExplainNode(
             if (((AnnIndexScan*)plan)->indexqualorig)
                 show_instrumentation_count("Rows Removed by Index Recheck", 2, planstate, es);
             show_scan_qual(((AnnIndexScan*)plan)->indexorderbyorig, "Order By", planstate, ancestors, es);
+            if (((AnnIndexScan*)plan)->ann_filter_enabled) {
+                AnnIndexScan* ann = (AnnIndexScan*)plan;
+                const char* mode = ann->filterMode == ANN_FILTER_PRE ? "PRE" :
+                    ann->filterMode == ANN_FILTER_IN ? "IN" : "POST";
+                ExplainPropertyText("Storage", "AStore", es);
+                ExplainPropertyText("Filter Mode", mode, es);
+                ExplainPropertyInteger("Initial Search Nodes", ann->ann_initial_search_nodes, es);
+                if (es->analyze) {
+                    DiskAnnFilterCounters counters = {};
+                    uint64 epoch = 0;
+                    bool prepared = false;
+                    if (ExecAnnIndexFilterStats((AnnIndexScanState*)planstate, &counters, &epoch, &prepared)) {
+                        ExplainPropertyText("Executed Mode", prepared ? mode : "NOT STARTED", es);
+                        ExplainPropertyLong("Scan Epoch", (long)epoch, es);
+                        ExplainPropertyLong("Search Rounds", (long)counters.search_rounds, es);
+                        if (ann->filterMode == ANN_FILTER_PRE) {
+                            ExplainPropertyLong("PRE Build Runs", (long)counters.pre_build_runs, es);
+                            ExplainPropertyLong("PRE Source Rows", (long)counters.pre_source_rows, es);
+                            ExplainPropertyLong("PRE Seals", (long)counters.pre_seals, es);
+                        }
+                        ExplainPropertyLong("Filter Memory Peak", (long)counters.memory_peak, es);
+                        ExplainPropertyLong("Visited Nodes", (long)counters.visited_nodes, es);
+                        ExplainPropertyLong("Candidate Members", (long)counters.candidate_members, es);
+                        ExplainPropertyLong("Candidate Callbacks", (long)counters.candidate_callbacks, es);
+                        ExplainPropertyLong("Accepted Members", (long)counters.accepted_members, es);
+                        ExplainPropertyLong("Rejected Members", (long)counters.rejected_members, es);
+                        ExplainPropertyLong("AStore Fetch Attempts", (long)counters.fetch_attempts, es);
+                        ExplainPropertyLong("Visible Rows", (long)counters.visible_rows, es);
+                        ExplainPropertyLong("Vector Key Mismatches", (long)counters.key_mismatches, es);
+                        ExplainPropertyLong("Qualification Probes", (long)counters.probe_calls, es);
+                        ExplainPropertyLong("Probe Cache Hits", (long)counters.probe_cache_hits, es);
+                        ExplainPropertyLong("Member Cache Hits", (long)counters.member_cache_hits, es);
+                        ExplainPropertyLong("Qualified Target Rows", (long)counters.qualified_target_rows, es);
+                        ExplainPropertyText("Search End Reason", prepared ? "configured beam completed" : "not started", es);
+                    }
+                }
+            }
             show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);

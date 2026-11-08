@@ -938,6 +938,18 @@ static AnnIndexScan* _copyAnnIndexScan(const AnnIndexScan* from)
     COPY_SCALAR_FIELD(selectivity);
     COPY_SCALAR_FIELD(is_partial);
     COPY_SCALAR_FIELD(annCount);
+    COPY_SCALAR_FIELD(filterMode);
+    COPY_SCALAR_FIELD(ann_filter_enabled);
+    COPY_SCALAR_FIELD(ann_request_id);
+    COPY_NODE_FIELD(ann_query_vector);
+    COPY_NODE_FIELD(ann_distance_expr);
+    COPY_NODE_FIELD(ann_limit_expr);
+    COPY_SCALAR_FIELD(ann_output_join_required);
+    COPY_SCALAR_FIELD(ann_initial_search_nodes);
+    COPY_SCALAR_FIELD(ann_filter_work_mem);
+    COPY_NODE_FIELD(ann_in_filter);
+    COPY_SCALAR_FIELD(ann_candidate_tid_param);
+    COPY_SCALAR_FIELD(ann_eligibility_tid_resno);
 
     return newnode;
 }

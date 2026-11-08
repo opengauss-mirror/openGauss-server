@@ -555,6 +555,41 @@ static Param* generate_new_param(PlannerInfo* root, Oid paramtype, int32 paramty
     return retval;
 }
 
+/* Register a real correlated EXISTS plan using the standard SubPlan owner.
+ * The local candidate is supplied by AnnIndexScan, not by an outer SQL row. */
+SubPlan* SS_make_ann_filter_subplan(PlannerInfo* root, Plan* plan, int tid_param)
+{
+    Param* param = makeNode(Param);
+    param->paramkind = PARAM_EXEC;
+    param->paramid = tid_param;
+    param->paramtype = TIDOID;
+    param->paramtypmod = -1;
+    param->location = -1;
+    PlannerParamItem* item = makeNode(PlannerParamItem);
+    item->paramId = tid_param;
+    item->item = (Node*)param;
+    PlannerInfo* subroot = (PlannerInfo*)palloc(sizeof(PlannerInfo));
+    errno_t rc = memcpy_s(subroot, sizeof(PlannerInfo), root, sizeof(PlannerInfo));
+    securec_check(rc, "", "");
+    subroot->parent_root = root;
+    subroot->query_level = root->query_level + 1;
+    subroot->parse = (Query*)copyObject(root->parse);
+    subroot->parse->limitCount = NULL;
+    subroot->parse->limitOffset = NULL;
+    subroot->parse->sortClause = NIL;
+    subroot->parse->targetList = plan->targetlist;
+    subroot->plan_params = NIL;
+    subroot->init_plans = NIL;
+    subroot->ann_filter_request = NULL;
+    subroot->ann_filter_controlled = false;
+    List* saved = root->plan_params;
+    root->plan_params = lappend(list_copy(saved), item);
+    SS_finalize_plan(subroot, plan, false);
+    root->plan_params = saved;
+    return (SubPlan*)build_subplan(root, plan, subroot, list_make1(item), EXISTS_SUBLINK,
+        NULL, false, true);
+}
+
 /*
  * Assign a (nonnegative) PARAM_EXEC ID for a special parameter (one that
  * is not actually used to carry a value at runtime).  Such parameters are
@@ -3087,9 +3122,18 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
 
-        case T_AnnIndexScan:
+        case T_AnnIndexScan: {
+            AnnIndexScan* ann = (AnnIndexScan*)plan;
             (void)finalize_primnode((Node*)((AnnIndexScan*)plan)->indexqual, &context);
             (void)finalize_primnode((Node*)((AnnIndexScan*)plan)->indexorderby, &context);
+            (void)finalize_primnode((Node*)ann->ann_query_vector, &context);
+            (void)finalize_primnode((Node*)ann->ann_distance_expr, &context);
+            (void)finalize_primnode((Node*)ann->ann_limit_expr, &context);
+            if (ann->ann_filter_enabled && ann->ann_in_filter != NULL) {
+                locally_added_param = ann->ann_candidate_tid_param;
+                valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
+                (void)finalize_primnode((Node*)ann->ann_in_filter, &context);
+            }
 
             /*
              * we need not look at indexqualorig, since it will have the same
@@ -3098,6 +3142,7 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
              */
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
+        }
 
         case T_BitmapIndexScan:
             (void)finalize_primnode((Node*)((BitmapIndexScan*)plan)->indexqual, &context);

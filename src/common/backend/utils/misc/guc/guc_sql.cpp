@@ -374,6 +374,42 @@ static const struct config_enum_entry ann_orderby_distance_reuse_options[] = {
     {NULL, 0, false}
 };
 
+static const struct config_enum_entry diskann_filter_mode_options[] = {
+    {"auto", DISKANN_FILTER_AUTO, false},
+    {"exact", DISKANN_FILTER_EXACT, false},
+    {"pre", DISKANN_FILTER_PRE, false},
+    {"in", DISKANN_FILTER_IN, false},
+    {"post", DISKANN_FILTER_POST, false},
+    {NULL, 0, false}
+};
+
+static void assign_diskann_filter_enable(bool newval, void* extra)
+{
+    if (newval != u_sess->datavec_ctx.enable_diskann_filter)
+        ResetPlanCache();
+}
+
+static void assign_diskann_filter_mode(int newval, void* extra)
+{
+    if (newval != u_sess->datavec_ctx.diskann_filter_mode)
+        ResetPlanCache();
+}
+
+static void assign_diskann_filter_memory(int newval, void* extra)
+{
+    if (newval != u_sess->datavec_ctx.diskann_filter_work_mem)
+        ResetPlanCache();
+}
+
+static void assign_diskann_filter_probes(int newval, void* extra)
+{
+    /* Legacy AM scans read probes at execution time. The new fixed-search
+     * route records its beam in the plan, including generic cached plans. */
+    if (newval != u_sess->datavec_ctx.diskann_probes &&
+        u_sess->datavec_ctx.enable_diskann_filter)
+        ResetPlanCache();
+}
+
 static const struct config_enum_entry hybrid_recall_parallel_mode_options[] = {
     {"off", HYBRID_RECALL_PARALLEL_OFF, false},
     {"auto", HYBRID_RECALL_PARALLEL_AUTO, false},
@@ -2026,6 +2062,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_diskann_filter",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables query-local AStore DiskANN filtering paths."),
+            NULL},
+            &u_sess->datavec_ctx.enable_diskann_filter,
+            false,
+            NULL,
+            assign_diskann_filter_enable,
+            NULL},
         {{"enable_npu",
             PGC_USERSET,
             NODE_ALL,
@@ -3038,6 +3085,19 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"diskann_filter_work_mem",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Limits query-local DiskANN filtering memory in kB."),
+            gettext_noop("Zero uses work_mem.")},
+            &u_sess->datavec_ctx.diskann_filter_work_mem,
+            0,
+            0,
+            MAX_KILOBYTES,
+            NULL,
+            assign_diskann_filter_memory,
+            NULL},
         {{"diskann_probes",
             PGC_USERSET,
             NODE_ALL,
@@ -3049,7 +3109,7 @@ static void InitSqlConfigureNamesInt()
             1,
             32768,
             NULL,
-            NULL,
+            assign_diskann_filter_probes,
             NULL},
 #endif
         /* End-of-list marker */
@@ -3851,6 +3911,18 @@ static void InitSqlConfigureNamesEnum()
             hnsw_iterative_scan_options,
             NULL,
             NULL,
+            NULL},
+        {{"diskann_filter_mode",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Selects auto, exact, pre, in, or post DiskANN filtering."),
+            gettext_noop("Explicit modes still require a supported query and index.")},
+            &u_sess->datavec_ctx.diskann_filter_mode,
+            DISKANN_FILTER_AUTO,
+            diskann_filter_mode_options,
+            NULL,
+            assign_diskann_filter_mode,
             NULL},
         {{"ann_orderby_distance_reuse",
             PGC_USERSET,

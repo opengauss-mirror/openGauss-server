@@ -32,6 +32,7 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
+#include "optimizer/diskann_filter_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "optimizer/planner.h"
@@ -913,6 +914,11 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     int indexcol;
     bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype);
 
+    /* Controlled requests derive their own unordered native ANN paths.
+     * Exact and unsupported auto requests must not retain a legacy ANN. */
+    if (index->isAnnIndex && root->ann_filter_controlled && root->ann_filter_request == NULL)
+        return NIL;
+
     if (index->isAnnIndex && IsExtremeRedo()) {
         if (ST_BITMAPSCAN != scantype) {
             ereport(NOTICE, (errmsg("Ann Index does not support extreme RTO"),
@@ -1078,8 +1084,19 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             outer_relids,
             upper_params,
             loop_count);
-        result = lappend(result, ipath);
-        if (can_parallel) {
+        if (root->ann_filter_controlled && index->isAnnIndex) {
+            /* AUTO adds alternatives to the native optimizer. Preserve the
+             * original ANN scan (and joins built from it) as a competitor;
+             * forced modes still require their query-filter protocol. */
+            if (root->ann_filter_request != NULL &&
+                root->ann_filter_request->requested_mode == DISKANN_FILTER_AUTO)
+                result = lappend(result, ipath);
+            else
+                ann_preserve_filter_candidate(root, ipath);
+        } else {
+            result = lappend(result, ipath);
+        }
+        if (can_parallel && !(root->ann_filter_controlled && index->isAnnIndex)) {
             ipath = create_index_path(root,
                 index,
                 index_clauses,

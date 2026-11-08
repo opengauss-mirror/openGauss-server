@@ -4521,6 +4521,42 @@ static AnnIndexScan* _readAnnIndexScan(AnnIndexScan* local_node)
     IF_EXIST(is_partial) {
         READ_BOOL_FIELD(is_partial);
     }
+    IF_EXIST(filterMode) {
+        READ_ENUM_FIELD(filterMode, AnnFilterMode);
+    }
+    IF_EXIST(ann_filter_enabled) {
+        READ_BOOL_FIELD(ann_filter_enabled);
+    }
+    IF_EXIST(ann_request_id) {
+        READ_UINT_FIELD(ann_request_id);
+    }
+    IF_EXIST(ann_query_vector) {
+        READ_NODE_FIELD(ann_query_vector);
+    }
+    IF_EXIST(ann_distance_expr) {
+        READ_NODE_FIELD(ann_distance_expr);
+    }
+    IF_EXIST(ann_limit_expr) {
+        READ_NODE_FIELD(ann_limit_expr);
+    }
+    IF_EXIST(ann_output_join_required) {
+        READ_BOOL_FIELD(ann_output_join_required);
+    }
+    IF_EXIST(ann_initial_search_nodes) {
+        READ_INT_FIELD(ann_initial_search_nodes);
+    }
+    IF_EXIST(ann_filter_work_mem) {
+        READ_INT_FIELD(ann_filter_work_mem);
+    }
+    IF_EXIST(ann_in_filter) {
+        READ_NODE_FIELD(ann_in_filter);
+    }
+    IF_EXIST(ann_candidate_tid_param) {
+        READ_INT_FIELD(ann_candidate_tid_param);
+    }
+    IF_EXIST(ann_eligibility_tid_resno) {
+        READ_INT_FIELD(ann_eligibility_tid_resno);
+    }
     READ_DONE();
 }
 

@@ -322,7 +322,12 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             if (p2walker((Node*)((AnnIndexScan*)node)->indexqual, context)) {
                 return true;
             }
-            /* Other fields are lists of basic items, nothing to walk. */
+            if (p2walker((Node*)((AnnIndexScan*)node)->indexorderby, context) ||
+                p2walker((Node*)((AnnIndexScan*)node)->ann_query_vector, context) ||
+                p2walker((Node*)((AnnIndexScan*)node)->ann_distance_expr, context) ||
+                p2walker((Node*)((AnnIndexScan*)node)->ann_limit_expr, context) ||
+                p2walker((Node*)((AnnIndexScan*)node)->ann_in_filter, context))
+                return true;
             break;
 
         case T_CStoreIndexScan:

@@ -1232,6 +1232,8 @@ static Plan* create_hybridrecall_plan(PlannerInfo* root, HybridRecallPath* best_
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
 {
     RelOptInfo* rel = best_path->parent;
+    if (IsA(best_path, IndexPath) && ((IndexPath*)best_path)->ann_filter_enabled)
+        rel = ((IndexPath*)best_path)->indexinfo->rel;
     List* tlist = NIL;
     List* scan_clauses = NIL;
     Plan* plan = NULL;
@@ -1571,6 +1573,13 @@ static bool use_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
 {
     int i;
     ListCell* lc = NULL;
+
+    /* Owned ANN qualification/output inputs have explicit Path targets.
+     * Re-expanding a private base relation to its physical rowtype would
+     * invalidate the qualification width and retain dead payload columns. */
+    if (root->ann_filter_request != NULL && rel->reloptkind == RELOPT_BASEREL &&
+        root->simple_rel_array[rel->relid] != rel)
+        return false;
 
     /*
      * Required-column UNION ALL rewriting deliberately narrows every source
@@ -3278,7 +3287,9 @@ static Scan* create_indexscan_plan(
     Scan* scan_plan = NULL;
     List* indexquals = best_path->indexquals;
     List* indexorderbys = best_path->indexorderbys;
-    Index baserelid = best_path->path.parent->relid;
+    RelOptInfo* physical_rel = best_path->ann_filter_enabled ?
+        best_path->indexinfo->rel : best_path->path.parent;
+    Index baserelid = physical_rel->relid;
     Oid indexoid = best_path->indexinfo->indexoid;
     List* qpqual = NIL;
     List* stripped_indexquals = NIL;
@@ -3292,7 +3303,7 @@ static Scan* create_indexscan_plan(
 
     /* it should be a base rel... */
     Assert(baserelid > 0);
-    Assert(best_path->path.parent->rtekind == RTE_RELATION);
+    Assert(physical_rel->rtekind == RTE_RELATION);
 
     /*
      * Build "stripped" indexquals structure (no RestrictInfos) to pass to
@@ -3446,7 +3457,7 @@ static Scan* create_indexscan_plan(
     }
 
     /* Finally ready to build the plan node */
-    if (best_path->path.parent->orientation == REL_COL_ORIENTED) {
+    if (physical_rel->orientation == REL_COL_ORIENTED) {
         scan_plan = (Scan*)make_cstoreindexscan(root,
             &best_path->path,
             tlist,
@@ -3461,7 +3472,7 @@ static Scan* create_indexscan_plan(
             best_path->indexscandir,
             indexonly);
 #ifdef ENABLE_MULTIPLE_NODES
-    } else if (best_path->path.parent->orientation == REL_TIMESERIES_ORIENTED) {
+    } else if (physical_rel->orientation == REL_TIMESERIES_ORIENTED) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Unsupported Index Scan FOR TIMESERIES.")));
@@ -3494,6 +3505,53 @@ static Scan* create_indexscan_plan(
                     (best_path->indexinfo->indpred != NIL),
                     best_path->annCount);
                 ((AnnIndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
+                {
+                    AnnIndexScan* ann = (AnnIndexScan*)scan_plan;
+                    if (best_path->ann_filter_enabled) {
+                        ann->ann_filter_enabled = true;
+                        ann->filterMode = best_path->ann_filter_mode;
+                        ann->ann_request_id = best_path->ann_request_id;
+                        ann->ann_query_vector = (Expr*)copyObject(best_path->ann_query_vector);
+                        ann->ann_distance_expr = (Expr*)copyObject(best_path->ann_distance_expr);
+                        ann->ann_limit_expr = (Expr*)copyObject(best_path->ann_limit_expr);
+                        ann->ann_output_join_required = best_path->ann_output_join_required;
+                        ann->ann_initial_search_nodes = best_path->ann_initial_search_nodes;
+                        ann->ann_filter_work_mem = best_path->ann_filter_work_mem;
+                        ann->ann_candidate_tid_param = best_path->ann_candidate_tid_param;
+                        /* The complete qualification tree independently reads
+                         * its own relations, even if a relation with the same
+                         * RTI is also an ancestor NL input. Its private NL
+                         * parameters must not consume the ancestor's list. */
+                        Relids saved_outer = root->curOuterRels;
+                        List* saved_params = root->curOuterParams;
+                        List* saved_items = root->plan_params;
+                        root->curOuterRels = bms_difference(saved_outer, best_path->ann_qualification_relids);
+                        root->curOuterParams = NIL;
+                        root->plan_params = NIL;
+                        if (ann->filterMode == ANN_FILTER_PRE) {
+                            Plan* source = create_plan_recurse(root, best_path->ann_eligibility_path);
+                            Var* tid = makeVar(baserelid, SelfItemPointerAttributeNumber,
+                                TIDOID, -1, InvalidOid, 0);
+                            source->targetlist = list_make1(makeTargetEntry((Expr*)tid, 1, NULL, false));
+                            source->plan_width = best_path->ann_eligibility_path->pathtarget->width;
+                            ann->ann_eligibility_tid_resno = 1;
+                            ann->scan.plan.lefttree = source;
+                            ann->scan.plan.qual = NIL;
+                        } else if (ann->filterMode == ANN_FILTER_IN) {
+                            Plan* probe = create_plan_recurse(root, best_path->ann_eligibility_path);
+                            probe->targetlist = list_make1(makeTargetEntry((Expr*)makeBoolConst(true, false),
+                                1, NULL, false));
+                            probe->plan_width = best_path->ann_eligibility_path->pathtarget->width;
+                            ann->ann_in_filter = SS_make_ann_filter_subplan(root, probe,
+                                best_path->ann_candidate_tid_param);
+                            ann->scan.plan.qual = NIL;
+                        }
+                        List* external_params = root->curOuterParams;
+                        root->curOuterRels = saved_outer;
+                        root->curOuterParams = list_concat(saved_params, external_params);
+                        root->plan_params = saved_items;
+                    }
+                }
             } else {
                 scan_plan = (Scan*)make_indexscan(tlist,
                     qpqual,

@@ -2207,6 +2207,7 @@ typedef struct AnnIndexScanState {
     TupleTableSlot* iss_OrderedSlot;
     ExprState* iss_OrderedExpr;
     List* iss_OrderedQual;
+    struct DiskAnnQueryFilterState* iss_QueryFilter;
 } AnnIndexScanState;
 
 /* Shared private payload used by recursive and flattened evaluation of an

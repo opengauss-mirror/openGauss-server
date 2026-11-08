@@ -871,6 +871,20 @@ static void _outAnnIndexScanInfo(StringInfo str, AnnIndexScan* node)
         }
         WRITE_BOOL_FIELD(is_partial);
     }
+    if (t_thrd.proc->workingVersionNum >= DISKANN_QUERY_FILTER_VERSION_NUM) {
+        WRITE_ENUM_FIELD(filterMode, AnnFilterMode);
+        WRITE_BOOL_FIELD(ann_filter_enabled);
+        WRITE_UINT_FIELD(ann_request_id);
+        WRITE_NODE_FIELD(ann_query_vector);
+        WRITE_NODE_FIELD(ann_distance_expr);
+        WRITE_NODE_FIELD(ann_limit_expr);
+        WRITE_BOOL_FIELD(ann_output_join_required);
+        WRITE_INT_FIELD(ann_initial_search_nodes);
+        WRITE_INT_FIELD(ann_filter_work_mem);
+        WRITE_NODE_FIELD(ann_in_filter);
+        WRITE_INT_FIELD(ann_candidate_tid_param);
+        WRITE_INT_FIELD(ann_eligibility_tid_resno);
+    }
 }
 
 /*

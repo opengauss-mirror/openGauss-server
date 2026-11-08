@@ -27,6 +27,7 @@
 #include "parser/parse_hint.h"
 #include "pgxc/pgxc.h"
 #include "optimizer/cost.h"
+#include "optimizer/diskann_filter_path.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "optimizer/placeholder.h"
@@ -279,6 +280,7 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
     /*
      * Ready to do the primary planning.
      */
+    ann_register_filter_request(root);
     final_rel = make_one_rel(root, joinlist, non_keypreserved);
     bms_free(non_keypreserved);
 
@@ -288,6 +290,7 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
                 errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("failed to construct the join relation")));
     }
+    ann_derive_filter_paths(root, final_rel);
     /* cheapest_total_path should not exist para_info */
     ListCell *lc = NULL;
     foreach(lc, final_rel->cheapest_total_path) {

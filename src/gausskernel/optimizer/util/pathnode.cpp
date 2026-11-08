@@ -29,6 +29,7 @@
 #include "nodes/relation.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
+#include "optimizer/diskann_filter_path.h"
 #include "optimizer/dataskew.h"
 #include "optimizer/nodegroups.h"
 #include "optimizer/optimizerdebug.h"
@@ -1742,6 +1743,19 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
     if (root != NULL && root->parse->indexhintList != NULL) {
         set_index_hint_value(new_path, root->parse->indexhintList);
     }
+
+    /* AUTO's derivation template inherits exactly the native scan/index
+     * hint score, before dominance can release the native ANN root. */
+    if (root != NULL && root->ann_filter_request != NULL &&
+        root->ann_filter_request->requested_mode == DISKANN_FILTER_AUTO &&
+        IsA(new_path, IndexPath) && ((IndexPath*)new_path)->isAnnIndex &&
+        !((IndexPath*)new_path)->ann_filter_enabled)
+        ann_preserve_filter_candidate(root, (IndexPath*)new_path);
+
+    /* Capture only legal paths, after native hints have been assigned and
+     * before cost dominance can free an inferior join. Private ANN routes
+     * retain the same join/scan/index hint scores as the native candidate. */
+    ann_preserve_ordinary_candidate(root, new_path);
 
     /* we will add cn gather path when cn gather hint switch on */
     if (root != NULL && EXEC_CONTAIN_COORDINATOR(new_path->exec_type) && permit_gather(root)) {

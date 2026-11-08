@@ -840,6 +840,10 @@ FusionType getSelectAnnIndexType(Plan *top_plan, ParamListInfo params)
     if (annIndex->lefttree != NULL) {
         return NOBYPASS_NO_INDEXSCAN;
     }
+    /* Query filtering requires the standard executor lifecycle. */
+    if (IsA(annIndex, AnnIndexScan) && ((AnnIndexScan*)annIndex)->ann_filter_enabled) {
+        return NOBYPASS_NO_INDEXSCAN;
+    }
     if (annIndex->qual != NULL) {
         return NOBYPASS_ANNINDEXSCAN_WITH_QUAL;
     }

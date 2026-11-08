@@ -479,6 +479,11 @@ bool DiskAnnGraphStore::NeighborExists(const DiskAnnEdgePage edge, BlockNumber i
 
 DiskAnnGraph::DiskAnnGraph(Relation rel, double dim, BlockNumber blkno, DiskAnnGraphStore* graphStore)
 {
+    /* Pruning depends on the metric. An uninitialized value skips both
+     * occlusion branches and can disconnect online inserts once an old
+     * vertex's neighbour list fills. Use the existing opclass procedures. */
+    functype = GetFunctionType(index_getprocinfo(rel, 1, DISKANN_DISTANCE_PROC),
+        DiskAnnOptionalProcInfo(rel, DISKANN_NORM_PROC));
     this->graphStore = graphStore;
     scratch = (QueryScratch*)palloc0(sizeof(QueryScratch));
     scratch->alignedQuery = (float*)palloc(dim * sizeof(float));

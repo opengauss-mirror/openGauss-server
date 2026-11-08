@@ -21,9 +21,12 @@
  *		ExecAnnIndexRestrPos		restores scan position.
  */
 #include "postgres.h"
+#include <math.h>
+
 #include "knl/knl_variable.h"
 
 #include "access/relscan.h"
+#include "access/heapam.h"
 #include "access/datavec/diskann.h"
 #include "access/tableam.h"
 #include "catalog/pg_partition_fn.h"
@@ -32,11 +35,13 @@
 #include "commands/cluster.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeIndexscan.h"
+#include "executor/node/nodeSubplan.h"
 #include "optimizer/clauses.h"
 #include "storage/tcap.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/guc.h"
+#include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -50,6 +55,465 @@
 static TupleTableSlot* ExecAnnIndexScan(PlanState* state);
 static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node);
 static void ExecInitNextPartitionForAnnIndexScan(AnnIndexScanState* node);
+
+struct DiskAnnQueryFilterState {
+    DiskAnnFilterSpec spec;
+    DiskAnnFilterCounters counters;
+    MemoryContext epoch_context;
+    ItemPointerData* candidate_tid; /* EState query lifetime, including global SubPlan End */
+    SubPlanState* probe;
+    ExprContext* probe_econtext;
+    TupleTableSlot* probe_slot; /* EState owns final slot cleanup */
+    HTAB* eligibility_cache;
+    HTAB* rejected_members;
+    bool prepared;
+    bool sealed;
+    bool in_probe;
+    HTAB* pre_roots;
+    HTAB* delivered;
+    MemoryContext probe_context;
+    ExprState* limit_state;
+    int64 final_k;
+    DiskAnnFilterCounters total_counters;
+};
+
+struct AnnQueryEligibilityEntry {
+    uint64 visible_tid;
+    bool qualified;
+};
+
+/* Index relation/file, snapshot and parameters are implicit in the bound
+ * scan descriptor and epoch. Encode identity fields without struct padding. */
+struct AnnQueryMemberKey {
+    uint64 node_block;
+    uint64 owner_tid;
+    uint64 root_tid;
+};
+
+static Size AnnQueryOwnedMemory(void* context);
+static bool AnnQueryQualify(void* context, const DiskAnnQueryMember* member,
+    ItemPointerData* visible);
+static AnnOrderByDistanceQuality AnnIndexRuntimeDistanceQuality(IndexScanDesc scan);
+
+static void AnnQueryFilterInit(AnnIndexScanState* node, AnnIndexScan* plan, int eflags)
+{
+    if (!plan->ann_filter_enabled)
+        return;
+#ifdef USE_ASSERT_CHECKING
+    /* Exercise the actual planned-node protocols, including the generated
+     * correlated SubPlan, in the Debug acceptance build. */
+    for (int withCosts = 0; withCosts <= 1; withCosts++) {
+        bool savedStats = u_sess->opt_cxt.out_plan_stat;
+        u_sess->opt_cxt.out_plan_stat = withCosts != 0;
+        char* encoded = nodeToString(plan);
+        u_sess->opt_cxt.out_plan_stat = savedStats;
+        if (withCosts == 0) {
+            /* The native statistics-free output is a plan hash image.
+             * Check that filtering semantics participate in that image;
+             * readable plan serialization uses the native full format. */
+            Assert(strstr(encoded, ":ann_filter_enabled true") != NULL);
+            Assert(strstr(encoded, ":ann_query_vector ") != NULL);
+            Assert(strstr(encoded, ":ann_limit_expr ") != NULL);
+            Assert(strstr(encoded, ":ann_in_filter ") != NULL);
+            Assert(strstr(encoded, ":ann_candidate_tid_param ") != NULL);
+            pfree(encoded);
+            continue;
+        }
+        AnnIndexScan* decoded = (AnnIndexScan*)stringToNode(encoded);
+        AnnIndexScan* copied = (AnnIndexScan*)copyObject(plan);
+        Assert(decoded->ann_filter_enabled && copied->ann_filter_enabled);
+        Assert(decoded->filterMode == plan->filterMode && copied->filterMode == plan->filterMode);
+        Assert(decoded->ann_request_id == plan->ann_request_id);
+        Assert(decoded->ann_initial_search_nodes == plan->ann_initial_search_nodes);
+        Assert(decoded->ann_filter_work_mem == plan->ann_filter_work_mem);
+        Assert(decoded->ann_candidate_tid_param == plan->ann_candidate_tid_param);
+        Assert(decoded->ann_eligibility_tid_resno == plan->ann_eligibility_tid_resno);
+        Assert(equal(decoded->ann_query_vector, plan->ann_query_vector));
+        Assert(equal(decoded->ann_distance_expr, plan->ann_distance_expr));
+        Assert(equal(decoded->ann_limit_expr, plan->ann_limit_expr));
+        if (plan->ann_in_filter != NULL) {
+            Assert(decoded->ann_in_filter != NULL);
+            /* Native SubPlan output intentionally rounds optional planner
+             * costs to two decimals. Verify execution fields independently. */
+            if (withCosts != 0) {
+                Assert(fabs(decoded->ann_in_filter->startup_cost -
+                    plan->ann_in_filter->startup_cost) <= 0.005001);
+                Assert(fabs(decoded->ann_in_filter->per_call_cost -
+                    plan->ann_in_filter->per_call_cost) <= 0.005001);
+            }
+            decoded->ann_in_filter->startup_cost = plan->ann_in_filter->startup_cost;
+            decoded->ann_in_filter->per_call_cost = plan->ann_in_filter->per_call_cost;
+        }
+        Assert(equal(decoded->ann_in_filter, plan->ann_in_filter));
+        Assert(equal(copied->ann_in_filter, plan->ann_in_filter));
+        pfree(encoded);
+    }
+#endif
+    int mode = u_sess->datavec_ctx.diskann_filter_mode;
+    int expected = plan->filterMode == ANN_FILTER_PRE ? DISKANN_FILTER_PRE :
+        plan->filterMode == ANN_FILTER_IN ? DISKANN_FILTER_IN : DISKANN_FILTER_POST;
+    if (!u_sess->datavec_ctx.enable_diskann_filter ||
+        (mode != DISKANN_FILTER_AUTO && mode != expected))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cached DiskANN filtering plan no longer matches the current mode")));
+    EState* estate = node->ss.ps.state;
+    MemoryContext old = MemoryContextSwitchTo(estate->es_query_cxt);
+    DiskAnnQueryFilterState* state = (DiskAnnQueryFilterState*)palloc0(sizeof(DiskAnnQueryFilterState));
+    node->iss_QueryFilter = state;
+    state->epoch_context = AllocSetContextCreate(estate->es_query_cxt,
+        "DiskANN query filter epoch", ALLOCSET_DEFAULT_SIZES);
+    /* ExecInitNode temporarily makes es_query_cxt the node context.  The
+     * correlated global SubPlan outlives that context during ExecEndPlan. */
+    state->candidate_tid = (ItemPointerData*)MemoryContextAllocZero(
+        estate->es_const_query_cxt, sizeof(ItemPointerData));
+    state->spec.mode = plan->filterMode;
+    state->spec.search_nodes = plan->ann_initial_search_nodes;
+    int memory_kb = plan->ann_filter_work_mem > 0 ? plan->ann_filter_work_mem :
+        u_sess->attr.attr_memory.work_mem;
+    state->spec.memory_limit = (Size)memory_kb * 1024;
+    state->spec.counters = &state->counters;
+    state->spec.context = node;
+    state->spec.qualify = AnnQueryQualify;
+    state->spec.owned_memory = AnnQueryOwnedMemory;
+    state->spec.epoch = 1;
+    state->limit_state = ExecInitExpr(plan->ann_limit_expr, (PlanState*)node);
+    if (plan->filterMode == ANN_FILTER_PRE)
+        outerPlanState(node) = ExecInitNode(outerPlan(plan), estate, eflags);
+    if (plan->filterMode == ANN_FILTER_IN) {
+        state->probe = ExecInitSubPlan(plan->ann_in_filter, (PlanState*)node);
+        node->ss.ps.subPlan = lappend(node->ss.ps.subPlan, state->probe);
+        state->probe_econtext = CreateExprContext(estate);
+        state->probe_slot = ExecInitExtraTupleSlot(estate);
+        ExecSetSlotDescriptor(state->probe_slot, RelationGetDescr(node->ss.ss_currentRelation));
+        state->probe_econtext->ecxt_scantuple = state->probe_slot;
+        ParamExecData* param = &estate->es_param_exec_vals[plan->ann_candidate_tid_param];
+        param->value = PointerGetDatum(state->candidate_tid);
+        param->isnull = true;
+    }
+    MemoryContextSwitchTo(old);
+}
+
+static void AnnQueryAccumulate(DiskAnnFilterCounters* dst, const DiskAnnFilterCounters* src)
+{
+#define ADD_COUNTER(name) dst->name += src->name
+    ADD_COUNTER(visited_nodes);
+    ADD_COUNTER(candidate_members);
+    ADD_COUNTER(candidate_callbacks);
+    ADD_COUNTER(accepted_members);
+    ADD_COUNTER(rejected_members);
+    ADD_COUNTER(visible_rows);
+    ADD_COUNTER(probe_calls);
+    ADD_COUNTER(probe_cache_hits);
+    ADD_COUNTER(member_cache_hits);
+    ADD_COUNTER(qualified_target_rows);
+    ADD_COUNTER(fetch_attempts);
+    ADD_COUNTER(key_mismatches);
+    ADD_COUNTER(search_rounds);
+    ADD_COUNTER(pre_build_runs);
+    ADD_COUNTER(pre_source_rows);
+    ADD_COUNTER(pre_seals);
+    dst->memory_peak = Max(dst->memory_peak, src->memory_peak);
+#undef ADD_COUNTER
+}
+
+bool ExecAnnIndexFilterStats(AnnIndexScanState* node, DiskAnnFilterCounters* counters,
+    uint64* epoch, bool* prepared)
+{
+    if (node == NULL || node->iss_QueryFilter == NULL)
+        return false;
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    *counters = state->total_counters;
+    AnnQueryAccumulate(counters, &state->counters);
+    *epoch = state->spec.epoch;
+    *prepared = state->prepared;
+    return true;
+}
+
+static Size AnnQueryOwnedMemory(void* context)
+{
+    DiskAnnQueryFilterState* state = ((AnnIndexScanState*)context)->iss_QueryFilter;
+    Size owned = GetMemoryTotalSpace(state->epoch_context, true) +
+        GetMemoryChunkSpace(state) + GetMemoryChunkSpace(state->candidate_tid);
+    if (state->probe_econtext != NULL) {
+        owned += GetMemoryChunkSpace(state->probe_econtext) +
+            GetMemoryTotalSpace(state->probe_econtext->ecxt_per_tuple_memory, true);
+        owned += GetMemoryChunkSpace(state->probe_slot) +
+            GetMemoryChunkSpace(state->probe_slot->tts_values) +
+            GetMemoryChunkSpace(state->probe_slot->tts_isnull) +
+            GetMemoryChunkSpace(state->probe_slot->tts_lobPointers);
+    }
+    return owned;
+}
+
+static HTAB* AnnQueryTidSet(MemoryContext context, const char* name)
+{
+    HASHCTL ctl = {};
+    ctl.keysize = sizeof(uint64);
+    ctl.entrysize = sizeof(uint64);
+    ctl.hcxt = context;
+    return hash_create(name, 128, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+}
+
+/* Encode fields, never hash padding from a storage-specific TID struct.
+ * The relation, snapshot and parameters are fixed by this scan epoch. */
+static uint64 AnnQueryTidKey(const ItemPointerData* tid)
+{
+    return ((uint64)ItemPointerGetBlockNumber(tid) << 16) |
+        ItemPointerGetOffsetNumber(tid);
+}
+
+static void AnnQueryCheckMemory(AnnIndexScanState* node)
+{
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    Size owned = AnnQueryOwnedMemory(node);
+    state->counters.memory_peak = Max(state->counters.memory_peak, owned);
+    if (owned > state->spec.memory_limit)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("DiskANN filtering exceeded diskann_filter_work_mem")));
+    if (node->iss_ScanDesc != NULL)
+        diskann_query_check_memory(GetIndexScanDesc(node->iss_ScanDesc));
+}
+
+/* The copied heap row owns every in-line datum. TOAST and normalization
+ * happen after the heap content lock has been released. */
+static bool AnnQueryKeyMatches(Datum value, Datum key, bool normalized)
+{
+    Vector* heap_vector = DatumGetVector(PointerGetDatum(PG_DETOAST_DATUM(value)));
+    if (normalized)
+        heap_vector = DatumGetVector(DirectFunctionCall1(l2_normalize, PointerGetDatum(heap_vector)));
+    Vector* stored = DatumGetVector(key);
+    return heap_vector->dim == stored->dim &&
+        memcmp(heap_vector->x, stored->x, stored->dim * sizeof(float)) == 0;
+}
+
+static bool AnnQueryQualify(void* context, const DiskAnnQueryMember* member,
+    ItemPointerData* visible)
+{
+    AnnIndexScanState* node = (AnnIndexScanState*)context;
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    AnnIndexScan* plan = (AnnIndexScan*)node->ss.ps.plan;
+    EState* estate = node->ss.ps.state;
+    IndexScanDesc scan = GetIndexScanDesc(node->iss_ScanDesc);
+    const ItemPointerData* root = &member->root_tid;
+    Datum key = member->key;
+    bool normalized = member->normalized;
+    if (state->in_probe)
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("recursive DiskANN candidate probe")));
+    state->counters.candidate_callbacks++;
+    if (!ItemPointerIsValid(root) || ItemPointerGetBlockNumber(root) >=
+        RelationGetNumberOfBlocks(node->ss.ss_currentRelation))
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("DiskANN candidate has an invalid target TID")));
+    if (plan->filterMode == ANN_FILTER_PRE) {
+        Assert(state->sealed);
+        uint64 root_key = AnnQueryTidKey(root);
+        if (hash_search(state->pre_roots, &root_key, HASH_FIND, NULL) == NULL) {
+            state->counters.rejected_members++;
+            return false;
+        }
+    }
+    if (plan->filterMode == ANN_FILTER_IN)
+        Assert(diskann_query_search_active(scan));
+    /* VACUUM may invalidate the original vector owner while other members
+     * survive. The copied canonical key is still checked against each row. */
+    uint64 owner_key = ItemPointerIsValid(&member->owner_tid) ?
+        AnnQueryTidKey(&member->owner_tid) : ~(uint64)0;
+    AnnQueryMemberKey member_key = {(uint64)member->node_block, owner_key, AnnQueryTidKey(root)};
+    if (hash_search(state->rejected_members, &member_key, HASH_FIND, NULL) != NULL) {
+        state->counters.member_cache_hits++;
+        state->counters.rejected_members++;
+        return false;
+    }
+    MemoryContext old = MemoryContextSwitchTo(state->probe_context);
+    bool qualified = false;
+    bool valid_identity = false;
+    state->in_probe = true;
+    PG_TRY();
+    {
+        Relation table = node->ss.ss_currentRelation;
+        state->counters.fetch_attempts++;
+        Buffer buffer = ReadBuffer(table, ItemPointerGetBlockNumber(root));
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        HeapTupleData tuple = {};
+        tuple.tupTableType = HEAP_TUPLE;
+        ItemPointerData tid = *root;
+        HeapTuple owned = NULL;
+        if (heap_hot_search_buffer(&tid, table, buffer, estate->es_snapshot, &tuple,
+            NULL, NULL, true, &estate->have_current_xact_date))
+            owned = heap_copytuple(&tuple);
+        UnlockReleaseBuffer(buffer);
+        if (owned != NULL) {
+            state->counters.visible_rows++;
+            bool isnull = false;
+            AttrNumber attno = scan->indexRelation->rd_index->indkey.values[0];
+            Datum value = heap_getattr(owned, attno, RelationGetDescr(table), &isnull);
+            if (!isnull && AnnQueryKeyMatches(value, key, normalized)) {
+                valid_identity = true;
+                *visible = owned->t_self;
+                qualified = true;
+                if (plan->filterMode == ANN_FILTER_IN) {
+                    /* Cache only a business verdict for an identity whose
+                     * snapshot-visible row and canonical vector just matched.
+                     * All parameters and the snapshot are fixed by this epoch. */
+                    uint64 visible_key = AnnQueryTidKey(visible);
+                    AnnQueryEligibilityEntry* entry = (AnnQueryEligibilityEntry*)hash_search(
+                        state->eligibility_cache, &visible_key, HASH_FIND, NULL);
+                    if (entry != NULL) {
+                        state->counters.probe_cache_hits++;
+                        qualified = entry->qualified;
+                    } else {
+                        ResetExprContext(state->probe_econtext);
+                        ExecStoreTuple(owned, state->probe_slot, InvalidBuffer, false);
+                        *state->candidate_tid = *visible;
+                        ParamExecData* param = &estate->es_param_exec_vals[plan->ann_candidate_tid_param];
+                        param->isnull = false;
+                        bool result_isnull = false;
+                        state->counters.probe_calls++;
+                        Datum verdict = ExecSubPlan(state->probe, state->probe_econtext, &result_isnull);
+                        qualified = !result_isnull && DatumGetBool(verdict);
+                        entry = (AnnQueryEligibilityEntry*)hash_search(
+                            state->eligibility_cache, &visible_key, HASH_ENTER, NULL);
+                        entry->qualified = qualified;
+                    }
+                }
+            } else {
+                state->counters.key_mismatches++;
+            }
+        }
+        /* Identity/key failures are local to this full member identity,
+         * never a node-wide verdict or a business qualification verdict. */
+        if (!valid_identity)
+            (void)hash_search(state->rejected_members, &member_key, HASH_ENTER, NULL);
+        AnnQueryCheckMemory(node);
+    }
+    PG_CATCH();
+    {
+        state->in_probe = false;
+        MemoryContextSwitchTo(old);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    state->in_probe = false;
+    if (state->probe_slot != NULL) {
+        ExecClearTuple(state->probe_slot);
+        ResetExprContext(state->probe_econtext);
+    }
+    if (qualified)
+        state->counters.accepted_members++;
+    else
+        state->counters.rejected_members++;
+    MemoryContextSwitchTo(old);
+    MemoryContextReset(state->probe_context);
+    return qualified;
+}
+
+static void AnnQueryBuildPre(AnnIndexScanState* node)
+{
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    AnnIndexScan* plan = (AnnIndexScan*)node->ss.ps.plan;
+    Relation table = node->ss.ss_currentRelation;
+    state->counters.pre_build_runs++;
+    for (;;) {
+        CHECK_FOR_INTERRUPTS();
+        TupleTableSlot* slot = ExecProcNode(outerPlanState(node));
+        if (TupIsNull(slot))
+            break;
+        state->counters.pre_source_rows++;
+        bool isnull = false;
+        Datum value = tableam_tslot_getattr(slot, plan->ann_eligibility_tid_resno, &isnull);
+        if (isnull)
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("PRE source returned a NULL target TID")));
+        ItemPointerData tid = *(ItemPointer)DatumGetPointer(value);
+        if (!ItemPointerIsValid(&tid) || ItemPointerGetBlockNumber(&tid) >=
+            RelationGetNumberOfBlocks(table))
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("PRE source returned an invalid target TID")));
+        Buffer buffer = ReadBuffer(table, ItemPointerGetBlockNumber(&tid));
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        OffsetNumber offset = ItemPointerGetOffsetNumber(&tid);
+        OffsetNumber roots[MaxHeapTuplesPerPage];
+        heap_get_root_tuples(BufferGetPage(buffer), roots);
+        OffsetNumber root = offset > 0 && offset <= MaxHeapTuplesPerPage ? roots[offset - 1] : InvalidOffsetNumber;
+        UnlockReleaseBuffer(buffer);
+        if (!OffsetNumberIsValid(root))
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("PRE source identity cannot be resolved to a HOT root")));
+        ItemPointerSetOffsetNumber(&tid, root);
+        uint64 root_key = AnnQueryTidKey(&tid);
+        (void)hash_search(state->pre_roots, &root_key, HASH_ENTER, NULL);
+        AnnQueryCheckMemory(node);
+    }
+    state->sealed = true; /* even an empty source must still enter ANN */
+    state->counters.pre_seals++;
+}
+
+static void AnnQueryPrepare(AnnIndexScanState* node)
+{
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    AnnIndexScan* plan = (AnnIndexScan*)node->ss.ps.plan;
+    IndexScanDesc scan = GetIndexScanDesc(node->iss_ScanDesc);
+    bool isnull = false;
+    Datum k = ExecEvalExprSwitchContext(state->limit_state, node->ss.ps.ps_ExprContext, &isnull);
+    if (isnull || DatumGetInt64(k) <= 0)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cached DiskANN filtering plan has an unsupported LIMIT")));
+    state->final_k = DatumGetInt64(k); /* SQL output bound, never the beam capacity */
+    AnnOrderByDistanceQuality quality = AnnIndexRuntimeDistanceQuality(scan);
+    if (quality == ANN_ORDERBY_DISTANCE_UNAVAILABLE ||
+        RelationIsUstoreFormat(node->ss.ss_currentRelation) ||
+        RowRelationIsCompressed(node->ss.ss_currentRelation))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("opened index or table cannot execute DiskANN filtering")));
+    MemoryContext old = MemoryContextSwitchTo(state->epoch_context);
+    state->delivered = AnnQueryTidSet(state->epoch_context, "DiskANN delivered targets");
+    HASHCTL rejected_ctl = {};
+    rejected_ctl.keysize = sizeof(AnnQueryMemberKey);
+    rejected_ctl.entrysize = sizeof(AnnQueryMemberKey);
+    rejected_ctl.hcxt = state->epoch_context;
+    state->rejected_members = hash_create("DiskANN rejected member identities", 128,
+        &rejected_ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    if (state->probe_context == NULL)
+        state->probe_context = AllocSetContextCreate(state->epoch_context,
+            "DiskANN candidate probe", ALLOCSET_DEFAULT_SIZES);
+    if (plan->filterMode == ANN_FILTER_PRE) {
+        state->pre_roots = AnnQueryTidSet(state->epoch_context, "DiskANN PRE roots");
+        AnnQueryBuildPre(node); /* runtime keys were evaluated before this call */
+    } else if (plan->filterMode == ANN_FILTER_IN) {
+        HASHCTL ctl = {};
+        ctl.keysize = sizeof(uint64);
+        ctl.entrysize = sizeof(AnnQueryEligibilityEntry);
+        ctl.hcxt = state->epoch_context;
+        state->eligibility_cache = hash_create("DiskANN qualified visible identities", 128,
+            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    diskann_set_query_filter(scan, &state->spec);
+    state->prepared = true;
+    MemoryContextSwitchTo(old);
+}
+
+static bool AnnQueryValidateDelivery(AnnIndexScanState* node, IndexScanDesc scan, TupleTableSlot* slot)
+{
+    DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+    DiskAnnQueryMember member;
+    if (!diskann_current_query_member(scan, &member) ||
+        !ItemPointerEquals(&member.visible_tid, &scan->xs_ctup.t_self))
+        return false;
+    MemoryContext old = MemoryContextSwitchTo(state->probe_context);
+    bool isnull = false;
+    Datum value = tableam_tslot_getattr(slot, scan->indexRelation->rd_index->indkey.values[0], &isnull);
+    bool matches = !isnull && AnnQueryKeyMatches(value, member.key, member.normalized);
+    MemoryContextSwitchTo(old);
+    MemoryContextReset(state->probe_context);
+    if (!matches) {
+        state->counters.key_mismatches++;
+        return false;
+    }
+    bool found = false;
+    uint64 visible_key = AnnQueryTidKey(&member.visible_tid);
+    (void)hash_search(state->delivered, &visible_key, HASH_ENTER, &found);
+    AnnQueryCheckMemory(node);
+    return !found;
+}
 
 static AnnOrderByRef* AnnIndexFindOrderByRef(AnnIndexScan* plan)
 {
@@ -178,6 +642,8 @@ static void AnnIndexBindOrderByValue(AnnIndexScanState* node, IndexScanDesc scan
  *		using the index specified in the IndexScanState information.
  * ----------------------------------------------------------------
  */
+static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node);
+
 static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
 {
     EState* estate = NULL;
@@ -243,6 +709,8 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
                 false);                 /* don't pfree */
         }
 
+        if (node->iss_QueryFilter != NULL && !AnnQueryValidateDelivery(node, indexScan, slot))
+            continue;
         AnnIndexBindOrderByValue(node, indexScan);
 
         /*
@@ -433,6 +901,9 @@ static bool AnnIndexRecheck(AnnIndexScanState* node, TupleTableSlot* slot)
 static TupleTableSlot* ExecAnnIndexScan(PlanState* state)
 {
     AnnIndexScanState* node = castNode(AnnIndexScanState, state);
+    if (node->iss_QueryFilter != NULL && node->iss_QueryFilter->in_probe)
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("cannot fetch DiskANN while its candidate probe is active")));
     /*
      * If we have runtime keys and they've not already been set up, do it now.
      */
@@ -455,6 +926,9 @@ static TupleTableSlot* ExecAnnIndexScan(PlanState* state)
         ExecIndexEvalRuntimeKeys(econtext, node->iss_RuntimeKeys, node->iss_NumRuntimeKeys);
     }
 
+    if (node->iss_QueryFilter != NULL && !node->iss_QueryFilter->prepared)
+        AnnQueryPrepare(node);
+
     if (node->iss_DiskannOrdered && node->ss.ps.state->es_epqTuple == NULL) {
         /* OrderedNext checks quals once while collecting candidates. Keep
          * projection here so volatile targets and SRFs run on emitted rows.
@@ -475,7 +949,10 @@ static TupleTableSlot* ExecAnnIndexScan(PlanState* state)
         node->ss.ps.qual = node->iss_OrderedQual;
         return result;
     }
-    return ExecScan(&node->ss, (ExecScanAccessMtd)AnnIndexNext, (ExecScanRecheckMtd)AnnIndexRecheck);
+    TupleTableSlot* result = ExecScan(&node->ss, (ExecScanAccessMtd)AnnIndexNext, (ExecScanRecheckMtd)AnnIndexRecheck);
+    if (node->iss_QueryFilter != NULL && !TupIsNull(result))
+        node->iss_QueryFilter->counters.qualified_target_rows++;
+    return result;
 }
 
 /* ----------------------------------------------------------------
@@ -491,6 +968,39 @@ static TupleTableSlot* ExecAnnIndexScan(PlanState* state)
  */
 void ExecReScanAnnIndexScan(AnnIndexScanState* node)
 {
+    if (node->iss_QueryFilter != NULL) {
+        DiskAnnQueryFilterState* state = node->iss_QueryFilter;
+        bool was_prepared = state->prepared;
+        if (state->in_probe)
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("cannot rescan DiskANN while its candidate probe is active")));
+        if (node->iss_ScanDesc != NULL)
+            diskann_clear_query_filter(GetIndexScanDesc(node->iss_ScanDesc));
+        AnnQueryAccumulate(&state->total_counters, &state->counters);
+        errno_t rc = memset_s(&state->counters, sizeof(state->counters), 0, sizeof(state->counters));
+        securec_check(rc, "", "");
+        state->prepared = false;
+        state->sealed = false;
+        state->pre_roots = NULL;
+        state->delivered = NULL;
+        state->eligibility_cache = NULL;
+        state->rejected_members = NULL;
+        if (state->probe_slot != NULL) {
+            ExecClearTuple(state->probe_slot);
+            ReScanExprContext(state->probe_econtext);
+        }
+        /* Initial runtime-key evaluation can call ReScan before a search
+         * has borrowed this state. Start epoch 1 for that first execution;
+         * every rescan of a prepared scan still gets a fresh identity. */
+        if (was_prepared)
+            state->spec.epoch++;
+        MemoryContextReset(state->epoch_context);
+        if (outerPlanState(node) != NULL && outerPlanState(node)->chgParam == NULL)
+            ExecReScan(outerPlanState(node));
+        AnnIndexScan* plan = (AnnIndexScan*)node->ss.ps.plan;
+        if (plan->filterMode == ANN_FILTER_IN)
+            node->ss.ps.state->es_param_exec_vals[plan->ann_candidate_tid_param].isnull = true;
+    }
     if (node->iss_OrderedSort != NULL) {
         ExecClearTuple(node->iss_OrderedSlot);
         tuplesort_end(node->iss_OrderedSort);
@@ -569,6 +1079,21 @@ void ExecReScanAnnIndexScan(AnnIndexScanState* node)
  */
 void ExecEndAnnIndexScan(AnnIndexScanState* node)
 {
+    if (node->iss_QueryFilter != NULL) {
+        if (node->iss_ScanDesc != NULL)
+            diskann_clear_query_filter(GetIndexScanDesc(node->iss_ScanDesc));
+        if (outerPlanState(node) != NULL)
+            ExecEndNode(outerPlanState(node));
+        if (node->iss_QueryFilter->probe_slot != NULL)
+            ExecClearTuple(node->iss_QueryFilter->probe_slot);
+        if (node->iss_QueryFilter->probe_econtext != NULL) {
+            FreeExprContext(node->iss_QueryFilter->probe_econtext, true);
+            node->iss_QueryFilter->probe_econtext = NULL;
+        }
+        /* Candidate storage survives for EState's global SubPlan cleanup. */
+        MemoryContextDelete(node->iss_QueryFilter->epoch_context);
+        node->iss_QueryFilter->epoch_context = NULL;
+    }
     if (node->iss_OrderedSort != NULL) {
         ExecClearTuple(node->iss_OrderedSlot);
         tuplesort_end(node->iss_OrderedSort);
@@ -887,6 +1412,7 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
      * here.  This allows an index-advisor plugin to EXPLAIN a plan containing
      * references to nonexistent indexes.
      */
+    AnnQueryFilterInit(index_state, node, eflags);
     if (eflags & EXEC_FLAG_EXPLAIN_ONLY) {
         gstrace_exit(GS_TRC_ID_ExecInitIndexScan);
         return index_state;
@@ -964,7 +1490,7 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
     /* Only DiskANN heap scans use this reorder protocol. HNSW, index-only,
      * bucket and Ustore execution retain their own access contracts. */
     if (index_state->iss_RelationDesc->rd_rel->relam == DISKANN_AM_OID &&
-        !node->index_only_scan && !node->is_ustore &&
+        !node->ann_filter_enabled && !node->index_only_scan && !node->is_ustore &&
         !RELATION_HAS_BUCKET(current_relation) && list_length(node->indexorderbyorig) == 1 &&
         exprType((Node*)linitial(node->indexorderbyorig)) == FLOAT8OID) {
         index_state->iss_DiskannOrdered = true;

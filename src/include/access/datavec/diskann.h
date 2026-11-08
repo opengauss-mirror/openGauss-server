@@ -31,6 +31,7 @@
 #include "nodes/execnodes.h"
 #include "access/datavec/vector.h"
 #include "access/datavec/utils.h"
+#include "access/datavec/diskannqueryfilter.h"
 #include "access/amapi.h"
 
 #include <cstring>
@@ -47,6 +48,11 @@ bool DiskAnnIndexUsesDeferredDelete(Relation index);
 /* Executor requests complete candidate batches before publishing sorted rows. */
 bool diskann_advance_ordered_batch(struct IndexScanDescData* scan);
 bool diskann_orderby_vector_matches(struct IndexScanDescData* scan, Datum value);
+void diskann_set_query_filter(struct IndexScanDescData* scan, const DiskAnnFilterSpec* filter);
+void diskann_clear_query_filter(struct IndexScanDescData* scan);
+bool diskann_current_query_member(struct IndexScanDescData* scan, DiskAnnQueryMember* member);
+bool diskann_query_search_active(struct IndexScanDescData* scan);
+void diskann_query_check_memory(struct IndexScanDescData* scan);
 
 /* Support functions */
 #define DISKANN_DISTANCE_PROC 1
@@ -541,6 +547,7 @@ struct DiskAnnScanOpaqueData {
     VectorList<BlockNumber> frozenBlks;
     VectorList<DiskAnnCandidatesData> candidates;
     NeighborPriorityQueue* queue;
+    struct DiskAnnQueryScanState* queryScan;
 };
 typedef struct DiskAnnScanOpaqueData *DiskAnnScanOpaque;
 
