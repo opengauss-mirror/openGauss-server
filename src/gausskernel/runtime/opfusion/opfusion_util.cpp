@@ -42,6 +42,8 @@
 #include "utils/snapmgr.h"
 #include "utils/knl_partcache.h"
 
+#define ANN_ORDER_BY_ARG_COUNT 2
+
 const char* getBypassReason(FusionType result)
 {
     switch (result) {
@@ -821,6 +823,47 @@ static FusionType checkAnnTargetList(List* targetlist)
     return ret;
 }
 
+/*
+ * ANN fusion can read constants and refresh bound external parameters, but it
+ * cannot evaluate runtime ORDER BY expressions. Leave those to the executor.
+ */
+static FusionType checkAnnOrderBy(List* orderby, ParamListInfo params)
+{
+    if (orderby == NIL) {
+        return NOBYPASS_EXP_NOT_SUPPORT;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, orderby) {
+        Expr* clause = (Expr*)lfirst(lc);
+        if (clause == NULL || !IsA(clause, OpExpr) || list_length(((OpExpr*)clause)->args) != ANN_ORDER_BY_ARG_COUNT) {
+            return NOBYPASS_EXP_NOT_SUPPORT;
+        }
+
+        Expr* leftop = (Expr*)get_leftop(clause);
+        Expr* rightop = (Expr*)get_rightop(clause);
+        if (leftop != NULL && IsA(leftop, RelabelType)) {
+            leftop = ((RelabelType*)leftop)->arg;
+        }
+        if (rightop != NULL && IsA(rightop, RelabelType)) {
+            rightop = ((RelabelType*)rightop)->arg;
+        }
+        if (leftop == NULL || !IsA(leftop, Var) || ((Var*)leftop)->varno != INDEX_VAR ||
+            ((Var*)leftop)->varattno <= 0 || rightop == NULL) {
+            return NOBYPASS_EXP_NOT_SUPPORT;
+        }
+
+        if (IsA(rightop, Param)) {
+            if (!checkFusionParam((Param*)rightop, params)) {
+                return NOBYPASS_PARAM_TYPE_INVALID;
+            }
+        } else if (!IsA(rightop, Const)) {
+            return NOBYPASS_EXP_NOT_SUPPORT;
+        }
+    }
+    return SELECT_FOR_ANN_FUSION;
+}
+
 static FusionType checkFuncExpr(FuncExpr* funcexpr, ParamListInfo params)
 {
     if (funcexpr->funcid == F_INT48 || funcexpr->funcid == F_I2TOI4) {
@@ -828,6 +871,45 @@ static FusionType checkFuncExpr(FuncExpr* funcexpr, ParamListInfo params)
     }
     return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
 }
+
+static FusionType checkAnnLimit(Limit* limit, ParamListInfo params)
+{
+    FusionType ret = SELECT_FOR_ANN_FUSION;
+    // check for offset
+    if (limit->limitOffset != NULL) {
+        if (IsA(limit->limitOffset, Const)) {
+            Assert(((Const *)limit->limitOffset)->consttype == INT8OID);
+            if (DatumGetInt64(((Const *)limit->limitOffset)->constvalue) < 0) {
+                return NOBYPASS_LIMITOFFSET_CONST_LESS_THAN_ZERO;
+            }
+        } else if (IsA(limit->limitOffset, Param)) {
+            Assert(((Param *)limit->limitOffset)->paramtype == INT8OID);
+            ret = SELECT_FOR_ANN_FUSION;
+        } else {
+            return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+        }
+    }
+    if (limit->limitCount != NULL) {
+        if (IsA(limit->limitCount, Const) && !limit->isPercent && !limit->withTies) {
+            Assert(((Const *)limit->limitCount)->consttype == INT8OID ||
+                ((Const *)limit->limitCount)->consttype == FLOAT8OID);
+            if ((!limit->isPercent && DatumGetInt64(((Const *)limit->limitCount)->constvalue) < 0) ||
+                (limit->isPercent && DatumGetFloat8(((Const *)limit->limitCount)->constvalue) < 0)) {
+                return NOBYPASS_LIMITCOUNT_CONST_LESS_THAN_ZERO;
+            }
+        } else if (IsA(limit->limitCount, Param) && !limit->isPercent && !limit->withTies &&
+            (((Param *)limit->limitCount)->paramtype == INT8OID ||
+                ((Param *)limit->limitCount)->paramtype == FLOAT8OID)) {
+            ret = SELECT_FOR_ANN_FUSION;
+        } else if (IsA(limit->limitCount, FuncExpr) && !limit->isPercent && !limit->withTies) {
+            ret = checkFuncExpr((FuncExpr*)(limit->limitCount), params);
+        } else {
+            return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+        }
+    }
+    return ret;
+}
+
 /* only support Limit + Ann index scan、 only Ann Index Scan*/
 FusionType getSelectAnnIndexType(Plan *top_plan, ParamListInfo params)
 {
@@ -843,39 +925,12 @@ FusionType getSelectAnnIndexType(Plan *top_plan, ParamListInfo params)
     if (annIndex->qual != NULL) {
         return NOBYPASS_ANNINDEXSCAN_WITH_QUAL;
     }
-    FusionType ret = SELECT_FOR_ANN_FUSION;
+    FusionType ret = checkAnnOrderBy(((AnnIndexScan*)annIndex)->indexorderby, params);
+    if (ret != SELECT_FOR_ANN_FUSION) {
+        return ret;
+    }
     if (limit != NULL) {
-        // check for offset
-        if (limit->limitOffset != NULL) {
-            if (IsA(limit->limitOffset, Const)) {
-                Assert(((Const *)limit->limitOffset)->consttype == 20);
-                if (DatumGetInt64(((Const *)limit->limitOffset)->constvalue) < 0) {
-                    return NOBYPASS_LIMITOFFSET_CONST_LESS_THAN_ZERO;
-                }
-            } else if (IsA(limit->limitOffset, Param)) {
-                Assert(((Param *)limit->limitOffset)->paramtype == INT8OID);
-                ret = SELECT_FOR_ANN_FUSION;
-            } else {
-                return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
-            }
-        }
-        if (limit->limitCount != NULL) {
-            if (IsA(limit->limitCount, Const) && !limit->isPercent && !limit->withTies) {
-                Assert(((Const *)limit->limitCount)->consttype == INT8OID
-                || ((Const *)limit->limitCount)->consttype == FLOAT8OID);
-                if ((!limit->isPercent && DatumGetInt64(((Const *)limit->limitCount)->constvalue) < 0) || 
-                    limit->isPercent && DatumGetFloat8(((Const *)limit->limitCount)->constvalue) < 0) {
-                    return NOBYPASS_LIMITCOUNT_CONST_LESS_THAN_ZERO;
-                }
-            } else if (IsA(limit->limitCount, Param) && !limit->isPercent && !limit->withTies &&
-                (((Param *)limit->limitCount)->paramtype == INT8OID || ((Param *)limit->limitCount)->paramtype == FLOAT8OID)) {
-                ret = SELECT_FOR_ANN_FUSION;
-            } else if (IsA(limit->limitCount, FuncExpr) && !limit->isPercent && !limit->withTies) {
-                ret = checkFuncExpr((FuncExpr*)(limit->limitCount), params);
-            } else {
-                return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
-            }
-        }
+        ret = checkAnnLimit(limit, params);
     }
     if (ret != SELECT_FOR_ANN_FUSION) {
         return ret;
