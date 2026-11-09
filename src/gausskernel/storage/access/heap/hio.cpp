@@ -107,6 +107,46 @@ Buffer ReadBufferBI(Relation relation, BlockNumber target_block, ReadBufferMode 
 }
 
 /*
+ * next_free/last_free are block numbers of one relation. COPY keeps a single
+ * BulkInsertState for every partition, so discard them when the relation
+ * changes. Otherwise a later insert reads the previous partition's block
+ * number from the new partition's file.
+ *
+ * current_buf is checked separately. Compressed rows and page replication go
+ * through RelationGetNewBufferForBulkInsert, which retargets current_buf and
+ * does not update extended_rnode. Returning early on an unchanged
+ * extended_rnode would keep that other relation's block number and read it
+ * from this relation.
+ */
+static void BulkInsertStateEnsureRelation(BulkInsertState bistate, Relation relation)
+{
+    RelFileNode rnode;
+    ForkNumber forknum;
+    BlockNumber blknum;
+
+    if (bistate == NULL) {
+        return;
+    }
+
+    if (BufferIsValid(bistate->current_buf)) {
+        BufferGetTag(bistate->current_buf, &rnode, &forknum, &blknum);
+        if (!RelFileNodeEquals(relation->rd_node, rnode)) {
+            ReleaseBuffer(bistate->current_buf);
+            bistate->current_buf = InvalidBuffer;
+        }
+    }
+
+    if (RelFileNodeEquals(bistate->extended_rnode, relation->rd_node)) {
+        return;
+    }
+
+    bistate->next_free = InvalidBlockNumber;
+    bistate->last_free = InvalidBlockNumber;
+    bistate->already_extended_by = 0;
+    bistate->extended_rnode = relation->rd_node;
+}
+
+/*
  * Extend a relation by multiple blocks to avoid future contention on the
  * relation extension lock.  Our goal is to pre-extend the relation by an
  * amount which ramps up as the degree of contention ramps up, but limiting
@@ -530,6 +570,7 @@ static Buffer RelationAddBlocks(Relation relation, BulkInsertState bistate, int 
         bistate->current_buf = buffer;
         /* Remember only the most recent contended batch, not a cumulative total. */
         bistate->already_extended_by = extend_by_pages;
+        bistate->extended_rnode = relation->rd_node;
     }
 
     if (needExtensionLock)
@@ -659,18 +700,7 @@ Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffe
         other_block = InvalidBlockNumber; /* just to keep compiler quiet */
     }
 
-    if ((bistate != NULL) && BufferIsValid(bistate->current_buf)) {
-        RelFileNode rnode;
-        ForkNumber forknum;
-        BlockNumber blknum;
-
-        BufferGetTag(bistate->current_buf, &rnode, &forknum, &blknum);
-
-        if (!RelFileNodeEquals(relation->rd_node, rnode)) {
-            ReleaseBuffer(bistate->current_buf);
-            bistate->current_buf = InvalidBuffer;
-        }
-    }
+    BulkInsertStateEnsureRelation(bistate, relation);
 
     /*
      * We first try to put the tuple on the same page we last inserted a tuple
