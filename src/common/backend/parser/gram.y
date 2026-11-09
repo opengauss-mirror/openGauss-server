@@ -16502,6 +16502,13 @@ index_functional_expr_key:	col_name_keyword_nonambiguous '(' Iconst ')'
 						pk->length = $3;
 						$$ = (Node*)pk;
 					}
+				| DATE_P '(' Iconst ')'
+					{
+						PrefixKey* pk = makeNode(PrefixKey);
+						pk->arg = (Expr*)makeColumnRef(pstrdup("date"), NIL, @1, yyscanner);
+						pk->length = $3;
+						$$ = (Node*)pk;
+					}
 				| func_name '(' func_arg_list opt_sort_clause ')'
 					{
 						List* elist = (List*)$3;
@@ -30103,6 +30110,31 @@ func_expr:	func_application within_group_clause filter_clause keep_clause opt_ov
 				}
 			| func_expr_common_subexpr
 				{ $$ = $1; }
+			| DATE_P '(' a_expr ')'
+				{
+					if (DB_IS_CMPT(A_FORMAT)) {
+						/*
+						 * Map the DATE type to timestamp(0) in A compatibility
+						 */
+						TypeName *t = SystemTypeName("timestamp");
+						t->typmods = list_make1(makeIntConst(0, -1));
+						t->location = @1;
+						t->end_location = @1 + DATE_LEN;
+						$$ = makeTypeCast($3, t, NULL, NULL, NULL, @1);
+					} else {
+						FuncCall *n = makeNode(FuncCall);
+						n->funcname = list_make1(makeString(pstrdup("date")));
+						n->args = list_make1($3);
+						n->agg_order = NIL;
+						n->agg_star = FALSE;
+						n->agg_distinct = FALSE;
+						n->func_variadic = FALSE;
+						n->over = NULL;
+						n->location = @1;
+						n->call_func = false;
+						$$ = (Node *)n;
+					}
+				}
 			| CURRENT_SCHEMA
 				{
 					$$ = MakeNoArgFunctionCall(SystemFuncName("current_schema"), @1);
@@ -33321,7 +33353,6 @@ col_name_keyword_nonambiguous:
 			| BYTEAWITHOUTORDERWITHEQUAL
 			| CHAR_P
 			| CHARACTER
-			| DATE_P
 			| DEC
 			| DECIMAL_P
 			| DECODE
