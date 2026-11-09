@@ -8384,6 +8384,13 @@ Datum pg_os_disk_io_info(PG_FUNCTION_ARGS)
 {
    FuncCallContext* funcctx = NULL;
    OSDiskIOStats      *disk_item;
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get OS disk IO statistics"),
+                errhint("Must be system admin or monitor admin can get OS disk IO statistics.")));
+    }
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
@@ -8464,6 +8471,12 @@ Datum pg_os_net_dev_info(PG_FUNCTION_ARGS)
    FuncCallContext* funcctx = NULL;
    OSNetDevInfo      *net_dev_info;
     /* stuff done only on the first call of the function */
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get OS network device statistics"),
+                errhint("Must be system admin or monitor admin can get OS network device statistics.")));
+    }
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
         TupleDesc tupdesc;
@@ -8534,6 +8547,12 @@ Datum pg_os_net_dev_ext(PG_FUNCTION_ARGS)
    FuncCallContext* funcctx = NULL;
    OSNetDevExt      *net_dev_ext;
     /* stuff done only on the first call of the function */
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get OS network device extension information"),
+                errhint("Must be system admin or monitor admin can get OS network device extension information.")));
+    }
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
         TupleDesc tupdesc;
@@ -8798,6 +8817,14 @@ Datum pg_thread_io_stat(PG_FUNCTION_ARGS)
 {
     const int ATT_NUM = 23;
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get thread IO statistics"),
+                errhint("Must be system admin or monitor admin can get thread IO statistics.")));
+    }
+
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
     TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
 

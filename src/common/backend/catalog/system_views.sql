@@ -1662,6 +1662,7 @@ CREATE VIEW pg_total_memory_detail AS SELECT * FROM pg_catalog.pv_total_memory_d
 CREATE VIEW gs_redo_stat AS SELECT * FROM pg_catalog.pg_stat_get_redo_stat();
 CREATE VIEW gs_session_stat AS SELECT * FROM pg_catalog.pv_session_stat();
 CREATE VIEW gs_thread_io_stat AS SELECT * FROM pg_catalog.pg_thread_io_stat();
+GRANT SELECT ON TABLE gs_thread_io_stat TO PUBLIC;
 CREATE VIEW gs_file_stat AS SELECT * FROM pg_catalog.pg_stat_get_file_stat();
 CREATE VIEW pg_catalog.ss_transaction_sync_status AS SELECT * FROM pg_catalog.ss_transaction_sync_stat();
 
