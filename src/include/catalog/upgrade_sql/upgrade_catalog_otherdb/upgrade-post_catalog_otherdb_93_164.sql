@@ -36,6 +36,9 @@ CREATE FUNCTION pg_catalog.pg_thread_io_stat(
 -- 2) Add gs_thread_io_stat view
 DROP VIEW IF EXISTS pg_catalog.gs_thread_io_stat CASCADE;
 CREATE VIEW pg_catalog.gs_thread_io_stat AS SELECT * FROM pg_catalog.pg_thread_io_stat();
+-- view visibility follows the dbe_perf views: normal users are rejected by
+-- the privilege check inside pg_thread_io_stat, so grant is safe here
+GRANT SELECT ON pg_catalog.gs_thread_io_stat TO PUBLIC;
 
 -- 3) Add dbe_perf thread IO views and function (dependency order:
 --    thread_io_stat view -> get_global_thread_io_stat function ->
@@ -43,8 +46,6 @@ CREATE VIEW pg_catalog.gs_thread_io_stat AS SELECT * FROM pg_catalog.pg_thread_i
 DO $DO$
 DECLARE
 ans boolean;
-user_name text;
-query_str text;
 BEGIN
   select case when count(*)=1 then true else false end as ans
     from (select nspname from pg_catalog.pg_namespace where nspname='dbe_perf' limit 1) into ans;
@@ -111,13 +112,6 @@ BEGIN
     CREATE VIEW DBE_PERF.global_thread_io_stat AS
       SELECT DISTINCT * FROM DBE_PERF.get_global_thread_io_stat();
 
-    REVOKE ALL ON DBE_PERF.thread_io_stat FROM PUBLIC;
-    REVOKE ALL ON DBE_PERF.global_thread_io_stat FROM PUBLIC;
-    SELECT SESSION_USER INTO user_name;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE DBE_PERF.thread_io_stat TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE DBE_PERF.global_thread_io_stat TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
     GRANT SELECT ON TABLE DBE_PERF.thread_io_stat TO PUBLIC;
     GRANT SELECT ON TABLE DBE_PERF.global_thread_io_stat TO PUBLIC;
   END IF;
