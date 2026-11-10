@@ -4605,8 +4605,9 @@ static void AppendQueryLockEventTopByCondition(StringInfoData& query, char* type
             delta_total_wait_us AS "Total Wait us",
             ROUND( delta_total_wait_us::NUMERIC / NULLIF(delta_wait, 0), 2) AS "Avg Wait us"
         FROM lock_delta
-        WHERE delta_request_count > 0
-        ORDER BY %s DESC
+        WHERE delta_request_count > 0 OR delta_nw_acquired > 0 OR delta_nw_not_acquired > 0
+            OR delta_wait > 0 OR delta_failed_wait > 0 OR delta_total_wait_us > 0
+        ORDER BY %s DESC, delta_request_count DESC, lock_name
         LIMIT %d
     )";
 
@@ -4930,6 +4931,9 @@ static void AppendQueryInstanceIOThreadType(StringInfoData& query, report_params
             fsyncs AS "Fsyncs",
             ROUND(fsync_time_ms::numeric, 2) AS "Fsync Time ms"
         FROM thread_io CROSS JOIN snap_info si
+        WHERE num_reads + num_writes + bytes_read + bytes_written
+            + read_time_ms + write_time_ms + hits + evictions
+            + fsyncs + fsync_time_ms > 0
         ORDER BY (bytes_read + bytes_written) DESC
     )";
     appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
@@ -5068,14 +5072,20 @@ static void AppendQueryHostDiskIO(StringInfoData& query, report_params* params)
         SELECT
             snap_device_name                                                       AS "Device",
             ROUND(diff_read_cnt::NUMERIC / interval_sec, 1)                        AS "Reads/s",
-            concat(ROUND((diff_read_sector * sector_size::NUMERIC / 1024) / interval_sec, 1), ' KB')
-                                                                                   AS "Read KB/s",
-            concat(ROUND((diff_read_ms::NUMERIC / 1000) / interval_sec, 1), ' s')  AS "Read Time/s",
+            ROUND((diff_read_sector * sector_size::NUMERIC / 1048576) / interval_sec, 1)
+                                                                                   AS "Read MB/s",
+            ROUND((diff_read_ms::NUMERIC / 1000) / interval_sec, 1)                AS "Read Time/s",
             ROUND(diff_write_cnt::NUMERIC / interval_sec, 1)                       AS "Writes/s",
-            concat(ROUND((diff_write_sector * sector_size::NUMERIC / 1024) / interval_sec, 1), ' KB')
-                                                                                   AS "Write KB/s",
-            concat(ROUND((diff_write_ms::NUMERIC / 1000) / interval_sec, 1), ' s') AS "Write Time/s"
+            ROUND((diff_write_sector * sector_size::NUMERIC / 1048576) / interval_sec, 1)
+                                                                                   AS "Write MB/s",
+            ROUND((diff_write_ms::NUMERIC / 1000) / interval_sec, 1)               AS "Write Time/s"
         FROM snap_diff
+        WHERE ROUND(diff_read_cnt::NUMERIC / interval_sec, 1) <> 0
+            OR ROUND((diff_read_sector * sector_size::NUMERIC / 1048576) / interval_sec, 1) <> 0
+            OR ROUND((diff_read_ms::NUMERIC / 1000) / interval_sec, 1) <> 0
+            OR ROUND(diff_write_cnt::NUMERIC / interval_sec, 1) <> 0
+            OR ROUND((diff_write_sector * sector_size::NUMERIC / 1048576) / interval_sec, 1) <> 0
+            OR ROUND((diff_write_ms::NUMERIC / 1000) / interval_sec, 1) <> 0
         ORDER BY diff_read_sector * sector_size DESC;
     )";
     appendStringInfo(&query, sql, params->snap_gap, params->end_snap_id, params->begin_snap_id,
@@ -5105,10 +5115,10 @@ static void get_summary_host_disk_io(report_params* params)
     dash->dashTitle = "Summary";
     dash->tableTitle = "Host Disk IO";
     dash->desc = lappend(dash->desc, (void*)desc);
-    note = "Reads/s, Read KB/s and Read Time/s: the count, throughput and time spent of read IO "
+    note = "Reads/s, Read MB/s and Read Time/s: the count, throughput and time spent of read IO "
            "per second on the device between two snapshots";
     dash->desc = lappend(dash->desc, (void*)note);
-    note = "Writes/s, Write KB/s and Write Time/s: the count, throughput and time spent of write IO "
+    note = "Writes/s, Write MB/s and Write Time/s: the count, throughput and time spent of write IO "
            "per second on the device between two snapshots";
     dash->desc = lappend(dash->desc, (void*)note);
 
@@ -5155,6 +5165,8 @@ static void AppendQueryInstanceIODatabase(StringInfoData& query, report_params* 
             ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
             ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
         FROM db_io_stats  CROSS JOIN snap_info si
+        WHERE total_reads <> 0 OR total_writes <> 0
+            OR ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) <> 0
         ORDER BY "Total IO MB" DESC
     )";
     appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
@@ -5214,6 +5226,8 @@ static void AppendQueryInstanceIOTablespace(StringInfoData& query, report_params
             ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
             ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
         FROM tablespace_io_stats CROSS JOIN snap_info si
+        WHERE total_reads <> 0 OR total_writes <> 0
+            OR ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) <> 0
         ORDER BY "Total IO MB" DESC
     )";
     appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
@@ -6137,6 +6151,12 @@ static const keyActivityColumnProfile g_keyActivityColumnProfiles[] = {
 static void AppendQueryGlobalKeyActivity(StringInfoData& query, report_params* params,
     const keyActivityColumnProfile* profile)
 {
+    const char* waitNonZeroCond =
+        (profile->waitColumns[0] != '\0') ?
+            "\n            OR ROUND(d.delta_wait_us / 1000.0, 2) > 0" : "";
+    const char* sizeNonZeroCond =
+        (profile->sizeColumns[0] != '\0') ?
+            "\n            OR ROUND(d.delta_size_bytes / 1048576.0, 2) > 0" : "";
     const char* sql = R"(
         WITH snap_info AS (
             SELECT %ld AS begin_snap_id, %ld AS end_snap_id,
@@ -6181,14 +6201,14 @@ static void AppendQueryGlobalKeyActivity(StringInfoData& query, report_params* p
                 ELSE NULL
             END AS "Per Transaction"%s%s
         FROM delta_data d CROSS JOIN snap_info si
-        WHERE (d.delta_count > 0 OR d.delta_wait_us > 0 OR d.delta_size_bytes > 0)
+        WHERE (d.delta_count > 0%s%s)
             AND d.activity_type = '%s'
         %s
     )";
     appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
                      params->snap_gap, get_report_node(params), get_report_snap_diff_trx_count(params),
-                     profile->waitColumns, profile->sizeColumns, profile->activityType,
-                     profile->orderClause);
+                     profile->waitColumns, profile->sizeColumns, waitNonZeroCond, sizeNonZeroCond,
+                     profile->activityType, profile->orderClause);
 }
 
 /** get global key activity */
