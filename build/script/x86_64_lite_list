@@ -9,6 +9,7 @@
 ./bin/gs_guc
 ./bin/gs_restore
 ./bin/pg_config
+./bin/pg_recvlogical
 ./bin/pg_controldata
 ./bin/pg_resetxlog
 ./bin/gs_probackup
