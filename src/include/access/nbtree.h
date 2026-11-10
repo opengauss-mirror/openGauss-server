@@ -1481,7 +1481,7 @@ extern IndexTuple _bt_checkkeys(
     IndexScanDesc scan, Page page, OffsetNumber offnum, ScanDirection dir,
     bool* continuescan, bool continuescanPrechecked, bool haveFirstMatch);
 extern bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc,
-    ScanDirection dir, bool *continuescan);
+    ScanDirection dir, bool *continuescan, int numTupleAttrs = -1);
 extern void _bt_killitems(IndexScanDesc scan, bool haveLock);
 extern BTCycleId _bt_vacuum_cycleid(Relation rel);
 extern BTCycleId _bt_start_vacuum(Relation rel);
