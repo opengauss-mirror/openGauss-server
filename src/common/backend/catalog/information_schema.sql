@@ -1622,7 +1622,17 @@ CREATE VIEW schemata AS
            CAST(d.datcollate AS varchar(64)) AS default_collation_name,
            CAST('NO' AS varchar(3)) AS default_encryption
     FROM pg_namespace n, pg_authid u, pg_catalog.pg_database d
-    WHERE n.nspowner = u.oid AND pg_catalog.pg_has_role(n.nspowner, 'USAGE') AND d.datname = current_database();
+    WHERE n.nspowner = u.oid
+          AND (pg_catalog.pg_has_role(n.nspowner, 'USAGE')
+               OR (d.datcompatibility = 'B'
+                   AND (pg_catalog.has_schema_privilege(n.oid, 'CREATE, USAGE')
+                        OR EXISTS (SELECT 1 FROM pg_class c
+                                   WHERE c.relnamespace = n.oid
+                                         AND NOT pg_catalog.pg_is_other_temp_schema(n.oid)
+                                         AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
+                                              OR pg_catalog.has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                                              OR pg_catalog.has_any_column_privilege(c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))))))
+          AND d.datname = current_database();
 
 GRANT SELECT ON schemata TO PUBLIC;
 
