@@ -4731,7 +4731,8 @@ CREATE VIEW dbe_perf.class_vital_info AS
     C.oid AS relid,
     N.nspname AS schemaname,
     C.relname AS relname,
-    C.relkind AS relkind
+    C.relkind AS relkind,
+    C.relfilenode AS relfilenode
     FROM pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
       WHERE C.relkind IN ('r', 't', 'i', 'I');
 

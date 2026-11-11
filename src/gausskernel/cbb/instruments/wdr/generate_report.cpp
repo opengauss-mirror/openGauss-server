@@ -5134,26 +5134,62 @@ static void get_summary_host_disk_io(report_params* params)
 }
 
 
-static void AppendQueryInstanceIODatabase(StringInfoData& query, report_params* params)
-{
-    const char* sql = R"(
+static const char* INSTANCE_IO_SNAP_INFO_CTE = R"(
         WITH snap_info AS (
             SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
         ),
+)";
+
+static const char* INSTANCE_IO_FILE_IO_CTES = R"(
+        snap_schema_files AS (
+            SELECT c.relfilenode, (SELECT oid FROM pg_database WHERE datname = current_database()) AS dbid
+            FROM pg_class c, pg_namespace ns
+            WHERE ns.oid = c.relnamespace AND ns.nspname = 'snapshot' AND c.relfilenode <> 0
+        ),
+        end_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
+                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
+                AND NOT EXISTS (SELECT 1 FROM snap_schema_files ssf
+                    WHERE ssf.relfilenode = fi.snap_filenum AND ssf.dbid = fi.snap_dbid)
+        ),
+        begin_snapshot_data AS (
+            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
+                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
+            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
+            WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
+        ),
+        file_io_diff AS (
+            SELECT
+                t2.snap_filenum, t2.snap_dbid, t2.snap_spcid,
+                GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
+                GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
+                GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
+                GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0) AS diff_blk_written
+            FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
+                ON t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
+                    AND t1.snap_dbid IS NOT DISTINCT FROM t2.snap_dbid
+                    AND t1.snap_spcid IS NOT DISTINCT FROM t2.snap_spcid
+        ),
+        file_io_active AS (
+            SELECT * FROM file_io_diff
+            WHERE diff_reads > 0 OR diff_writes > 0 OR diff_blk_read > 0 OR diff_blk_written > 0
+        ),
+)";
+
+static void AppendQueryInstanceIODatabase(StringInfoData& query, report_params* params)
+{
+    const char* sql = R"(
         db_io_stats AS (
             SELECT
                 COALESCE(pg_database.datname, 'global') AS db_name,
-                SUM(GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0)) AS total_reads,
-                SUM(GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0)) AS total_writes,
-                SUM(GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0)) AS total_blk_read,
-                SUM(GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0)) AS total_blk_written
-            FROM snapshot.snap_global_file_iostat t2  CROSS JOIN snap_info si
-            LEFT JOIN snapshot.snap_global_file_iostat t1 ON t1.snap_node_name = t2.snap_node_name
-                 AND t1.snap_dbid IS NOT DISTINCT FROM t2.snap_dbid
-                 AND t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
-                 AND t1.snapshot_id = si.begin_snap_id
-            LEFT JOIN pg_database ON pg_database.oid = t2.snap_dbid
-            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+                SUM(fid.diff_reads) AS total_reads,
+                SUM(fid.diff_writes) AS total_writes,
+                SUM(fid.diff_blk_read) AS total_blk_read,
+                SUM(fid.diff_blk_written) AS total_blk_written
+            FROM file_io_active fid
+            LEFT JOIN pg_database ON pg_database.oid = fid.snap_dbid
             GROUP BY pg_database.datname
         )
         SELECT
@@ -5164,13 +5200,13 @@ static void AppendQueryInstanceIODatabase(StringInfoData& query, report_params* 
             ROUND(total_writes / si.interval_sec, 2) AS "Per Sec Writes",
             ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
             ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
-        FROM db_io_stats  CROSS JOIN snap_info si
-        WHERE total_reads <> 0 OR total_writes <> 0
-            OR ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) <> 0
+        FROM db_io_stats CROSS JOIN snap_info si
         ORDER BY "Total IO MB" DESC
     )";
-    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+    appendStringInfo(&query, INSTANCE_IO_SNAP_INFO_CTE, params->begin_snap_id, params->end_snap_id,
                      params->snap_gap, get_report_node(params));
+    appendStringInfoString(&query, INSTANCE_IO_FILE_IO_CTES);
+    appendStringInfoString(&query, sql);
 }
 
 static void get_summary_instance_io_database(report_params* params)
@@ -5198,23 +5234,15 @@ static void get_summary_instance_io_database(report_params* params)
 static void AppendQueryInstanceIOTablespace(StringInfoData& query, report_params* params)
 {
     const char* sql = R"(
-        WITH snap_info AS (
-            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
-        ),
         tablespace_io_stats AS (
             SELECT
                 COALESCE(pg_tablespace.spcname, 'global') AS tspace_name,
-                SUM(GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0)) AS total_reads,
-                SUM(GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0)) AS total_writes,
-                SUM(GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0)) AS total_blk_read,
-                SUM(GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0)) AS total_blk_written
-            FROM snapshot.snap_global_file_iostat t2 CROSS JOIN snap_info si
-            LEFT JOIN snapshot.snap_global_file_iostat t1 ON t1.snap_node_name = t2.snap_node_name
-                AND t1.snap_spcid IS NOT DISTINCT FROM t2.snap_spcid
-                AND t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
-                AND t1.snapshot_id = si.begin_snap_id
-            LEFT JOIN pg_tablespace ON pg_tablespace.oid = t2.snap_spcid
-            WHERE t2.snapshot_id = si.end_snap_id AND t2.snap_node_name = si.snap_node_name
+                SUM(fid.diff_reads) AS total_reads,
+                SUM(fid.diff_writes) AS total_writes,
+                SUM(fid.diff_blk_read) AS total_blk_read,
+                SUM(fid.diff_blk_written) AS total_blk_written
+            FROM file_io_active fid
+            LEFT JOIN pg_tablespace ON pg_tablespace.oid = fid.snap_spcid
             GROUP BY pg_tablespace.spcname
         )
         SELECT
@@ -5226,12 +5254,12 @@ static void AppendQueryInstanceIOTablespace(StringInfoData& query, report_params
             ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
             ROUND((total_blk_read + total_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
         FROM tablespace_io_stats CROSS JOIN snap_info si
-        WHERE total_reads <> 0 OR total_writes <> 0
-            OR ROUND((total_blk_read + total_blk_written) * 8.0 / 1024.0, 2) <> 0
         ORDER BY "Total IO MB" DESC
     )";
-    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+    appendStringInfo(&query, INSTANCE_IO_SNAP_INFO_CTE, params->begin_snap_id, params->end_snap_id,
                      params->snap_gap, get_report_node(params));
+    appendStringInfoString(&query, INSTANCE_IO_FILE_IO_CTES);
+    appendStringInfoString(&query, sql);
 }
 
 static void get_summary_instance_io_tablespace(report_params* params)
@@ -5258,9 +5286,6 @@ static void get_summary_instance_io_tablespace(report_params* params)
 static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, report_params* params)
 {
     const char* sql = R"(
-        WITH snap_info AS (
-            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
-        ),
         relkind_mapping AS (
             SELECT 'r' AS relkind, 'TABLE' AS object_type UNION ALL
             SELECT 'i', 'INDEX' UNION ALL
@@ -5278,43 +5303,31 @@ static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, repor
             SELECT 'x', 'INDEX' UNION ALL
             SELECT 't', 'TOAST TABLE'
         ),
-        end_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
-                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
-            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
-            WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
-        ),
-        begin_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
-                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
-            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
-            WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
+        snap_object_meta AS (
+            SELECT scv.db_name, scv.snap_relfilenode::bigint AS filenum,
+                MIN(scv.snap_relname) AS relname, MIN(scv.snap_relkind) AS relkind
+            FROM snapshot.snap_class_vital_info scv CROSS JOIN snap_info si
+            WHERE scv.snapshot_id IN (si.begin_snap_id, si.end_snap_id)
+                AND scv.snap_relfilenode <> 0
+            GROUP BY scv.db_name, scv.snap_relfilenode::bigint
         ),
         file_object_type AS (
             SELECT DISTINCT
-                t2.snap_dbid, t2.snap_spcid, t2.snap_filenum,
-                COALESCE(mapping.object_type, part_mapping.object_type, 'OTHER') AS object_type
-            FROM end_snapshot_data t2
-            LEFT JOIN pg_class ON pg_class.relfilenode = t2.snap_filenum
+                fid.snap_dbid, fid.snap_spcid, fid.snap_filenum,
+                COALESCE(mapping.object_type, part_mapping.object_type, meta_mapping.object_type, 'OTHER')
+                    AS object_type
+            FROM file_io_active fid
+            LEFT JOIN pg_class ON pg_class.relfilenode = fid.snap_filenum
                 AND pg_class.relfilenode <> 0
-                AND t2.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+                AND fid.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
             LEFT JOIN relkind_mapping mapping ON pg_class.relkind = mapping.relkind
-            LEFT JOIN pg_partition ON pg_partition.relfilenode = t2.snap_filenum
+            LEFT JOIN pg_partition ON pg_partition.relfilenode = fid.snap_filenum
                 AND pg_partition.relfilenode <> 0
-                AND t2.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+                AND fid.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
             LEFT JOIN parttype_mapping part_mapping ON pg_partition.parttype = part_mapping.parttype
-        ),
-        file_io_diff AS (
-            SELECT
-                t2.snap_filenum, t2.snap_dbid, t2.snap_spcid,
-                GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
-                GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
-                GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
-                GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0) AS diff_blk_written
-            FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
-                ON t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
-                    AND t1.snap_dbid IS NOT DISTINCT FROM t2.snap_dbid
-                    AND t1.snap_spcid IS NOT DISTINCT FROM t2.snap_spcid
+            LEFT JOIN snap_object_meta meta ON meta.filenum = fid.snap_filenum
+                AND meta.db_name = (SELECT datname::text FROM pg_database WHERE oid = fid.snap_dbid)
+            LEFT JOIN relkind_mapping meta_mapping ON meta.relkind = meta_mapping.relkind
         ),
         object_io_stats AS (
             SELECT
@@ -5324,7 +5337,7 @@ static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, repor
                 SUM(fid.diff_writes) AS total_writes,
                 SUM(fid.diff_blk_read) AS total_blk_read,
                 SUM(fid.diff_blk_written) AS total_blk_written
-            FROM file_io_diff fid JOIN file_object_type fot
+            FROM file_io_active fid JOIN file_object_type fot
                 ON fid.snap_filenum IS NOT DISTINCT FROM fot.snap_filenum
                     AND fid.snap_dbid IS NOT DISTINCT FROM fot.snap_dbid
                     AND fid.snap_spcid IS NOT DISTINCT FROM fot.snap_spcid
@@ -5342,8 +5355,10 @@ static void AppendQueryInstanceIODatabaseObjectType(StringInfoData& query, repor
         FROM object_io_stats CROSS JOIN snap_info si
         ORDER BY "Total IO MB" DESC
     )";
-    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+    appendStringInfo(&query, INSTANCE_IO_SNAP_INFO_CTE, params->begin_snap_id, params->end_snap_id,
                      params->snap_gap, get_report_node(params));
+    appendStringInfoString(&query, INSTANCE_IO_FILE_IO_CTES);
+    appendStringInfoString(&query, sql);
 }
 
 static void get_summary_instance_io_database_object_type(report_params* params)
@@ -5371,41 +5386,12 @@ static void get_summary_instance_io_database_object_type(report_params* params)
 static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, report_params* params)
 {
     const char* sql = R"(
-        WITH snap_info AS (
-            SELECT %ld AS begin_snap_id, %ld AS end_snap_id, %ld::NUMERIC AS interval_sec, '%s' AS snap_node_name
-        ),
-        end_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_spcid,
-                fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd, fi.snap_phyblkwrt
-            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
-            WHERE fi.snapshot_id = si.end_snap_id AND fi.snap_node_name = si.snap_node_name
-        ),
-        begin_snapshot_data AS (
-            SELECT fi.snap_filenum, fi.snap_dbid, fi.snap_phyrds, fi.snap_phywrts, fi.snap_phyblkrd,fi.snap_phyblkwrt
-            FROM snapshot.snap_global_file_iostat fi CROSS JOIN snap_info si
-            WHERE fi.snapshot_id = si.begin_snap_id AND fi.snap_node_name = si.snap_node_name
-        ),
-        file_io_diff AS (
-            SELECT
-                t2.snap_filenum, t2.snap_dbid, t2.snap_spcid,
-                GREATEST(COALESCE(t2.snap_phyrds, 0) - COALESCE(t1.snap_phyrds, 0), 0) AS diff_reads,
-                GREATEST(COALESCE(t2.snap_phywrts, 0) - COALESCE(t1.snap_phywrts, 0), 0) AS diff_writes,
-                GREATEST(COALESCE(t2.snap_phyblkrd, 0) - COALESCE(t1.snap_phyblkrd, 0), 0) AS diff_blk_read,
-                GREATEST(COALESCE(t2.snap_phyblkwrt, 0) - COALESCE(t1.snap_phyblkwrt, 0), 0) AS diff_blk_written
-            FROM end_snapshot_data t2 LEFT JOIN begin_snapshot_data t1
-                ON t1.snap_filenum IS NOT DISTINCT FROM t2.snap_filenum
-                    AND t1.snap_dbid IS NOT DISTINCT FROM t2.snap_dbid
-        ),
-        begin_snapshot_relname AS (
-            SELECT sta.db_name, sta.snap_relid, MIN(sta.snap_relname) AS relname
-            FROM snapshot.snap_global_stat_all_tables sta CROSS JOIN snap_info si
-            WHERE sta.snapshot_id = si.begin_snap_id AND sta.snap_node_name = si.snap_node_name
-            GROUP BY sta.db_name, sta.snap_relid
-        ),
-        snap_schema_files AS (
-            SELECT c.relfilenode
-            FROM pg_class c, pg_namespace ns
-            WHERE ns.oid = c.relnamespace AND ns.nspname = 'snapshot' AND c.relfilenode <> 0
+        snap_object_meta AS (
+            SELECT scv.db_name, scv.snap_relfilenode::bigint AS filenum, MIN(scv.snap_relname) AS relname
+            FROM snapshot.snap_class_vital_info scv CROSS JOIN snap_info si
+            WHERE scv.snapshot_id IN (si.begin_snap_id, si.end_snap_id)
+                AND scv.snap_relfilenode <> 0
+            GROUP BY scv.db_name, scv.snap_relfilenode::bigint
         ),
         file_detail AS (
             SELECT
@@ -5413,7 +5399,7 @@ static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, repor
                 fid.diff_reads, fid.diff_writes, fid.diff_blk_read, fid.diff_blk_written,
                 COALESCE(pg_database.datname, 'Global') AS db_name,
                 COALESCE(pg_tablespace.spcname, 'pg_default') AS tspace_name,
-                COALESCE(pg_class.relname, pg_partition.relname, brn.relname) AS object_name,
+                COALESCE(pg_class.relname, pg_partition.relname, meta.relname) AS object_name,
                 CASE
                     WHEN fid.snap_dbid = 0 OR fid.snap_filenum = 0 THEN 'Global Shared System File'
                     WHEN fid.snap_spcid IS NOT NULL AND fid.snap_spcid != 0 THEN
@@ -5421,7 +5407,7 @@ static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, repor
                     ELSE
                         'base/' || fid.snap_dbid::text || '/' || fid.snap_filenum::text
                 END AS file_path
-            FROM file_io_diff fid
+            FROM file_io_active fid
             LEFT JOIN pg_database ON pg_database.oid = fid.snap_dbid
             LEFT JOIN pg_tablespace ON pg_tablespace.oid = fid.snap_spcid
             LEFT JOIN pg_class ON pg_class.relfilenode = fid.snap_filenum
@@ -5430,10 +5416,8 @@ static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, repor
             LEFT JOIN pg_partition ON pg_partition.relfilenode = fid.snap_filenum
                 AND pg_partition.relfilenode <> 0
                 AND fid.snap_dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-            LEFT JOIN begin_snapshot_relname brn
-                ON brn.snap_relid = fid.snap_filenum
-                AND fid.snap_filenum <> 0
-                AND brn.db_name = pg_database.datname::text
+            LEFT JOIN snap_object_meta meta ON meta.filenum = fid.snap_filenum
+                AND meta.db_name = pg_database.datname::text
         )
         SELECT
             file_path AS "File Path",
@@ -5447,14 +5431,13 @@ static void AppendQueryInstanceIODatabaseObjectPath(StringInfoData& query, repor
             ROUND((diff_blk_read + diff_blk_written) * 8.0 / 1024.0, 2) AS "Total IO MB",
             ROUND((diff_blk_read + diff_blk_written) * 8.0 / si.interval_sec / 1024.0, 2) AS "Per Sec IO MB"
         FROM file_detail CROSS JOIN snap_info si
-        WHERE (diff_reads > 0 OR diff_writes > 0)
-            AND NOT EXISTS (SELECT 1 FROM snap_schema_files ssf
-                WHERE ssf.relfilenode = snap_filenum)
-        ORDER BY (diff_blk_read + diff_blk_written) DESC
+        ORDER BY (diff_blk_read + diff_blk_written) DESC, snap_dbid, snap_filenum
         LIMIT 10
     )";
-    appendStringInfo(&query, sql, params->begin_snap_id, params->end_snap_id,
+    appendStringInfo(&query, INSTANCE_IO_SNAP_INFO_CTE, params->begin_snap_id, params->end_snap_id,
                      params->snap_gap, get_report_node(params));
+    appendStringInfoString(&query, INSTANCE_IO_FILE_IO_CTES);
+    appendStringInfoString(&query, sql);
 }
 
 static void get_summary_instance_io_database_object_path(report_params* params)
@@ -5532,12 +5515,12 @@ static void get_summary_instance_io(report_params* params)
     if (!get_report_node(params)) {
         return;
     }
+    get_summary_instance_io_thread_type(params);
+    get_summary_instance_io_file_type(params);
     get_summary_instance_io_database(params);
     get_summary_instance_io_tablespace(params);
     get_summary_instance_io_database_object_type(params);
-    get_summary_instance_io_file_type(params);
     get_summary_instance_io_database_object_path(params);
-    get_summary_instance_io_thread_type(params);
 }
 
 static void get_summary_global_lock_event(report_params* params)
@@ -6098,32 +6081,32 @@ static void check_report_parameter(report_params* params)
 }
 
 /* Wait time columns of the key activity categories which have wait metrics */
-static const char* g_keyActivityWaitColumns =
-    ",\n            CASE\n"
-    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
-    "                THEN ROUND(d.delta_wait_us / 1000.0, 2)\n"
-    "                ELSE NULL\n"
-    "            END AS \"Total Wait ms\",\n"
-    "            CASE\n"
-    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
-    "                    AND si.interval_sec IS NOT NULL AND si.interval_sec > 0\n"
-    "                THEN ROUND((d.delta_wait_us / 1000.0) / si.interval_sec, 2)\n"
-    "                ELSE NULL\n"
-    "            END AS \"Per Second Wait ms\",\n"
-    "            CASE\n"
-    "                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0\n"
-    "                    AND si.total_xacts IS NOT NULL AND si.total_xacts > 0\n"
-    "                THEN ROUND((d.delta_wait_us / 1000.0) / si.total_xacts, 2)\n"
-    "                ELSE NULL\n"
-    "            END AS \"Per Transaction Wait ms\"";
+static const char* KEY_ACTIVITY_WAIT_COLUMNS = R"(,
+            CASE
+                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0
+                THEN ROUND(d.delta_wait_us / 1000.0, 2)
+                ELSE NULL
+            END AS "Total Wait ms",
+            CASE
+                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0
+                    AND si.interval_sec IS NOT NULL AND si.interval_sec > 0
+                THEN ROUND((d.delta_wait_us / 1000.0) / si.interval_sec, 2)
+                ELSE NULL
+            END AS "Per Second Wait ms",
+            CASE
+                WHEN d.delta_wait_us IS NOT NULL AND d.delta_wait_us > 0
+                    AND si.total_xacts IS NOT NULL AND si.total_xacts > 0
+                THEN ROUND((d.delta_wait_us / 1000.0) / si.total_xacts, 2)
+                ELSE NULL
+            END AS "Per Transaction Wait ms")";
 
 /* Size column of the key activity categories which have size metrics, displayed in MB */
-static const char* g_keyActivitySizeColumn =
-    ",\n            CASE\n"
-    "                WHEN d.delta_size_bytes IS NOT NULL AND d.delta_size_bytes > 0\n"
-    "                THEN ROUND(d.delta_size_bytes / 1048576.0, 2)\n"
-    "                ELSE NULL\n"
-    "            END AS \"Total Size MB\"";
+static const char* KEY_ACTIVITY_SIZE_COLUMN = R"(,
+            CASE
+                WHEN d.delta_size_bytes IS NOT NULL AND d.delta_size_bytes > 0
+                THEN ROUND(d.delta_size_bytes / 1048576.0, 2)
+                ELSE NULL
+            END AS "Total Size MB")";
 
 /*
  * Column profiles of the six key activity categories. Each category table
@@ -6142,10 +6125,10 @@ typedef struct keyActivityColumnProfile {
 static const keyActivityColumnProfile g_keyActivityColumnProfiles[] = {
     {"Buffer", "", "", "ORDER BY \"Total Count\" DESC"},
     {"Transaction", "", "", "ORDER BY \"Total Count\" DESC"},
-    {"Executor", "", g_keyActivitySizeColumn, "ORDER BY \"Total Count\" DESC"},
-    {"Lock", g_keyActivityWaitColumns, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
-    {"SMGR", g_keyActivityWaitColumns, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
-    {"WAL", g_keyActivityWaitColumns, g_keyActivitySizeColumn,
+    {"Executor", "", KEY_ACTIVITY_SIZE_COLUMN, "ORDER BY \"Total Count\" DESC"},
+    {"Lock", KEY_ACTIVITY_WAIT_COLUMNS, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
+    {"SMGR", KEY_ACTIVITY_WAIT_COLUMNS, "", "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"},
+    {"WAL", KEY_ACTIVITY_WAIT_COLUMNS, KEY_ACTIVITY_SIZE_COLUMN,
         "ORDER BY \"Total Wait ms\" DESC NULLS LAST, \"Total Count\" DESC"}};
 
 static void AppendQueryGlobalKeyActivity(StringInfoData& query, report_params* params,
@@ -6301,19 +6284,15 @@ void GenReport::get_report_data(report_params* params)
     /* summary - Host CPU memory */
     get_summary_host_cpu(params);
     get_summary_host_memory(params);
-
-    /** summary - Instance IO */
-    get_summary_instance_io(params);
-
     /* summary - Host Disk IO */
     get_summary_host_disk_io(params);
-
     /* summary - Host Network */
     get_summary_host_network(params);
 
+    /** summary - Instance IO */
+    get_summary_instance_io(params);
     /* summary - Global Key Activity */
     get_summary_global_key_activity(params);
-
     /* summary - Global Lock Event */
     get_summary_global_lock_event(params);
 
