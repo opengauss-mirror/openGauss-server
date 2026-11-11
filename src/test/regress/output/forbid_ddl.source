@@ -30,7 +30,7 @@ ERROR:  permission denied for database db_ddl
 DETAIL:  N/A
 \! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -h "127.0.0.1" -c "comment on database db_ddl IS 'test';"
 COMMENT
-\! @abs_bindir@/gsql -p 8798 -d regression -U "grantee" -W "Asdf@1234" -c "drop database db_ddl;"
+\! @abs_bindir@/gsql -p @portstring@ -d regression -U "grantee" -W "Asdf@1234" -c "drop database db_ddl;"
 DROP DATABASE
 -- tablespace
 \! @abs_bindir@/gsql -p @portstring@ -d regression -c "create tablespace ts_ddl relative location 'ts_ddl';"
