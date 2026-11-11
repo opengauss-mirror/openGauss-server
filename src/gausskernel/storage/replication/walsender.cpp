@@ -3944,7 +3944,9 @@ static int WSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
         }
         /* track thread IO for WAL page read (WAL streaming sender path) */
         uint64 io_cost_us = timer.elapsed_us();
-        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
+        }
     }
 
     *pageTLI = ws_private->tli;
@@ -5151,7 +5153,9 @@ retry:
         /* track thread IO for WAL segment read (both normal and DSS O_DIRECT aligned path) */
         {
             uint64 io_cost_us = timer.elapsed_us();
-            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
+            if (PgstatThreadIoEnabled()) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, io_cost_us, false);
+            }
         }
 
         /* Update state for read */

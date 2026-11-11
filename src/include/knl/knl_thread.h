@@ -3697,6 +3697,19 @@ extern void knl_thread_init(knl_thread_role role);
 extern void knl_thread_layout_dump(void);
 extern THR_LOCAL knl_thrd_context t_thrd;
 
+/*
+ * Thread IO statistics global gate. Defined inline here so every consumer TU
+ * can inline the check at call sites: when enable_wdr_snapshot is off, the
+ * whole instrumentation (counters, IO context maintenance) costs nothing.
+ * Defined in this header because u_sess is declared by knl_session.h above,
+ * while pgstat_threadio_stats.h sits below knl_thread.h in the include chain
+ * and cannot reference u_sess itself.
+ */
+inline bool PgstatThreadIoEnabled()
+{
+    return (u_sess != NULL && u_sess->attr.attr_common.enable_wdr_snapshot);
+}
+
 inline bool StreamThreadAmI()
 {
     return (t_thrd.role == STREAM_WORKER || t_thrd.role == THREADPOOL_STREAM);
