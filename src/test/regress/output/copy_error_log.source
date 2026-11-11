@@ -254,5 +254,34 @@ HINT:  You may want to use copy_error_log_create() to create it instead in order
 drop table pgxc_copy_error_log;
 drop table copy_create_err_tab_001_01;
 drop table err_copy_create_err_tab_001_01;
+--case 5: error logging options are only valid for COPY FROM
+create table copy_error_options (a int);
+insert into copy_error_options values (1);
+-- Reject COPY TO before attempting to open the absent error table.
+copy copy_error_options to stdout log errors;
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+copy copy_error_options to stdout log errors data;
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+do $$ begin perform copy_error_log_create(); end $$;
+-- An existing error table must not make these options valid for COPY TO.
+copy copy_error_options to stdout log errors;
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+copy copy_error_options to stdout log errors data;
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+copy copy_error_options to stdout log errors reject limit '1';
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+copy copy_error_options to stdout log errors data reject limit '1';
+ERROR:  Reject Limit , LOG ERRORS or LOG ERRORS DATA can only be used in COPY From Statements.
+-- COPY FROM still accepts either logging option without an explicit limit.
+copy copy_error_options from stdin log errors;
+NOTICE:  Reject Limit was not set for LOG ERRORS or LOG ERRORS DATA. '0' is used as default.
+copy copy_error_options from stdin log errors data;
+NOTICE:  Reject Limit was not set for LOG ERRORS or LOG ERRORS DATA. '0' is used as default.
+copy (select a from copy_error_options order by a) to stdout;
+1
+2
+3
+drop table pgxc_copy_error_log;
+drop table copy_error_options;
 \c regression;
 drop database copy_error_log;
