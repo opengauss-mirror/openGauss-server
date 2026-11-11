@@ -4947,17 +4947,8 @@ loop:
  */
 static snapxid_t* GetCurrentSnapXid()
 {
-    /*
-     * Keep selecting the current slot and publishing this backend's pin
-     * atomic with respect to CalculateLocalLatestSnapshot().  The producer
-     * holds ProcArrayLock exclusively while it scans the ring, so a shared
-     * lock here closes the window between reading g_snap_current and
-     * IncrRefCount().
-     */
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
     snapxid_t* x = (snapxid_t*)g_snap_current;
     IncrRefCount(x);
-    LWLockRelease(ProcArrayLock);
     return x;
 }
 
