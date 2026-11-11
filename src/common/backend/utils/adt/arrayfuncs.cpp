@@ -5873,8 +5873,11 @@ ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue
      * have to worry about detoasting elements since whatever's in the
      * sub-array should be OK already.
      */
-    rc = memcpy_s(astate->data + astate->nbytes, astate->abytes - astate->nbytes, data, ndatabytes);
-    securec_check(rc, "", "");
+    /* Skip 0-byte payloads to avoid a zero-size memcpy_s destination. */
+    if (ndatabytes > 0) {
+        rc = memcpy_s(astate->data + astate->nbytes, astate->abytes - astate->nbytes, data, ndatabytes);
+        securec_check(rc, "", "");
+    }
     astate->nbytes += ndatabytes;
 
     /* Deal with null bitmap if needed */
@@ -5954,8 +5957,11 @@ Datum makeArrayResultArr(ArrayBuildStateArr* astate, MemoryContext rcontext, boo
         securec_check(rc, "", "");
         rc = memcpy_s(ARR_LBOUND(result), astate->ndims * sizeof(int), astate->lbs, astate->ndims * sizeof(int));
         securec_check(rc, "", "");
-        rc = memcpy_s(ARR_DATA_PTR(result), astate->nbytes, astate->data, astate->nbytes);
-        securec_check(rc, "", "");
+        /* Skip 0-byte payloads to avoid a zero-size memcpy_s destination. */
+        if (astate->nbytes > 0) {
+            rc = memcpy_s(ARR_DATA_PTR(result), astate->nbytes, astate->data, astate->nbytes);
+            securec_check(rc, "", "");
+        }
 
         if (astate->nullbitmap != NULL)
             array_bitmap_copy(ARR_NULLBITMAP(result), 0, astate->nullbitmap, 0, astate->nitems);

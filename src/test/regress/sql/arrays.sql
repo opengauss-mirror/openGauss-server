@@ -481,6 +481,14 @@ select array_agg(ar)
 select array_agg(array[i+1.2, i+1.3, i+1.4]) from generate_series(1,3) g(i);
 select array_agg(array['Hello', i::text]) from generate_series(9,11) g(i);
 select array_agg(array[i, nullif(i, 3), i+1]) from generate_series(1,4) g(i);
+-- All-NULL elements still form nonempty arrays, with dimensions and a null bitmap.
+select array_agg(array[null::int, null::int]);
+-- Two 128-element int arrays fill the 1024-byte buffer before an all-NULL subarray.
+select array_dims(a) as dims, array[a[1][1], a[2][1], a[3][1]] as sample
+  from (select array_agg(ar order by n) as a
+          from (values (1, array_fill(1, array[128])),
+                       (2, array_fill(2, array[128])),
+                       (3, array_fill(null::int, array[128]))) v(n,ar)) s;
 -- errors
 select array_agg('{}'::int[]) from generate_series(1,2);
 select array_agg(null::int[]) from generate_series(1,2);
@@ -489,6 +497,7 @@ select array_agg(ar)
 -- array(select array-value ...)
 select array(select array[i,i/2] from generate_series(1,5) i);
 select array(select array['Hello', i::text] from generate_series(9,11) i);
+select array(select array[null::int, null::int] from generate_series(1,2));
 
 -- dimensionality
 select array_agg(i) from generate_series(1, 2) as i;
