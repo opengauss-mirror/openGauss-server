@@ -59,14 +59,14 @@ function test_1() {
     exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub2 CONNECTION '$publisher_connstr' PUBLICATION tap_pub WITH (copy_data = false)"
 
     # wait for it to start
-    poll_query_until $case_db $sub_node1_port "SELECT count(*) FROM pg_stat_subscription WHERE subname = 'tap_sub2' AND relid IS NULL AND pid IS NOT NULL" "1" "Timed out while waiting for subscriber to start"
+    poll_query_until $case_db $sub_node1_port "SELECT count(*) FROM pg_stat_subscription WHERE subname = 'tap_sub2' AND relid IS NULL AND pid IS NOT NULL AND subid IN (SELECT oid FROM pg_subscription WHERE subdbid = (SELECT oid FROM pg_database WHERE datname = current_database()))" "1" "Timed out while waiting for subscriber to start"
 
     # and drop both subscriptions
     exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub"
     exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub2"
 
-    # check subscriptions are removed
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_subscription")" = "0" ]; then
+    # pg_subscription is shared across databases; check only this test database.
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_subscription WHERE subdbid = (SELECT oid FROM pg_database WHERE datname = current_database())")" = "0" ]; then
 		echo "check second and third sub are dropped success"
 	else
 		echo "$failed_keyword when second and third sub are dropped"
@@ -146,7 +146,8 @@ function test_1() {
     # subscriber is stuck on data copy for constraint violation.
     exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub"
 
-    if [ "$(exec_sql $case_db $pub_node1_port "SELECT count(*) FROM pg_replication_slots")" = "2" ]; then
+    # Ignore physical slots and logical slots belonging to other test databases.
+    if [ "$(exec_sql $case_db $pub_node1_port "SELECT count(*) FROM pg_replication_slots WHERE slot_type = 'logical' AND database = current_database()")" = "0" ]; then
 		echo "check DROP SUBSCRIPTION during error can clean up the slots on the publisher success"
 	else
 		echo "$failed_keyword when DROP SUBSCRIPTION during error can clean up the slots on the publisher"

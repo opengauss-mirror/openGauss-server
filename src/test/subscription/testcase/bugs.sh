@@ -149,12 +149,22 @@ create table t_pubsub_0349(
     exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR ALL TABLES"
     exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub"
 
+    # Save the current database's subscription OID before DROP to scope the origin check.
+    local sub_oid=$(exec_sql $case_db $sub_node1_port "SELECT oid FROM pg_subscription WHERE subdbid = (SELECT oid FROM pg_database WHERE datname = current_database()) AND subname = 'tap_sub'")
+    case "$sub_oid" in
+        ''|*[!0-9]*)
+            echo "$failed_keyword when identifying subscription for origin cleanup"
+            exit 1
+            ;;
+    esac
+    local origin_pattern="^pg_${sub_oid}(_[0-9]+)?$"
+
     exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub;"
 
-    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_replication_origin_status")" = "0" ]; then
-        echo "check if pg_replication_origin_status is empty success"
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_replication_origin_status WHERE external_id ~ '$origin_pattern'")" = "0" ]; then
+        echo "check subscription replication origins are removed success"
     else
-        echo "$failed_keyword when check if pg_replication_origin_status is empty"
+        echo "$failed_keyword when check subscription replication origins are removed"
         exit 1
     fi
 
