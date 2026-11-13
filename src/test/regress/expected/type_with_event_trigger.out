@@ -3,5 +3,11 @@ create database type_with_event_trigger;
 create publication pub_test for all tables with (ddl='all');
 drop type type_not_exists cascade;
 ERROR:  type "type_not_exists" does not exist
+drop table if exists table_not_exist;
+NOTICE:  table "table_not_exist" does not exist, skipping
+drop type if exists type_not_exist;
+NOTICE:  type "type_not_exist" does not exist, skipping
+drop index if exists index_not_exist;
+NOTICE:  index "index_not_exist" does not exist, skipping
 \c regression
 drop database type_with_event_trigger;
