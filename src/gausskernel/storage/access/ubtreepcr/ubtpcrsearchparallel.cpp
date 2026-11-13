@@ -147,16 +147,15 @@ int UBTreePCRParallelGetScanTotalBlocks(IndexScanDesc pcr_scan, ScanDirection di
             tmp_buf = _bt_getbuf(pcr_rel, pcr_next, BT_READ);
             Page cur_page = BufferGetPage(tmp_buf);
             opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(cur_page);
-            if (ScanDirectionIsForward(dir)) {
-                if (P_FIRSTDATAKEY(opaque) > PageGetMaxOffsetNumber(cur_page)) {
-                    _bt_relbuf(pcr_rel, tmp_buf);
-                    total_blocks++;
-                    continue;
-                }
-                UBTreePCRCheckKeys(pcr_scan, cur_page, P_FIRSTDATAKEY(opaque), dir, &still_loop);
-            } else {
-                UBTreePCRCheckKeys(pcr_scan, cur_page, PageGetMaxOffsetNumber(cur_page), dir, &still_loop);
+            /* PCR pages have TD slots before their row pointers. */
+            OffsetNumber maxoff = UBTreePCRPageGetMaxOffsetNumber(cur_page);
+            if (P_FIRSTDATAKEY(opaque) > maxoff) {
+                _bt_relbuf(pcr_rel, tmp_buf);
+                total_blocks++;
+                continue;
             }
+            OffsetNumber offnum = ScanDirectionIsForward(dir) ? P_FIRSTDATAKEY(opaque) : maxoff;
+            UBTreePCRCheckKeys(pcr_scan, cur_page, offnum, dir, &still_loop);
             if (!still_loop) {
                 _bt_relbuf(pcr_rel, tmp_buf);
                 break;

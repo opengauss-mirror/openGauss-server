@@ -153,16 +153,15 @@ int _bt_get_parallel_scan_total_blocks(IndexScanDesc bt_scan, ScanDirection dir,
             tmp_buf = _bt_getbuf(bt_rel, bt_next, BT_READ);
             Page cur_page = BufferGetPage(tmp_buf);
             opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(cur_page);
-            if (ScanDirectionIsForward(dir)) {
-                if (P_FIRSTDATAKEY(opaque) > PageGetMaxOffsetNumber(cur_page)) {
-                    _bt_relbuf(bt_rel, tmp_buf);
-                    total_blocks++;
-                    continue;
-                }
-                _bt_checkkeys(bt_scan, cur_page, P_FIRSTDATAKEY(opaque), dir, &continuescan, false, false);
-            } else {
-                _bt_checkkeys(bt_scan, cur_page, PageGetMaxOffsetNumber(cur_page), dir, &continuescan, false, false);
+            /* An empty non-rightmost page contains only its high key. */
+            OffsetNumber maxoff = PageGetMaxOffsetNumber(cur_page);
+            if (P_FIRSTDATAKEY(opaque) > maxoff) {
+                _bt_relbuf(bt_rel, tmp_buf);
+                total_blocks++;
+                continue;
             }
+            OffsetNumber offnum = ScanDirectionIsForward(dir) ? P_FIRSTDATAKEY(opaque) : maxoff;
+            _bt_checkkeys(bt_scan, cur_page, offnum, dir, &continuescan, false, false);
             if (!continuescan) {
                 _bt_relbuf(bt_rel, tmp_buf);
                 break;

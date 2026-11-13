@@ -1281,6 +1281,7 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
     int keysz;
     int ikey;
     ScanKey key;
+    int numTupleAttrs;
 
     *continuescan = true; /* default assumption */
 
@@ -1318,6 +1319,7 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
     tupdesc = RelationGetDescr(scan->indexRelation);
     so = (BTScanOpaque)scan->opaque;
     keysz = so->numberOfKeys;
+    numTupleAttrs = BTREE_TUPLE_GET_NUM_OF_ATTS(tuple, scan->indexRelation);
 
     for (key = so->keyData, ikey = 0; ikey < keysz; key++, ikey++) {
         Datum datum;
@@ -1359,9 +1361,20 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
             continue;
         }
 
+        /*
+         * A high key can be a suffix-truncated pivot.  Missing attributes
+         * are boundary values, not SQL NULLs, and cannot disprove a qual.
+         * Leave continuescan unchanged so the sibling page is still read.
+         */
+        if (key->sk_attno > numTupleAttrs) {
+            Assert(btree_tuple_is_pivot(tuple));
+            Assert(ScanDirectionIsForward(dir));
+            continue;
+        }
+
         /* row-comparison keys need special processing */
         if (key->sk_flags & SK_ROW_HEADER) {
-            if (_bt_check_rowcompare(key, tuple, tupdesc, dir, continuescan)) {
+            if (_bt_check_rowcompare(key, tuple, tupdesc, dir, continuescan, numTupleAttrs)) {
                 continue;
             }
             return NULL;
@@ -1534,7 +1547,7 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum,
  * This is a subroutine for _bt_checkkeys, which see for more info.
  */
 bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc, ScanDirection dir,
-                                 bool *continuescan)
+                                 bool *continuescan, int numTupleAttrs)
 {
     ScanKey subkey = (ScanKey)DatumGetPointer(skey->sk_argument);
     int32 cmpresult = 0;
@@ -1549,6 +1562,13 @@ bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc, Sca
         bool isNull = false;
 
         Assert(subkey->sk_flags & SK_ROW_MEMBER);
+
+        /* An equal prefix followed by a truncated suffix is inconclusive. */
+        if (numTupleAttrs >= 0 && subkey->sk_attno > numTupleAttrs) {
+            Assert(btree_tuple_is_pivot(tuple));
+            Assert(ScanDirectionIsForward(dir));
+            return true;
+        }
 
         datum = index_getattr(tuple, subkey->sk_attno, tupdesc, &isNull);
         if (isNull) {
