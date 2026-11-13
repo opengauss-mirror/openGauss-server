@@ -66,9 +66,9 @@ function exec_sql_file() {
 function exec_dump_db() {
 	echo "dump $1 to $3.."
 	if [ $# -eq 4 ]; then
-		gs_dump $1 -f $3 -p $2
+		gs_dump $1 -f $3 -p $2 --restrict-key=MatviewDumpRegressionKey
 	else 
-		gs_dump $1 -f $3 -p $2 --no-publications --no-subscriptions
+		gs_dump $1 -f $3 -p $2 --no-publications --no-subscriptions --restrict-key=MatviewDumpRegressionKey
 	fi
 }
 
