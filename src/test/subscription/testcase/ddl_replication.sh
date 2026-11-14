@@ -35,11 +35,15 @@ function case_setup() {
     wait_for_subscription_sync $case_use_db $sub_node1_port "${case_use_db}_sub"
 }
 
-function case_teardown() {
+function case_cleanup_replication() {
     local case_use_db=$1
 
     exec_sql $case_use_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS ${case_use_db}_sub"
     exec_sql $case_use_db $pub_node1_port "DROP PUBLICATION IF EXISTS ${case_use_db}_pub"
+}
+
+function case_teardown() {
+    local case_use_db=$1
 
     exec_sql $db $sub_node1_port "DROP DATABASE $case_use_db"
     exec_sql $db $pub_node1_port "DROP DATABASE $case_use_db"
@@ -96,9 +100,13 @@ function run_test() {
             rm ${results_dir}/$cur_case.dump.diff 
         fi
 
+        # Release workers, slots and origins even when the dump differs.
+        # Keep failed databases and dump files available for diagnosis.
+        case_cleanup_replication $cur_case
         if [ $err -eq 0 ]; then
             case_teardown $cur_case
         fi
+        cur_case=""
 
     done
 
@@ -115,4 +123,6 @@ exec_sql $db $pub_node1_port "ALTER ROLE ddl_test_user sysadmin"
 
 export test_username="ddl_test_user"
 
+# The wait helpers may exit early on a timeout.
+trap 'if [ -n "$cur_case" ]; then case_cleanup_replication "$cur_case"; fi' EXIT
 run_test $sql_dir

@@ -2133,6 +2133,10 @@ static void ReorderBufferProcessTXN(
      */
     bool usingSubtxn = IsTransactionOrTransactionBlock();
 
+    /* Preserve float precision in both regular and streaming decoding output. */
+    u_sess->attr.attr_common.extra_float_digits =
+        LOGICAL_DECODE_EXTRA_FLOAT_DIGITS;
+
     if (commit_lsn == InvalidXLogRecPtr)
         txn->csn = InvalidCommitSeqNo;
 

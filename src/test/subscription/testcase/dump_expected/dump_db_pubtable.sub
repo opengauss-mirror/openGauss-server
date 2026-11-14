@@ -2,6 +2,8 @@
 -- openGauss database dump
 --
 
+\restrict MatviewDumpRegressionKey
+
 SET statement_timeout = 0;
 SET xmloption = content;
 SET client_encoding = 'UTF8';
@@ -77,4 +79,6 @@ GRANT USAGE ON SCHEMA "public" TO PUBLIC;
 --
 -- openGauss database dump complete
 --
+
+\unrestrict MatviewDumpRegressionKey
 
