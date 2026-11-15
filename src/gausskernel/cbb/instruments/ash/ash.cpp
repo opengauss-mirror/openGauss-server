@@ -1051,7 +1051,12 @@ static void CollectActiveSessionStatus(uint64 sample_id, bool need_flush_sample)
         active_sess_hist_arrary->active_sess_hist_info +  active_sess_hist_arrary->curr_index;
     PgBackendStatus* medium_beentry = (PgBackendStatus*)palloc(sizeof(PgBackendStatus));
     for (int i = 1; i <= BackendStatusArray_size; i++) {
-        ash_arrary_slot->changCount++;
+
+        /* Ensure that changeCount is an even number before increment steps. */
+         if ((ash_arrary_slot->changCount++ & 1) != 0){
+            ash_arrary_slot->changCount++;
+        }
+
         for (;;) {
             /*
              * Follow the protocol of retrying if st_changecount changes while we
@@ -1313,12 +1318,25 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
         bool nulls[ATTR_NUM] = {false};
         HeapTuple tuple = NULL;
         SessionHistEntry *beentry = NULL;
-        errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
+       
+        MemoryContext tuple_context = CurrentMemoryContext;
+        MemoryContext attempt_context = AllocSetContextCreate(tuple_context,
+            "ASH tuple conversion context",
+            ALLOCSET_SMALL_MINSIZE,
+            ALLOCSET_SMALL_INITSIZE,
+            ALLOCSET_SMALL_MAXSIZE);
         beentry = g_instance.stat_cxt.active_sess_hist_arrary->active_sess_hist_info + funcctx->call_cntr;
         for (;;) {
+
+            CHECK_FOR_INTERRUPTS();
+            /*Memory allocated by GetTuple can only be released after the loop finishes. so must reset the context */
+            MemoryContextReset(attempt_context);
+            MemoryContextSwitchTo(attempt_context);
+            errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+            securec_check(rc, "\0", "\0");
+
             uint64 save_changecount = beentry->changCount;
             /* Values only available to same user or superuser */
             if (superuser() || isMonitoradmin(GetUserId()) || beentry->userid == GetUserId()) {
@@ -1329,10 +1347,13 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
                     nulls[i] = true;
                 }
             }
+
+            MemoryContextSwitchTo(tuple_context);
             if (save_changecount == beentry->changCount && ((unsigned int)save_changecount & 1) == 0)
                 break;
         }
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        MemoryContextDelete(attempt_context);
 
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
