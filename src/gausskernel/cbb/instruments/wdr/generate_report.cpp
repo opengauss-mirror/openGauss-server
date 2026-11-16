@@ -2948,7 +2948,8 @@ static void NodeTableIOStrPart(StringInfo query, report_params* params, char* so
         "SELECT table_io.db_name as \"DB Name\", table_io.snap_schemaname as \"Schema Name\","
         " table_io.snap_relname as \"Table Name\", table_io.heap_blks_hit_ratio as \"%%Heap Blks Hit Ratio\","
         " table_io.heap_blks_read as \"Heap Blks Read\", table_io.heap_blks_hit as  \"Heap Blks Hit\","
-        " idx_io.idx_blks_read as \"Idx Blks Read\", idx_io.idx_blks_hit as \"Idx Blks Hit\", "
+        " coalesce(idx_io.idx_blks_read, 0) as \"Idx Blks Read\","
+        " coalesce(idx_io.idx_blks_hit, 0) as \"Idx Blks Hit\", "
         " table_io.toast_blks_read as \"Toast Blks Read\",  table_io.toast_blks_hit as \"Toast Blks Hit\","
         " table_io.tidx_blks_read as \"Tidx Blks Read\", table_io.tidx_blks_hit as  \"Tidx Blks Hit\" "
         " FROM (Select t2.db_name, t2.snap_schemaname , t2.snap_relname ,"
@@ -2959,8 +2960,6 @@ static void NodeTableIOStrPart(StringInfo query, report_params* params, char* so
         " (t2.snap_heap_blks_hit - coalesce(t1.snap_heap_blks_hit, 0))) * 100, 2) end ) as heap_blks_hit_ratio,"
         " (t2.snap_heap_blks_read - coalesce(t1.snap_heap_blks_read, 0)) as heap_blks_read,"
         " (t2.snap_heap_blks_hit - coalesce(t1.snap_heap_blks_hit, 0)) as heap_blks_hit,"
-        " (t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as idx_blks_read,"
-        " (t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as idx_blks_hit,"
         " (t2.snap_toast_blks_read - coalesce(t1.snap_toast_blks_read, 0)) as toast_blks_read,"
         " (t2.snap_toast_blks_hit - coalesce(t1.snap_toast_blks_hit, 0)) as toast_blks_hit,"
         " (t2.snap_tidx_blks_read - coalesce(t1.snap_tidx_blks_read, 0)) as tidx_blks_read,"
@@ -2987,10 +2986,14 @@ static void NodeTableIODataOrderbySortKey(report_params* params, char* sortkey,
     StringInfoData query;
     initStringInfo(&query);
     NodeTableIOStrPart(&query, params, sortkey);
+    /*
+     * Aggregate per-index IO to table grain (same as cluster mode). Without SUM/GROUP BY,
+     * left-joining indexes duplicates each table row by index count and repeats heap stats.
+     */
     appendStringInfo(&query,
         " (Select t2.db_name , t2.snap_schemaname , t2.snap_relname,"
-        " (t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as idx_blks_read,"
-        " (t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as idx_blks_hit"
+        " pg_catalog.sum(t2.snap_idx_blks_read - coalesce(t1.snap_idx_blks_read, 0)) as idx_blks_read,"
+        " pg_catalog.sum(t2.snap_idx_blks_hit - coalesce(t1.snap_idx_blks_hit, 0)) as idx_blks_hit"
         " from"
         " (select * from snapshot.snap_global_statio_all_indexes"
         " where snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
@@ -3000,7 +3003,8 @@ static void NodeTableIODataOrderbySortKey(report_params* params, char* sortkey,
         " where snapshot_id = %ld and snap_node_name = '%s' and snap_schemaname NOT IN"
         " (%s) AND snap_schemaname !~ '^pg_toast') t2"
         " on t1.snap_relid = t2.snap_relid and t2.snap_indexrelid = t1.snap_indexrelid and "
-        "t2.db_name = t1.db_name and t2.snap_schemaname = t1.snap_schemaname) as idx_io"
+        "t2.db_name = t1.db_name and t2.snap_schemaname = t1.snap_schemaname"
+        " group by t2.db_name, t2.snap_schemaname, t2.snap_relname) as idx_io"
         " on table_io.db_name = idx_io.db_name and table_io.snap_schemaname = idx_io.snap_schemaname"
         " and table_io.snap_relname = idx_io.snap_relname) data  where "
         "data.\"%%Heap Blks Hit Ratio\" <>0 or data.\"Heap Blks Read\" <>0 or data.\"Heap Blks Hit\" <>0"
