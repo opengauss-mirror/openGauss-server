@@ -1454,6 +1454,9 @@ bool ValidatePasswordLenConfig(bool isError)
 
 static bool check_password_min_length(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_min_length;
     u_sess->attr.attr_security.Password_min_length = *newval;
     bool result = ValidatePasswordLenConfig();
@@ -1463,6 +1466,9 @@ static bool check_password_min_length(int* newval, void** extra, GucSource sourc
 
 static bool check_password_max_length(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_max_length;
     u_sess->attr.attr_security.Password_max_length = *newval;
     bool result = ValidatePasswordLenConfig();
@@ -1472,6 +1478,9 @@ static bool check_password_max_length(int* newval, void** extra, GucSource sourc
 
 static bool check_password_min_uppercase(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_min_upper;
     u_sess->attr.attr_security.Password_min_upper = *newval;
     bool result = ValidatePasswordLenConfig();
@@ -1481,6 +1490,9 @@ static bool check_password_min_uppercase(int* newval, void** extra, GucSource so
 
 static bool check_password_min_lowercase(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_min_lower;
     u_sess->attr.attr_security.Password_min_lower = *newval;
     bool result = ValidatePasswordLenConfig();
@@ -1490,6 +1502,9 @@ static bool check_password_min_lowercase(int* newval, void** extra, GucSource so
 
 static bool check_password_min_digital(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_min_digital;
     u_sess->attr.attr_security.Password_min_digital = *newval;
     bool result = ValidatePasswordLenConfig();
@@ -1499,6 +1514,9 @@ static bool check_password_min_digital(int* newval, void** extra, GucSource sour
 
 static bool check_password_min_special(int* newval, void** extra, GucSource source)
 {
+    if (IsRestoringGUCOptions()) {
+        return true;
+    }
     int oldValue = u_sess->attr.attr_security.Password_min_special;
     u_sess->attr.attr_security.Password_min_special = *newval;
     bool result = ValidatePasswordLenConfig();
