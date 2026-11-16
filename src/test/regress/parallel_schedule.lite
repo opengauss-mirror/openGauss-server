@@ -869,6 +869,8 @@ test: procedure_privilege_test
 # pljson
 test: pljson
 
+test: datetime_to_char datetime_to_char_full
+
 test: toomanyparams
 
 test: guc_help

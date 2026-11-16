@@ -245,3 +245,4 @@ test: hw_pwd_encryption_sm3
 test: cstore_unique_index
 test: rule_test
 test: plpgsql_savepoint
+test: datetime_to_char datetime_to_char_full

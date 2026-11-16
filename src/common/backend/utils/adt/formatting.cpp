@@ -91,6 +91,7 @@
 #include "utils/int8.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
+#include "utils/numutils.h"
 #include "utils/pg_locale.h"
 #include "utils/tzparser.h"
 #include "miscadmin.h"
@@ -3285,6 +3286,76 @@ static int from_char_seq_search(int* dest, char** src, char** array, int type, i
                 (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("localized string format value too long"))); \
     } while (0)
 
+/* Per-call state: derive each calendar field once and share the Julian day. */
+typedef struct DCHToCharDateFields {
+    int julian;
+    bool wdayReady;
+    bool ydayReady;
+} DCHToCharDateFields;
+
+static inline void DchToCharWeekday(struct pg_tm* tm, DCHToCharDateFields* fields)
+{
+    if (!fields->ydayReady) {
+        fields->julian = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
+    }
+    /* Weekdays repeat every 7 days; Sunday is 0. */
+    tm->tm_wday = (fields->julian + 1) % 7;
+    fields->wdayReady = true;
+}
+
+static inline void DchToCharYearday(struct pg_tm* tm, DCHToCharDateFields* fields)
+{
+    if (!fields->wdayReady) {
+        fields->julian = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
+    }
+    tm->tm_yday = fields->julian - date2j(tm->tm_year, 1, 1) + 1;
+    fields->ydayReady = true;
+}
+
+/* Write decimal digits with optional zero padding, without parsing a format string. */
+static inline int DchToCharInteger(char* out, int capacity, int minlen, int value)
+{
+    /*
+     * For minlen in [0, 6], 12 bytes cover any signed 32-bit integer:
+     * up to 11 characters (including the sign) plus '\0'.
+     * If the remaining output space is below 12 bytes, use sprintf_s
+     * to check the actual output length and preserve its error handling.
+     */
+    if (capacity < 12) {
+        return sprintf_s(out, capacity, "%0*d", minlen, value);
+    }
+
+    uint32 uvalue = (uint32)value;
+
+    /* A width of 2 and values below 100 allow direct digit-pair output. */
+    if (minlen == 2 && uvalue < 100) {
+        pg_ultostr_zeropad_width_2(out, uvalue);
+        /* Terminate after the 2 output digits. */
+        out[2] = '\0';
+        /* Return the 2 output digits, excluding the terminator. */
+        return 2;
+    }
+
+    char* start = out;
+    if (value < 0) {
+        *out++ = '-';
+        uvalue = 0U - uvalue;
+        if (minlen > 0) {
+            --minlen;
+        }
+    }
+    /* A minimum width of 4 uses the specialized zero-padding helper. */
+    if (minlen == 4) {
+        out = pg_ultostr_zeropad_min_width_4(out, uvalue);
+    } else if (minlen > 0) {
+        out = pg_ultostr_zeropad(out, uvalue, minlen);
+    } else {
+        out = pg_ultostr(out, uvalue);
+    }
+    *out = '\0';
+    return (int)(out - start);
+}
+
 /* ----------
  * Process a TmToChar struct as denoted by a list of FormatNodes.
  * The formatted data is written to the string pointed to by 'out'.
@@ -3298,6 +3369,8 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
     int i;
     int len;
     errno_t rc = EOK;
+    /* Interval and time callers retain their supplied fields, including total days. */
+    DCHToCharDateFields dateFields = {0, is_interval, is_interval};
 
     /* cache localized days and months */
     cache_locale_time();
@@ -3320,142 +3393,192 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
         switch (n->key->id) {
             case DCH_A_M:
             case DCH_P_M:
-                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= HOURS_PER_DAY / 2) ? P_M_STR : A_M_STR);
+                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= MAX_VALUE_12_CLOCK) ? P_M_STR : A_M_STR);
                 securec_check(rc, "\0", "\0");
                 s += strlen(s);
                 break;
             case DCH_AM:
             case DCH_PM:
-                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= HOURS_PER_DAY / 2) ? PM_STR : AM_STR);
+                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= MAX_VALUE_12_CLOCK) ? PM_STR : AM_STR);
                 securec_check(rc, "\0", "\0");
                 s += strlen(s);
                 break;
             case DCH_a_m:
             case DCH_p_m:
-                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= HOURS_PER_DAY / 2) ? p_m_STR : a_m_STR);
+                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= MAX_VALUE_12_CLOCK) ? p_m_STR : a_m_STR);
                 securec_check(rc, "\0", "\0");
                 s += strlen(s);
                 break;
             case DCH_am:
             case DCH_pm:
-                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= HOURS_PER_DAY / 2) ? pm_STR : am_STR);
+                rc = strcpy_s(s, len, (tm->tm_hour % HOURS_PER_DAY >= MAX_VALUE_12_CLOCK) ? pm_STR : am_STR);
                 securec_check(rc, "\0", "\0");
                 s += strlen(s);
                 break;
             case DCH_HH:
-            case DCH_HH12:
-
+            case DCH_HH12: {
                 /*
                  * display time as shown on a 12-hour clock, even for
                  * intervals
                  */
-                rc = sprintf_s(s,
-                    len,
-                    "%0*d",
-                    S_FM(n->suffix) ? 0 : 2,
-                    (tm->tm_hour % (HOURS_PER_DAY / 2) == 0) ? (HOURS_PER_DAY / 2) : (tm->tm_hour % (HOURS_PER_DAY / 2)));
+                int hour = tm->tm_hour % MAX_VALUE_12_CLOCK;
+                if (hour == 0)
+                    hour = MAX_VALUE_12_CLOCK;
+
+                /* Use minimum width 2 for 12-hour output unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, hour);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
+            }
             case DCH_HH24:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, tm->tm_hour);
+                /* Hours use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, tm->tm_hour);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_MI:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, tm->tm_min);
+                /* Minutes use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, tm->tm_min);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_SS:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, tm->tm_sec);
+                /* Seconds use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, tm->tm_sec);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_MS: /* millisecond */
             case DCH_FF3:
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%03d", (int)(in->fsec / INT64CONST(1000)));
+                /* Use width 3; 1000 microseconds form a millisecond. */
+                rc = DchToCharInteger(s, len, 3, (int)(in->fsec / INT64CONST(1000)));
 #else
                 /* No rint() because we can't overflow and we might print US */
-                rc = sprintf_s(s, len, "%03d", (int)(in->fsec * 1000));
+                /* Use width 3; scale fractional seconds by 1000 to obtain milliseconds. */
+                rc = DchToCharInteger(s, len, 3, (int)(in->fsec * 1000));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_FF1: /* millisecond */
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%01d", (int)(in->fsec / INT64CONST(100000)));
+                /* Use width 1; divide microseconds by 100000 for tenths. */
+                rc = DchToCharInteger(s, len, 1, (int)(in->fsec / INT64CONST(100000)));
 #else
-                rc = sprintf_s(s, len, "%01d", (int)(in->fsec * 1000000 / 100000));
+                /* Use width 1; scale seconds by 1000000, then divide by 100000. */
+                rc = DchToCharInteger(s, len, 1, (int)(in->fsec * 1000000 / 100000));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_FF2: /* millisecond */
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%02d", (int)(in->fsec / INT64CONST(10000)));
+                /* Use width 2; divide microseconds by 10000 for hundredths. */
+                rc = DchToCharInteger(s, len, 2, (int)(in->fsec / INT64CONST(10000)));
 #else
-                rc = sprintf_s(s, len, "%02d", (int)(in->fsec * 1000000 / 10000));
+                /* Use width 2; scale seconds by 1000000, then divide by 10000. */
+                rc = DchToCharInteger(s, len, 2, (int)(in->fsec * 1000000 / 10000));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_FF4: /* millisecond */
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%04d", (int)(in->fsec / INT64CONST(100)));
+                /* Use width 4; divide microseconds by 100 for ten-thousandths. */
+                rc = DchToCharInteger(s, len, 4, (int)(in->fsec / INT64CONST(100)));
 #else
-                rc = sprintf_s(s, len, "%04d", (int)(in->fsec * 1000000 / 100));
+                /* Use width 4; scale seconds by 1000000, then divide by 100. */
+                rc = DchToCharInteger(s, len, 4, (int)(in->fsec * 1000000 / 100));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_FF5: /* millisecond */
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%05d", (int)(in->fsec / INT64CONST(10)));
+                /* Use width 5; divide microseconds by 10 for hundred-thousandths. */
+                rc = DchToCharInteger(s, len, 5, (int)(in->fsec / INT64CONST(10)));
 #else
-                rc = sprintf_s(s, len, "%05d", (int)(in->fsec * 1000000 / 10));
+                /* Use width 5; scale seconds by 1000000, then divide by 10. */
+                rc = DchToCharInteger(s, len, 5, (int)(in->fsec * 1000000 / 10));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_US: /* microsecond */
             case DCH_FF6:
 #ifdef HAVE_INT64_TIMESTAMP
-                rc = sprintf_s(s, len, "%06d", (int)in->fsec);
+                /* Microseconds use minimum width 6. */
+                rc = DchToCharInteger(s, len, 6, (int)in->fsec);
 #else
                 /* don't use rint() because we can't overflow 1000 */
-                rc = sprintf_s(s, len, "%06d", (int)(in->fsec * 1000000));
+                /* Use width 6; scale fractional seconds by 1000000 to obtain microseconds. */
+                rc = DchToCharInteger(s, len, 6, (int)(in->fsec * 1000000));
 #endif
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_SSSSS:
-                rc = sprintf_s(s, len, "%d", tm->tm_hour * SECS_PER_HOUR + tm->tm_min * SECS_PER_MINUTE + tm->tm_sec);
+                rc = DchToCharInteger(s, len, 0,
+                    tm->tm_hour * SECS_PER_HOUR + tm->tm_min * SECS_PER_MINUTE + tm->tm_sec);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_tz:
             case DCH_tzh:
@@ -3532,12 +3655,13 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 if (S_TM(n->suffix)) {
                     char* str = str_toupper_z(u_sess->lc_cxt.localized_full_months[tm->tm_mon - 1], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(
                         s, len, "%*s", S_FM(n->suffix) ? 0 : -9, str_toupper_z(months_full[tm->tm_mon - 1], collid));
                     securec_check_ss(rc, "\0", "\0");
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_Month:
                 INVALID_FOR_INTERVAL;
@@ -3546,11 +3670,12 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 if (S_TM(n->suffix)) {
                     char* str = str_initcap_z(u_sess->lc_cxt.localized_full_months[tm->tm_mon - 1], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -9, months_full[tm->tm_mon - 1]);
                     securec_check_ss(rc, "\0", "\0");
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_month:
                 INVALID_FOR_INTERVAL;
@@ -3559,12 +3684,13 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 if (S_TM(n->suffix)) {
                     char* str = str_tolower_z(u_sess->lc_cxt.localized_full_months[tm->tm_mon - 1], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -9, months_full[tm->tm_mon - 1]);
                     securec_check_ss(rc, "\0", "\0");
                     *s = pg_tolower((unsigned char)*s);
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_MON:
                 INVALID_FOR_INTERVAL;
@@ -3607,48 +3733,67 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 s += strlen(s);
                 break;
             case DCH_MM:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, tm->tm_mon);
+                /* Months use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, tm->tm_mon);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_DAY:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_toupper_z(u_sess->lc_cxt.localized_full_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -9, str_toupper_z(days[tm->tm_wday], collid));
                     securec_check_ss(rc, "\0", "\0");
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_Day:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_initcap_z(u_sess->lc_cxt.localized_full_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -9, days[tm->tm_wday]);
                     securec_check_ss(rc, "\0", "\0");
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_day:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_tolower_z(u_sess->lc_cxt.localized_full_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
+                    s += strlen(s);
                 } else {
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -9, days[tm->tm_wday]);
                     securec_check_ss(rc, "\0", "\0");
                     *s = pg_tolower((unsigned char)*s);
+                    s += rc;
                 }
-                s += strlen(s);
                 break;
             case DCH_DY:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_toupper_z(u_sess->lc_cxt.localized_abbrev_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
@@ -3660,6 +3805,9 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 break;
             case DCH_Dy:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_initcap_z(u_sess->lc_cxt.localized_abbrev_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
@@ -3671,6 +3819,9 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 break;
             case DCH_dy:
                 INVALID_FOR_INTERVAL;
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
                 if (S_TM(n->suffix)) {
                     char* str = str_tolower_z(u_sess->lc_cxt.localized_abbrev_days[tm->tm_wday], collid);
                     CopyLocalizedString(s, str);
@@ -3683,142 +3834,191 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 break;
             case DCH_DDD:
             case DCH_IDDD:
-                rc = sprintf_s(s,
-                    len,
-                    "%0*d",
-                    S_FM(n->suffix) ? 0 : 3,
+                if (n->key->id == DCH_DDD && !dateFields.ydayReady) {
+                    DchToCharYearday(tm, &dateFields);
+                }
+                /* Day-of-year fields use minimum width 3 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 3,
                     (n->key->id == DCH_DDD) ? tm->tm_yday : date2isoyearday(tm->tm_year, tm->tm_mon, tm->tm_mday));
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_DD:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, tm->tm_mday);
+                /* Days use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, tm->tm_mday);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_D:
                 INVALID_FOR_INTERVAL;
-                rc = sprintf_s(s, len, "%d", tm->tm_wday + 1);
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
+                rc = DchToCharInteger(s, len, 0, tm->tm_wday + 1);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_ID:
                 INVALID_FOR_INTERVAL;
-                rc = sprintf_s(s, len, "%d", (tm->tm_wday == 0) ? 7 : tm->tm_wday);
+                if (!dateFields.wdayReady) {
+                    DchToCharWeekday(tm, &dateFields);
+                }
+                /* ISO weekday numbering maps Sunday (0) to 7. */
+                rc = DchToCharInteger(s, len, 0, (tm->tm_wday == 0) ? 7 : tm->tm_wday);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_WW:
-                rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, (tm->tm_yday - 1) / 7 + 1);
+                if (!dateFields.ydayReady) {
+                    DchToCharYearday(tm, &dateFields);
+                }
+                /* Use minimum width 2 unless FM is set; each week spans 7 days. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, (tm->tm_yday - 1) / 7 + 1);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_IW:
-                rc = sprintf_s(
-                    s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, date2isoweek(tm->tm_year, tm->tm_mon, tm->tm_mday));
+                /* ISO week numbers use minimum width 2 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2,
+                    date2isoweek(tm->tm_year, tm->tm_mon, tm->tm_mday));
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_Q:
                 if (!tm->tm_mon)
                     break;
-                rc = sprintf_s(s, len, "%d", (tm->tm_mon - 1) / 3 + 1);
+                /* Each quarter contains 3 months. */
+                rc = DchToCharInteger(s, len, 0, (tm->tm_mon - 1) / 3 + 1);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_CC:
                 if (is_interval) /* straight calculation */
                     i = tm->tm_year / 100;
                 else /* century 21 starts in 2001 */
                     i = (tm->tm_year - 1) / 100 + 1;
-                if (i <= 99 && i >= -99)
-                    rc = sprintf_s(s, len, "%0*d", S_FM(n->suffix) ? 0 : 2, i);
-                else
-                    rc = sprintf_s(s, len, "%d", i);
+                /* Century values from -99 to 99 use the minimum-width form. */
+                if (i <= 99 && i >= -99) {
+                    /* Century numbers use minimum width 2 unless FM suppresses padding. */
+                    rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2, i);
+                } else {
+                    rc = DchToCharInteger(s, len, 0, i);
+                }
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_Y_YYY:
                 i = ADJUST_YEAR(tm->tm_year, is_interval) / 1000;
                 rc = sprintf_s(s, len, "%d,%03d", i, ADJUST_YEAR(tm->tm_year, is_interval) - (i * 1000));
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_YYYY:
             case DCH_IYYY:
-                rc = sprintf_s(s,
-                    len,
-                    "%0*d",
-                    S_FM(n->suffix) ? 0 : 4,
+                /* Year fields use minimum width 4 unless FM suppresses padding. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 4,
                     ((n->key->id == DCH_YYYY)
                             ? ADJUST_YEAR(tm->tm_year, is_interval)
                             : ADJUST_YEAR(date2isoyear(tm->tm_year, tm->tm_mon, tm->tm_mday), is_interval)));
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_YYY:
             case DCH_IYY:
-                rc = sprintf_s(s,
-                    len,
-                    "%0*d",
-                    S_FM(n->suffix) ? 0 : 3,
+                /* Use minimum width 3 for the last 3 year digits unless FM is specified. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 3,
                     ((n->key->id == DCH_YYY)
                             ? ADJUST_YEAR(tm->tm_year, is_interval)
                             : ADJUST_YEAR(date2isoyear(tm->tm_year, tm->tm_mon, tm->tm_mday), is_interval)) %
                         1000);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_YY:
             case DCH_IY:
-                rc = sprintf_s(s,
-                    len,
-                    "%0*d",
-                    S_FM(n->suffix) ? 0 : 2,
+                /* Use minimum width 2 for the last 2 year digits unless FM is specified. */
+                rc = DchToCharInteger(s, len, S_FM(n->suffix) ? 0 : 2,
                     ((n->key->id == DCH_YY)
                             ? ADJUST_YEAR(tm->tm_year, is_interval)
                             : ADJUST_YEAR(date2isoyear(tm->tm_year, tm->tm_mon, tm->tm_mday), is_interval)) %
                         100);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_Y:
             case DCH_I:
-                rc = sprintf_s(s,
-                    len,
-                    "%1d",
+                rc = DchToCharInteger(s, len, 0,
                     ((n->key->id == DCH_Y)
                             ? ADJUST_YEAR(tm->tm_year, is_interval)
                             : ADJUST_YEAR(date2isoyear(tm->tm_year, tm->tm_mon, tm->tm_mday), is_interval)) %
                         10);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_RM:
             case DCH_rm:
@@ -3867,15 +4067,19 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
 
                     rc = sprintf_s(s, len, "%*s", S_FM(n->suffix) ? 0 : -4, months[mon]);
                     securec_check_ss(rc, "\0", "\0");
-                    s += strlen(s);
+                    s += rc;
                     break;
                 }
             case DCH_W:
-                rc = sprintf_s(s, len, "%d", (tm->tm_mday - 1) / 7 + 1);
+                /* Each week within a month spans 7 days. */
+                rc = DchToCharInteger(s, len, 0, (tm->tm_mday - 1) / 7 + 1);
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             case DCH_X:
                 /*
@@ -3888,11 +4092,14 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 }
                 break;
             case DCH_J:
-                rc = sprintf_s(s, len, "%d", date2j(tm->tm_year, tm->tm_mon, tm->tm_mday));
+                rc = DchToCharInteger(s, len, 0, date2j(tm->tm_year, tm->tm_mon, tm->tm_mday));
                 securec_check_ss(rc, "\0", "\0");
-                if (S_THth(n->suffix))
+                if (S_THth(n->suffix)) {
                     str_numth(s, s, S_TH_TYPE(n->suffix));
-                s += strlen(s);
+                    s += strlen(s);
+                } else {
+                    s += rc;
+                }
                 break;
             default:
                 break;
@@ -4330,14 +4537,21 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
 {
     FormatNode* format = NULL;
     char *fmt_str = NULL, *result = NULL;
+    char fmtBuffer[DCH_CACHE_SIZE + 1];
     bool incache = false;
     int fmt_len;
     text* res = NULL;
 
-    /*
-     * Convert fmt to C string
-     */
-    fmt_str = text_to_cstring(fmt);
+    /* Use a stack buffer for short templates with a regular varlena header. */
+    if (fmt != NULL && !VARATT_IS_EXTENDED(fmt) && VARSIZE(fmt) - VARHDRSZ <= DCH_CACHE_SIZE) {
+        int inputLen = VARSIZE(fmt) - VARHDRSZ;
+        MemCpy(fmtBuffer, VARDATA(fmt), inputLen);
+        fmtBuffer[inputLen] = '\0';
+        fmt_str = fmtBuffer;
+    } else {
+        fmt_str = text_to_cstring(fmt);
+    }
+    /* Keep the original first-NUL semantics, including an empty template. */
     fmt_len = strlen(fmt_str);
 
     /*
@@ -4386,7 +4600,9 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
     if (!incache)
         pfree_ext(format);
 
-    pfree_ext(fmt_str);
+    if (fmt_str != fmtBuffer) {
+        pfree_ext(fmt_str);
+    }
 
     /* convert C-string result to TEXT format */
     res = cstring_to_text(result);
@@ -4409,7 +4625,6 @@ Datum timestamp_to_char(PG_FUNCTION_ARGS)
     text *fmt = PG_GETARG_TEXT_P(1), *res = NULL;
     TmToChar tmtc;
     struct pg_tm* tm = NULL;
-    int thisdate;
 
     if ((VARSIZE(fmt) - VARHDRSZ) <= 0 || TIMESTAMP_NOT_FINITE(dt))
         PG_RETURN_NULL();
@@ -4419,10 +4634,6 @@ Datum timestamp_to_char(PG_FUNCTION_ARGS)
 
     if (timestamp2tm(dt, NULL, tm, &tmtcFsec(&tmtc), NULL, NULL) != 0)
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
-
-    thisdate = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
-    tm->tm_wday = (thisdate + 1) % 7;
-    tm->tm_yday = thisdate - date2j(tm->tm_year, 1, 1) + 1;
 
     if (!(res = datetime_to_char_body(&tmtc, fmt, false, PG_GET_COLLATION())))
         PG_RETURN_NULL();
@@ -4437,7 +4648,6 @@ Datum timestamptz_to_char(PG_FUNCTION_ARGS)
     TmToChar tmtc;
     int tz;
     struct pg_tm* tm = NULL;
-    int thisdate;
 
     if ((VARSIZE(fmt) - VARHDRSZ) <= 0 || TIMESTAMP_NOT_FINITE(dt))
         PG_RETURN_NULL();
@@ -4447,10 +4657,6 @@ Datum timestamptz_to_char(PG_FUNCTION_ARGS)
 
     if (timestamp2tm(dt, &tz, tm, &tmtcFsec(&tmtc), &tmtcTzn(&tmtc), NULL) != 0)
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
-
-    thisdate = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
-    tm->tm_wday = (thisdate + 1) % 7;
-    tm->tm_yday = thisdate - date2j(tm->tm_year, 1, 1) + 1;
 
     if (!(res = datetime_to_char_body(&tmtc, fmt, false, PG_GET_COLLATION())))
         PG_RETURN_NULL();
@@ -5243,16 +5449,17 @@ static void convert_values_to_pgtime(struct pg_tm* tm, fsec_t* fsec, TmFromChar&
     }
 
     if (tmfc.clock == CLOCK_12_HOUR) {
-        if (tm->tm_hour < 1 || tm->tm_hour > HOURS_PER_DAY / 2)
+        if (tm->tm_hour < 1 || tm->tm_hour > MAX_VALUE_12_CLOCK)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
                     errmsg("hour \"%d\" is invalid for the 12-hour clock", tm->tm_hour),
                     errhint("Use the 24-hour clock, or give an hour between 1 and 12.")));
 
-        if (tmfc.pm && tm->tm_hour < HOURS_PER_DAY / 2)
-            tm->tm_hour += HOURS_PER_DAY / 2;
-        else if (!tmfc.pm && tm->tm_hour == HOURS_PER_DAY / 2)
+        if (tmfc.pm && tm->tm_hour < MAX_VALUE_12_CLOCK) {
+            tm->tm_hour += MAX_VALUE_12_CLOCK;
+        } else if (!tmfc.pm && tm->tm_hour == MAX_VALUE_12_CLOCK) {
             tm->tm_hour = 0;
+        }
     }
 
     if (tmfc.year) {

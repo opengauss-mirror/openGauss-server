@@ -1,0 +1,1134 @@
+-- Date/time to_char regression: core behavior and integer output.
+-- Coverage:
+-- 1. Common output, zero padding, signs, widths, ordinal suffixes, weekdays, day of year, and date boundaries.
+-- 2. Individual timestamp/timestamptz integer fields, plus positive/negative intervals and values exceeding field widths in PG mode.
+-- 3. NULLs, short-template boundaries, basic time zone and DateStyle behavior, and three-argument NLS calls.
+-- 1. Separate A-mode database.
+set client_min_messages = warning;
+drop database if exists dch_to_char_core_a;
+reset client_min_messages;
+create database dch_to_char_core_a with template template0 encoding 'UTF8'
+    lc_collate 'C' lc_ctype 'C' dbcompatibility 'A';
+\c dch_to_char_core_a
+set timezone = 'UTC';
+set datestyle = 'ISO, YMD';
+set intervalstyle = 'postgres';
+set lc_time = 'C';
+\pset null '<NULL>'
+-- 2. Common formats and integer output.
+-- 2.1 Five input types; A-mode intervals use the existing internal templates.
+select case when
+    to_char(timestamp '2020-02-29 07:08:09', 'YYYY-MM-DD HH24:MI:SS') = '2020-02-29 07:08:09' and
+    to_char(timestamptz '2020-02-29 07:08:09+08', 'YYYY-MM-DD HH24:MI:SS') = '2020-02-28 23:08:09' and
+    to_char(time '07:08:09', 'HH24:MI:SS') = '07:08:09' and
+    to_char(timetz '07:08:09+08', 'HH24:MI:SS') = '07:08:09' and
+    to_char(interval '-7 hours', 'HH24') = '-00 07:00:00'
+then 'OK' else 'Failed' end as common_types;
+ common_types 
+--------------
+ OK
+(1 row)
+
+-- 2.2 With and without zero padding; values exceeding the minimum width are not truncated.
+select case when
+    to_char(timestamp '0001-01-09 07:08:09', 'YYYY-MM-DD HH24:MI:SS') = '0001-01-09 07:08:09' and
+    to_char(timestamp '0001-01-09 07:08:09', 'FMYYYY-FMMM-FMDD FMHH24:FMMI:FMSS') = '1-1-9 7:8:9' and
+    to_char(timestamp '9999-12-31' + interval '1 day', 'YYYY-MM-DD') = '10000-01-01' and
+    to_char(timestamp '2020-02-29 07:08:09', 'YYYYMMDDHH24MISS') = '20200229070809'
+then 'OK' else 'Failed' end as integer_padding;
+ integer_padding 
+-----------------
+ OK
+(1 row)
+
+-- 2.3 Fractional-second precisions; FM does not suppress zero padding for fractional seconds.
+select case when
+    to_char(timestamp '2020-02-29 07:08:09.007008', 'MS US FF FF1 FF2 FF3 FF4 FF5 FF6') = '007 007008 007008 0 00 007 0070 00700 007008' and
+    to_char(time '07:08:09.007008', 'FMMS FMUS FMFF2 FMFF4') = '007 007008 00 0070' and
+    to_char(time '07:08:09.999999', 'SS.MS.US') = '09.999.999999'
+then 'OK' else 'Failed' end as fractional_seconds;
+ fractional_seconds 
+--------------------
+ OK
+(1 row)
+
+-- 2.4 Ordinal suffixes and adjacent fields; suffixes must not overwrite the next field.
+select case when
+    to_char(timestamp '2020-02-01', 'DDTH-DDth-FMDDTH') = '01ST-01st-1ST' and
+    to_char(timestamp '2020-02-11', 'DDTH DDth') = '11TH 11th' and
+    to_char(timestamp '2020-02-22', 'DDTHMMDD') = '22ND0222' and
+    to_char(time '00:00:00', 'HH HH12 AM A.M.') = '12 12 AM A.M.' and
+    to_char(time '12:00:00', 'HH HH12 PM P.M.') = '12 12 PM P.M.'
+then 'OK' else 'Failed' end as suffix_and_adjacent_fields;
+ suffix_and_adjacent_fields 
+----------------------------
+ OK
+(1 row)
+
+-- 3. Weekdays, day of year, and date boundaries.
+-- 3.1 Compute fields alone, weekday before day of year, the reverse order, and repeated fields.
+select case when
+    to_char(timestamp '2020-02-29', 'D') = '7' and
+    to_char(timestamp '2020-02-29', 'DDD') = '060' and
+    to_char(timestamp '2020-02-29', 'D DDD D DDD WW') = '7 060 7 060 09' and
+    to_char(timestamp '2020-02-29', 'DDD D DDD D') = '060 7 060 7' and
+    to_char(timestamp '2020-03-01', 'D ID DDD') = '1 7 061'
+then 'OK' else 'Failed' end as weekday_and_yearday;
+ weekday_and_yearday 
+---------------------
+ OK
+(1 row)
+
+-- 3.2 Leap years, non-leap century years, ISO week-year boundaries, BC dates, and AD year 1.
+select case when
+    to_char(timestamp '1900-03-01', 'YYYY-DDD') = '1900-060' and
+    to_char(timestamp '2000-02-29', 'YYYY-DDD') = '2000-060' and
+    to_char(timestamp '2005-01-01', 'YYYY IYYY IW ID IDDD') = '2005 2004 53 6 370' and
+    to_char(timestamp '0001-01-01 BC', 'YYYY BC') = '0001 BC' and
+    to_char(timestamp '0001-01-01', 'YYYY AD') = '0001 AD'
+then 'OK' else 'Failed' end as calendar_boundaries;
+ calendar_boundaries 
+---------------------
+ OK
+(1 row)
+
+-- 4. Text lengths, template lengths, and NULLs.
+-- 4.1 Brackets expose trailing padding in names; TM uses the lc_time cache.
+select case when
+    '[' || to_char(timestamp '2020-02-29', 'MONTH') || ']' = '[FEBRUARY ]' and
+    '[' || to_char(timestamp '2020-02-29', 'DAY') || ']' = '[SATURDAY ]' and
+    to_char(timestamp '2020-02-29', 'FMMonth FMDay') = 'February Saturday' and
+    to_char(timestamp '2020-02-29', 'TMMonth TMDay') = 'February Saturday' and
+    to_char(timestamp '2020-02-29', 'AD A.D. BC B.C. RM') = 'AD A.D. AD A.D. II  '
+then 'OK' else 'Failed' end as text_padding;
+ text_padding 
+--------------
+ OK
+(1 row)
+
+-- 4.2 Templates of 127, 128, and 129 bytes cover the stack-buffer boundary and the long-template path.
+select case when
+    to_char(timestamp '2020-02-29', repeat('-', 123) || 'YYYY') = repeat('-', 123) || '2020' and
+    to_char(timestamp '2020-02-29', repeat('-', 124) || 'YYYY') = repeat('-', 124) || '2020' and
+    to_char(timestamp '2020-02-29', repeat('-', 125) || 'YYYY') = repeat('-', 125) || '2020' and
+    to_char(timestamp '2020-02-29', '"日期:"YYYY-MM-DD') = '日期:2020-02-29'
+then 'OK' else 'Failed' end as template_boundaries;
+ template_boundaries 
+---------------------
+ OK
+(1 row)
+
+-- 4.3 NULL inputs, NULL templates, empty templates, and infinite timestamps.
+select case when
+    to_char(null::timestamp, 'YYYY') is null and
+    to_char(null::timestamptz, 'YYYY') is null and
+    to_char(null::time, 'HH24') is null and
+    to_char(null::timetz, 'HH24') is null and
+    to_char(null::interval, 'HH24') is null and
+    to_char(timestamp '2020-02-29', null::text) is null and
+    to_char(timestamp '2020-02-29', '') is null and
+    to_char(timestamp 'infinity', 'YYYY') is null and
+    to_char(timestamp '-infinity', 'YYYY') is null
+then 'OK' else 'Failed' end as null_and_infinity;
+ null_and_infinity 
+-------------------
+ OK
+(1 row)
+
+-- 5. Integer-field comparisons across inputs.
+-- 5.1 Dates and boundary values; input IDs match those in datetime_to_char_full.sql.
+create table datetime_inputs(id integer primary key, ts timestamp, tz timestamptz);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "datetime_inputs_pkey" for table "datetime_inputs"
+insert into datetime_inputs values
+    (1, '2020-02-29 07:08:09.007008', '2020-02-29 07:08:09.007008+00'),
+    (2, '2026-01-01 00:00:00', '2026-01-01 00:00:00+00'),
+    (3, '2026-12-31 12:59:59.999999', '2026-12-31 12:59:59.999999+00'),
+    (4, '2005-01-01 23:59:59.000001', '2005-01-01 23:59:59.000001+00'),
+    (5, '0001-01-01', '0001-01-01 00:00:00+00'),
+    (6, '9999-12-31', '9999-12-31 00:00:00+00'),
+    (7, '0001-01-01 BC', '0001-01-01 00:00:00+00 BC'),
+    (8, null, null);
+-- 5.2 All supported case variants of integer fields; check each field with both timestamp overloads.
+create table datetime_formats(id integer primary key, picture text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "datetime_formats_pkey" for table "datetime_formats"
+insert into datetime_formats values
+    (1, 'CC'),
+    (2, 'DDD'),
+    (3, 'DD'),
+    (4, 'D'),
+    (5, 'FF1'),
+    (6, 'FF2'),
+    (7, 'FF3'),
+    (8, 'FF4'),
+    (9, 'FF5'),
+    (10, 'FF6'),
+    (11, 'FF'),
+    (12, 'HH24'),
+    (13, 'HH12'),
+    (14, 'HH'),
+    (15, 'IDDD'),
+    (16, 'ID'),
+    (17, 'IW'),
+    (18, 'IYYY'),
+    (19, 'IYY'),
+    (20, 'IY'),
+    (21, 'I'),
+    (22, 'J'),
+    (23, 'MI'),
+    (24, 'MM'),
+    (25, 'MS'),
+    (26, 'Q'),
+    (27, 'SSSSS'),
+    (28, 'SS'),
+    (29, 'US'),
+    (30, 'WW'),
+    (31, 'W'),
+    (32, 'YYYY'),
+    (33, 'YYY'),
+    (34, 'YY'),
+    (35, 'Y'),
+    (36, 'cc'),
+    (37, 'ddd'),
+    (38, 'dd'),
+    (39, 'd'),
+    (40, 'ff1'),
+    (41, 'ff2'),
+    (42, 'ff3'),
+    (43, 'ff4'),
+    (44, 'ff5'),
+    (45, 'ff6'),
+    (46, 'ff'),
+    (47, 'hh24'),
+    (48, 'hh12'),
+    (49, 'hh'),
+    (50, 'iddd'),
+    (51, 'id'),
+    (52, 'iw'),
+    (53, 'iyyy'),
+    (54, 'iyy'),
+    (55, 'iy'),
+    (56, 'i'),
+    (57, 'j'),
+    (58, 'mi'),
+    (59, 'mm'),
+    (60, 'ms'),
+    (61, 'q'),
+    (62, 'sssss'),
+    (63, 'ss'),
+    (64, 'us'),
+    (65, 'ww'),
+    (66, 'w'),
+    (67, 'yyyy'),
+    (68, 'yyy'),
+    (69, 'yy'),
+    (70, 'y');
+select v.id, f.id as format_id, f.picture,
+       '[' || to_char(v.ts, f.picture) || ']' as timestamp_result,
+       '[' || to_char(v.tz, f.picture) || ']' as timestamptz_result
+from datetime_inputs v cross join datetime_formats f
+order by v.id, f.id;
+ id | format_id | picture | timestamp_result | timestamptz_result 
+----+-----------+---------+------------------+--------------------
+  1 |         1 | CC      | [21]             | [21]
+  1 |         2 | DDD     | [060]            | [060]
+  1 |         3 | DD      | [29]             | [29]
+  1 |         4 | D       | [7]              | [7]
+  1 |         5 | FF1     | [0]              | [0]
+  1 |         6 | FF2     | [00]             | [00]
+  1 |         7 | FF3     | [007]            | [007]
+  1 |         8 | FF4     | [0070]           | [0070]
+  1 |         9 | FF5     | [00700]          | [00700]
+  1 |        10 | FF6     | [007008]         | [007008]
+  1 |        11 | FF      | [007008]         | [007008]
+  1 |        12 | HH24    | [07]             | [07]
+  1 |        13 | HH12    | [07]             | [07]
+  1 |        14 | HH      | [07]             | [07]
+  1 |        15 | IDDD    | [062]            | [062]
+  1 |        16 | ID      | [6]              | [6]
+  1 |        17 | IW      | [09]             | [09]
+  1 |        18 | IYYY    | [2020]           | [2020]
+  1 |        19 | IYY     | [020]            | [020]
+  1 |        20 | IY      | [20]             | [20]
+  1 |        21 | I       | [0]              | [0]
+  1 |        22 | J       | [2458909]        | [2458909]
+  1 |        23 | MI      | [08]             | [08]
+  1 |        24 | MM      | [02]             | [02]
+  1 |        25 | MS      | [007]            | [007]
+  1 |        26 | Q       | [1]              | [1]
+  1 |        27 | SSSSS   | [25689]          | [25689]
+  1 |        28 | SS      | [09]             | [09]
+  1 |        29 | US      | [007008]         | [007008]
+  1 |        30 | WW      | [09]             | [09]
+  1 |        31 | W       | [5]              | [5]
+  1 |        32 | YYYY    | [2020]           | [2020]
+  1 |        33 | YYY     | [020]            | [020]
+  1 |        34 | YY      | [20]             | [20]
+  1 |        35 | Y       | [0]              | [0]
+  1 |        36 | cc      | [21]             | [21]
+  1 |        37 | ddd     | [060]            | [060]
+  1 |        38 | dd      | [29]             | [29]
+  1 |        39 | d       | [7]              | [7]
+  1 |        40 | ff1     | [0]              | [0]
+  1 |        41 | ff2     | [00]             | [00]
+  1 |        42 | ff3     | [007]            | [007]
+  1 |        43 | ff4     | [0070]           | [0070]
+  1 |        44 | ff5     | [00700]          | [00700]
+  1 |        45 | ff6     | [007008]         | [007008]
+  1 |        46 | ff      | [007008]         | [007008]
+  1 |        47 | hh24    | [07]             | [07]
+  1 |        48 | hh12    | [07]             | [07]
+  1 |        49 | hh      | [07]             | [07]
+  1 |        50 | iddd    | [062]            | [062]
+  1 |        51 | id      | [6]              | [6]
+  1 |        52 | iw      | [09]             | [09]
+  1 |        53 | iyyy    | [2020]           | [2020]
+  1 |        54 | iyy     | [020]            | [020]
+  1 |        55 | iy      | [20]             | [20]
+  1 |        56 | i       | [0]              | [0]
+  1 |        57 | j       | [2458909]        | [2458909]
+  1 |        58 | mi      | [08]             | [08]
+  1 |        59 | mm      | [02]             | [02]
+  1 |        60 | ms      | [007]            | [007]
+  1 |        61 | q       | [1]              | [1]
+  1 |        62 | sssss   | [25689]          | [25689]
+  1 |        63 | ss      | [09]             | [09]
+  1 |        64 | us      | [007008]         | [007008]
+  1 |        65 | ww      | [09]             | [09]
+  1 |        66 | w       | [5]              | [5]
+  1 |        67 | yyyy    | [2020]           | [2020]
+  1 |        68 | yyy     | [020]            | [020]
+  1 |        69 | yy      | [20]             | [20]
+  1 |        70 | y       | [0]              | [0]
+  2 |         1 | CC      | [21]             | [21]
+  2 |         2 | DDD     | [001]            | [001]
+  2 |         3 | DD      | [01]             | [01]
+  2 |         4 | D       | [5]              | [5]
+  2 |         5 | FF1     | [0]              | [0]
+  2 |         6 | FF2     | [00]             | [00]
+  2 |         7 | FF3     | [000]            | [000]
+  2 |         8 | FF4     | [0000]           | [0000]
+  2 |         9 | FF5     | [00000]          | [00000]
+  2 |        10 | FF6     | [000000]         | [000000]
+  2 |        11 | FF      | [000000]         | [000000]
+  2 |        12 | HH24    | [00]             | [00]
+  2 |        13 | HH12    | [12]             | [12]
+  2 |        14 | HH      | [12]             | [12]
+  2 |        15 | IDDD    | [004]            | [004]
+  2 |        16 | ID      | [4]              | [4]
+  2 |        17 | IW      | [01]             | [01]
+  2 |        18 | IYYY    | [2026]           | [2026]
+  2 |        19 | IYY     | [026]            | [026]
+  2 |        20 | IY      | [26]             | [26]
+  2 |        21 | I       | [6]              | [6]
+  2 |        22 | J       | [2461042]        | [2461042]
+  2 |        23 | MI      | [00]             | [00]
+  2 |        24 | MM      | [01]             | [01]
+  2 |        25 | MS      | [000]            | [000]
+  2 |        26 | Q       | [1]              | [1]
+  2 |        27 | SSSSS   | [0]              | [0]
+  2 |        28 | SS      | [00]             | [00]
+  2 |        29 | US      | [000000]         | [000000]
+  2 |        30 | WW      | [01]             | [01]
+  2 |        31 | W       | [1]              | [1]
+  2 |        32 | YYYY    | [2026]           | [2026]
+  2 |        33 | YYY     | [026]            | [026]
+  2 |        34 | YY      | [26]             | [26]
+  2 |        35 | Y       | [6]              | [6]
+  2 |        36 | cc      | [21]             | [21]
+  2 |        37 | ddd     | [001]            | [001]
+  2 |        38 | dd      | [01]             | [01]
+  2 |        39 | d       | [5]              | [5]
+  2 |        40 | ff1     | [0]              | [0]
+  2 |        41 | ff2     | [00]             | [00]
+  2 |        42 | ff3     | [000]            | [000]
+  2 |        43 | ff4     | [0000]           | [0000]
+  2 |        44 | ff5     | [00000]          | [00000]
+  2 |        45 | ff6     | [000000]         | [000000]
+  2 |        46 | ff      | [000000]         | [000000]
+  2 |        47 | hh24    | [00]             | [00]
+  2 |        48 | hh12    | [12]             | [12]
+  2 |        49 | hh      | [12]             | [12]
+  2 |        50 | iddd    | [004]            | [004]
+  2 |        51 | id      | [4]              | [4]
+  2 |        52 | iw      | [01]             | [01]
+  2 |        53 | iyyy    | [2026]           | [2026]
+  2 |        54 | iyy     | [026]            | [026]
+  2 |        55 | iy      | [26]             | [26]
+  2 |        56 | i       | [6]              | [6]
+  2 |        57 | j       | [2461042]        | [2461042]
+  2 |        58 | mi      | [00]             | [00]
+  2 |        59 | mm      | [01]             | [01]
+  2 |        60 | ms      | [000]            | [000]
+  2 |        61 | q       | [1]              | [1]
+  2 |        62 | sssss   | [0]              | [0]
+  2 |        63 | ss      | [00]             | [00]
+  2 |        64 | us      | [000000]         | [000000]
+  2 |        65 | ww      | [01]             | [01]
+  2 |        66 | w       | [1]              | [1]
+  2 |        67 | yyyy    | [2026]           | [2026]
+  2 |        68 | yyy     | [026]            | [026]
+  2 |        69 | yy      | [26]             | [26]
+  2 |        70 | y       | [6]              | [6]
+  3 |         1 | CC      | [21]             | [21]
+  3 |         2 | DDD     | [365]            | [365]
+  3 |         3 | DD      | [31]             | [31]
+  3 |         4 | D       | [5]              | [5]
+  3 |         5 | FF1     | [9]              | [9]
+  3 |         6 | FF2     | [99]             | [99]
+  3 |         7 | FF3     | [999]            | [999]
+  3 |         8 | FF4     | [9999]           | [9999]
+  3 |         9 | FF5     | [99999]          | [99999]
+  3 |        10 | FF6     | [999999]         | [999999]
+  3 |        11 | FF      | [999999]         | [999999]
+  3 |        12 | HH24    | [12]             | [12]
+  3 |        13 | HH12    | [12]             | [12]
+  3 |        14 | HH      | [12]             | [12]
+  3 |        15 | IDDD    | [368]            | [368]
+  3 |        16 | ID      | [4]              | [4]
+  3 |        17 | IW      | [53]             | [53]
+  3 |        18 | IYYY    | [2026]           | [2026]
+  3 |        19 | IYY     | [026]            | [026]
+  3 |        20 | IY      | [26]             | [26]
+  3 |        21 | I       | [6]              | [6]
+  3 |        22 | J       | [2461406]        | [2461406]
+  3 |        23 | MI      | [59]             | [59]
+  3 |        24 | MM      | [12]             | [12]
+  3 |        25 | MS      | [999]            | [999]
+  3 |        26 | Q       | [4]              | [4]
+  3 |        27 | SSSSS   | [46799]          | [46799]
+  3 |        28 | SS      | [59]             | [59]
+  3 |        29 | US      | [999999]         | [999999]
+  3 |        30 | WW      | [53]             | [53]
+  3 |        31 | W       | [5]              | [5]
+  3 |        32 | YYYY    | [2026]           | [2026]
+  3 |        33 | YYY     | [026]            | [026]
+  3 |        34 | YY      | [26]             | [26]
+  3 |        35 | Y       | [6]              | [6]
+  3 |        36 | cc      | [21]             | [21]
+  3 |        37 | ddd     | [365]            | [365]
+  3 |        38 | dd      | [31]             | [31]
+  3 |        39 | d       | [5]              | [5]
+  3 |        40 | ff1     | [9]              | [9]
+  3 |        41 | ff2     | [99]             | [99]
+  3 |        42 | ff3     | [999]            | [999]
+  3 |        43 | ff4     | [9999]           | [9999]
+  3 |        44 | ff5     | [99999]          | [99999]
+  3 |        45 | ff6     | [999999]         | [999999]
+  3 |        46 | ff      | [999999]         | [999999]
+  3 |        47 | hh24    | [12]             | [12]
+  3 |        48 | hh12    | [12]             | [12]
+  3 |        49 | hh      | [12]             | [12]
+  3 |        50 | iddd    | [368]            | [368]
+  3 |        51 | id      | [4]              | [4]
+  3 |        52 | iw      | [53]             | [53]
+  3 |        53 | iyyy    | [2026]           | [2026]
+  3 |        54 | iyy     | [026]            | [026]
+  3 |        55 | iy      | [26]             | [26]
+  3 |        56 | i       | [6]              | [6]
+  3 |        57 | j       | [2461406]        | [2461406]
+  3 |        58 | mi      | [59]             | [59]
+  3 |        59 | mm      | [12]             | [12]
+  3 |        60 | ms      | [999]            | [999]
+  3 |        61 | q       | [4]              | [4]
+  3 |        62 | sssss   | [46799]          | [46799]
+  3 |        63 | ss      | [59]             | [59]
+  3 |        64 | us      | [999999]         | [999999]
+  3 |        65 | ww      | [53]             | [53]
+  3 |        66 | w       | [5]              | [5]
+  3 |        67 | yyyy    | [2026]           | [2026]
+  3 |        68 | yyy     | [026]            | [026]
+  3 |        69 | yy      | [26]             | [26]
+  3 |        70 | y       | [6]              | [6]
+  4 |         1 | CC      | [21]             | [21]
+  4 |         2 | DDD     | [001]            | [001]
+  4 |         3 | DD      | [01]             | [01]
+  4 |         4 | D       | [7]              | [7]
+  4 |         5 | FF1     | [0]              | [0]
+  4 |         6 | FF2     | [00]             | [00]
+  4 |         7 | FF3     | [000]            | [000]
+  4 |         8 | FF4     | [0000]           | [0000]
+  4 |         9 | FF5     | [00000]          | [00000]
+  4 |        10 | FF6     | [000001]         | [000001]
+  4 |        11 | FF      | [000001]         | [000001]
+  4 |        12 | HH24    | [23]             | [23]
+  4 |        13 | HH12    | [11]             | [11]
+  4 |        14 | HH      | [11]             | [11]
+  4 |        15 | IDDD    | [370]            | [370]
+  4 |        16 | ID      | [6]              | [6]
+  4 |        17 | IW      | [53]             | [53]
+  4 |        18 | IYYY    | [2004]           | [2004]
+  4 |        19 | IYY     | [004]            | [004]
+  4 |        20 | IY      | [04]             | [04]
+  4 |        21 | I       | [4]              | [4]
+  4 |        22 | J       | [2453372]        | [2453372]
+  4 |        23 | MI      | [59]             | [59]
+  4 |        24 | MM      | [01]             | [01]
+  4 |        25 | MS      | [000]            | [000]
+  4 |        26 | Q       | [1]              | [1]
+  4 |        27 | SSSSS   | [86399]          | [86399]
+  4 |        28 | SS      | [59]             | [59]
+  4 |        29 | US      | [000001]         | [000001]
+  4 |        30 | WW      | [01]             | [01]
+  4 |        31 | W       | [1]              | [1]
+  4 |        32 | YYYY    | [2005]           | [2005]
+  4 |        33 | YYY     | [005]            | [005]
+  4 |        34 | YY      | [05]             | [05]
+  4 |        35 | Y       | [5]              | [5]
+  4 |        36 | cc      | [21]             | [21]
+  4 |        37 | ddd     | [001]            | [001]
+  4 |        38 | dd      | [01]             | [01]
+  4 |        39 | d       | [7]              | [7]
+  4 |        40 | ff1     | [0]              | [0]
+  4 |        41 | ff2     | [00]             | [00]
+  4 |        42 | ff3     | [000]            | [000]
+  4 |        43 | ff4     | [0000]           | [0000]
+  4 |        44 | ff5     | [00000]          | [00000]
+  4 |        45 | ff6     | [000001]         | [000001]
+  4 |        46 | ff      | [000001]         | [000001]
+  4 |        47 | hh24    | [23]             | [23]
+  4 |        48 | hh12    | [11]             | [11]
+  4 |        49 | hh      | [11]             | [11]
+  4 |        50 | iddd    | [370]            | [370]
+  4 |        51 | id      | [6]              | [6]
+  4 |        52 | iw      | [53]             | [53]
+  4 |        53 | iyyy    | [2004]           | [2004]
+  4 |        54 | iyy     | [004]            | [004]
+  4 |        55 | iy      | [04]             | [04]
+  4 |        56 | i       | [4]              | [4]
+  4 |        57 | j       | [2453372]        | [2453372]
+  4 |        58 | mi      | [59]             | [59]
+  4 |        59 | mm      | [01]             | [01]
+  4 |        60 | ms      | [000]            | [000]
+  4 |        61 | q       | [1]              | [1]
+  4 |        62 | sssss   | [86399]          | [86399]
+  4 |        63 | ss      | [59]             | [59]
+  4 |        64 | us      | [000001]         | [000001]
+  4 |        65 | ww      | [01]             | [01]
+  4 |        66 | w       | [1]              | [1]
+  4 |        67 | yyyy    | [2005]           | [2005]
+  4 |        68 | yyy     | [005]            | [005]
+  4 |        69 | yy      | [05]             | [05]
+  4 |        70 | y       | [5]              | [5]
+  5 |         1 | CC      | [01]             | [01]
+  5 |         2 | DDD     | [001]            | [001]
+  5 |         3 | DD      | [01]             | [01]
+  5 |         4 | D       | [2]              | [2]
+  5 |         5 | FF1     | [0]              | [0]
+  5 |         6 | FF2     | [00]             | [00]
+  5 |         7 | FF3     | [000]            | [000]
+  5 |         8 | FF4     | [0000]           | [0000]
+  5 |         9 | FF5     | [00000]          | [00000]
+  5 |        10 | FF6     | [000000]         | [000000]
+  5 |        11 | FF      | [000000]         | [000000]
+  5 |        12 | HH24    | [00]             | [00]
+  5 |        13 | HH12    | [12]             | [12]
+  5 |        14 | HH      | [12]             | [12]
+  5 |        15 | IDDD    | [001]            | [001]
+  5 |        16 | ID      | [1]              | [1]
+  5 |        17 | IW      | [01]             | [01]
+  5 |        18 | IYYY    | [0001]           | [0001]
+  5 |        19 | IYY     | [001]            | [001]
+  5 |        20 | IY      | [01]             | [01]
+  5 |        21 | I       | [1]              | [1]
+  5 |        22 | J       | [1721426]        | [1721426]
+  5 |        23 | MI      | [00]             | [00]
+  5 |        24 | MM      | [01]             | [01]
+  5 |        25 | MS      | [000]            | [000]
+  5 |        26 | Q       | [1]              | [1]
+  5 |        27 | SSSSS   | [0]              | [0]
+  5 |        28 | SS      | [00]             | [00]
+  5 |        29 | US      | [000000]         | [000000]
+  5 |        30 | WW      | [01]             | [01]
+  5 |        31 | W       | [1]              | [1]
+  5 |        32 | YYYY    | [0001]           | [0001]
+  5 |        33 | YYY     | [001]            | [001]
+  5 |        34 | YY      | [01]             | [01]
+  5 |        35 | Y       | [1]              | [1]
+  5 |        36 | cc      | [01]             | [01]
+  5 |        37 | ddd     | [001]            | [001]
+  5 |        38 | dd      | [01]             | [01]
+  5 |        39 | d       | [2]              | [2]
+  5 |        40 | ff1     | [0]              | [0]
+  5 |        41 | ff2     | [00]             | [00]
+  5 |        42 | ff3     | [000]            | [000]
+  5 |        43 | ff4     | [0000]           | [0000]
+  5 |        44 | ff5     | [00000]          | [00000]
+  5 |        45 | ff6     | [000000]         | [000000]
+  5 |        46 | ff      | [000000]         | [000000]
+  5 |        47 | hh24    | [00]             | [00]
+  5 |        48 | hh12    | [12]             | [12]
+  5 |        49 | hh      | [12]             | [12]
+  5 |        50 | iddd    | [001]            | [001]
+  5 |        51 | id      | [1]              | [1]
+  5 |        52 | iw      | [01]             | [01]
+  5 |        53 | iyyy    | [0001]           | [0001]
+  5 |        54 | iyy     | [001]            | [001]
+  5 |        55 | iy      | [01]             | [01]
+  5 |        56 | i       | [1]              | [1]
+  5 |        57 | j       | [1721426]        | [1721426]
+  5 |        58 | mi      | [00]             | [00]
+  5 |        59 | mm      | [01]             | [01]
+  5 |        60 | ms      | [000]            | [000]
+  5 |        61 | q       | [1]              | [1]
+  5 |        62 | sssss   | [0]              | [0]
+  5 |        63 | ss      | [00]             | [00]
+  5 |        64 | us      | [000000]         | [000000]
+  5 |        65 | ww      | [01]             | [01]
+  5 |        66 | w       | [1]              | [1]
+  5 |        67 | yyyy    | [0001]           | [0001]
+  5 |        68 | yyy     | [001]            | [001]
+  5 |        69 | yy      | [01]             | [01]
+  5 |        70 | y       | [1]              | [1]
+  6 |         1 | CC      | [100]            | [100]
+  6 |         2 | DDD     | [365]            | [365]
+  6 |         3 | DD      | [31]             | [31]
+  6 |         4 | D       | [6]              | [6]
+  6 |         5 | FF1     | [0]              | [0]
+  6 |         6 | FF2     | [00]             | [00]
+  6 |         7 | FF3     | [000]            | [000]
+  6 |         8 | FF4     | [0000]           | [0000]
+  6 |         9 | FF5     | [00000]          | [00000]
+  6 |        10 | FF6     | [000000]         | [000000]
+  6 |        11 | FF      | [000000]         | [000000]
+  6 |        12 | HH24    | [00]             | [00]
+  6 |        13 | HH12    | [12]             | [12]
+  6 |        14 | HH      | [12]             | [12]
+  6 |        15 | IDDD    | [362]            | [362]
+  6 |        16 | ID      | [5]              | [5]
+  6 |        17 | IW      | [52]             | [52]
+  6 |        18 | IYYY    | [9999]           | [9999]
+  6 |        19 | IYY     | [999]            | [999]
+  6 |        20 | IY      | [99]             | [99]
+  6 |        21 | I       | [9]              | [9]
+  6 |        22 | J       | [5373484]        | [5373484]
+  6 |        23 | MI      | [00]             | [00]
+  6 |        24 | MM      | [12]             | [12]
+  6 |        25 | MS      | [000]            | [000]
+  6 |        26 | Q       | [4]              | [4]
+  6 |        27 | SSSSS   | [0]              | [0]
+  6 |        28 | SS      | [00]             | [00]
+  6 |        29 | US      | [000000]         | [000000]
+  6 |        30 | WW      | [53]             | [53]
+  6 |        31 | W       | [5]              | [5]
+  6 |        32 | YYYY    | [9999]           | [9999]
+  6 |        33 | YYY     | [999]            | [999]
+  6 |        34 | YY      | [99]             | [99]
+  6 |        35 | Y       | [9]              | [9]
+  6 |        36 | cc      | [100]            | [100]
+  6 |        37 | ddd     | [365]            | [365]
+  6 |        38 | dd      | [31]             | [31]
+  6 |        39 | d       | [6]              | [6]
+  6 |        40 | ff1     | [0]              | [0]
+  6 |        41 | ff2     | [00]             | [00]
+  6 |        42 | ff3     | [000]            | [000]
+  6 |        43 | ff4     | [0000]           | [0000]
+  6 |        44 | ff5     | [00000]          | [00000]
+  6 |        45 | ff6     | [000000]         | [000000]
+  6 |        46 | ff      | [000000]         | [000000]
+  6 |        47 | hh24    | [00]             | [00]
+  6 |        48 | hh12    | [12]             | [12]
+  6 |        49 | hh      | [12]             | [12]
+  6 |        50 | iddd    | [362]            | [362]
+  6 |        51 | id      | [5]              | [5]
+  6 |        52 | iw      | [52]             | [52]
+  6 |        53 | iyyy    | [9999]           | [9999]
+  6 |        54 | iyy     | [999]            | [999]
+  6 |        55 | iy      | [99]             | [99]
+  6 |        56 | i       | [9]              | [9]
+  6 |        57 | j       | [5373484]        | [5373484]
+  6 |        58 | mi      | [00]             | [00]
+  6 |        59 | mm      | [12]             | [12]
+  6 |        60 | ms      | [000]            | [000]
+  6 |        61 | q       | [4]              | [4]
+  6 |        62 | sssss   | [0]              | [0]
+  6 |        63 | ss      | [00]             | [00]
+  6 |        64 | us      | [000000]         | [000000]
+  6 |        65 | ww      | [53]             | [53]
+  6 |        66 | w       | [5]              | [5]
+  6 |        67 | yyyy    | [9999]           | [9999]
+  6 |        68 | yyy     | [999]            | [999]
+  6 |        69 | yy      | [99]             | [99]
+  6 |        70 | y       | [9]              | [9]
+  7 |         1 | CC      | [01]             | [01]
+  7 |         2 | DDD     | [001]            | [001]
+  7 |         3 | DD      | [01]             | [01]
+  7 |         4 | D       | [7]              | [7]
+  7 |         5 | FF1     | [0]              | [0]
+  7 |         6 | FF2     | [00]             | [00]
+  7 |         7 | FF3     | [000]            | [000]
+  7 |         8 | FF4     | [0000]           | [0000]
+  7 |         9 | FF5     | [00000]          | [00000]
+  7 |        10 | FF6     | [000000]         | [000000]
+  7 |        11 | FF      | [000000]         | [000000]
+  7 |        12 | HH24    | [00]             | [00]
+  7 |        13 | HH12    | [12]             | [12]
+  7 |        14 | HH      | [12]             | [12]
+  7 |        15 | IDDD    | [363]            | [363]
+  7 |        16 | ID      | [6]              | [6]
+  7 |        17 | IW      | [52]             | [52]
+  7 |        18 | IYYY    | [0002]           | [0002]
+  7 |        19 | IYY     | [002]            | [002]
+  7 |        20 | IY      | [02]             | [02]
+  7 |        21 | I       | [2]              | [2]
+  7 |        22 | J       | [1721060]        | [1721060]
+  7 |        23 | MI      | [00]             | [00]
+  7 |        24 | MM      | [01]             | [01]
+  7 |        25 | MS      | [000]            | [000]
+  7 |        26 | Q       | [1]              | [1]
+  7 |        27 | SSSSS   | [0]              | [0]
+  7 |        28 | SS      | [00]             | [00]
+  7 |        29 | US      | [000000]         | [000000]
+  7 |        30 | WW      | [01]             | [01]
+  7 |        31 | W       | [1]              | [1]
+  7 |        32 | YYYY    | [0001]           | [0001]
+  7 |        33 | YYY     | [001]            | [001]
+  7 |        34 | YY      | [01]             | [01]
+  7 |        35 | Y       | [1]              | [1]
+  7 |        36 | cc      | [01]             | [01]
+  7 |        37 | ddd     | [001]            | [001]
+  7 |        38 | dd      | [01]             | [01]
+  7 |        39 | d       | [7]              | [7]
+  7 |        40 | ff1     | [0]              | [0]
+  7 |        41 | ff2     | [00]             | [00]
+  7 |        42 | ff3     | [000]            | [000]
+  7 |        43 | ff4     | [0000]           | [0000]
+  7 |        44 | ff5     | [00000]          | [00000]
+  7 |        45 | ff6     | [000000]         | [000000]
+  7 |        46 | ff      | [000000]         | [000000]
+  7 |        47 | hh24    | [00]             | [00]
+  7 |        48 | hh12    | [12]             | [12]
+  7 |        49 | hh      | [12]             | [12]
+  7 |        50 | iddd    | [363]            | [363]
+  7 |        51 | id      | [6]              | [6]
+  7 |        52 | iw      | [52]             | [52]
+  7 |        53 | iyyy    | [0002]           | [0002]
+  7 |        54 | iyy     | [002]            | [002]
+  7 |        55 | iy      | [02]             | [02]
+  7 |        56 | i       | [2]              | [2]
+  7 |        57 | j       | [1721060]        | [1721060]
+  7 |        58 | mi      | [00]             | [00]
+  7 |        59 | mm      | [01]             | [01]
+  7 |        60 | ms      | [000]            | [000]
+  7 |        61 | q       | [1]              | [1]
+  7 |        62 | sssss   | [0]              | [0]
+  7 |        63 | ss      | [00]             | [00]
+  7 |        64 | us      | [000000]         | [000000]
+  7 |        65 | ww      | [01]             | [01]
+  7 |        66 | w       | [1]              | [1]
+  7 |        67 | yyyy    | [0001]           | [0001]
+  7 |        68 | yyy     | [001]            | [001]
+  7 |        69 | yy      | [01]             | [01]
+  7 |        70 | y       | [1]              | [1]
+  8 |         1 | CC      | []               | []
+  8 |         2 | DDD     | []               | []
+  8 |         3 | DD      | []               | []
+  8 |         4 | D       | []               | []
+  8 |         5 | FF1     | []               | []
+  8 |         6 | FF2     | []               | []
+  8 |         7 | FF3     | []               | []
+  8 |         8 | FF4     | []               | []
+  8 |         9 | FF5     | []               | []
+  8 |        10 | FF6     | []               | []
+  8 |        11 | FF      | []               | []
+  8 |        12 | HH24    | []               | []
+  8 |        13 | HH12    | []               | []
+  8 |        14 | HH      | []               | []
+  8 |        15 | IDDD    | []               | []
+  8 |        16 | ID      | []               | []
+  8 |        17 | IW      | []               | []
+  8 |        18 | IYYY    | []               | []
+  8 |        19 | IYY     | []               | []
+  8 |        20 | IY      | []               | []
+  8 |        21 | I       | []               | []
+  8 |        22 | J       | []               | []
+  8 |        23 | MI      | []               | []
+  8 |        24 | MM      | []               | []
+  8 |        25 | MS      | []               | []
+  8 |        26 | Q       | []               | []
+  8 |        27 | SSSSS   | []               | []
+  8 |        28 | SS      | []               | []
+  8 |        29 | US      | []               | []
+  8 |        30 | WW      | []               | []
+  8 |        31 | W       | []               | []
+  8 |        32 | YYYY    | []               | []
+  8 |        33 | YYY     | []               | []
+  8 |        34 | YY      | []               | []
+  8 |        35 | Y       | []               | []
+  8 |        36 | cc      | []               | []
+  8 |        37 | ddd     | []               | []
+  8 |        38 | dd      | []               | []
+  8 |        39 | d       | []               | []
+  8 |        40 | ff1     | []               | []
+  8 |        41 | ff2     | []               | []
+  8 |        42 | ff3     | []               | []
+  8 |        43 | ff4     | []               | []
+  8 |        44 | ff5     | []               | []
+  8 |        45 | ff6     | []               | []
+  8 |        46 | ff      | []               | []
+  8 |        47 | hh24    | []               | []
+  8 |        48 | hh12    | []               | []
+  8 |        49 | hh      | []               | []
+  8 |        50 | iddd    | []               | []
+  8 |        51 | id      | []               | []
+  8 |        52 | iw      | []               | []
+  8 |        53 | iyyy    | []               | []
+  8 |        54 | iyy     | []               | []
+  8 |        55 | iy      | []               | []
+  8 |        56 | i       | []               | []
+  8 |        57 | j       | []               | []
+  8 |        58 | mi      | []               | []
+  8 |        59 | mm      | []               | []
+  8 |        60 | ms      | []               | []
+  8 |        61 | q       | []               | []
+  8 |        62 | sssss   | []               | []
+  8 |        63 | ss      | []               | []
+  8 |        64 | us      | []               | []
+  8 |        65 | ww      | []               | []
+  8 |        66 | w       | []               | []
+  8 |        67 | yyyy    | []               | []
+  8 |        68 | yyy     | []               | []
+  8 |        69 | yy      | []               | []
+  8 |        70 | y       | []               | []
+(560 rows)
+
+-- 5.3 Check FM, TH, th, and combinations of FM and suffixes for each field.
+select f.id, f.picture,
+       to_char(v.ts, 'FM' || f.picture) as fm_result,
+       to_char(v.ts, f.picture || 'TH') as upper_suffix,
+       to_char(v.ts, f.picture || 'th') as lower_suffix,
+       to_char(v.ts, 'FM' || f.picture || 'TH') as fm_suffix
+from datetime_inputs v cross join datetime_formats f
+where v.id = 1
+order by f.id;
+ id | picture | fm_result | upper_suffix | lower_suffix | fm_suffix 
+----+---------+-----------+--------------+--------------+-----------
+  1 | CC      | 21        | 21ST         | 21st         | 21ST
+  2 | DDD     | 60        | 060TH        | 060th        | 60TH
+  3 | DD      | 29        | 29TH         | 29th         | 29TH
+  4 | D       | 7         | 7TH          | 7th          | 7TH
+  5 | FF1     | 0         | 0TH          | 0th          | 0TH
+  6 | FF2     | 00        | 00TH         | 00th         | 00TH
+  7 | FF3     | 007       | 007TH        | 007th        | 007TH
+  8 | FF4     | 0070      | 0070TH       | 0070th       | 0070TH
+  9 | FF5     | 00700     | 00700TH      | 00700th      | 00700TH
+ 10 | FF6     | 007008    | 007008TH     | 007008th     | 007008TH
+ 11 | FF      | 007008    | 007008TH     | 007008th     | 007008TH
+ 12 | HH24    | 7         | 07TH         | 07th         | 7TH
+ 13 | HH12    | 7         | 07TH         | 07th         | 7TH
+ 14 | HH      | 7         | 07TH         | 07th         | 7TH
+ 15 | IDDD    | 62        | 062ND        | 062nd        | 62ND
+ 16 | ID      | 6         | 6TH          | 6th          | 6TH
+ 17 | IW      | 9         | 09TH         | 09th         | 9TH
+ 18 | IYYY    | 2020      | 2020TH       | 2020th       | 2020TH
+ 19 | IYY     | 20        | 020TH        | 020th        | 20TH
+ 20 | IY      | 20        | 20TH         | 20th         | 20TH
+ 21 | I       | 0         | 0TH          | 0th          | 0TH
+ 22 | J       | 2458909   | 2458909TH    | 2458909th    | 2458909TH
+ 23 | MI      | 8         | 08TH         | 08th         | 8TH
+ 24 | MM      | 2         | 02ND         | 02nd         | 2ND
+ 25 | MS      | 007       | 007TH        | 007th        | 007TH
+ 26 | Q       | 1         | 1ST          | 1st          | 1ST
+ 27 | SSSSS   | 25689     | 25689TH      | 25689th      | 25689TH
+ 28 | SS      | 9         | 09TH         | 09th         | 9TH
+ 29 | US      | 007008    | 007008TH     | 007008th     | 007008TH
+ 30 | WW      | 9         | 09TH         | 09th         | 9TH
+ 31 | W       | 5         | 5TH          | 5th          | 5TH
+ 32 | YYYY    | 2020      | 2020TH       | 2020th       | 2020TH
+ 33 | YYY     | 20        | 020TH        | 020th        | 20TH
+ 34 | YY      | 20        | 20TH         | 20th         | 20TH
+ 35 | Y       | 0         | 0TH          | 0th          | 0TH
+ 36 | cc      | 21        | 21ST         | 21st         | 21ST
+ 37 | ddd     | 60        | 060TH        | 060th        | 60TH
+ 38 | dd      | 29        | 29TH         | 29th         | 29TH
+ 39 | d       | 7         | 7TH          | 7th          | 7TH
+ 40 | ff1     | 0         | 0TH          | 0th          | 0TH
+ 41 | ff2     | 00        | 00TH         | 00th         | 00TH
+ 42 | ff3     | 007       | 007TH        | 007th        | 007TH
+ 43 | ff4     | 0070      | 0070TH       | 0070th       | 0070TH
+ 44 | ff5     | 00700     | 00700TH      | 00700th      | 00700TH
+ 45 | ff6     | 007008    | 007008TH     | 007008th     | 007008TH
+ 46 | ff      | 007008    | 007008TH     | 007008th     | 007008TH
+ 47 | hh24    | 7         | 07TH         | 07th         | 7TH
+ 48 | hh12    | 7         | 07TH         | 07th         | 7TH
+ 49 | hh      | 7         | 07TH         | 07th         | 7TH
+ 50 | iddd    | 62        | 062ND        | 062nd        | 62ND
+ 51 | id      | 6         | 6TH          | 6th          | 6TH
+ 52 | iw      | 9         | 09TH         | 09th         | 9TH
+ 53 | iyyy    | 2020      | 2020TH       | 2020th       | 2020TH
+ 54 | iyy     | 20        | 020TH        | 020th        | 20TH
+ 55 | iy      | 20        | 20TH         | 20th         | 20TH
+ 56 | i       | 0         | 0TH          | 0th          | 0TH
+ 57 | j       | 2458909   | 2458909TH    | 2458909th    | 2458909TH
+ 58 | mi      | 8         | 08TH         | 08th         | 8TH
+ 59 | mm      | 2         | 02ND         | 02nd         | 2ND
+ 60 | ms      | 007       | 007TH        | 007th        | 007TH
+ 61 | q       | 1         | 1ST          | 1st          | 1ST
+ 62 | sssss   | 25689     | 25689TH      | 25689th      | 25689TH
+ 63 | ss      | 9         | 09TH         | 09th         | 9TH
+ 64 | us      | 007008    | 007008TH     | 007008th     | 007008TH
+ 65 | ww      | 9         | 09TH         | 09th         | 9TH
+ 66 | w       | 5         | 5TH          | 5th          | 5TH
+ 67 | yyyy    | 2020      | 2020TH       | 2020th       | 2020TH
+ 68 | yyy     | 20        | 020TH        | 020th        | 20TH
+ 69 | yy      | 20        | 20TH         | 20th         | 20TH
+ 70 | y       | 0         | 0TH          | 0th          | 0TH
+(70 rows)
+
+-- 6. Configuration and call arguments.
+-- 6.1 Time zones affect the date; explicit templates retain their own format.
+set timezone = 'PRC';
+select case when
+    to_char(timestamptz '2020-02-29 20:08:09+00', 'YYYY-MM-DD HH24:MI:SS D DDD') = '2020-03-01 04:08:09 1 061' and
+    to_char(timestamp '2020-02-29 20:08:09', 'YYYY-MM-DD HH24:MI:SS D DDD') = '2020-02-29 20:08:09 7 060'
+then 'OK' else 'Failed' end as timezone_change;
+ timezone_change 
+-----------------
+ OK
+(1 row)
+
+reset timezone;
+-- 6.2 DateStyle does not change explicit templates.
+set datestyle = 'SQL, DMY';
+select case when
+    to_char(timestamp '2020-02-29 07:08:09', 'YYYY-MM-DD HH24:MI:SS') = '2020-02-29 07:08:09'
+then 'OK' else 'Failed' end as explicit_template_datestyle;
+ explicit_template_datestyle 
+-----------------------------
+ OK
+(1 row)
+
+reset datestyle;
+-- 6.3 Three-argument calls and NLS parameters; invalid languages produce the original errors directly.
+set timezone = 'UTC';
+select to_char(timestamp '2020-02-29', 'YYYY-MM-DD', 'NLS_DATE_LANGUAGE=American'),
+       to_char(timestamptz '2020-02-29 00:00:00+00', 'YYYY-MM-DD', 'NLS_DATE_LANGUAGE=English'),
+       to_char(interval '-7 hours', 'HH24', 'NLS_DATE_LANGUAGE=English');
+  to_char   |  to_char   |   to_char    
+------------+------------+--------------
+ 2020-02-29 | 2020-02-29 | -00 07:00:00
+(1 row)
+
+select to_char(timestamp '2020-02-29', 'YYYY', 'NLS_DATE_LANGUAGE=French');
+ERROR:  NLS parameter French is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+select to_char(timestamptz '2020-02-29 00:00:00+00', 'YYYY', 'NLS_DATE_LANGUAGE=French');
+ERROR:  NLS parameter French is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+select to_char(interval '7 hours', 'HH24', 'NLS_DATE_LANGUAGE=French');
+ERROR:  NLS parameter French is not supported!
+DETAIL:  Not support the given nls parameter.
+CONTEXT:  referenced column: to_char
+reset timezone;
+-- 7. PG-mode negative intervals: check signed integer output after the A-mode cases.
+\c regression
+drop database dch_to_char_core_a;
+set client_min_messages = warning;
+drop database if exists dch_to_char_core_pg;
+reset client_min_messages;
+create database dch_to_char_core_pg with template template0 encoding 'UTF8'
+    lc_collate 'C' lc_ctype 'C' dbcompatibility 'PG';
+\c dch_to_char_core_pg
+set intervalstyle = 'postgres';
+select case when
+    to_char(interval '-7 hours', 'HH24') = '-7' and
+    to_char(interval '-7 years', 'YYYY') = '-007' and
+    to_char(interval '-7 years', 'FMYYYY') = '-7' and
+    to_char(interval '-123 days', 'DD') = '-123' and
+    to_char(interval '-7 minutes -8 seconds', 'MI:SS') = '-7:-8' and
+    to_char(interval '-0.007008 seconds', 'MS US') = '-07 -07008' and
+    to_char(interval '-7 hours', 'HH24TH') = '-7TH'
+then 'OK' else 'Failed' end as signed_integer_output;
+ signed_integer_output 
+-----------------------
+ OK
+(1 row)
+
+-- 7.1 More interval values: zero, positive/negative values, values exceeding field widths, whole years, and signed months.
+create table interval_inputs(id integer primary key, value interval);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_inputs_pkey" for table "interval_inputs"
+insert into interval_inputs values
+    (1, interval '0'),
+    (2, interval '7 years 2 months 3 days 4 hours 5 minutes 6.007008 seconds'),
+    (3, interval '-7 years -2 months -3 days -4 hours -5 minutes -6.007008 seconds'),
+    (4, interval '12345 years 123 days 123 hours'),
+    (5, interval '-12345 years -123 days -123 hours'),
+    (6, interval '12 months'), (7, interval '-12 months'),
+    (8, interval '1 month'), (9, interval '-1 month'), (10, null);
+create table interval_formats(id integer primary key, picture text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_formats_pkey" for table "interval_formats"
+insert into interval_formats values
+    (1, 'YYYY YYY YY Y CC'), (2, 'FMYYYY FMYYY FMYY FMY FMCC'),
+    (3, 'MM DD HH HH12 HH24 MI SS SSSSS'), (4, 'FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS'),
+    (5, 'MS US FF FF1 FF2 FF3 FF4 FF5 FF6'), (6, 'FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6'),
+    (7, 'DDD WW W Q'), (8, 'RM rm FMRM'), (9, 'IYYY IYY IY I IW IDDD J'),
+    (10, 'YYYYMMDDHH24MISS'), (11, 'SSMSUS'), (12, 'SSXFF6|SSxFF6');
+select v.id, f.id as format_id, f.picture, '[' || to_char(v.value, f.picture) || ']' as result
+from interval_inputs v cross join interval_formats f order by v.id, f.id;
+ id | format_id |                    picture                    |                     result                     
+----+-----------+-----------------------------------------------+------------------------------------------------
+  1 |         1 | YYYY YYY YY Y CC                              | [0000 000 00 0 00]
+  1 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [0 0 0 0 0]
+  1 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [00 00 12 12 00 00 00 0]
+  1 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [0 0 12 12 0 0 0]
+  1 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  1 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  1 |         7 | DDD WW W Q                                    | [000 01 1 ]
+  1 |         8 | RM rm FMRM                                    | [  ]
+  1 |         9 | IYYY IYY IY I IW IDDD J                       | [-001 -01 -1 -1 48 331 1721028]
+  1 |        10 | YYYYMMDDHH24MISS                              | [00000000000000]
+  1 |        11 | SSMSUS                                        | [00000000000]
+  1 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  2 |         1 | YYYY YYY YY Y CC                              | [0007 007 07 7 00]
+  2 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [7 7 7 7 0]
+  2 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [02 03 04 04 04 05 06 14706]
+  2 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [2 3 4 4 4 5 6]
+  2 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [007 007008 007008 0 00 007 0070 00700 007008]
+  2 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [007 007008 0 00 007 0070 00700 007008]
+  2 |         7 | DDD WW W Q                                    | [2583 369 1 1]
+  2 |         8 | RM rm FMRM                                    | [II   ii   II]
+  2 |         9 | IYYY IYY IY I IW IDDD J                       | [0007 007 07 7 05 034 1723650]
+  2 |        10 | YYYYMMDDHH24MISS                              | [00070203040506]
+  2 |        11 | SSMSUS                                        | [06007007008]
+  2 |        12 | SSXFF6|SSxFF6                                 | [06007008|06007008]
+  3 |         1 | YYYY YYY YY Y CC                              | [-007 -07 -7 -7 00]
+  3 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [-7 -7 -7 -7 0]
+  3 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [-2 -3 -4 -4 -4 -5 -6 -14706]
+  3 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [-2 -3 -4 -4 -4 -5 -6]
+  3 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [-07 -07008 -07008 0 00 -07 -070 -0700 -07008]
+  3 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [-07 -07008 0 00 -07 -070 -0700 -07008]
+  3 |         7 | DDD WW W Q                                    | [-2583 -368 1 0]
+  3 |         8 | RM rm FMRM                                    | [XI   xi   XI]
+  3 |         9 | IYYY IYY IY I IW IDDD J                       | [-008 -08 -8 -8 39 273 1718408]
+  3 |        10 | YYYYMMDDHH24MISS                              | [-007-2-3-4-5-6]
+  3 |        11 | SSMSUS                                        | [-6-07-07008]
+  3 |        12 | SSXFF6|SSxFF6                                 | [-6-07008|-6-07008]
+  4 |         1 | YYYY YYY YY Y CC                              | [12345 345 45 5 123]
+  4 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [12345 345 45 5 123]
+  4 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [00 123 03 03 123 00 00 442800]
+  4 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [0 123 3 3 123 0 0]
+  4 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  4 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  4 |         7 | DDD WW W Q                                    | [4444323 634904 18 ]
+  4 |         8 | RM rm FMRM                                    | [XII  xii  XII]
+  4 |         9 | IYYY IYY IY I IW IDDD J                       | [12345 345 45 5 14 092 6230070]
+  4 |        10 | YYYYMMDDHH24MISS                              | [12345001231230000]
+  4 |        11 | SSMSUS                                        | [00000000000]
+  4 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  5 |         1 | YYYY YYY YY Y CC                              | [-12345 -345 -45 -5 -123]
+  5 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [-12345 -345 -45 -5 -123]
+  5 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [00 -123 -3 -3 -123 00 00 -442800]
+  5 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [0 -123 -3 -3 -123 0 0]
+  5 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  5 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  5 |         7 | DDD WW W Q                                    | [-4444323 -634902 -16 ]
+  5 |         8 | RM rm FMRM                                    | [I    i    I]
+  5 |         9 | IYYY IYY IY I IW IDDD J                       | [-12346 -346 -46 -6 30 208 -2788012]
+  5 |        10 | YYYYMMDDHH24MISS                              | [-1234500-123-1230000]
+  5 |        11 | SSMSUS                                        | [00000000000]
+  5 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  6 |         1 | YYYY YYY YY Y CC                              | [0001 001 01 1 00]
+  6 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [1 1 1 1 0]
+  6 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [00 00 12 12 00 00 00 0]
+  6 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [0 0 12 12 0 0 0]
+  6 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  6 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  6 |         7 | DDD WW W Q                                    | [360 52 1 ]
+  6 |         8 | RM rm FMRM                                    | [XII  xii  XII]
+  6 |         9 | IYYY IYY IY I IW IDDD J                       | [0000 000 00 0 48 333 1721394]
+  6 |        10 | YYYYMMDDHH24MISS                              | [00010000000000]
+  6 |        11 | SSMSUS                                        | [00000000000]
+  6 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  7 |         1 | YYYY YYY YY Y CC                              | [-001 -01 -1 -1 00]
+  7 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [-1 -1 -1 -1 0]
+  7 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [00 00 12 12 00 00 00 0]
+  7 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [0 0 12 12 0 0 0]
+  7 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  7 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  7 |         7 | DDD WW W Q                                    | [-360 -50 1 ]
+  7 |         8 | RM rm FMRM                                    | [I    i    I]
+  7 |         9 | IYYY IYY IY I IW IDDD J                       | [-002 -02 -2 -2 49 337 1720663]
+  7 |        10 | YYYYMMDDHH24MISS                              | [-0010000000000]
+  7 |        11 | SSMSUS                                        | [00000000000]
+  7 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  8 |         1 | YYYY YYY YY Y CC                              | [0000 000 00 0 00]
+  8 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [0 0 0 0 0]
+  8 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [01 00 12 12 00 00 00 0]
+  8 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [1 0 12 12 0 0 0]
+  8 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  8 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  8 |         7 | DDD WW W Q                                    | [030 05 1 1]
+  8 |         8 | RM rm FMRM                                    | [I    i    I]
+  8 |         9 | IYYY IYY IY I IW IDDD J                       | [-001 -01 -1 -1 52 362 1721059]
+  8 |        10 | YYYYMMDDHH24MISS                              | [00000100000000]
+  8 |        11 | SSMSUS                                        | [00000000000]
+  8 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+  9 |         1 | YYYY YYY YY Y CC                              | [0000 000 00 0 00]
+  9 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | [0 0 0 0 0]
+  9 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | [-1 00 12 12 00 00 00 0]
+  9 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | [-1 0 12 12 0 0 0]
+  9 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | [000 000000 000000 0 00 000 0000 00000 000000]
+  9 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | [000 000000 0 00 000 0000 00000 000000]
+  9 |         7 | DDD WW W Q                                    | [-30 -3 1 1]
+  9 |         8 | RM rm FMRM                                    | [XII  xii  XII]
+  9 |         9 | IYYY IYY IY I IW IDDD J                       | [-001 -01 -1 -1 43 301 1720998]
+  9 |        10 | YYYYMMDDHH24MISS                              | [0000-100000000]
+  9 |        11 | SSMSUS                                        | [00000000000]
+  9 |        12 | SSXFF6|SSxFF6                                 | [00000000|00000000]
+ 10 |         1 | YYYY YYY YY Y CC                              | <NULL>
+ 10 |         2 | FMYYYY FMYYY FMYY FMY FMCC                    | <NULL>
+ 10 |         3 | MM DD HH HH12 HH24 MI SS SSSSS                | <NULL>
+ 10 |         4 | FMMM FMDD FMHH FMHH12 FMHH24 FMMI FMSS        | <NULL>
+ 10 |         5 | MS US FF FF1 FF2 FF3 FF4 FF5 FF6              | <NULL>
+ 10 |         6 | FMMS FMUS FMFF1 FMFF2 FMFF3 FMFF4 FMFF5 FMFF6 | <NULL>
+ 10 |         7 | DDD WW W Q                                    | <NULL>
+ 10 |         8 | RM rm FMRM                                    | <NULL>
+ 10 |         9 | IYYY IYY IY I IW IDDD J                       | <NULL>
+ 10 |        10 | YYYYMMDDHH24MISS                              | <NULL>
+ 10 |        11 | SSMSUS                                        | <NULL>
+ 10 |        12 | SSXFF6|SSxFF6                                 | <NULL>
+(120 rows)
+
+-- 7.2 Ordinal suffixes on negative values and adjacent fields.
+select to_char(interval '-7 years', 'YYYYTH|FMYYYYth|YYYY'),
+       to_char(interval '-0.007008 seconds', 'USTH|US');
+     to_char      |     to_char     
+------------------+-----------------
+ -007TH|-7th|-007 | -07008TH|-07008
+(1 row)
+
+-- 7.3 Minimum and maximum 32-bit integers: signs, complete digits, ordinal suffixes, and adjacent fields.
+select case when
+    to_char(interval '-2147483648 days', 'DD|FMDD') = '-2147483648|-2147483648' and
+    to_char(interval '-2147483648 days', 'DDTH|DDth|DDMI') = '-2147483648TH|-2147483648th|-214748364800'
+then 'OK' else 'Failed' end as int32_min_output;
+ int32_min_output 
+------------------
+ OK
+(1 row)
+
+select case when
+    to_char(interval '2147483647 days', 'DD|FMDD') = '2147483647|2147483647' and
+    to_char(interval '2147483647 days', 'DDTH|DDth|DDMI') = '2147483647TH|2147483647th|214748364700'
+then 'OK' else 'Failed' end as int32_max_output;
+ int32_max_output 
+------------------
+ OK
+(1 row)
+
+-- 7.4 Expected errors: intervals do not support era fields or weekday names.
+select to_char(interval '1 day', 'AD');
+ERROR:  invalid format specification for an interval value
+HINT:  Intervals are not tied to specific calendar dates.
+CONTEXT:  referenced column: to_char
+select to_char(interval '1 day', 'DAY');
+ERROR:  invalid format specification for an interval value
+HINT:  Intervals are not tied to specific calendar dates.
+CONTEXT:  referenced column: to_char
+select to_char(interval '1 day', 'DY');
+ERROR:  invalid format specification for an interval value
+HINT:  Intervals are not tied to specific calendar dates.
+CONTEXT:  referenced column: to_char
+\c regression
+drop database dch_to_char_core_pg;
