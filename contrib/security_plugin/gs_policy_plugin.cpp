@@ -50,6 +50,7 @@
 #include "catalog/pg_proc.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
+#include "fmgr.h"
 #include "gs_policy_labels.h"
 #include "libpq/auth.h"
 #include "miscadmin.h"
@@ -1817,6 +1818,47 @@ void install_label_hook()
     }
 }
 
+enum SecurityPluginInitState {
+    SECURITY_PLUGIN_INITIALIZING,
+    SECURITY_PLUGIN_READY,
+    SECURITY_PLUGIN_FAILED
+};
+
+/*
+ * Shared preload runs in each worker's startup session.  Keep its state in
+ * that registry so separate copies cannot install the thread-local hooks twice.
+ */
+static void InstallSecurityPluginHooksOnce()
+{
+    void** stateSlot = find_rendezvous_variable("openGauss.security_plugin.hooks.v1");
+    SecurityPluginInitState* initState = (SecurityPluginInitState*)*stateSlot;
+    if (initState != NULL) {
+        if (*initState == SECURITY_PLUGIN_READY) {
+            return;
+        }
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("Policy plugin hook initialization is incomplete")));
+    }
+    initState = (SecurityPluginInitState*)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), sizeof(SecurityPluginInitState));
+    *initState = SECURITY_PLUGIN_INITIALIZING;
+    *stateSlot = initState;
+    PG_TRY();
+    {
+        reset_policy_thr_hook = destory_thread_variables;
+        install_audit_hook();
+        install_label_hook();
+        install_masking_hook();
+        *initState = SECURITY_PLUGIN_READY;
+    }
+    PG_CATCH();
+    {
+        *initState = SECURITY_PLUGIN_FAILED;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
 /*
  * Define GUC variables and install hooks upon module load.
  * NOTE: _PG_init will be invoked(installed) many times 
@@ -1836,14 +1878,7 @@ void _PG_init(void)
     if ((t_thrd.role != WORKER) && (t_thrd.role != THREADPOOL_WORKER)) {
         return;
     }
-    /*
-     * Install our hook functions after saving the existing pointers to
-     * preserve the chains.
-     */
-    reset_policy_thr_hook = destory_thread_variables;
-    install_audit_hook();
-    install_label_hook();
-    install_masking_hook();
+    InstallSecurityPluginHooksOnce();
 }
 
 /*

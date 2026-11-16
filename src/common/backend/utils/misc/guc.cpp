@@ -12765,21 +12765,50 @@ static bool check_shared_preload_libraries(char** newval, void** extra, GucSourc
     if (IsUnderPostmaster) {
         return true;
     }
-    if (*newval == NULL || strlen(*newval) == 0) {
-        *newval = guc_strdup(FATAL, "security_plugin");
+
+    char* rawLibraries = pstrdup(*newval == NULL ? "" : *newval);
+    List* libraries = NIL;
+    if (!SplitIdentifierString(rawLibraries, ',', &libraries, false, false)) {
+        GUC_check_errdetail("List syntax is invalid.");
+        list_free(libraries);
+        pfree(rawLibraries);
+        return false;
+    }
+
+    bool hasSecurityPlugin = false;
+    bool emptyList = (libraries == NIL);
+    ListCell* libraryCell = NULL;
+    foreach (libraryCell, libraries) {
+        const char* libraryName = (const char*)lfirst(libraryCell);
+        if (libraryName[0] == '\0') {
+            GUC_check_errdetail("Library names must not be empty.");
+            list_free(libraries);
+            pfree(rawLibraries);
+            return false;
+        }
+        if (LibraryNameIs(libraryName, "security_plugin")) {
+            hasSecurityPlugin = true;
+        }
+    }
+    list_free(libraries);
+    pfree(rawLibraries);
+    if (hasSecurityPlugin) {
         return true;
     }
-    if (strstr(*newval, "security_plugin") != NULL) {
-        return true;
+
+    /* Keep quoted library names intact when adding the mandatory library. */
+    const char* oldValue = emptyList ? "" : *newval;
+    const char* separator = emptyList ? "" : ",";
+    size_t totalLength = strlen(oldValue) + strlen(separator) + strlen("security_plugin") + 1;
+    char* newValue = (char*)guc_malloc(FATAL, totalLength);
+    int rc = snprintf_s(newValue, totalLength, totalLength - 1, "%s%ssecurity_plugin", oldValue, separator);
+    if (rc < 0) {
+        pfree(newValue);
+        GUC_check_errdetail("Could not add security_plugin to the library list.");
+        return false;
     }
-    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
-    size_t total_len = strlen(*newval) + strlen(",security_plugin") + 1;
-    char* new_value = (char*)palloc(total_len);
-    int rcs = snprintf_s(new_value, total_len, total_len - 1, "%s,security_plugin", *newval);
-    securec_check_ss(rcs, "\0", "\0");
     pfree_ext(*newval);
-    *newval = new_value;
-    MemoryContextSwitchTo(oldContext);
+    *newval = newValue;
     return true;
 }
 

@@ -658,6 +658,7 @@ extern PGFunction lookup_C_func_by_oid(Oid fn_oid, char* probin, char* prosrc);
 extern void check_external_function(const char* filepath, const char* filename, const char* funcname);
 extern CFunInfo load_external_function(const char* filename, char* funcname, bool signalNotFound, bool isValidate);
 extern char* expand_dynamic_library_name(const char* name);
+extern bool LibraryNameIs(const char* name, const char* libraryName);
 extern PGFunction lookup_external_function(void* filehandle, const char* funcname);
 extern void load_file(const char* filename, bool restricted);
 extern void** find_rendezvous_variable(const char* varName);
