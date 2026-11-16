@@ -4943,12 +4943,17 @@ loop:
 }
 
 /*
- * just a wrapper to pass __snap_current to GetSnapshotData
+ * Pin current before reading its fields; retry if it changed before the pin.
  */
 static snapxid_t* GetCurrentSnapXid()
 {
     snapxid_t* x = (snapxid_t*)g_snap_current;
     IncrRefCount(x);
+    while (x != (snapxid_t*)g_snap_current) {
+        DecrRefCount(x);
+        x = (snapxid_t*)g_snap_current;
+        IncrRefCount(x);
+    }
     return x;
 }
 
