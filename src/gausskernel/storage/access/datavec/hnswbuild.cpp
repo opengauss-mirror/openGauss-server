@@ -1798,6 +1798,19 @@ static void ValidateHnswBuildOptions(HnswBuildState *buildstate, bool enableVect
     if (buildstate->enableRabitQ && !buildstate->typeInfo->supportRabitQ) {
         ereport(ERROR, (errmsg("this data type cannot support hnsw_rabitq.")));
     }
+    /*
+     * RabitQ only supports L2, inner product, and cosine distance. Cosine
+     * opclasses use the inner-product support function with a norm function.
+     */
+    if (buildstate->enableRabitQ &&
+        buildstate->procinfo->fn_oid != L2_FUNC_OID &&
+        buildstate->procinfo->fn_oid != IP_FUNC_OID &&
+        buildstate->procinfo->fn_oid != HALF_L2_FUNC_OID &&
+        buildstate->procinfo->fn_oid != HALF_IP_FUNC_OID) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("HNSW RabitQ does not support the selected operator class"),
+            errdetail("RabitQ supports L2, inner product, and cosine distance only.")));
+    }
 
     buildstate->vectorPayloadLen = 0;
     if (enableVectorStorage) {
