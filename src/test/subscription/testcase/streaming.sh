@@ -44,8 +44,13 @@ function test_subtransaction_abort() {
          COMMIT"
     wait_for_catchup $case_db $pub_node1_port stream_sub
     check_count 5500
-    rollback_column_count=$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'stream_test' AND column_name = 'rollback_column'")
+    if ! rollback_column_count=$(gsql -X -p "$sub_node1_port" -d "$case_db" -Atq -v ON_ERROR_STOP=1 -c "
+        SELECT count(*) FROM pg_catalog.pg_attribute
+        WHERE attrelid = 'public.stream_test'::pg_catalog.regclass
+          AND attnum > 0 AND NOT attisdropped AND attname = 'rollback_column'"); then
+        echo "$failed_keyword could not check column rollback_column on subscriber"
+        exit 1
+    fi
     if [ "$rollback_column_count" != "0" ]; then echo "$failed_keyword rolled back streaming DDL was applied on subscriber"; exit 1; fi
 }
 function test_mixed_unpublished_ddl() {
@@ -122,8 +127,13 @@ function test_stream_skiplsn() {
     exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION stream_sub SET (skiplsn = '$commitlsn')"
     wait_for_catchup $case_db $pub_node1_port stream_sub
     check_count 1500
-    skipped_ddl_count=$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'stream_test' AND column_name = 'skipped_ddl'")
+    if ! skipped_ddl_count=$(gsql -X -p "$sub_node1_port" -d "$case_db" -Atq -v ON_ERROR_STOP=1 -c "
+        SELECT count(*) FROM pg_catalog.pg_attribute
+        WHERE attrelid = 'public.stream_test'::pg_catalog.regclass
+          AND attnum > 0 AND NOT attisdropped AND attname = 'skipped_ddl'"); then
+        echo "$failed_keyword could not check column skipped_ddl on subscriber"
+        exit 1
+    fi
     if [ "$skipped_ddl_count" != "0" ]; then echo "$failed_keyword skipped streaming DDL was applied on subscriber"; exit 1; fi
 }
 function test_stream_error_recovery() {

@@ -20106,14 +20106,14 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                     if (i == partkeynum) 
                         appendPQExpBuffer(partitionq, "p.boundaries[%d]::int ASC NULLS LAST", i);
                     else
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int NULLS LAST", i);
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int NULLS LAST, ", i);
                 } else {
                     if (i == partkeynum) 
                         appendPQExpBuffer(
                             partitionq, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                     else
                         appendPQExpBuffer(
-                            partitionq, "p.boundaries[%d]::%s NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                            partitionq, "p.boundaries[%d]::%s NULLS LAST, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
                 }
             }
         } else {

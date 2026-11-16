@@ -73,8 +73,15 @@ function run_test() {
             sh ${cur_case}.teardown $subscription_dir $base_port $cur_case
         fi
 
-        exec_dump_db $cur_case $pub_node1_port "$dump_result_dir/$cur_case.dump.pub"
-        exec_dump_db $cur_case $sub_node1_port "$dump_result_dir/$cur_case.dump.sub"
+        exec_dump_db "$cur_case" "$pub_node1_port" "$dump_result_dir/$cur_case.dump.pub" || err=1
+        exec_dump_db "$cur_case" "$sub_node1_port" "$dump_result_dir/$cur_case.dump.sub" || err=1
+        if [ "$err" -ne 0 ]; then
+            echo "$failed_keyword $cur_case database dump failed"
+            totalerr=1
+            case_cleanup_replication "$cur_case"
+            cur_case=""
+            continue
+        fi
 
         diff $dump_result_dir/$cur_case.dump.pub $dump_result_dir/$cur_case.dump.sub | grep -v '^[0-9]' > ${results_dir}/$cur_case.dump.diff
 
