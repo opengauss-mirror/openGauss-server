@@ -2364,6 +2364,7 @@ static void GlobalTableIndex(report_params* params)
 /*
  * Unused indexes on a single node: idx_scan delta between snapshots is zero.
  * Reuses snap_global_stat_all_indexes; excludes system schemas like User index stats.
+ * Primary/unique indexes are excluded: uniqueness checks do not bump idx_scan.
  */
 static void UnusedIndexesNodeStat(report_params* params)
 {
@@ -2386,6 +2387,8 @@ static void UnusedIndexesNodeStat(report_params* params)
         "AND snap_2.snap_relname = snap_1.snap_relname AND snap_2.snap_indexrelname = snap_1.snap_indexrelname "
         "AND snap_2.db_name = snap_1.db_name "
         "WHERE (snap_2.snap_idx_scan - coalesce(snap_1.snap_idx_scan, 0)) = 0 "
+        "AND NOT coalesce(snap_2.snap_indisprimary, false) "
+        "AND NOT coalesce(snap_2.snap_indisunique, false) "
         "order by snap_2.db_name, snap_2.snap_schemaname, snap_2.snap_relname limit 200;",
         params->end_snap_id,
         params->report_node,
@@ -2397,7 +2400,7 @@ static void UnusedIndexesNodeStat(report_params* params)
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     dash->dashTitle = "Object stats";
     dash->tableTitle = "Unused Indexes";
-    desc = "User indexes with zero index scans between begin and end snapshot";
+    desc = "Non-unique user indexes with zero index scans between begin and end snapshot";
     dash->desc = lappend(dash->desc, desc);
     GenReport::add_data(dash, &params->Contents);
     pfree_ext(query.data);
@@ -2405,6 +2408,7 @@ static void UnusedIndexesNodeStat(report_params* params)
 
 /*
  * Unused indexes in cluster report: same rule on snap_summary_stat_all_indexes.
+ * Primary/unique indexes are excluded (same as node report).
  */
 static void UnusedIndexesClusterStat(report_params* params)
 {
@@ -2439,6 +2443,8 @@ static void UnusedIndexesClusterStat(report_params* params)
         " ON (snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_indexrelid = snap_1.snap_indexrelid AND "
         " snap_2.db_name = snap_1.db_name AND snap_2.snap_schemaname = snap_1.snap_schemaname) "
         "WHERE (snap_2.snap_idx_scan - coalesce(snap_1.snap_idx_scan, 0)) = 0 "
+        "AND NOT coalesce(snap_2.snap_indisprimary, false) "
+        "AND NOT coalesce(snap_2.snap_indisunique, false) "
         " order by snap_2.db_name, snap_2.snap_schemaname, snap_2.snap_relname limit 200;",
         cache_io_sys_schema,
         params->end_snap_id,
@@ -2450,7 +2456,7 @@ static void UnusedIndexesClusterStat(report_params* params)
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     dash->dashTitle = "Object stats";
     dash->tableTitle = "Unused Indexes";
-    desc = "User indexes with zero index scans between begin and end snapshot (cluster)";
+    desc = "Non-unique user indexes with zero index scans between snapshots (cluster)";
     dash->desc = lappend(dash->desc, desc);
     GenReport::add_data(dash, &params->Contents);
     pfree_ext(query.data);

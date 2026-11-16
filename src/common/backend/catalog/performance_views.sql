@@ -2214,7 +2214,9 @@ CREATE VIEW dbe_perf.stat_all_indexes AS
     I.relname AS indexrelname,
     pg_catalog.pg_stat_get_numscans(I.oid) AS idx_scan,
     pg_catalog.pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
-    pg_catalog.pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch
+    pg_catalog.pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch,
+    X.indisunique AS indisunique,
+    X.indisprimary AS indisprimary
     FROM pg_class C JOIN
          pg_index X ON C.oid = X.indrelid JOIN
          pg_class I ON I.oid = X.indexrelid
@@ -2222,8 +2224,9 @@ CREATE VIEW dbe_perf.stat_all_indexes AS
       WHERE C.relkind IN ('r', 't');
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_all_indexes
-  (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name, 
-   OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
+  (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
+   OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint,
+   OUT indisunique boolean, OUT indisprimary boolean)
 RETURNS setof record
 AS $$
 DECLARE
@@ -2246,20 +2249,23 @@ DECLARE
         idx_scan := row_data.idx_scan;
         idx_tup_read := row_data.idx_tup_read;
         idx_tup_fetch := row_data.idx_tup_fetch;
+        indisunique := row_data.indisunique;
+        indisprimary := row_data.indisprimary;
         return next;
       END LOOP;
     END LOOP;
     return;
   END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-  
+
 CREATE VIEW dbe_perf.global_stat_all_indexes AS
   SELECT * FROM dbe_perf.get_global_stat_all_indexes();
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_all_indexes
   (OUT schemaname name, OUT relname name, OUT indexrelname name,
    OUT toastrelschemaname name, OUT toastrelname name,
-   OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
+   OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint,
+   OUT indisunique boolean, OUT indisprimary boolean)
 RETURNS setof record
 AS $$
 DECLARE
@@ -2272,7 +2278,7 @@ DECLARE
     query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
       query_str := '
-      SELECT 
+      SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
         C.relname AS toastrelname,
@@ -2280,7 +2286,9 @@ DECLARE
         T.indexrelname AS indexrelname,
         T.idx_scan AS idx_scan,
         T.idx_tup_read AS idx_tup_read,
-        T.idx_tup_fetch AS idx_tup_fetch
+        T.idx_tup_fetch AS idx_tup_fetch,
+        T.indisunique AS indisunique,
+        T.indisprimary AS indisprimary
       FROM dbe_perf.stat_all_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
         LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
@@ -2298,6 +2306,8 @@ DECLARE
         idx_scan := row_data.idx_scan;
         idx_tup_read := row_data.idx_tup_read;
         idx_tup_fetch := row_data.idx_tup_fetch;
+        indisunique := row_data.indisunique;
+        indisprimary := row_data.indisprimary;
         return next;
       END LOOP;
     END LOOP;
@@ -2308,7 +2318,10 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_stat_all_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read,
+         pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch,
+         pg_catalog.bool_or(Ti.indisunique) AS indisunique,
+         pg_catalog.bool_or(Ti.indisprimary) AS indisprimary
     FROM dbe_perf.get_summary_stat_all_indexes() AS Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -2724,8 +2737,9 @@ CREATE VIEW dbe_perf.stat_user_indexes AS
           schemaname !~ '^pg_toast';
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_user_indexes
-  (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name, 
-   OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
+  (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
+   OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint,
+   OUT indisunique boolean, OUT indisprimary boolean)
 RETURNS setof record
 AS $$
 DECLARE
@@ -2748,20 +2762,23 @@ DECLARE
         idx_scan := row_data.idx_scan;
         idx_tup_read := row_data.idx_tup_read;
         idx_tup_fetch := row_data.idx_tup_fetch;
+        indisunique := row_data.indisunique;
+        indisprimary := row_data.indisprimary;
         return next;
       END LOOP;
     END LOOP;
     return;
   END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-  
+
 CREATE VIEW dbe_perf.global_stat_user_indexes AS
   SELECT * FROM dbe_perf.get_global_stat_user_indexes();
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_user_indexes
   (OUT schemaname name, OUT relname name, OUT indexrelname name,
    OUT toastrelschemaname name, OUT toastrelname name,
-   OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
+   OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint,
+   OUT indisunique boolean, OUT indisprimary boolean)
 RETURNS setof record
 AS $$
 DECLARE
@@ -2782,7 +2799,9 @@ DECLARE
         T.indexrelname AS indexrelname,
         T.idx_scan AS idx_scan,
         T.idx_tup_read AS idx_tup_read,
-        T.idx_tup_fetch AS idx_tup_fetch
+        T.idx_tup_fetch AS idx_tup_fetch,
+        T.indisunique AS indisunique,
+        T.indisprimary AS indisprimary
       FROM dbe_perf.stat_user_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
         LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
@@ -2800,6 +2819,8 @@ DECLARE
         idx_scan := row_data.idx_scan;
         idx_tup_read := row_data.idx_tup_read;
         idx_tup_fetch := row_data.idx_tup_fetch;
+        indisunique := row_data.indisunique;
+        indisprimary := row_data.indisprimary;
         return next;
       END LOOP;
     END LOOP;
@@ -2810,7 +2831,10 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_stat_user_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read,
+         pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch,
+         pg_catalog.bool_or(Ti.indisunique) AS indisunique,
+         pg_catalog.bool_or(Ti.indisprimary) AS indisprimary
     FROM dbe_perf.get_summary_stat_user_indexes() as Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
