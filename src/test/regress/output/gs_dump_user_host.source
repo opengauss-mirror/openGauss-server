@@ -1,0 +1,28 @@
+create database test_dump_user_host dbcompatibility 'B';
+\c test_dump_user_host
+create user 'sys_dump'@'%' with sysadmin password 'Aa@12356';
+create user dump_normal password 'Aa@12356';
+create table tbl_owned(a int, b text);
+insert into tbl_owned values(1, 'x');
+alter table tbl_owned owner to 'sys_dump'@'%';
+create table tbl_not_owned(a int);
+insert into tbl_not_owned values(3);
+alter table tbl_not_owned owner to dump_normal;
+\! @abs_bindir@/gs_dump test_dump_user_host -p @portstring@ -U sys_dump -W 'Aa@12356' -F p -t tbl_owned -f @abs_bindir@/dump_owned.sql > /dev/null 2>&1
+\! grep -c 'COPY public.*tbl_owned' @abs_bindir@/dump_owned.sql
+1
+\! @abs_bindir@/gs_dump test_dump_user_host -p @portstring@ -U sys_dump -W 'Aa@12356' -F p -t tbl_not_owned -f @abs_bindir@/dump_not_owned.sql > /dev/null 2>&1
+\! grep -c 'COPY public.*tbl_not_owned' @abs_bindir@/dump_not_owned.sql
+1
+\! @abs_bindir@/gs_dump test_dump_user_host -p @portstring@ -U sys_dump -W 'Aa@12356' -F p -f @abs_bindir@/dump_full.sql > /dev/null 2>&1
+\! grep -c 'COPY public.*tbl_owned' @abs_bindir@/dump_full.sql
+1
+\! grep -c 'COPY public.*tbl_not_owned' @abs_bindir@/dump_full.sql
+1
+drop user 'sys_dump'@'%' cascade;
+drop user dump_normal cascade;
+\! rm -f @abs_bindir@/dump_owned.sql
+\! rm -f @abs_bindir@/dump_not_owned.sql
+\! rm -f @abs_bindir@/dump_full.sql
+\c regression
+drop database test_dump_user_host;

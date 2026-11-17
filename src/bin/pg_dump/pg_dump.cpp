@@ -281,6 +281,7 @@ static bool oids = false;
 static int outputNoOwner = 0;
 static char* outputSuperuser = NULL;
 static const char* username = NULL;
+static char* g_execUserName = NULL;
 static char* pchPasswd = NULL;
 static const char* dumpencoding = NULL;
 static const char* pghost = NULL;
@@ -581,6 +582,7 @@ static char* changeTableName(const char* tableName);
 static void appendOidList(SimpleOidList* oidList, Oid val);
 static bool isIndependentRole(PGconn* conn, char* rolname);
 static bool isSuperRole(PGconn* conn, char* rolname);
+static char* GetExecuteUserName(Archive* fout);
 static bool isExecUserSuperRole(Archive* fout);
 static bool isExecUserNotObjectOwner(Archive* fout, const char* objRoleName);
 static bool isTsStoreTable(const TableInfo *tbinfo);
@@ -1401,6 +1403,7 @@ static void free_dump()
     GS_FREE(pgport);
     GS_FREE(outputSuperuser);
     GS_FREE(username);
+    GS_FREE(g_execUserName);
     GS_FREE(lockWaitTimeout);
     GS_FREE(use_role);
     GS_FREE(encrypt_mode);
@@ -7751,6 +7754,22 @@ static bool isSuperRole(PGconn* conn, char* rolname)
 }
 
 /*
+ * Get the real role name of the current connection.
+ * If the user executing gs_dump is created as 'user'@'host',
+ * the 'host' part maybe ignored by PQuser(), leading to user name comparison failure.
+ */
+static char* GetExecuteUserName(Archive* fout)
+{
+    if (g_execUserName == NULL) {
+        PGresult* res = ExecuteSqlQueryForSingleRow(fout, (char*)"SELECT session_user");
+        g_execUserName = gs_strdup(PQgetvalue(res, 0, 0));
+        PQclear(res);
+    }
+
+    return g_execUserName;
+}
+
+/*
  * Determine if the execute role/--role is superRole
  */
 static bool isExecUserSuperRole(Archive* fout)
@@ -7759,7 +7778,7 @@ static bool isExecUserSuperRole(Archive* fout)
     char* executeUser = NULL;
 
     /* get execute user */
-    executeUser = PQuser(AH->connection);
+    executeUser = GetExecuteUserName(fout);
 
     if ((use_role != NULL) && isSuperRole(AH->connection, use_role)) {
         return true;
@@ -7816,7 +7835,7 @@ static bool isExecUserNotObjectOwner(Archive* fout, const char* objRoleName)
         }
     } else {
         /* get execute user */
-        executeUser = PQuser(AH->connection);
+        executeUser = GetExecuteUserName(fout);
         /* get len */
         maxLen2 = (strlen(executeUser) > strlen(objRoleName)) ? strlen(executeUser) : strlen(objRoleName);
         if (0 != strncmp(executeUser, objRoleName, maxLen2) && !IsExecRoleCanDumpObject(fout, executeUser, objRoleName)) {
@@ -9666,7 +9685,7 @@ RuleInfo* getRules(Archive* fout, int* numRules)
                     use_role);
             }
         } else {
-            execUser = PQuser(AH->connection);
+            execUser = GetExecuteUserName(fout);
             if (isSuperRole(AH->connection, execUser)) {
                 appendPQExpBuffer(query,
                     "SELECT "
@@ -12234,7 +12253,7 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
             bool isExistsRolkind = false;
 
             isExistsRolkind = is_column_exists(AH->connection, AuthIdRelationId, "rolkind");
-            executeUser = PQuser(AH->connection);
+            executeUser = GetExecuteUserName(fout);
             /*
              * If the table's owner is independent role, only need the owner to backup it.
              * else, print warning message, and skip the object.
