@@ -51,6 +51,17 @@
 #endif
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
+
+/*
+ * During simple-expression evaluation ecxt_per_query_memory points at the
+ * expression's cache context.  Transaction switching must preserve the whole
+ * owning executor, including its ExprContexts and all expression children.
+ */
+static inline MemoryContext simple_econtext_owner(ExprContext* econtext)
+{
+    return econtext->ecxt_estate->es_query_cxt;
+}
+
 static const char* const raise_skip_msg = "RAISE";
 typedef int (*SpiExecuteMultiResHook)(PLpgSQL_execstate* estate, PLpgSQL_expr* expr,
     PLpgSQL_stmt_execsql* plstmt, ParamListInfo paramLI, long tcount, bool* multi_res);
@@ -81,6 +92,9 @@ typedef struct {
  * so that we don't have to re-prepare simple expressions on each trip through
  * a function.	(We assume the case to optimize is many repetitions of a
  * function within a transaction.)
+ * Each compiled expression owns a child context for its ExprState and lazy
+ * executor caches.  Replanning or freeing the compiled expression can retire
+ * that child early without destroying the shared EState or other expressions.
  */
 typedef struct SimpleEcontextStackEntry {
     bool is_valid; /* set true in default, set false before procedure commit/rollback */
@@ -884,15 +898,15 @@ static void stp_keep_context_subxact_exprcontext(int stackId)
     while (entry != NULL && entry->statckEntryId > stackId) {
         /* set invalid flag to keep this expr context in stp_cleanup_subxact_exprcontext. */
         entry->is_valid = false;
-        if (entry->stack_econtext->ecxt_per_query_memory->parent != t_thrd.mem_cxt.portal_mem_cxt &&
+        if (simple_econtext_owner(entry->stack_econtext)->parent != t_thrd.mem_cxt.portal_mem_cxt &&
             ((entry->spi_level < u_sess->SPI_cxt._connected ||
-              entry->stack_econtext->ecxt_per_query_memory == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt))) {
+              simple_econtext_owner(entry->stack_econtext) == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt))) {
             /* save the last entry in simple_econtext_stack, only set one flag for same ecxt_per_query_memory. */
             if (last_entry == NULL) {
                 last_entry = entry;
-            } else if (last_entry->stack_econtext->ecxt_per_query_memory !=
-                        entry->stack_econtext->ecxt_per_query_memory) {
-                MemoryContextSetParent(last_entry->stack_econtext->ecxt_per_query_memory,
+            } else if (simple_econtext_owner(last_entry->stack_econtext) !=
+                        simple_econtext_owner(entry->stack_econtext)) {
+                MemoryContextSetParent(simple_econtext_owner(last_entry->stack_econtext),
                                        t_thrd.mem_cxt.portal_mem_cxt);
                 last_entry->has_change_parent = true;
                 last_entry = entry;
@@ -903,7 +917,7 @@ static void stp_keep_context_subxact_exprcontext(int stackId)
         entry = entry->next;
     }
     if (last_entry != NULL) {
-        MemoryContextSetParent(last_entry->stack_econtext->ecxt_per_query_memory, t_thrd.mem_cxt.portal_mem_cxt);
+        MemoryContextSetParent(simple_econtext_owner(last_entry->stack_econtext), t_thrd.mem_cxt.portal_mem_cxt);
         last_entry->has_change_parent = true;
     }
     /* u_sess->plsql_cxt.simple_econtext_stack will be move into u_sess->plsql_cxt.spi_xact_expr_context
@@ -911,7 +925,7 @@ static void stp_keep_context_subxact_exprcontext(int stackId)
     XactExprContextItem* item = (XactExprContextItem*)u_sess->plsql_cxt.spi_xact_expr_context;
     while (item != NULL) {
         if (item->has_change_parent) {
-            MemoryContextSetParent(item->simple_econtext->ecxt_per_query_memory, t_thrd.mem_cxt.portal_mem_cxt);
+            MemoryContextSetParent(simple_econtext_owner(item->simple_econtext), t_thrd.mem_cxt.portal_mem_cxt);
         }
         item->is_valid = false;
         item = (XactExprContextItem*)item->next;
@@ -925,7 +939,7 @@ void stp_mark_upper_func_exprcontext()
     SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
     while (entry != NULL) {
         if (entry->spi_level > u_sess->SPI_cxt._connected &&
-            entry->stack_econtext->ecxt_per_query_memory == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt) {
+            simple_econtext_owner(entry->stack_econtext) == u_sess->plsql_cxt.simple_eval_estate->es_query_cxt) {
             if (entry->upper_func_used_level == -1) {
                 entry->upper_func_used_level = u_sess->SPI_cxt._connected;
             } else {
@@ -10014,7 +10028,7 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
     XactExprContextItem *item = (XactExprContextItem*)u_sess->plsql_cxt.spi_xact_expr_context;
     while (item != NULL) {
         if (item->has_change_parent) {
-            MemoryContextSetParent(item->simple_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+            MemoryContextSetParent(simple_econtext_owner(item->simple_econtext), u_sess->top_transaction_mem_cxt);
         }
         item = (XactExprContextItem*)item->next;
     }
@@ -12917,6 +12931,53 @@ loop_exit:
     return rc;
 }
 
+/*
+ * Retire an inactive expression's executor caches before releasing its plan.
+ * A context from an earlier transaction must never be dereferenced: the
+ * transaction may already have deleted it.  Function-cache deletion reaches
+ * here through free_expr(), after use_count permits freeing the old function.
+ */
+void plpgsql_free_simple_expr_state(PLpgSQL_expr* expr)
+{
+    MemoryContext context = expr->expr_simple_context;
+    EState* estate = u_sess->plsql_cxt.simple_eval_estate;
+
+    if (context != NULL && estate != NULL &&
+        expr->expr_simple_context_lxid == t_thrd.proc->lxid) {
+        /*
+         * Replanning can retire a state before the containing function exits.
+         * Detach and run only callbacks allocated by this expression, while
+         * their arguments and the old plan are still alive.  Other expressions'
+         * callbacks keep their normal invocation/subtransaction lifetime.
+         */
+        ListCell* lc = NULL;
+        foreach (lc, estate->es_exprcontexts) {
+            ExprContext* econtext = (ExprContext*)lfirst(lc);
+            ExprContext cleanup = *econtext;
+            cleanup.ecxt_callbacks = NULL;
+            ExprContext_CB** tail = &cleanup.ecxt_callbacks;
+            ExprContext_CB** link = &econtext->ecxt_callbacks;
+            while (*link != NULL) {
+                ExprContext_CB* callback = *link;
+                if (MemoryContextContains(context, callback)) {
+                    *link = callback->next;
+                    callback->next = NULL;
+                    *tail = callback;
+                    tail = &callback->next;
+                } else {
+                    link = &callback->next;
+                }
+            }
+            ShutdownExprContext(&cleanup, true);
+        }
+        MemoryContextDelete(context);
+    }
+    expr->expr_simple_context = NULL;
+    expr->expr_simple_context_lxid = InvalidLocalTransactionId;
+    expr->expr_simple_state = NULL;
+    expr->expr_simple_lxid = InvalidLocalTransactionId;
+}
+
 /* ----------
  * exec_eval_simple_expr -		Evaluate a simple expression returning
  *								a Datum by directly calling ExecEvalExpr().
@@ -12991,6 +13052,7 @@ static bool exec_eval_simple_expr(
          */
         expr->expr_simple_plan_lxid = curlxid;
     } else {
+        plpgsql_free_simple_expr_state(expr);
         /*
         * If we have a valid refcount on some previous version of the plan,
         * release it, so we don't leak plans intra-transaction.
@@ -13096,10 +13158,16 @@ static bool exec_eval_simple_expr(
      */
 
     if (expr->expr_simple_lxid != curlxid) {
+        /* Also reclaim a partial tree left by an earlier failed ExecInitExpr. */
+        plpgsql_free_simple_expr_state(expr);
 #ifndef ENABLE_MULTIPLE_NODES
         stp_mark_upper_func_exprcontext();
 #endif
-        oldcontext = MemoryContextSwitchTo(u_sess->plsql_cxt.simple_eval_estate->es_query_cxt);
+        expr->expr_simple_context = AllocSetContextCreate(
+            u_sess->plsql_cxt.simple_eval_estate->es_query_cxt,
+            "PL/pgSQL simple expression", ALLOCSET_SMALL_SIZES);
+        expr->expr_simple_context_lxid = curlxid;
+        oldcontext = MemoryContextSwitchTo(expr->expr_simple_context);
         expr->expr_simple_state = ExecInitExpr(expr->expr_simple_expr, NULL);
         // expr->expr_simple_state = ExecInitExprForPlSql(expr->expr_simple_expr, econtext->ecxt_param_list_info,
         //     u_sess->plsql_cxt.simple_eval_estate->es_is_flt_frame);
@@ -13185,7 +13253,20 @@ static bool exec_eval_simple_expr(
         plpgsql_estate->curr_nested_table_type = InvalidOid;
     }
 
-    *result = ExecEvalExpr(expr->expr_simple_state, econtext, isNull);
+    /* Lazy fmgr/function caches must have the same owner as the ExprState. */
+    MemoryContext query_context = econtext->ecxt_per_query_memory;
+    PG_TRY();
+    {
+        econtext->ecxt_per_query_memory = expr->expr_simple_context;
+        *result = ExecEvalExpr(expr->expr_simple_state, econtext, isNull);
+        econtext->ecxt_per_query_memory = query_context;
+    }
+    PG_CATCH();
+    {
+        econtext->ecxt_per_query_memory = query_context;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     /* for nested table, we need use nested table type as result type */
     if (plpgsql_estate && plpgsql_estate->curr_nested_table_type != InvalidOid) {
         if (expr->expr_simple_state->evalfunc == (ExprStateEvalFunc)ExecEvalArrayRef) {
@@ -15353,7 +15434,7 @@ void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
         if (plcontext->has_change_parent && plcontext->spi_level >= u_sess->SPI_cxt._connected &&
             (plcontext->upper_func_used_level == -1 ||
              plcontext->upper_func_used_level >= u_sess->SPI_cxt._connected)) {
-            MemoryContextSetParent(plcontext->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+            MemoryContextSetParent(simple_econtext_owner(plcontext->stack_econtext), u_sess->top_transaction_mem_cxt);
         }
 #endif
         /*
@@ -15407,7 +15488,7 @@ void plpgsql_xact_cb(XactEvent event, void* arg)
     while (entry != NULL) {
         if (entry->has_change_parent && entry->spi_level >= u_sess->SPI_cxt._connected &&
             (entry->upper_func_used_level == -1 || entry->upper_func_used_level >= u_sess->SPI_cxt._connected)) {
-            MemoryContextSetParent(entry->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+            MemoryContextSetParent(simple_econtext_owner(entry->stack_econtext), u_sess->top_transaction_mem_cxt);
         }
         entry = entry->next;
     }
@@ -15438,7 +15519,7 @@ void GsplsqlResetContextInAbout()
     SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
     while (entry != NULL) {
         if (entry->has_change_parent) {
-            MemoryContextSetParent(entry->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+            MemoryContextSetParent(simple_econtext_owner(entry->stack_econtext), u_sess->top_transaction_mem_cxt);
         }
         entry = entry->next;
     }
@@ -16784,6 +16865,11 @@ PLpgSQL_datum* deepCopyPlpgsqlDatum(PLpgSQL_datum* datum)
             newm->ns = NULL;
             newm->expr_simple_expr = NULL;
             newm->expr_simple_state = NULL;
+            newm->expr_simple_context = NULL;
+            newm->expr_simple_context_lxid = InvalidLocalTransactionId;
+            newm->expr_simple_plan = NULL;
+            newm->expr_simple_plansource = NULL;
+            newm->expr_simple_plan_lxid = InvalidLocalTransactionId;
             result = (PLpgSQL_datum*)newm;
             break;
         }

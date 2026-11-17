@@ -1051,6 +1051,21 @@ static void free_getdiag(PLpgSQL_stmt_getdiag* stmt)
 
 void free_expr(PLpgSQL_expr* expr)
 {
+    if (expr != NULL) {
+        /* The caller has finished using this compiled expression. */
+        plpgsql_free_simple_expr_state(expr);
+        if (expr->expr_simple_plan != NULL &&
+            expr->expr_simple_plan_lxid == t_thrd.proc->lxid &&
+            u_sess->plsql_cxt.shared_simple_eval_resowner != NULL) {
+            ResourceOwner owner = t_thrd.utils_cxt.CurrentResourceOwner;
+            t_thrd.utils_cxt.CurrentResourceOwner = u_sess->plsql_cxt.shared_simple_eval_resowner;
+            ReleaseCachedPlan(expr->expr_simple_plan, true);
+            t_thrd.utils_cxt.CurrentResourceOwner = owner;
+        }
+        expr->expr_simple_plan_lxid = InvalidLocalTransactionId;
+        expr->expr_simple_expr = NULL;
+        expr->expr_simple_plansource = NULL;
+    }
     if (expr != NULL && expr->plan != NULL) {
         SPI_freeplan(expr->plan);
         expr->plan = NULL;

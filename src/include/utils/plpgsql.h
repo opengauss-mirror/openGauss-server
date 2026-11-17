@@ -451,6 +451,9 @@ typedef struct PLpgSQL_expr { /* SQpL Query to plan and execute	*/
      * expr_simple_state probably points at garbage!)
      */
     ExprState* expr_simple_state; /* eval tree for expr_simple_expr */
+    /* State and lazy executor caches, reclaimable with this compiled expr. */
+    MemoryContext expr_simple_context;
+    LocalTransactionId expr_simple_context_lxid;
     bool expr_simple_in_use;      /* true if eval tree is active */
     LocalTransactionId expr_simple_lxid;
     bool isouttype;               /* the parameter will output */
@@ -2041,6 +2044,7 @@ extern void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* fu
 extern void plpgsql_destroy_econtext(PLpgSQL_execstate* estate);
 extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
 extern void free_expr(PLpgSQL_expr* expr);
+extern void plpgsql_free_simple_expr_state(PLpgSQL_expr* expr);
 extern void free_assignlist(List* assignlist);
 extern HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, TupleDesc tupdesc);
 void exec_assign_expr(PLpgSQL_execstate* estate, PLpgSQL_datum* target, PLpgSQL_expr* expr);
