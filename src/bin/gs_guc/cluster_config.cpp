@@ -913,11 +913,12 @@ char** readfile(const char* path, int reserve_num_lines)
     /*
      * Count newlines. We expect there to be a newline after each full line,
      * including one at the end of file. If there isn't a newline at the end,
-     * any characters after the last newline will be ignored.
+     * count the last partial line as well; it will be copied with a newline
+     * appended.
      */
     nlines = 0;
     for (i = 0; i < len; i++) {
-        if (buffer[i] == '\n') {
+        if (buffer[i] == '\n' || i == (len - 1)) {
             nlines++;
         }
     }
@@ -934,8 +935,9 @@ char** readfile(const char* path, int reserve_num_lines)
     linebegin = buffer;
     n = 0;
     for (i = 0; i < len; i++) {
-        if (buffer[i] == '\n') {
-            int slen = &buffer[i] - linebegin + 1;
+        if (buffer[i] == '\n' || i == (len - 1)) {
+            int copylen = &buffer[i] - linebegin + 1;
+            int slen = ((buffer[i] != '\n') && (i == (len - 1))) ? copylen + 1 : copylen;
             char* linebuf = (char*)malloc(slen + 1);
             if (NULL == linebuf) {
                 write_stderr("ERROR: Memory allocation failed.\n");
@@ -946,8 +948,11 @@ char** readfile(const char* path, int reserve_num_lines)
                 GS_FREE(buffer);
                 return NULL;
             }
-            rc = memcpy_s(linebuf, slen, linebegin, slen);
+            rc = memcpy_s(linebuf, copylen, linebegin, copylen);
             securec_check_c(rc, "\0", "\0");
+            if (slen != copylen) {
+                linebuf[copylen] = '\n';
+            }
             linebuf[slen] = '\0';
             result[n++] = linebuf;
             linebegin = &buffer[i + 1];
