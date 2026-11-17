@@ -15713,6 +15713,21 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
                 erraction("check constraints of columns")));
     }
 
+    /*
+     * B-format unique indexes may contain duplicates inserted while
+     * unique_checks was disabled.  Recheck existing data before promoting
+     * such an index to a primary key.  Do this before opening indexRel so
+     * REINDEX's check for active index users sees no extra reference.
+     */
+    if (DB_IS_CMPT(B_FORMAT) && stmt->primary) {
+        /* REINDEX needs session-local GTT storage before ALTER TABLE's final initialization. */
+        if (RELATION_IS_GLOBAL_TEMP(rel)) {
+            gtt_create_storage_files(RelationGetRelid(rel));
+        }
+        reindex_index(index_oid, InvalidOid, false, NULL, false);
+        CommandCounterIncrement();
+    }
+
     indexRel = index_open(index_oid, AccessShareLock);
 
     indexName = pstrdup(RelationGetRelationName(indexRel));
@@ -15720,9 +15735,10 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
     indexInfo = BuildIndexInfo(indexRel);
 
     /* this should have been checked at parse time */
-    if (!indexInfo->ii_Unique)
+    if (!indexInfo->ii_Unique) {
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("index \"%s\" is not unique", indexName)));
+    }
     /*
      * Determine name to assign to constraint.	We require a constraint to
      * have the same name as the underlying index; therefore, use the index's
@@ -15731,9 +15747,9 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
      * to match.
      */
     constraintName = stmt->idxname;
-    if (constraintName == NULL)
+    if (constraintName == NULL) {
         constraintName = indexName;
-    else if (strcmp(constraintName, indexName) != 0) {
+    } else if (strcmp(constraintName, indexName) != 0) {
         ereport(NOTICE,
             (errmsg("ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index \"%s\" to \"%s\"",
                 indexName,
@@ -15742,14 +15758,16 @@ static ObjectAddress ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation re
     }
 
     /* Extra checks needed if making primary key */
-    if (stmt->primary)
+    if (stmt->primary) {
         index_check_primary_key(rel, indexInfo, true, stmt);
+    }
 
     /* Note we currently don't support EXCLUSION constraints here */
-    if (stmt->primary)
+    if (stmt->primary) {
         constraintType = CONSTRAINT_PRIMARY;
-    else
+    } else {
         constraintType = CONSTRAINT_UNIQUE;
+    }
 
     /* Create the catalog entries for the constraint */
     address = index_constraint_create(rel,
