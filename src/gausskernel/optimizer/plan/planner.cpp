@@ -8388,7 +8388,7 @@ static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* ac
              */
             List* win_vars = pull_var_clause((Node*)tle->expr, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
             new_tlist = add_to_flat_tlist(new_tlist, win_vars);
-            list_free_deep(win_vars);
+            list_free_ext(win_vars);
         } else if (contain_volatile_functions((Node*)tle->expr) || !contain_var_clause((Node*)tle->expr) ||
             checkExprHasSetReturningFuncs((Node*)tle->expr)) {
             /*
@@ -16473,7 +16473,7 @@ make_window_input_target(PlannerInfo *root, PathTarget *final_target, List *acti
              */
             List* win_vars = pull_var_clause((Node*)expr, PVC_INCLUDE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
             add_new_columns_to_pathtarget(input_target, win_vars);
-            list_free_deep(win_vars);
+            list_free_ext(win_vars);
         } else if (contain_volatile_functions((Node*)expr) || !contain_var_clause((Node*)expr) ||
             checkExprHasSetReturningFuncs((Node*)expr)) {
             /*
