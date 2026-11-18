@@ -3875,7 +3875,7 @@ static void InitConfigureNamesString()
             CLIENT_CONN,
             gettext_noop("Spare Cpu that can not be used in thread pool."),
             NULL,
-            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            GUC_LIST_INPUT | GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.thread_pool_attr,
             "16, 2, (nobind)",
             NULL,
