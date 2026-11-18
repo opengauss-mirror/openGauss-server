@@ -235,3 +235,6 @@ test: insert_on_conflict_1
 
 # RECORD field deparsing for proven-dummy subqueries
 test: ruleutils_record
+
+# FunctionCallInfo initialization in vector execution
+test: vec_function_call

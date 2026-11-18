@@ -3642,10 +3642,10 @@ void HashJoinTbl::matchKey(ScalarVector* val, int rows, int hashValKeyIdx, int k
     uint8* flag = val->m_flag;
     int i;
     LOCAL_FCINFO(fc_info, 2);
-    fc_info->extra = NULL;
-    PGFunction cmp_fun = m_eqfunctions[key_num].fn_addr;
-
-    fc_info->flinfo = (m_eqfunctions + key_num);
+    OpExpr* clause = (OpExpr*)((ExprState*)list_nth(m_runtime->hashclauses, key_num))->expr;
+    InitFunctionCallInfoData(*fc_info, &m_eqfunctions[key_num], 2, clause->inputcollid, NULL, NULL);
+    fc_info->args[0].isnull = false;
+    fc_info->args[1].isnull = false;
 
     for (i = 0; i < rows; i++) {
         if (m_keyMatch[i] == true && m_cellCache[i] && NOT_NULL(m_cellCache[i]->m_val[hashValKeyIdx].flag)) {
@@ -3655,7 +3655,7 @@ void HashJoinTbl::matchKey(ScalarVector* val, int rows, int hashValKeyIdx, int k
                 } else {
                     fc_info->args[0].value = value[i];
                     fc_info->args[1].value = m_cellCache[i]->m_val[hashValKeyIdx].val;
-                    m_keyMatch[i] = cmp_fun(fc_info);
+                    m_keyMatch[i] = FunctionCallInvoke(fc_info);
                 }
             } else {
                 m_keyMatch[i] = false;

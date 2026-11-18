@@ -1347,11 +1347,14 @@ bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVecto
         notnull_check = notnull_check && ((cmpType)pVector->m_vals[pVectorIdx] == val);
     } else {
         LOCAL_FCINFO(fcinfo, 2);
-        fcinfo->extra = NULL;
+        Agg* node = (Agg*)m_runtime->ss.ps.plan;
+        InitFunctionCallInfoData(*fcinfo, &m_equalFuncs[keyIdx], 2,
+            node->grp_collations != NULL ? node->grp_collations[keyIdx] : InvalidOid, NULL, NULL);
         fcinfo->args[0].value = pVector->m_vals[pVectorIdx];
         fcinfo->args[1].value = val;
-        fcinfo->flinfo = (m_equalFuncs + keyIdx);
-        notnull_check = notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(fcinfo);
+        fcinfo->args[0].isnull = false;
+        fcinfo->args[1].isnull = false;
+        notnull_check = notnull_check && (bool)FunctionCallInvoke(fcinfo);
     }
 
     return (notnull_check || null_check);
@@ -1372,7 +1375,13 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
     bool null_check = false;
 
     LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
+    if (!simpleType) {
+        Agg* node = (Agg*)m_runtime->ss.ps.plan;
+        InitFunctionCallInfoData(*fcinfo, &m_equalFuncs[keyIdx], 2,
+            node->grp_collations != NULL ? node->grp_collations[keyIdx] : InvalidOid, NULL, NULL);
+        fcinfo->args[0].isnull = false;
+        fcinfo->args[1].isnull = false;
+    }
 
     for (int i = 0; i < cmpRows; i++) {
         /* only doing compare when match is true */
@@ -1387,8 +1396,7 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
             } else {
                 fcinfo->args[0].value = pVector->m_vals[m_suspectIdx[i]];
                 fcinfo->args[1].value = val;
-                fcinfo->flinfo = (m_equalFuncs + keyIdx);
-                m_match[i] = null_check || (notnull_check && (bool)m_equalFuncs[keyIdx].fn_addr(fcinfo));
+                m_match[i] = null_check || (notnull_check && (bool)FunctionCallInvoke(fcinfo));
             }
         }
     }

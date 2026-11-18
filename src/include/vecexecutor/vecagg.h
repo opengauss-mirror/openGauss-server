@@ -214,8 +214,10 @@ bool BaseAggRunner::match_key(VectorBatch* batch, int batchIdx, hashCell* cell)
     ScalarVector* pVector = NULL;
     hashVal* hashval = NULL;
     LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
-
+    Agg* node = (Agg*)m_runtime->ss.ps.plan;
+    if (node->aggstrategy == AGG_SORTED && node->groupingSets != NIL) {
+        node = m_runtime->phase->aggnode;
+    }
 
     for (i = 0; i < m_key; i++) {
         pVector = &batch->m_arr[m_keyIdx[i]];
@@ -228,10 +230,13 @@ bool BaseAggRunner::match_key(VectorBatch* batch, int batchIdx, hashCell* cell)
                 else
                     return false;
             } else {
+                InitFunctionCallInfoData(*fcinfo, &m_eqfunctions[i], 2,
+                    node->grp_collations != NULL ? node->grp_collations[i] : InvalidOid, NULL, NULL);
                 fcinfo->args[0].value = ScalarVector::Decode(pVector->m_vals[batchIdx]);
                 fcinfo->args[1].value = ScalarVector::Decode(hashval->val);
-                fcinfo->flinfo = (m_eqfunctions + i);
-                match = m_eqfunctions[i].fn_addr(fcinfo);
+                fcinfo->args[0].isnull = false;
+                fcinfo->args[1].isnull = false;
+                match = FunctionCallInvoke(fcinfo);
                 if (match == false)
                     return false;
             }

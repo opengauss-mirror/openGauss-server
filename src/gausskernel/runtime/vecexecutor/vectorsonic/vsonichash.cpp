@@ -440,9 +440,9 @@ void SonicHash::hashGeneralFunc(char* val, uint8* flag, int nval, uint32* res, F
     uint32 hash_val;
     containerType* arrval = (containerType*)val;
     uint32* res1 = res;
-    LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
-    fcinfo->flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 1);
+    InitFunctionCallInfoData(*fcinfo, hashFmgr, 1, InvalidOid, NULL, NULL);
+    fcinfo->args[0].isnull = false;
     PGFunction func = hashFmgr->fn_addr;
 
     for (int i = 0; i < nval; i++) {
