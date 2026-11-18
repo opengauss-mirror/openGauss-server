@@ -501,6 +501,29 @@ static void redirect_output(const char* prefix_name, const char* log_dir, int *c
     }
 }
 
+static char* CommandRepalloc(char* ptr, int oldSize, int newSize)
+{
+    if (newSize <= 0) {
+        if (ptr != NULL) {
+            pfree(ptr);
+        }
+        return NULL;
+    }
+
+    char* newPtr = (char*)palloc(newSize);
+    if (newPtr == NULL) {
+        return NULL;
+    }
+
+    if (ptr != NULL) {
+        errno_t rc = memcpy_s(newPtr, newSize, ptr, oldSize);
+        securec_check_c(rc, "\0", "\0");
+        pfree(ptr);
+    }
+
+    return newPtr;
+}
+
 void init_log(char* prefix_name)
 {
     char* gausslog_dir = NULL;
@@ -726,12 +749,21 @@ static void report_command(FILE *fp, auditConfig *audit_cfg) {
     bool is_success = audit_cfg->is_success;
 
     errno_t rc;
-    char command[MAXPGPATH] = {0};
+    size_t maxSize = MAXPGPATH;
+    size_t cmdSize = 0;
+    char* command = (char*)palloc(maxSize);
+    if (command == NULL) {
+        printf(_("palloc memory failed! %s\n"), gs_strerror(errno));
+        return;
+    }
 
-    rc = strcat_s(command, MAXPGPATH, process_name);
+    rc = memset_s(command, maxSize, 0, maxSize);
     securec_check_c(rc, "\0", "\0");
-    rc = strcat_s(command, MAXPGPATH, " ");
+    rc = strcat_s(command, maxSize, process_name);
     securec_check_c(rc, "\0", "\0");
+    rc = strcat_s(command, maxSize, " ");
+    securec_check_c(rc, "\0", "\0");
+    cmdSize += (strlen(process_name) + strlen(" "));
     
     bool is_pass = false;
     for (int i = 1; i<argc; i++) {
@@ -759,8 +791,9 @@ static void report_command(FILE *fp, auditConfig *audit_cfg) {
 
         /* Mask password in key=value conninfo strings (e.g. "host=... password=xxx dbname=...") */
         char *pw_pos = strstr(argv[i], "password=");
+        char sanitized[MAXPGPATH] = {0};
+        const char *argToAppend = argv[i];
         if (pw_pos != NULL) {
-            char sanitized[MAXPGPATH] = {0};
             size_t prefix_len = (size_t)(pw_pos - argv[i]) + strlen("password=");
             rc = strncpy_s(sanitized, MAXPGPATH, argv[i], prefix_len);
             securec_check_c(rc, "\0", "\0");
@@ -778,15 +811,30 @@ static void report_command(FILE *fp, auditConfig *audit_cfg) {
                 rc = strcat_s(sanitized, MAXPGPATH, val_end);
                 securec_check_c(rc, "\0", "\0");
             }
-            rc = strcat_s(command, MAXPGPATH, sanitized);
-        } else {
-            rc = strcat_s(command, MAXPGPATH, argv[i]);
+            argToAppend = sanitized;
         }
+        size_t appendSize = strlen(argToAppend);
+        if (i < argc - 1) {
+            appendSize += strlen(" ");
+        }
+        while (cmdSize + appendSize >= maxSize) {
+            int scale = 2;
+            char* newCommand = (char*)CommandRepalloc(command, maxSize, maxSize * scale);
+            maxSize = maxSize * scale;
+            if (newCommand == NULL) {
+                printf(_("CommandRepalloc memory failed! %s\n"), gs_strerror(errno));
+                pfree(command);
+                return;
+            }
+            command = newCommand;
+        }
+        rc = strcat_s(command, maxSize, argToAppend);
         securec_check_c(rc, "\0", "\0");
         if (i<argc - 1) {
-            rc = strcat_s(command, MAXPGPATH, " ");
+            rc = strcat_s(command, maxSize, " ");
             securec_check_c(rc, "\0", "\0");
         }
+        cmdSize += appendSize;
     }
 
     char current_localtime[LOG_MAX_TIMELEN] = {0};
@@ -798,6 +846,7 @@ static void report_command(FILE *fp, auditConfig *audit_cfg) {
     } else {
         (void)fprintf(fp, _("[%s] [%s] %s\n"), current_localtime, (is_success ? "SUCCESS" : "FAILURE"), command);
     }
+    pfree(command);
 }
 
 static void get_log_dir(const char *process_name, char *log_dir) {
