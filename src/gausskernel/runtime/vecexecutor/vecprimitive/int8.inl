@@ -301,7 +301,6 @@ vsint8_avg(PG_FUNCTION_ARGS)
 	int			nrows = pVector->m_rows;
 
 	/* left-hand and right-hand operand of addition  */
-        NullableDatum   args[2];
 	Datum		*leftdata = NULL;
 	Datum		*countdata = NULL;
 	uint8		leftflag;
@@ -313,7 +312,9 @@ vsint8_avg(PG_FUNCTION_ARGS)
 	int			ndatum;
 	
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	bictl		  ctl;
 	ctl.context = data->m_cxt;
 	
@@ -408,7 +409,9 @@ vector_abs(PG_FUNCTION_ARGS)
 	uint8* 	pflagsRes = (uint8*)(PG_GETARG_VECTOR(2)->m_flag);
 	int i;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	if (likely(pselection == NULL))
@@ -682,14 +685,15 @@ vint_stddev_samp(PG_FUNCTION_ARGS)
 	ScalarValue*  pVal = pVector->m_vals;
 	uint8*		  flag = pVector->m_flag;
 	int			  nrows = pVector->m_rows;
-        NullableDatum     args[2];
 	Datum		  result[2];
 	Datum		  bi_result;
 	Datum		*datumarray = NULL;
 	int			ndatum;
 	Datum		newval;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	bictl		  ctl;
 	Numeric		  leftarg, rightarg;	/* left-hand and right-hand operand of addition */
@@ -904,7 +908,9 @@ vnumeric_stddev_samp_final(PG_FUNCTION_ARGS)
 	
 	Datum	  arg[3];
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	Numeric tmp_arg;
 	

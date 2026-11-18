@@ -50,7 +50,9 @@ vnumeric_avg_final(PG_FUNCTION_ARGS)
 	uint8  *m_flag = (uint8*)PG_GETARG_DATUM(3);
 	
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	if(singlenode)
 	{
@@ -109,7 +111,9 @@ vnumeric_avg(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	Datum	      *datumarray = NULL;
 	int			   ndatum;
 	bictl		  ctl;
@@ -235,7 +239,6 @@ vsnumeric_avg_final(PG_FUNCTION_ARGS)
 	int 			nrows = pVector->m_rows;
 	uint8*			pflag = &pVector->m_flag[nrows];
 	ScalarValue*	pvals = &pVector->m_vals[nrows];
-        NullableDatum           args[2];
 	Datum			*countdata = NULL;
 	Datum			*leftdata = NULL;
 	
@@ -243,7 +246,9 @@ vsnumeric_avg_final(PG_FUNCTION_ARGS)
 	int				arrIndx,atomIndx;
 
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	nrows = nrows + 1;
 
 	arrIndx = getArrayIndx(dataIdx, data->m_nbit);
@@ -314,13 +319,14 @@ vsnumeric_avg(PG_FUNCTION_ARGS)
 	ScalarValue*	pVal = pVector->m_vals;
 	uint8*			flag = pVector->m_flag;
 	int				nrows = pVector->m_rows;
-        NullableDatum           args[2];
 	Datum			result;
 	Datum			*leftdata = NULL;
 	Datum			*countdata = NULL;
 	uint8			leftflag;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	bictl			ctl;
 	/* left-hand and right-hand operand of addition */
 	Numeric			leftarg, rightarg;	
@@ -459,7 +465,9 @@ vnumeric_op(PG_FUNCTION_ARGS)
 	Numeric		leftarg, rightarg;	// left-hand and right-hand operand of addition	
 	uint16		num1Flags, num2Flags;		// numeric flags of num1 and num2 
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	if(likely(pselection == NULL))
 	{
@@ -549,7 +557,9 @@ vnumeric_min_max(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	Numeric		  leftarg, rightarg;	// left-hand and right-hand operand of addition	
 	uint16		  num1Flags, num2Flags;		// numeric flags of num1 and num2 
 	int			  arg1, arg2, i;
@@ -623,11 +633,12 @@ vsnumeric_min_max(PG_FUNCTION_ARGS)
 	ScalarValue*	pVal = pVector->m_vals;
 	uint8*			flag = pVector->m_flag;
 	int				nrows = pVector->m_rows;
-        NullableDatum           args[2];
 	Datum			result;
 	Datum			*leftdata = NULL;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	/* left-hand and right-hand operand of addition */
 	Numeric			leftarg, rightarg;	
 	/* numeric flags of num1 and num2 */

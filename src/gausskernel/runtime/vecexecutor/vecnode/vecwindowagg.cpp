@@ -792,9 +792,10 @@ bool VecWinAggRuntime::MatchPeer(
     uint8 flag2;
     ScalarVector* vector1 = batch1->m_arr;
     ScalarVector* vector2 = batch2->m_arr;
+    WindowAgg* node = (WindowAgg*)m_winruntime->ss.ps.plan;
+    Oid* collations = is_ord ? node->ord_collations : node->part_collations;
+    FmgrInfo* eqfunctions = is_ord ? m_ordeqfunctions : m_parteqfunctions;
     LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
-    PGFunction eqfunc;
 
     for (i = 0; i < nkeys; i++) {
         val1 = vector1[keyIdx[i]].m_vals[idx1];
@@ -808,17 +809,13 @@ bool VecWinAggRuntime::MatchPeer(
                 else
                     return false;
             } else {
+                InitFunctionCallInfoData(*fcinfo, &eqfunctions[i], 2,
+                    collations != NULL ? collations[i] : InvalidOid, NULL, NULL);
                 fcinfo->args[0].value = ScalarVector::Decode(val1);
                 fcinfo->args[1].value = ScalarVector::Decode(val2);
-                if (is_ord) {
-                    fcinfo->flinfo = (m_ordeqfunctions + i);
-                    eqfunc = m_ordeqfunctions[i].fn_addr;
-                    match = eqfunc(fcinfo);
-                } else {
-                    fcinfo->flinfo = (m_parteqfunctions + i);
-                    eqfunc = m_parteqfunctions[i].fn_addr;
-                    match = eqfunc(fcinfo);
-                }
+                fcinfo->args[0].isnull = false;
+                fcinfo->args[1].isnull = false;
+                match = FunctionCallInvoke(fcinfo);
 
                 if (match == false)
                     return false;
@@ -1417,10 +1414,11 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
     Datum key1, key2;
     uint8 flag1, flag2;
     int nrows = batch->m_rows;
+    WindowAgg* node = (WindowAgg*)m_winruntime->ss.ps.plan;
+    Oid* collations = is_ord ? node->ord_collations : node->part_collations;
+    FmgrInfo* eqfunctions = is_ord ? m_ordeqfunctions : m_parteqfunctions;
     LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
     int idx = 0;
-    PGFunction eqfunc;
     errno_t rc;
     Assert(end <= nrows);
 
@@ -1432,6 +1430,12 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
 
     for (int i = 0; i < nkeys; i++) {
         vector = &batch->m_arr[keyIdx[i]];
+        if (!simple && vector->m_desc.encoded) {
+            InitFunctionCallInfoData(*fcinfo, &eqfunctions[i], 2,
+                collations != NULL ? collations[i] : InvalidOid, NULL, NULL);
+            fcinfo->args[0].isnull = false;
+            fcinfo->args[1].isnull = false;
+        }
         key1 = vector->m_vals[start];
         flag1 = vector->m_flag[start];
         idx = 1;
@@ -1448,15 +1452,7 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
                         fcinfo->args[0].value = ScalarVector::Decode(key1);
                         fcinfo->args[1].value = ScalarVector::Decode(key2);
 
-                        if (is_ord) {
-                            fcinfo->flinfo = (m_ordeqfunctions + i);
-                            eqfunc = m_ordeqfunctions[i].fn_addr;
-                            m_winSequence[idx] = eqfunc(fcinfo) ? 0 : 1;
-                        } else {
-                            fcinfo->flinfo = (m_parteqfunctions + i);
-                            eqfunc = m_parteqfunctions[i].fn_addr;
-                            m_winSequence[idx] = eqfunc(fcinfo) ? 0 : 1;
-                        }
+                        m_winSequence[idx] = FunctionCallInvoke(fcinfo) ? 0 : 1;
                     }
                 } else if (IS_NULL(flag1) && IS_NULL(flag2)) {
                     // not the same

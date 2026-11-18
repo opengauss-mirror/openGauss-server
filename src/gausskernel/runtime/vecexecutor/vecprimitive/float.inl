@@ -97,9 +97,11 @@ vfloat_avg_final(PG_FUNCTION_ARGS)
 	ArrayType  *transarray = NULL;
 	float8	   *transvalues = NULL;
 
-        NullableDatum arg;
         LOCAL_FCINFO(finfo, 3);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 3, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
+        finfo->args[2].isnull = false;
 
 	if(singlenode)
 	{
@@ -218,7 +220,9 @@ vfloat8_avg(PG_FUNCTION_ARGS)
 	int			  nrows = pVector1->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	ArrayType  *transarray = NULL;
 	float8	   *transvalues = NULL;
 
@@ -319,7 +323,9 @@ vfloat4_avg(PG_FUNCTION_ARGS)
 	int			  nrows = pVector1->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	ArrayType  *transarray = NULL;
 	float8	   *transvalues = NULL;
 	Datum		  pvalue;
@@ -418,7 +424,9 @@ vfloat_min_max(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	for(i = 0 ; i < nrows; i++)
@@ -460,7 +468,9 @@ vfloat_sum(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	for(i = 0 ; i < nrows; i++)
@@ -502,7 +512,9 @@ vfloat4_mop(PG_FUNCTION_ARGS)
 	int          i;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	if(likely(pselection == NULL))
@@ -564,7 +576,9 @@ vfloat8_mop(PG_FUNCTION_ARGS)
 	int          i;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	if(likely(pselection == NULL))

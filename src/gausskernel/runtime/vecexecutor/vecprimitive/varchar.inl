@@ -642,7 +642,10 @@ vbpchar(PG_FUNCTION_ARGS)
 	Datum			result;
 	int				i;
         LOCAL_FCINFO(finfo, 3);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, bpcharFunc == bpchar ? 3 : 1, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
+        finfo->args[2].isnull = false;
 
 	if (bpcharFunc == name_bpchar)
 	{
@@ -755,10 +758,9 @@ vtrim1(PG_FUNCTION_ARGS)
 	uint8			*ResultFlag = VecResult->m_flag;
 	Datum			result;
 	int				i;
-        LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
-
-        finfo->flinfo = fcinfo->flinfo;
+        LOCAL_FCINFO(finfo, 1);
+        InitFunctionCallInfoData(*finfo, fcinfo->flinfo, 1, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
 
 	if (pselection != NULL)
 	{

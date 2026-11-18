@@ -585,9 +585,9 @@ inline void hashBasedOperator::hashCellT(hashCell* cell, int keyIdx, FmgrInfo* h
 {
     hashVal val;
     ScalarValue hashV;
-    LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
-    fcinfo->flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 1);
+    InitFunctionCallInfoData(*fcinfo, hashFmgr, 1, InvalidOid, NULL, NULL);
+    fcinfo->args[0].isnull = false;
     PGFunction func = hashFmgr->fn_addr;
 
     for (int j = 0; j < nval; j++) {
@@ -617,9 +617,9 @@ inline void hashBasedOperator::hashColT(ScalarVector* val, FmgrInfo* hashFmgr, i
 {
     ScalarValue* value = val->m_vals;
     uint8* flag = val->m_flag;
-    LOCAL_FCINFO(fcinfo, 2);
-    fcinfo->extra = NULL;
-    fcinfo->flinfo = hashFmgr;
+    LOCAL_FCINFO(fcinfo, 1);
+    InitFunctionCallInfoData(*fcinfo, hashFmgr, 1, InvalidOid, NULL, NULL);
+    fcinfo->args[0].isnull = false;
     PGFunction func = hashFmgr->fn_addr;
     ScalarValue hashV;
 

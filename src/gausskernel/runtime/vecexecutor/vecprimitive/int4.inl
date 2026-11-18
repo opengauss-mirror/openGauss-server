@@ -105,7 +105,9 @@ vint_avg_final(PG_FUNCTION_ARGS)
 	ScalarValue*  pvals = (ScalarValue*)PG_GETARG_DATUM(2);
 	uint8  *pflag = (uint8*)PG_GETARG_DATUM(3);
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	if(singlenode)
 	{
@@ -173,14 +175,15 @@ vsint_avg_final(PG_FUNCTION_ARGS)
 	int		nrows = pVector->m_rows;
 	uint8*	pflag = &pVector->m_flag[nrows];
 	ScalarValue* pvals = &pVector->m_vals[nrows];
-        NullableDatum   args[2];
 	Datum	*leftdata = NULL;
 	Datum	*countdata = NULL;
 	uint8	leftflag;
 	int		arrIndx, atomIndx;
 
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 	nrows = nrows + 1;
 
@@ -256,7 +259,9 @@ vint_avg(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	ArrayType  *transarray = NULL;
 	VecInt8TransTypeData *transdata = NULL;
 	
@@ -351,7 +356,6 @@ vsint_avg(PG_FUNCTION_ARGS)
 	int			nrows = pVector->m_rows;
 	int			arrIndx, atomIndx;
 	
-        NullableDatum           args[2];
 	Datum		*leftdata = NULL;
 	Datum		*countdata = NULL;
 	uint8		leftflag;
@@ -360,7 +364,9 @@ vsint_avg(PG_FUNCTION_ARGS)
 	ArrayType  *transarray = NULL;
 	VecInt8TransTypeData *transdata = NULL;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	
 
 	for (i = 0; i < nrows; i++)
@@ -580,7 +586,9 @@ vtimetz_min_max(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	for(i = 0 ; i < nrows; i++)
@@ -631,7 +639,9 @@ vinterval_avg(PG_FUNCTION_ARGS)
 	int			  nrows = pVector->m_rows;
 	Datum		  result;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	Datum		  sum;
 	Datum			*transdatums = NULL;
 	int				ndatums;
@@ -713,7 +723,9 @@ vinterval_avg_final(PG_FUNCTION_ARGS)
 	uint8  *m_flag = (uint8*)PG_GETARG_DATUM(3);
 	
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 	Datum	   transdatums[2];
 	Interval	N;
 
@@ -770,7 +782,9 @@ vctid_sop(PG_FUNCTION_ARGS)
 	Oid     typeId2 = PG_GETARG_VECTOR(1)->m_desc.typeId;
 	int          i;
         LOCAL_FCINFO(finfo, 2);
-        finfo->extra = NULL;
+        InitFunctionCallInfoData(*finfo, NULL, 2, fcinfo->fncollation, NULL, NULL);
+        finfo->args[0].isnull = false;
+        finfo->args[1].isnull = false;
 
 
 	if(likely(pselection == NULL))
