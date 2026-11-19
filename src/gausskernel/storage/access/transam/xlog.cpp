@@ -2869,8 +2869,10 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
                                        t_thrd.xlog_cxt.openLogOff, (unsigned long)nbytes, TRANSLATE_ERRNO)));
             }
 
-            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes,
-                u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0, true);
+            if (PgstatThreadIoEnabled()) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes,
+                    u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0, true);
+            }
 
             if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
                 ++g_instance.wal_cxt.xlogFlushStats->writeTimes;
@@ -2909,8 +2911,10 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
                 INSTR_TIME_SET_CURRENT(endTime);
                 INSTR_TIME_SUBTRACT(endTime, startTime);
                 elapsedTime = INSTR_TIME_GET_MICROSEC(endTime);
-                pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
-                    u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
+                if (PgstatThreadIoEnabled()) {
+                    pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                        u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
+                }
                 /* Add statistics */
                 if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
                     ++g_instance.wal_cxt.xlogFlushStats->syncTimes;
@@ -3599,8 +3603,10 @@ void XLogDoFlush()
         INSTR_TIME_SET_CURRENT(endTime);
         INSTR_TIME_SUBTRACT(endTime, startTime);
         elapsedTime = INSTR_TIME_GET_MICROSEC(endTime);
-        pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
-            u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io_fsync(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                u_sess->attr.attr_common.track_io_timing ? (uint64)elapsedTime : 0);
+        }
         if (g_instance.wal_cxt.xlogFlushStats->statSwitch) {
             ++g_instance.wal_cxt.xlogFlushStats->syncTimes;
             g_instance.wal_cxt.xlogFlushStats->totalSyncTime += elapsedTime;
@@ -11018,11 +11024,13 @@ void StartupXLOG(void)
                 /* Handle interrupt signals of startup process */
                 RedoInterruptCallBack();
 
-                TimestampTz threadioNow = GetCurrentTimestamp();
-                if (threadioLastFlush == 0 ||
-                    TimestampDifferenceExceeds(threadioLastFlush, threadioNow, threadioFlushIntervalMs)) {
-                    threadioLastFlush = threadioNow;
-                    pgstat_send_threadio_stats();
+                if (PgstatThreadIoEnabled()) {
+                    TimestampTz threadioNow = GetCurrentTimestamp();
+                    if (threadioLastFlush == 0 ||
+                        TimestampDifferenceExceeds(threadioLastFlush, threadioNow, threadioFlushIntervalMs)) {
+                        threadioLastFlush = threadioNow;
+                        pgstat_send_threadio_stats();
+                    }
                 }
 
                 /*
@@ -18039,7 +18047,9 @@ bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char *readBu
                             XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
                             t_thrd.xlog_cxt.readOff, INT2ULONG(reqLen), TRANSLATE_ERRNO)));
         }
-        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, timer.elapsed_us(), false);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)readbytes, timer.elapsed_us(), false);
+        }
     }
 
     t_thrd.xlog_cxt.readOff += reqLen;
@@ -18866,7 +18876,9 @@ try_again:
             }
             goto next_record_is_invalid;
         }
-        pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)ret, timer.elapsed_us(), false);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)ret, timer.elapsed_us(), false);
+        }
     }
     Assert(targetSegNo == t_thrd.xlog_cxt.readSegNo);
     Assert(targetPageOff == t_thrd.xlog_cxt.readOff);
@@ -20829,8 +20841,10 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
             actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
                                         t_thrd.xlog_cxt.readOff);
             if (actualBytes == t_thrd.xlog_cxt.readLen) {
-                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
-                    false);
+                if (PgstatThreadIoEnabled()) {
+                    pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
+                        false);
+                }
             }
         }
     } else {
@@ -21207,8 +21221,10 @@ retry:
             actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
                                         t_thrd.xlog_cxt.readOff);
             if (actualBytes == t_thrd.xlog_cxt.readLen) {
-                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
-                    false);
+                if (PgstatThreadIoEnabled()) {
+                    pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(),
+                        false);
+                }
             }
         }
     } else {
@@ -21633,7 +21649,10 @@ retry:
         ThreadIoTimer timer;
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
         if (actualBytes == XLOG_BLCKSZ) {
-            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)actualBytes, timer.elapsed_us(), false);
+            if (PgstatThreadIoEnabled()) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                    (uint64)actualBytes, timer.elapsed_us(), false);
+            }
         }
     }
     if (actualBytes != XLOG_BLCKSZ) {

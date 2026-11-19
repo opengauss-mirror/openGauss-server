@@ -937,6 +937,10 @@ void pgstat_send_threadio_stats(void)
     int context_id;
     errno_t rc;
 
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     static const PgStat_ThreadIOStats all_zeroes = {0};
     knl_thread_io_role io_role = get_knl_thread_io_role(t_thrd.role);
 
@@ -993,6 +997,10 @@ void pgstat_send_threadio_stats(void)
  */
 void pgstat_flush_threadio_stats(void)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     TimestampTz now = GetCurrentTimestamp();
     if (!TimestampDifferenceExceeds(u_sess->stat_cxt.last_threadio_report, now, PGSTAT_STAT_INTERVAL))
         return;
@@ -1005,6 +1013,10 @@ static bool pgstat_have_pending_thread_io(void)
     static const PgStat_ThreadIOStats all_zeroes = {0};
     int object_id;
     int context_id;
+
+    if (!PgstatThreadIoEnabled()) {
+        return false;
+    }
 
     for (object_id = 0; object_id < THREAD_IO_OBJECT_MAX; object_id++) {
         for (context_id = 0; context_id < THREAD_IO_CONTEXT_MAX; context_id++) {

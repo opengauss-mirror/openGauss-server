@@ -97,4 +97,18 @@ typedef enum ThreadIOObjectType {
     THREAD_IO_OBJECT_MAX
 } ThreadIOObjectType;
 
+/*
+ * Thread IO statistics gating policy: collection is gated on
+ * enable_wdr_snapshot via the inline PgstatThreadIoEnabled() in
+ * knl/knl_thread.h, so that IO hot paths stay free of instrumentation
+ * overhead when WDR is disabled. The gate is applied at two layers on
+ * purpose: call sites wrap each track call to skip the call entirely
+ * (zero-overhead path when disabled), while the track functions themselves
+ * keep the same check as a fallback for any future call site that forgets
+ * the wrapper. Do not remove either layer. Both consumers of these
+ * statistics (WDR Instance IO report cards and the runtime IO views)
+ * require enable_wdr_snapshot to be on; this coupling is intentional to
+ * avoid introducing an extra GUC.
+ */
+
 #endif /* PGSTAT_THREADIO_STATS_H */

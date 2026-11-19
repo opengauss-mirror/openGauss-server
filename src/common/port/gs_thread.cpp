@@ -50,6 +50,7 @@
 #include "gs_thread.h"
 #include "gssignal/gs_signal.h"
 #include "utils/pg_locale.h"
+#include "pgstat_threadio_stats.h"
 #include "gs_policy/policy_common.h"
 #ifdef ENABLE_GSS
 #include "gssapi/gssapi_krb5.h"
@@ -953,12 +954,20 @@ static inline void accum_thread_io_time(uint64 io_cost_us, int64 *total_time, in
         *max_time = (int64)io_cost_us;
 }
 
+/*
+ * See the gating policy comment in pgstat_threadio_stats.h; the gate is
+ * the inline PgstatThreadIoEnabled() in knl/knl_thread.h.
+ */
 void pgstat_track_thread_io(ThreadIOObjectType obj_type,
                             ThreadIOContextType ctx_type,
                             uint64 io_bytes,
                             uint64 io_cost_us,
                             bool isWrite)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     if (!isWrite) {
         stat->num_reads++;
@@ -974,6 +983,10 @@ void pgstat_track_thread_io(ThreadIOObjectType obj_type,
 void pgstat_track_thread_io_writeback(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_blocks,
     uint64 io_cost_us)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->writebacks += io_blocks;
     accum_thread_io_time(io_cost_us, &stat->writeback_time, &stat->max_writeback_time);
@@ -982,6 +995,10 @@ void pgstat_track_thread_io_writeback(ThreadIOObjectType obj_type, ThreadIOConte
 void pgstat_track_thread_io_extend(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_bytes,
     uint64 io_cost_us)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->extend_bytes += io_bytes;
     accum_thread_io_time(io_cost_us, &stat->extend_time, &stat->max_extend_time);
@@ -989,6 +1006,10 @@ void pgstat_track_thread_io_extend(ThreadIOObjectType obj_type, ThreadIOContextT
 
 void pgstat_track_thread_io_fsync(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type, uint64 io_cost_us)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->fsyncs++;
     stat->total_fsync_time += io_cost_us;
@@ -996,18 +1017,30 @@ void pgstat_track_thread_io_fsync(ThreadIOObjectType obj_type, ThreadIOContextTy
 
 void pgstat_track_thread_io_hit(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->hits++;
 }
 
 void pgstat_track_thread_io_evict(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->evictions++;
 }
 
 void pgstat_track_thread_io_reuse(ThreadIOObjectType obj_type, ThreadIOContextType ctx_type)
 {
+    if (!PgstatThreadIoEnabled()) {
+        return;
+    }
+
     PgStat_ThreadIOStats *stat = get_local_thread_io_stat(obj_type, ctx_type);
     stat->reuses++;
 }

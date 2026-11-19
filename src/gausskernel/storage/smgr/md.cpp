@@ -723,9 +723,11 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
         CfsExtendExtent(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
                         forknum, blocknum, buffer, COMMON_STORAGE);
         time_diff = timer.elapsed_us();
-        pgstat_track_thread_io_extend(
-            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io_extend(
+                RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+                t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
+        }
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -761,9 +763,11 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
         }
 
         time_diff = timer.elapsed_us();
-        pgstat_track_thread_io_extend(
-            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io_extend(
+                RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+                t_thrd.cur_thread_io_context, BLCKSZ, time_diff);
+        }
     }
 
     /* report the extend write to the file IO statistics (see mdwrite; extend used to bypass them) */
@@ -969,9 +973,11 @@ void mdzeroextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, i
         curblocknum += numblocks;
     }
 
-    pgstat_track_thread_io_extend(
-        RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-        t_thrd.cur_thread_io_context, (uint64)nblocks * BLCKSZ, timer.elapsed_us());
+    if (PgstatThreadIoEnabled()) {
+        pgstat_track_thread_io_extend(
+            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+            t_thrd.cur_thread_io_context, (uint64)nblocks * BLCKSZ, timer.elapsed_us());
+    }
 
     /* report the zeroextend write to the file IO statistics (used to bypass them) */
     PgStat_MsgFile msg;
@@ -1173,9 +1179,11 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
             if (nflushed == InvalidBlockNumber) {
                 return;
             }
-            pgstat_track_thread_io_writeback(
-                RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-                t_thrd.cur_thread_io_context, (uint64)nflushed, timer.elapsed_us());
+            if (PgstatThreadIoEnabled()) {
+                pgstat_track_thread_io_writeback(
+                    RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+                    t_thrd.cur_thread_io_context, (uint64)nflushed, timer.elapsed_us());
+            }
 
             nblocks -= nflushed;
             blocknum += nflushed;
@@ -1212,9 +1220,11 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
 
         ThreadIoTimer timer;
         FileWriteback(v->mdfd_vfd, seekpos, (off_t)BLCKSZ * nflush);
-        pgstat_track_thread_io_writeback(
-            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, (uint64)nflush, timer.elapsed_us());
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io_writeback(
+                RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+                t_thrd.cur_thread_io_context, (uint64)nflush, timer.elapsed_us());
+        }
 
         nblocks -= nflush;
         blocknum += nflush;
@@ -1451,9 +1461,11 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
                        (size_t)dList[i]->blockDesc.blockSize, offset);
         dList[i]->aiocb.aio_reqprio = CompltrPriority(dList[i]->blockDesc.reqType);
 
-        pgstat_track_thread_io(
-            RelFileNodeBackendIsTemp(smgr_rel->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-            t_thrd.cur_thread_io_context, (uint64)dList[i]->blockDesc.blockSize, 0, true);
+        if (PgstatThreadIoEnabled()) {
+            pgstat_track_thread_io(
+                RelFileNodeBackendIsTemp(smgr_rel->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+                t_thrd.cur_thread_io_context, (uint64)dList[i]->blockDesc.blockSize, 0, true);
+        }
 
         START_CRIT_SECTION();
         if (dList[i]->blockDesc.descType == AioWrite) {
@@ -1647,9 +1659,12 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     (void)INSTR_TIME_SET_CURRENT(endTime);
     INSTR_TIME_SUBTRACT(endTime, startTime);
     timeDiff = INSTR_TIME_GET_MICROSEC(endTime);
-    pgstat_track_thread_io(RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-        t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0),
-        u_sess->attr.attr_common.track_io_timing ? (uint64)timeDiff : 0, false);
+    if (PgstatThreadIoEnabled()) {
+        pgstat_track_thread_io(
+            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+            t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0),
+            u_sess->attr.attr_common.track_io_timing ? (uint64)timeDiff : 0, false);
+    }
     if (msgCount == 0) {
         lstFile = reln->smgr_rnode.node.relNode;
         lstDb = reln->smgr_rnode.node.dbNode;
@@ -1781,8 +1796,11 @@ void mdreadbatch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, in
         }
     }
 
-    pgstat_track_thread_io(RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-        t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0), timer.elapsed_us(), false);
+    if (PgstatThreadIoEnabled()) {
+        pgstat_track_thread_io(
+            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+            t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0), timer.elapsed_us(), false);
+    }
 }
 
 /*
@@ -1857,9 +1875,12 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     time_diff = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(end_time);
 #endif
 
-    pgstat_track_thread_io(RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
-        t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0),
-        u_sess->attr.attr_common.track_io_timing ? (uint64)time_diff : 0, true);
+    if (PgstatThreadIoEnabled()) {
+        pgstat_track_thread_io(
+            RelFileNodeBackendIsTemp(reln->smgr_rnode) ? IO_OBJECT_TEMP_RELATION : IO_OBJECT_RELATION,
+            t_thrd.cur_thread_io_context, (uint64)(nbytes > 0 ? nbytes : 0),
+            u_sess->attr.attr_common.track_io_timing ? (uint64)time_diff : 0, true);
+    }
 
     if (msg_count == 0) {
         lst_file = reln->smgr_rnode.node.relNode;
@@ -2457,7 +2478,9 @@ int SyncMdFile(const FileTag *ftag, char *path)
     /* Try to fsync the file. */
     ThreadIoTimer timer;
     result = FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
-    pgstat_track_thread_io_fsync(IO_OBJECT_RELATION, IO_CONTEXT_NORMAL, timer.elapsed_us());
+    if (PgstatThreadIoEnabled()) {
+        pgstat_track_thread_io_fsync(IO_OBJECT_RELATION, IO_CONTEXT_NORMAL, timer.elapsed_us());
+    }
     savedErrno = errno;
     if (needClose) {
         FileClose(file);

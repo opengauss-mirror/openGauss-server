@@ -656,8 +656,10 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
                 if (fileBytes <= 0) {
                     break;
                 }
-                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
-                    (uint64)fileBytes, read_timer.elapsed_us(), false);
+                if (PgstatThreadIoEnabled()) {
+                    pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL,
+                        (uint64)fileBytes, read_timer.elapsed_us(), false);
+                }
 
                 {
                     ThreadIoTimer write_timer;
@@ -665,8 +667,10 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
                         close(fdSrc);
                         ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", archPath)));
                     }
-                    pgstat_track_thread_io(IO_OBJECT_ARCHIVE, IO_CONTEXT_NORMAL,
-                        (uint64)fileBytes, write_timer.elapsed_us(), true);
+                    if (PgstatThreadIoEnabled()) {
+                        pgstat_track_thread_io(IO_OBJECT_ARCHIVE, IO_CONTEXT_NORMAL,
+                            (uint64)fileBytes, write_timer.elapsed_us(), true);
+                    }
                 }
                 (void)memset_s(pbuff, sizeof(pbuff), 0, sizeof(pbuff));
             }

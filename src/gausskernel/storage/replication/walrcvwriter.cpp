@@ -221,8 +221,10 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
         uint64 elapsedTime = (uint64)INSTR_TIME_GET_MICROSEC(endTime);
 
         if (byteswritten > 0) {
-            pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
-                u_sess->attr.attr_common.track_io_timing ? elapsedTime : 0, true);
+            if (PgstatThreadIoEnabled()) {
+                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
+                    u_sess->attr.attr_common.track_io_timing ? elapsedTime : 0, true);
+            }
         }
 
         if (g_instance.wal_cxt.walRecvWriterStats->isEnableStat) {
@@ -1291,8 +1293,10 @@ static void XLogWalRcvWriteFromUwal(WalRcvCtlBlock *walrcb, char *buf, Size nbyt
             ThreadIoTimer timer;
             byteswritten = write(recvFile, buf, segbytes);
             if (byteswritten > 0) {
-                pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
-                    timer.elapsed_us(), true);
+                if (PgstatThreadIoEnabled()) {
+                    pgstat_track_thread_io(IO_OBJECT_WAL, IO_CONTEXT_NORMAL, (uint64)byteswritten,
+                        timer.elapsed_us(), true);
+                }
             }
         }
         if (byteswritten <= 0) {
