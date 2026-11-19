@@ -434,28 +434,42 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     RelationSyncEntry *relentry;
     Oid relrewrite = RelationGetRelrewriteOption(relation);
     bool table_rewrite = false;
+    Relation rewriteRelation = NULL;
     TransactionId xid = t_thrd.publication_cxt.inStreaming ? change->txn->xid : InvalidTransactionId;
 
     if (OidIsValid(relrewrite)) {
         table_rewrite = true;
-        relation = RelationIdGetRelation(relrewrite);
+        rewriteRelation = RelationIdGetRelation(relrewrite);
+        if (!RelationIsValid(rewriteRelation)) {
+            return;
+        }
+        relation = rewriteRelation;
     
         if (REORDER_BUFFER_CHANGE_INSERT == change->action) {
             Oid replidindex = RelationGetReplicaIndex(relation);
             if (!OidIsValid(replidindex)) {
+                RelationClose(rewriteRelation);
                 return;
             }
         } else if (REORDER_BUFFER_CHANGE_UPDATE != change->action) {
+            RelationClose(rewriteRelation);
             return;
         }
     }
 
-    if (!is_publishable_relation(relation))
+    if (!is_publishable_relation(relation)) {
+        if (RelationIsValid(rewriteRelation)) {
+            RelationClose(rewriteRelation);
+        }
         return;
+    }
 
     relentry = get_rel_sync_entry(data, RelationGetRelid(relation));
     /* First check the table filter */
     if (!CheckAction(change->action, relentry->pubactions)) {
+        if (RelationIsValid(rewriteRelation)) {
+            RelationClose(rewriteRelation);
+        }
         return;
     }
 
@@ -464,6 +478,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
      * message.
      */
     if (table_rewrite && relentry->pubactions.pubddl == PUBDDL_NONE) {
+        RelationClose(rewriteRelation);
         return;
     }
 
@@ -550,6 +565,10 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     /* Cleanup */
     MemoryContextSwitchTo(old);
     MemoryContextReset(data->common.context);
+
+    if (RelationIsValid(rewriteRelation)) {
+        RelationClose(rewriteRelation);
+    }
 }
 
 static void pgoutput_truncate(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,

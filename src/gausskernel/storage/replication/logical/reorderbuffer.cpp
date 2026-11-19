@@ -1709,7 +1709,7 @@ static void ReorderBufferMaybeMarkTXNStreamed(ReorderBuffer *rb, ReorderBufferTX
  * time.
  */
 static void ReorderBufferTruncateTXN(
-    ReorderBuffer *rb, ReorderBufferTXN *txn, bool txnPrepared)
+    ReorderBuffer *rb, ReorderBufferTXN *txn, bool txnPrepared, bool markSubtxnsStreamed)
 {
     dlist_mutable_iter iter;
     Size mem_freed = 0;
@@ -1729,8 +1729,9 @@ static void ReorderBufferTruncateTXN(
         Assert(rbtxn_is_known_subxact(subtxn));
         Assert(subtxn->nsubtxns == 0);
 
-        ReorderBufferMaybeMarkTXNStreamed(rb, subtxn);
-        ReorderBufferTruncateTXN(rb, subtxn, txnPrepared);
+        if (markSubtxnsStreamed)
+            ReorderBufferMaybeMarkTXNStreamed(rb, subtxn);
+        ReorderBufferTruncateTXN(rb, subtxn, txnPrepared, markSubtxnsStreamed);
     }
 
     /* cleanup changes in the txn */
@@ -1841,9 +1842,10 @@ static bool ReorderBufferCheckAndTruncateAbortedTXN(ReorderBuffer *rb, ReorderBu
     /*
      * The transaction aborted. We discard both the changes collected so far
      * and the toast reconstruction data. The full cleanup will happen as part
-     * of decoding ABORT record of this transaction.
+     * of decoding ABORT record of this transaction. Discarding buffered changes
+     * must not mark unstreamed subtransactions as streamed.
      */
-    ReorderBufferTruncateTXN(rb, txn, false);
+    ReorderBufferTruncateTXN(rb, txn, false, false);
     ReorderBufferToastReset(rb, txn);
 
     /* All changes should be discarded */
@@ -1871,7 +1873,7 @@ static void ReorderBufferResetTXN(
     CommandId command_id, XLogRecPtr last_lsn)
 {
     /* Discard the changes that we just streamed */
-    ReorderBufferTruncateTXN(rb, txn, false);
+    ReorderBufferTruncateTXN(rb, txn, false, true);
 
     /* Free all resources allocated for toast reconstruction */
     ReorderBufferToastReset(rb, txn);
@@ -2537,7 +2539,7 @@ static void ReorderBufferProcessTXN(
          */
         if (streaming) {
             ReorderBufferMaybeMarkTXNStreamed(rb, txn);
-            ReorderBufferTruncateTXN(rb, txn, false);
+            ReorderBufferTruncateTXN(rb, txn, false, true);
             /* Reset the CheckXidAlive */
             u_sess->utils_cxt.CheckXidAlive = InvalidTransactionId;
         } else {
