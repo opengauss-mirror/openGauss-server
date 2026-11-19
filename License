@@ -52,8 +52,8 @@
 
 3， 请将如下声明文本放入每个源文件的头部注释中。
 
-Copyright (c) [Year] [name of copyright holder]
-[Software Name] is licensed under Mulan PSL v2.
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+openGauss-server is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
          http://license.coscl.org.cn/MulanPSL2
@@ -61,7 +61,10 @@ THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
+
+
 Mulan Permissive Software License，Version 2
+
 Mulan Permissive Software License，Version 2 (Mulan PSL v2)
 
 January 2020 http://license.coscl.org.cn/MulanPSL2
@@ -90,7 +93,7 @@ Subject to the terms and conditions of this License, each Contributor hereby gra
 
 3. No Trademark License
 
-No trademark license is granted to use the trade names, trademarks, service marks, or product names of Contributor, except as required to fulfill notice requirements in section 4.
+No trademark license is granted to use the trade names, trademarks, service marks, or product names of Contributor, except as required to fulfill notice requirements in Section 4.
 
 4. Distribution Restriction
 
@@ -108,13 +111,16 @@ END OF THE TERMS AND CONDITIONS
 
 How to Apply the Mulan Permissive Software License，Version 2 (Mulan PSL v2) to Your Software
 
-To apply the Mulan PSL v2 to your work, for easy identification by recipients, you are suggested to complete following three steps:
+   To apply the Mulan PSL v2 to your work, for easy identification by recipients, you are suggested to complete following three steps:
 
-Fill in the blanks in following statement, including insert your software name, the year of the first publication of your software, and your name identified as the copyright owner;
-Create a file named "LICENSE" which contains the whole context of this License in the first directory of your software package;
-Attach the statement to the appropriate annotated syntax at the beginning of each source file.
-Copyright (c) [Year] [name of copyright holder]
-[Software Name] is licensed under Mulan PSL v2.
+   i Fill in the blanks in following statement, including insert your software name, the year of the first publication of your software, and your name identified as the copyright owner;
+
+   ii Create a file named "LICENSE" which contains the whole context of this License in the first directory of your software package;
+
+   iii Attach the statement to the appropriate annotated syntax at the beginning of each source file.
+
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+openGauss-server is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
          http://license.coscl.org.cn/MulanPSL2
