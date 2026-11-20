@@ -337,6 +337,7 @@ static bool isNeedGetLCName = true;
 #define PM_BUSY_ALARM_US 1000000L
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
+#define TDE_CACHE_POLL_INTERVAL_US (SECS_PER_MINUTE * USECS_PER_SEC)
 #define CHECK_TIMES 10
 #define InvalidPid ((ThreadId)(-1))
 
@@ -4854,7 +4855,7 @@ static int ServerLoop(void)
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
             /* TDE cache watchdog */
             current_poll_time = mc_timers_us();
-            if ((current_poll_time - last_poll_time) >= PM_POLL_TIMEOUT_MINUTE) {
+            if ((current_poll_time - last_poll_time) >= TDE_CACHE_POLL_INTERVAL_US) {
                 TDE::TDEKeyStorage::get_instance().cache_watch_dog();
                 last_poll_time = current_poll_time;
             }

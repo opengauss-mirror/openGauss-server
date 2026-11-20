@@ -363,6 +363,9 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
         }
         (void)syscalllockRelease(&read_cipher_lock);
         return true;
+    } else if (mode == TDE_MODE) {
+        global_rand_file = &g_rand_file_content[TDE_KEY_TYPE];
+        global_cipher_file = &g_cipher_file_content[TDE_KEY_TYPE];
     } else if (mode == GDS_MODE) {
         global_rand_file = &g_rand_file_content[GDS_SSL_TYPE];
         global_cipher_file = &g_cipher_file_content[GDS_SSL_TYPE];
@@ -475,7 +478,7 @@ static bool isModeExists(KeyMode mode)
         mode != SERVER_ENC_MODE && mode != CLIENT_ENC_MODE && 
 #endif
         mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE &&
-        mode != USER_MAPPING_MODE && mode != SUBSCRIPTION_MODE && mode != OGAI_MODE) {
+        mode != USER_MAPPING_MODE && mode != SUBSCRIPTION_MODE && mode != OGAI_MODE && mode != TDE_MODE) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("AK/SK encrypt/decrypt encounters invalid key mode.\n"));
         return false;
@@ -819,7 +822,7 @@ bool decode_cipher_files(
     }
 
     /* in server_mode,read the files begin with server% */
-    if (mode == SERVER_MODE || mode == GDS_MODE) {
+    if (mode == SERVER_MODE || mode == GDS_MODE || mode == TDE_MODE) {
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", datadir, CIPHER_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", datadir, RAN_KEY_FILE);

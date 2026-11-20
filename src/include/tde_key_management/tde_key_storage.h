@@ -43,7 +43,7 @@ public:
     bool empty();
 
     bool insert_cache(TDECacheEntry* tde_cache_entry);
-    char* search_cache(const char* dek_cipher);
+    bool search_cache(const char* dek_cipher, char* dek_plaintext, Size output_size);
     void cache_watch_dog();
     void clean_cache_entry_value(char* dek_plaintext);
     void reset_dek_plaintext(char* dek_plaintext);
@@ -53,6 +53,7 @@ private:
     ~TDEKeyStorage();
     static uint32 tde_cache_entry_hash_func(const void* key, Size keysize);
     static int tde_cache_entry_match_func(const void* key1, const void* key2, Size keySize);
+    void remove_cache_entry(TDECacheEntry* entry);
 
 private:
     MemoryContext tde_cache_mem;

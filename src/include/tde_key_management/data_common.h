@@ -118,7 +118,7 @@ typedef struct {
     char* key_cipher;
     /* dek_plaintext and timestamp are values */
     char* dek_plaintext;
-    TimestampTz timestamp;
+    TimestampTz timestamp;       /* insertion time: fixed one-hour expiry, never refreshed */
 } TDECacheEntry;
 
 /* TDE buffer cache entry key is RelFileNode  value is TdeInfo */

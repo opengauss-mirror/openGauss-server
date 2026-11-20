@@ -110,6 +110,7 @@
 #include "gtm/gtm_client.h"
 #include "miscadmin.h"
 #include "tde_key_management/tde_key_manager.h"
+#include "storage/ipc.h"
 #include "tde_key_management/tde_key_storage.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -22289,29 +22290,41 @@ static void ATExecEncryptionKeyRotation(Relation rel, LOCKMODE lockmode)
 {
     List* tde_reloption = NULL;
     char* dek_cipher = NULL;
-    const TDEData* tde_data = NULL;
+    char* cmk_id = NULL;
     errno_t rc = EOK;
 
     /* get new tde info */
-    TDEKeyManager *tde_key_manager= New(CurrentMemoryContext) TDEKeyManager();
-    tde_key_manager->init();
-    tde_data = tde_key_manager->create_dek();
+    TDEKeyManager* volatile tde_key_manager = NULL;
+    PG_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+    {
+        tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+        tde_key_manager->init();
+        const TDEData* tde_data = tde_key_manager->create_dek();
 
-    dek_cipher = (char*)palloc0(strlen(tde_data->dek_cipher) + 1);
-    rc = memcpy_s(dek_cipher, (strlen(tde_data->dek_cipher) + 1), tde_data->dek_cipher,
-        (strlen(tde_data->dek_cipher) + 1));
-    securec_check(rc, "\0", "\0");
+        dek_cipher = (char*)palloc0(strlen(tde_data->dek_cipher) + 1);
+        rc = memcpy_s(dek_cipher, (strlen(tde_data->dek_cipher) + 1), tde_data->dek_cipher,
+            (strlen(tde_data->dek_cipher) + 1));
+        securec_check(rc, "\0", "\0");
+        cmk_id = (char*)palloc0(strlen(tde_data->cmk_id) + 1);
+        rc = memcpy_s(cmk_id, (strlen(tde_data->cmk_id) + 1), tde_data->cmk_id,
+            (strlen(tde_data->cmk_id) + 1));
+        securec_check(rc, "\0", "\0");
 
-    /* encryption key rotation */
-    tde_reloption = list_make1(makeDefElem("dek_cipher", (Node*)makeString(dek_cipher)));
-    ATExecSetRelOptions(rel, tde_reloption, AT_SetRelOptions, lockmode, true);
-    ereport(LOG, (errmsg("TDE key rotation success"), errdetail("check TDE table info dek_cipher is changed")));
-    /* sync TDE storage hash table */
-    if (IS_PGXC_DATANODE) {
-        tde_key_manager->save_key(tde_data);
+        /* Update both fields: the new DEK envelope is protected by this CMK_ID. */
+        tde_reloption = list_make2(makeDefElem("dek_cipher", (Node*)makeString(dek_cipher)),
+            makeDefElem("cmk_id", (Node*)makeString(cmk_id)));
+        ATExecSetRelOptions(rel, tde_reloption, AT_SetRelOptions, lockmode, true);
+        ereport(LOG, (errmsg("TDE key rotation success"),
+            errdetail("check TDE table DEK envelope and CMK_ID are changed")));
+        /* sync TDE storage hash table */
+        if (IS_PGXC_DATANODE) {
+            tde_key_manager->save_key(tde_data);
+        }
     }
-    DELETE_EX2(tde_key_manager);
+    PG_END_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+    TDEKeyManager::cleanup(0, PointerGetDatum(&tde_key_manager));
     pfree_ext(dek_cipher);
+    pfree_ext(cmk_id);
 }
 
 /*

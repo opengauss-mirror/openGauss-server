@@ -40,7 +40,6 @@ void TDEKeyStorage::init()
     if (tde_cache != NULL) {
         return;
     }
-
     HASHCTL tde_ctl;
     errno_t rc = memset_s(&tde_ctl, sizeof(tde_ctl), 0, sizeof(tde_ctl));
     securec_check(rc, "", "");
@@ -76,9 +75,7 @@ int TDEKeyStorage::tde_cache_entry_match_func(const void* key1, const void* key2
     /* de-reference char ** to char * to do comparison */
     const char *dek1 = *(char **)key1;
     const char *dek2 = *(char **)key2;
-    int dek1_len = strlen(dek1);
-    int dek2_len = strlen(dek2);
-    return (strncmp(dek1, dek2, ((dek1_len > dek2_len) ? dek1_len : dek2_len)));
+    return strcmp(dek1, dek2);
 }
 
 TDEKeyStorage::TDEKeyStorage()
@@ -98,10 +95,7 @@ TDEKeyStorage::~TDEKeyStorage()
 
 bool TDEKeyStorage::empty()
 {
-    if (tde_cache == NULL) {
-        return true;
-    }
-    return false;
+    return tde_cache == NULL;
 }
 
 void TDEKeyStorage::reset()
@@ -123,12 +117,7 @@ void TDEKeyStorage::clear()
         hash_seq_init(&scan_state, tde_cache);
         TDECacheEntry* item = NULL;
         while ((item = reinterpret_cast<TDECacheEntry*>(hash_seq_search(&scan_state))) != NULL) {
-            clean_cache_entry_value(item->dek_plaintext);
-            if (hash_search(tde_cache, (const void*)&item->key_cipher, HASH_REMOVE, NULL) == NULL) {
-                LWLockRelease(TDEKeyCacheLock);
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("TDE Key storage clear cache: remove entry failed")));
-            }
+            remove_cache_entry(item);
         }
         LWLockRelease(TDEKeyCacheLock);
     }
@@ -151,64 +140,92 @@ void TDEKeyStorage::clean_cache_entry_value(char* dek_plaintext)
 
 bool TDEKeyStorage::insert_cache(TDECacheEntry* tde_cache_entry)
 {
-    bool found = false;
-    errno_t rc = EOK;
-
-    MemoryContext old = MemoryContextSwitchTo(tde_cache_mem);
-    /* build tde cache key */
-    char* tde_cache_key = (char*)palloc0(strlen(tde_cache_entry->key_cipher) + 1);
-    rc = memcpy_s(tde_cache_key, (strlen(tde_cache_entry->key_cipher) + 1), tde_cache_entry->key_cipher, 
-        (strlen(tde_cache_entry->key_cipher) + 1));
-    securec_check(rc, "\0", "\0");
-
-    /* insert hash table */
-    LWLockAcquire(TDEKeyCacheLock, LW_EXCLUSIVE);
-    TDECacheEntry* entry = NULL;
-    entry = reinterpret_cast<TDECacheEntry*>(hash_search(tde_cache, (const void*)&tde_cache_key, HASH_FIND, &found));
-    if (!found) {
-        entry = reinterpret_cast<TDECacheEntry*>
-            (hash_search(tde_cache, (const void*)&tde_cache_key, HASH_ENTER, &found));
-        if (entry == NULL) {
-            pfree_ext(tde_cache_key);
-            LWLockRelease(TDEKeyCacheLock);
-            MemoryContextSwitchTo(old);
-            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                errmsg("build TDE key cache hash table failed")));
-            return false;
-        }
-        /* insert new cache key-value */
-        entry->dek_plaintext = (char*)palloc0(strlen(tde_cache_entry->dek_plaintext) + 1);
-        rc = memcpy_s(entry->dek_plaintext, (strlen(tde_cache_entry->dek_plaintext) + 1), 
-            tde_cache_entry->dek_plaintext, (strlen(tde_cache_entry->dek_plaintext) + 1));
-        securec_check(rc, "\0", "\0");
-        entry->timestamp = tde_cache_entry->timestamp;
-    } else {
-        /* update cache key-value */
-        rc = memcpy_s(entry->dek_plaintext, (strlen(tde_cache_entry->dek_plaintext) + 1), 
-            tde_cache_entry->dek_plaintext, (strlen(tde_cache_entry->dek_plaintext) + 1));
-        securec_check(rc, "\0", "\0");
-        entry->timestamp = tde_cache_entry->timestamp;
+    Size plain_size = strlen(tde_cache_entry->dek_plaintext) + 1;
+    if (plain_size != 33) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid TDE cache entry size")));
     }
-    MemoryContextSwitchTo(old);
+    char* volatile key = NULL;
+    char* volatile plain = NULL;
+    LWLockAcquire(TDEKeyCacheLock, LW_EXCLUSIVE);
+    PG_TRY();
+    {
+        bool found = false;
+        TDECacheEntry* entry = (TDECacheEntry*)hash_search(tde_cache,
+            (const void*)&tde_cache_entry->key_cipher, HASH_FIND, &found);
+        if (found && GetCurrentTimestamp() - entry->timestamp >= USECS_PER_HOUR) {
+            remove_cache_entry(entry);
+            found = false;
+        }
+        if (!found) {
+            /* Allocate only on a miss, before publishing; the catch owns both buffers. */
+            key = MemoryContextStrdup(tde_cache_mem, tde_cache_entry->key_cipher);
+            plain = MemoryContextStrdup(tde_cache_mem, tde_cache_entry->dek_plaintext);
+            entry = (TDECacheEntry*)hash_search(tde_cache, (const void*)&key, HASH_ENTER, &found);
+            if (entry == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not insert TDE cache entry")));
+            }
+            entry->dek_plaintext = (char*)plain;
+            entry->timestamp = tde_cache_entry->timestamp;
+            key = NULL;
+            plain = NULL;
+        } else {
+            /* A complete envelope identifies immutable key material. */
+            if (strcmp(entry->dek_plaintext, tde_cache_entry->dek_plaintext) != 0) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("conflicting plaintext for a TDE envelope")));
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        LWLockRelease(TDEKeyCacheLock);
+        if (plain != NULL) {
+            clean_cache_entry_value((char*)plain);
+        }
+        if (key != NULL) {
+            pfree((void*)key);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     LWLockRelease(TDEKeyCacheLock);
     return true;
 }
 
-char* TDEKeyStorage::search_cache(const char* dek_cipher)
+/* Caller holds TDEKeyCacheLock exclusively; copy pointers before removing the entry. */
+void TDEKeyStorage::remove_cache_entry(TDECacheEntry* entry)
+{
+    char* key = entry->key_cipher;
+    char* plain = entry->dek_plaintext;
+    if (hash_search(tde_cache, (const void*)&key, HASH_REMOVE, NULL) == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not remove TDE key cache entry")));
+    }
+    clean_cache_entry_value(plain);
+    pfree(key);
+}
+
+bool TDEKeyStorage::search_cache(const char* dek_cipher, char* dek_plaintext, Size output_size)
 {
     bool found = false;
-    MemoryContext old = MemoryContextSwitchTo(tde_cache_mem);
     LWLockAcquire(TDEKeyCacheLock, LW_SHARED);
     TDECacheEntry* entry = NULL;
     entry = reinterpret_cast<TDECacheEntry*>(hash_search(tde_cache, (const void*)&dek_cipher, HASH_FIND, &found));
     if (!found) {
-        MemoryContextSwitchTo(old);
         LWLockRelease(TDEKeyCacheLock);
-        return NULL;
+        return false;
     }
-    MemoryContextSwitchTo(old);
+    if (GetCurrentTimestamp() - entry->timestamp >= USECS_PER_HOUR) {
+        LWLockRelease(TDEKeyCacheLock);
+        return false;
+    }
+    Size key_len = strlen(entry->dek_plaintext);
+    if (key_len + 1 > output_size) {
+        LWLockRelease(TDEKeyCacheLock);
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("TDE key cache value exceeds the output buffer")));
+    }
+    errno_t rc = memcpy_s(dek_plaintext, output_size, entry->dek_plaintext, key_len + 1);
+    securec_check(rc, "\0", "\0");
     LWLockRelease(TDEKeyCacheLock);
-    return entry->dek_plaintext;
+    return true;
 }
 
 void TDEKeyStorage::cache_watch_dog()
@@ -221,13 +238,9 @@ void TDEKeyStorage::cache_watch_dog()
         hash_seq_init(&scan_state, tde_cache);
         TDECacheEntry* item = NULL;
         while ((item = reinterpret_cast<TDECacheEntry*>(hash_seq_search(&scan_state))) != NULL) {
-            if ((cur_timestamp - item->timestamp) > USECS_PER_HOUR) {
-                clean_cache_entry_value(item->dek_plaintext);
-                if (hash_search(tde_cache, (const void*)&item->key_cipher, HASH_REMOVE, NULL) == NULL) {
-                    LWLockRelease(TDEKeyCacheLock);
-                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), 
-                        errmsg("TDE Key storage WatchDog cache: remove entry failed")));
-                }
+            /* Fixed lifetime from insertion, regardless of intervening cache hits. */
+            if ((cur_timestamp - item->timestamp) >= USECS_PER_HOUR) {
+                remove_cache_entry(item);
             }
         }
         LWLockRelease(TDEKeyCacheLock);
