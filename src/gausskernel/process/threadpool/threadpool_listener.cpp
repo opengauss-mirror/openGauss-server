@@ -209,7 +209,10 @@ void ThreadPoolListener::CreateEpoll()
 void ThreadPoolListener::dispatch_socked_closed_session(knl_session_context* session)
 {
     Assert(session->status != KNL_SESS_UNINIT);
-    m_idleSessionList->Remove(&session->elem);
+    if (!m_idleSessionList->RemoveConfirm(&session->elem)) {
+        /* session removed by other thread */
+        return;
+    }
     if (unlikely(session->status == KNL_SESS_UNINIT)) {
         session->status = KNL_SESS_CLOSERAW;
     } else {
@@ -557,7 +560,8 @@ Dlelem* ThreadPoolListener::TryRemoveReadySessListHead()
 {
     Dlelem *elem = NULL;
     if (m_group->m_idleWorkerNum > 0) {
-        elem = m_readySessionList->RemoveHead();
+        /* Take the head without cache matching, and remove its session bucket entry. */
+        elem = GetReadySession(NULL);
     }
     return elem;
 }
@@ -675,7 +679,7 @@ Dlelem *ThreadPoolListener::GetReadySession(ThreadPoolWorker *worker)
     if (!EnableLocalSysCache()) {
         return m_readySessionList->RemoveHead();
     }
-    Dlelem *elt = GetSessFromReadySessionList(worker);
+    Dlelem *elt = worker == NULL ? m_readySessionList->RemoveHead() : GetSessFromReadySessionList(worker);
     if (elt == NULL) {
         return NULL;
     }
