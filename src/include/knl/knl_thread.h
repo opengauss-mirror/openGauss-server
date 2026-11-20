@@ -3078,6 +3078,7 @@ typedef struct knl_t_stat_context {
 } knl_t_stat_context;
 
 typedef struct knl_t_thread_pool_context {
+    void* payload;
     class ThreadPoolGroup* group;
     class ThreadPoolListener* listener;
     class ThreadPoolWorker* worker;

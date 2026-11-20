@@ -14349,6 +14349,7 @@ static void is_memory_backend_reserved(const knl_thread_arg* arg)
 template <knl_thread_role thread_role>
 int GaussDbThreadMain(knl_thread_arg* arg)
 {
+    t_thrd.threadpool_cxt.payload = arg->payload;
     Port port;
     char* p_name_thread = NULL;
     /* Do this sooner rather than later... */
@@ -14389,6 +14390,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     init_ps_display(GetThreadName(arg->role), "", "", "");
 
     SetExtraThreadInfo<thread_role>(arg);
+    Assert((thread_role != THREADPOOL_STREAM && thread_role != STREAM_WORKER) || t_thrd.threadpool_cxt.payload != NULL);
+    t_thrd.threadpool_cxt.payload = NULL;
 
     /* Lose the postmaster's on-exit routines (really a no-op) */
     on_exit_reset();
