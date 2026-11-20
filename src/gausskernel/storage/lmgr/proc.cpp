@@ -2719,14 +2719,29 @@ void ProcSendSignal(ThreadId pid)
  *
  * Returns TRUE if okay, FALSE on failure.
  */
+/* Like statement_fin_time, the socket is valid only while the statement timer is active. */
+static THR_LOCAL volatile pgsocket authenticationTimeoutSocket = PGINVALID_SOCKET;
+THR_LOCAL volatile bool g_authenticationTimedOut = false;
+
+bool enable_sig_alarm(int delayms, bool isStatementTimeout, pgsocket authenticationSocket);
+
 bool enable_sig_alarm(int delayms, bool is_statement_timeout)
 {
+    return enable_sig_alarm(delayms, is_statement_timeout, PGINVALID_SOCKET);
+}
+
+bool enable_sig_alarm(int delayms, bool isStatementTimeout, pgsocket authenticationSocket)
+{
+    if (isStatementTimeout) {
+        authenticationTimeoutSocket = authenticationSocket;
+    }
+
     TimestampTz fin_time;
     struct itimerval timeval;
     errno_t ret = memset_s(&timeval, sizeof(struct itimerval), 0, sizeof(struct itimerval));
     securec_check(ret, "\0", "\0");
 
-    if (is_statement_timeout) {
+    if (isStatementTimeout) {
         /*
          * Begin statement-level timeout
          *
@@ -3178,6 +3193,12 @@ static bool CheckStatementTimeout(void)
     if (now >= t_thrd.storage_cxt.statement_fin_time) {
         /* Time to die */
         t_thrd.storage_cxt.statement_timeout_active = false;
+        if (authenticationTimeoutSocket != PGINVALID_SOCKET) {
+            /* Let the authentication read return before cleaning up the connection. */
+            g_authenticationTimedOut = true;
+            (void)shutdown(authenticationTimeoutSocket, SHUT_RD);
+            return true;
+        }
         t_thrd.storage_cxt.cancel_from_timeout = true;
         (void)gs_signal_send(t_thrd.proc_cxt.MyProcPid, SIGINT);
     } else {
