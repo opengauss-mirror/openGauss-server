@@ -360,32 +360,21 @@ static void InitSecurityConfigureNamesBool()
             NULL,
             NULL},
         /* Database Security: Support Transparent Data Encryption */
-        /* add guc option about TDE */
-#ifndef ENABLE_FINANCE_MODE
         {{"enable_tde",
+#ifndef ENABLE_FINANCE_MODE
             PGC_POSTMASTER,
-            NODE_ALL,
-            TRANSPARENT_DATA_ENCRYPTION,
-            gettext_noop("Enable Transparent Data Encryption feature."),
-            NULL},
-            &g_instance.attr.attr_security.enable_tde,
-            false,
-            NULL,
-            NULL,
-            NULL},
 #else
-            {{"enable_tde",
             PGC_INTERNAL,
+#endif
             NODE_ALL,
             TRANSPARENT_DATA_ENCRYPTION,
-            gettext_noop("Enable Transparent Data Encryption feature."),
+            gettext_noop("Enable Transparent Data Encryption."),
             NULL},
             &g_instance.attr.attr_security.enable_tde,
             false,
             NULL,
             NULL,
             NULL},
-#endif
         {{"modify_initial_password",
             PGC_SIGHUP,
             NODE_ALL,
@@ -1344,7 +1333,22 @@ static void InitSecurityConfigureNamesString()
 
 static void InitSecurityConfigureNamesEnum()
 {
+    static const struct config_enum_entry tde_key_provider_options[] = {
+        {"kms", TDE_KEY_PROVIDER_KMS, false},
+        {"sdf", TDE_KEY_PROVIDER_SDF, false},
+        {NULL, 0, false}
+    };
     struct config_enum localConfigureNamesEnum[] = {
+        {{"tde_key_provider",
+#ifndef ENABLE_FINANCE_MODE
+            PGC_POSTMASTER,
+#else
+            PGC_INTERNAL,
+#endif
+            NODE_ALL, TRANSPARENT_DATA_ENCRYPTION,
+            gettext_noop("Select the TDE key provider: kms or sdf."), NULL},
+            &g_instance.attr.attr_security.tde_key_provider,
+            TDE_KEY_PROVIDER_KMS, tde_key_provider_options, NULL, NULL, NULL},
 
         /* End-of-list marker */
         {{NULL,

@@ -141,7 +141,7 @@ void TDEKeyStorage::clean_cache_entry_value(char* dek_plaintext)
 bool TDEKeyStorage::insert_cache(TDECacheEntry* tde_cache_entry)
 {
     Size plain_size = strlen(tde_cache_entry->dek_plaintext) + 1;
-    if (plain_size != 33) {
+    if (plain_size != DEK_PLAIN_HEX_LEN + 1) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid TDE cache entry size")));
     }
     char* volatile key = NULL;
@@ -223,7 +223,9 @@ bool TDEKeyStorage::search_cache(const char* dek_cipher, char* dek_plaintext, Si
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("TDE key cache value exceeds the output buffer")));
     }
     errno_t rc = memcpy_s(dek_plaintext, output_size, entry->dek_plaintext, key_len + 1);
-    securec_check(rc, "\0", "\0");
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
     LWLockRelease(TDEKeyCacheLock);
     return true;
 }
@@ -266,10 +268,7 @@ TDEBufferCache::~TDEBufferCache()
 
 bool TDEBufferCache::empty()
 {
-    if (tde_buffer_cache == NULL) {
-        return true;
-    }
-    return false;
+    return tde_buffer_cache == NULL;
 }
 
 void TDEBufferCache::reset()
@@ -291,6 +290,7 @@ void TDEBufferCache::clear()
         hash_seq_init(&scan_state, tde_buffer_cache);
         TdeFileNodeEntry* item = NULL;
         while ((item = reinterpret_cast<TdeFileNodeEntry*>(hash_seq_search(&scan_state))) != NULL) {
+            TdeInfo* info = item->tde_info;
             if (hash_search(tde_buffer_cache, (const void*)&item->tde_node, HASH_REMOVE, NULL) == NULL) {
                 LWLockRelease(TDEKeyCacheLock);
                 ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_DATA_EXCEPTION), 
@@ -298,6 +298,7 @@ void TDEBufferCache::clear()
                     errcause("TDE buffer cache crash"), 
                     erraction("check TDE_BUFFER_CACHE_CONTEXT or system cache")));
             }
+            pfree(info);
         }
         LWLockRelease(TDEKeyCacheLock);
     }
@@ -332,48 +333,47 @@ void TDEBufferCache::init()
 
 bool TDEBufferCache::insert_cache(RelFileNode tde_rnode, TdeInfo *tde_info)
 {
-    bool found = false;
-    errno_t rc = EOK;
-
-    MemoryContext old = MemoryContextSwitchTo(tde_buffer_mem);
-    /* build tde cache key */
-    RelFileNode tde_key = tde_rnode;
-
-    /* insert hash table */
+    TdeInfo value = {0};
+    errno_t rc = strcpy_s(value.dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(value.cmk_id, CMK_ID_LEN, tde_info->cmk_id);
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+    value.algo = tde_info->algo;
+    if (tde_rnode.bucketNode != InvalidBktId) {
+        tde_rnode.bucketNode = SegmentBktId;
+    }
+    TdeInfo* volatile allocated = NULL;
     LWLockAcquire(TDEKeyCacheLock, LW_EXCLUSIVE);
-    TdeFileNodeEntry *entry = NULL;
-    entry = reinterpret_cast<TdeFileNodeEntry*>(hash_search(tde_buffer_cache, (const void*)&tde_key, 
-        HASH_FIND, &found));
-    if (!found) {
-        entry = reinterpret_cast<TdeFileNodeEntry*>(hash_search(tde_buffer_cache, 
-            (const void*)&tde_key, HASH_ENTER, &found));
-        if (entry == NULL) {
-            LWLockRelease(TDEKeyCacheLock);
-            MemoryContextSwitchTo(old);
-            return false;
-        }
-        /* insert new cache key-value */
-        entry->tde_info = (TdeInfo*)palloc0(sizeof(TdeInfo));
-        rc = strcpy_s(entry->tde_info->dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
-        securec_check(rc, "\0", "\0");
-        rc = strcpy_s(entry->tde_info->cmk_id, CMK_ID_LEN, tde_info->cmk_id);
-        securec_check(rc, "\0", "\0");
-        entry->tde_info->algo = tde_info->algo;
-    } else {
-        /* update cache key-value */
-        if (strncmp(entry->tde_info->dek_cipher, tde_info->dek_cipher, DEK_CIPHER_LEN) != 0) {
-            rc = strcpy_s(entry->tde_info->dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
-            securec_check(rc, "\0", "\0");
-        }
-        if (strncmp(entry->tde_info->cmk_id, tde_info->cmk_id, CMK_ID_LEN) != 0) {
-            rc = strcpy_s(entry->tde_info->cmk_id, CMK_ID_LEN, tde_info->cmk_id);
-            securec_check(rc, "\0", "\0");
-        }
-        if (entry->tde_info->algo != tde_info->algo) {
-            entry->tde_info->algo = tde_info->algo;
+    PG_TRY();
+    {
+        bool found = false;
+        TdeFileNodeEntry* entry = (TdeFileNodeEntry*)hash_search(tde_buffer_cache,
+            (const void*)&tde_rnode, HASH_FIND, &found);
+        if (!found) {
+            /* Finish allocating the value before making the hash entry visible. */
+            allocated = (TdeInfo*)MemoryContextAlloc(tde_buffer_mem, sizeof(TdeInfo));
+            *allocated = value;
+            entry = (TdeFileNodeEntry*)hash_search(tde_buffer_cache, (const void*)&tde_rnode, HASH_ENTER, &found);
+            if (entry == NULL) {
+                ereport(ERROR, (errmsg("could not insert TDE relation cache entry")));
+            }
+            entry->tde_info = (TdeInfo*)allocated;
+            allocated = NULL;
+        } else {
+            *entry->tde_info = value;
         }
     }
-    MemoryContextSwitchTo(old);
+    PG_CATCH();
+    {
+        LWLockRelease(TDEKeyCacheLock);
+        if (allocated != NULL) {
+            pfree((void*)allocated);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     LWLockRelease(TDEKeyCacheLock);
     return true;
 }
@@ -384,20 +384,17 @@ void TDEBufferCache::search_cache(RelFileNode tde_rnode, TdeInfo *tde_info)
     if (tde_rnode.bucketNode != InvalidBktId) {
         tde_rnode.bucketNode = SegmentBktId;
     }
-    MemoryContext old = MemoryContextSwitchTo(tde_buffer_mem);
     LWLockAcquire(TDEKeyCacheLock, LW_SHARED);
     TdeFileNodeEntry* entry = NULL;
     entry = reinterpret_cast<TdeFileNodeEntry*>(hash_search(tde_buffer_cache, (const void*)&tde_rnode, 
         HASH_FIND, &found));
     if (!found) {
-        MemoryContextSwitchTo(old);
         LWLockRelease(TDEKeyCacheLock);
         return;
     }
 
     errno_t rc = memcpy_s(tde_info, sizeof(TdeInfo), entry->tde_info, sizeof(TdeInfo));
     securec_check(rc, "\0", "\0");
-    MemoryContextSwitchTo(old);
     LWLockRelease(TDEKeyCacheLock);
     return;
 }

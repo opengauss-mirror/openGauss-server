@@ -40,11 +40,17 @@
 
 #include "knl/knl_guc/knl_guc_common.h"
 
+enum TdeKeyProvider {
+    TDE_KEY_PROVIDER_KMS = 0,
+    TDE_KEY_PROVIDER_SDF
+};
+
 typedef struct knl_instance_attr_security {
     bool EnableSSL;
     bool enablePrivilegesSeparate;
     bool enable_nonsysadmin_execute_direct;
     bool enable_tde;
+    int tde_key_provider;
     char* ssl_cert_file;
     char* ssl_key_file;
 #ifdef USE_TASSL

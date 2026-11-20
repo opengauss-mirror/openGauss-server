@@ -948,6 +948,7 @@ void ResetDecoder(XLogReaderState *state)
     state->decoded_record = NULL;
 
     state->main_data_len = 0;
+    state->isTde = false;
 
     for (block_id = 0; block_id <= state->max_block_id; block_id++) {
         state->blocks[block_id].in_use = false;
@@ -987,7 +988,29 @@ static void CompressTableRecord(RelFileNode* relfileNode)
     }
 }
 
-/*  
+/* Read in wire order; update lastBlock only after both metadata items are complete. */
+static bool DecodeBlockTdeInfoAndFlags(DecodedBkpBlock* block, char*& ptr, uint32& remaining,
+    bool hasTde, DecodedBkpBlock*& lastBlock)
+{
+    if (hasTde) {
+        if (remaining < sizeof(TdeInfo)) {
+            return false;
+        }
+        block->tdeinfo = (TdeInfo*)ptr;
+        ptr += sizeof(TdeInfo);
+        remaining -= sizeof(TdeInfo);
+    }
+    if (remaining < sizeof(uint16)) {
+        return false;
+    }
+    block->extra_flag = *(uint16*)ptr;
+    ptr += sizeof(uint16);
+    remaining -= sizeof(uint16);
+    lastBlock = block;
+    return true;
+}
+
+/*
  * Decode the previously read record.
  *
  * On error, a human-readable error message is returned in *errormsg, and
@@ -1058,9 +1081,10 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
         } else if (BKID_GET_BKID(block_id) <= XLR_MAX_BLOCK_ID) {
             /* XLogRecordBlockHeader */
             DecodedBkpBlock *blk = NULL;
+            bool metadataValid = true;
             uint8 fork_flags;
             bool hasbucket_segpage = (block_id & BKID_HAS_BUCKET_OR_SEGPAGE) != 0;
-            state->isTde = (block_id & BKID_HAS_TDE_PAGE) != 0;
+            bool hasTde = (block_id & BKID_HAS_TDE_PAGE) != 0;
             block_id = BKID_GET_BKID(block_id);
             
             if (block_id <= state->max_block_id) {
@@ -1120,15 +1144,7 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
                 ptr += filenodelen;
                 remaining -= filenodelen;
 
-                if (state->isTde) {
-                    blk->tdeinfo = (TdeInfo*)ptr;
-                    ptr += sizeof(TdeInfo);
-                    remaining -= sizeof(TdeInfo);
-                }
-
-                DECODE_XLOG_ONE_ITEM(blk->extra_flag, uint16);
-
-                lastBlock = blk;
+                metadataValid = DecodeBlockTdeInfoAndFlags(blk, ptr, remaining, hasTde, lastBlock);
             } else {
                 if (lastBlock == NULL) {
                     report_invalid_record(state, "BKPBLOCK_SAME_REL set but no previous rel at %X/%X",
@@ -1138,7 +1154,12 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
 
                 blk->rnode = lastBlock->rnode;
                 blk->extra_flag = lastBlock->extra_flag;
+                blk->tdeinfo = blk->forknum == lastBlock->forknum ? lastBlock->tdeinfo : NULL;
             }
+            if (!metadataValid) {
+                goto shortdata_err;
+            }
+            state->isTde = state->isTde || blk->tdeinfo != NULL;
 
             DECODE_XLOG_ONE_ITEM(blk->blkno, BlockNumber);
             if (XLOG_NEED_PHYSICAL_LOCATION(blk->rnode)) {

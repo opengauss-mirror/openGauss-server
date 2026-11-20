@@ -9611,7 +9611,7 @@ static void heap_xlog_insert(XLogReaderState* record)
 {
     Pointer rec_data = (Pointer)XLogRecGetData(record);
     bool isinit = (XLogRecGetInfo(record) & XLOG_HEAP_INIT_PAGE) != 0;
-    bool tde = XLogRecGetTdeInfo(record);
+    bool tde = record->blocks[HEAP_INSERT_ORIG_BLOCK_NUM].tdeinfo != NULL;
     xl_heap_insert* xlrec = NULL;
     RedoBufferInfo buffer;
     Size freespace = 0;
@@ -9696,7 +9696,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
     RedoBufferInfo buffer;
     Size freespace = 0;
     bool isinit = (XLogRecGetInfo(record) & XLOG_HEAP_INIT_PAGE) != 0;
-    bool tde = XLogRecGetTdeInfo(record);
+    bool tde = record->blocks[HEAP_MULTI_INSERT_ORIG_BLOCK_NUM].tdeinfo != NULL;
     XLogRedoAction action;
     Pointer rec_data;
     XLogPhyBlock pblk;
@@ -9766,7 +9766,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
 static void heap_xlog_update(XLogReaderState* record, bool hot_update)
 {
     xl_heap_update* xlrec = (xl_heap_update*)XLogRecGetData(record);
-    bool tde = XLogRecGetTdeInfo(record);
+    bool tde = record->blocks[HEAP_UPDATE_NEW_BLOCK_NUM].tdeinfo != NULL;
     RelFileNode rnode;
     BlockNumber oldblk;
     BlockNumber newblk;

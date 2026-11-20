@@ -34,7 +34,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= ckms_message.o kms_interface.o data_common.o tde_key_manager.o tde_key_storage.o http_common.o
+OBJS= ckms_message.o kms_interface.o data_common.o tde_key_manager.o tde_key_storage.o http_common.o sdf_tde_provider.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

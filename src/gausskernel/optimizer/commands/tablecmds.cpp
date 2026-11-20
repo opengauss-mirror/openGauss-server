@@ -21782,7 +21782,11 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
                  * use physical block number
                  */
                 if (PageIsVerified(page, blkno)) {
-                    smgrwrite(src, forkNum, blkno, buf, false);
+                    char* write_page = PageDataEncryptForPhysicalWrite(page);
+                    if (write_page != page) {
+                        PageSetChecksumInplace(write_page, blkno);
+                    }
+                    smgrwrite(src, forkNum, blkno, write_page, false);
                     UpdateRepairTime(src->smgr_rnode.node, forkNum, blkno);
                 } else {
                     ereport(ERROR,
@@ -21957,7 +21961,11 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
                 RemoteReadBlock(src->rd_smgr->smgr_rnode, forkNum, src_blkno, buf, NULL);
 
                 if (PageIsVerified(page, src_blkno)) {
-                    smgrwrite(src->rd_smgr, forkNum, src_blkno, buf, false);
+                    char* write_page = PageDataEncryptForPhysicalWrite(page);
+                    if (write_page != page) {
+                        PageSetChecksumInplace(write_page, src_blkno);
+                    }
+                    smgrwrite(src->rd_smgr, forkNum, src_blkno, write_page, false);
                     UpdateRepairTime(src->rd_node, forkNum, src_blkno);
                 } else {
                     ereport(ERROR,
@@ -22290,7 +22298,7 @@ static void ATExecEncryptionKeyRotation(Relation rel, LOCKMODE lockmode)
 {
     List* tde_reloption = NULL;
     char* dek_cipher = NULL;
-    char* cmk_id = NULL;
+    char* cmkId = NULL;
     errno_t rc = EOK;
 
     /* get new tde info */
@@ -22305,14 +22313,14 @@ static void ATExecEncryptionKeyRotation(Relation rel, LOCKMODE lockmode)
         rc = memcpy_s(dek_cipher, (strlen(tde_data->dek_cipher) + 1), tde_data->dek_cipher,
             (strlen(tde_data->dek_cipher) + 1));
         securec_check(rc, "\0", "\0");
-        cmk_id = (char*)palloc0(strlen(tde_data->cmk_id) + 1);
-        rc = memcpy_s(cmk_id, (strlen(tde_data->cmk_id) + 1), tde_data->cmk_id,
+        cmkId = (char*)palloc0(strlen(tde_data->cmk_id) + 1);
+        rc = memcpy_s(cmkId, (strlen(tde_data->cmk_id) + 1), tde_data->cmk_id,
             (strlen(tde_data->cmk_id) + 1));
         securec_check(rc, "\0", "\0");
 
         /* Update both fields: the new DEK envelope is protected by this CMK_ID. */
         tde_reloption = list_make2(makeDefElem("dek_cipher", (Node*)makeString(dek_cipher)),
-            makeDefElem("cmk_id", (Node*)makeString(cmk_id)));
+            makeDefElem("cmk_id", (Node*)makeString(cmkId)));
         ATExecSetRelOptions(rel, tde_reloption, AT_SetRelOptions, lockmode, true);
         ereport(LOG, (errmsg("TDE key rotation success"),
             errdetail("check TDE table DEK envelope and CMK_ID are changed")));
@@ -22324,7 +22332,7 @@ static void ATExecEncryptionKeyRotation(Relation rel, LOCKMODE lockmode)
     PG_END_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
     TDEKeyManager::cleanup(0, PointerGetDatum(&tde_key_manager));
     pfree_ext(dek_cipher);
-    pfree_ext(cmk_id);
+    pfree_ext(cmkId);
 }
 
 /*

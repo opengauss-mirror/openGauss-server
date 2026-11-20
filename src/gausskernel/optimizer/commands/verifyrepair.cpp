@@ -455,20 +455,30 @@ bool tryRepairPage(BlockNumber blocknum, bool is_segment, RelFileNode *relnode, 
     }
 
     if (PageIsVerified((Page)buf, checksumBlock)) {
+        SegSpace* spc = NULL;
         if (is_segment) {
-            SegSpace* spc = spc_open(relnode->spcNode, relnode->dbNode, false, false);
+            spc = spc_open(relnode->spcNode, relnode->dbNode, false, false);
             if (!spc) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         (errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
                                 relnode->spcNode, relnode->dbNode))));
             }
+        }
+        char* writePage = PageDataEncryptForPhysicalWrite((Page)buf);
+        if (writePage != buf) {
+            errno_t rc = memcpy_s(buf, BLCKSZ, writePage, BLCKSZ);
+            securec_check(rc, "\0", "\0");
+            writePage = buf;
+            PageSetChecksumInplace(writePage, checksumBlock);
+        }
+        if (is_segment) {
             if (isSegmentPhysical) {
-                seg_physical_write(spc, *relnode, forknum, blocknum, buf, true);
+                seg_physical_write(spc, *relnode, forknum, blocknum, writePage, true);
             } else {
-                seg_physical_write(spc, logicalRelNode, forknum, logicalBlocknum, buf, true);
+                seg_physical_write(spc, logicalRelNode, forknum, logicalBlocknum, writePage, true);
             }
         } else {
-            smgrwrite(smgr, forknum, blocknum, buf, true);
+            smgrwrite(smgr, forknum, blocknum, writePage, true);
         }
         BadBlockKey key;
 

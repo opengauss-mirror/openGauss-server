@@ -196,9 +196,9 @@ void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
                 phdr->pd_multi_base = 0;
                 const char* algo = RelationGetAlgo(relation);
                 if (RelationisEncryptEnable(relation) || (algo && *algo != '\0')) {
-                    phdr->pd_upper -= sizeof(TdePageInfo);
-                    phdr->pd_special -= sizeof(TdePageInfo);
-                    PageSetTDE(page);
+                    TdeInfo tde_info = {0};
+                    GetTdeInfoFromRel(relation, &tde_info);
+                    PageInitTdeInfo(page, &tde_info);
                 }
                 MarkBufferDirty(buffer);
             }
@@ -315,9 +315,9 @@ static void InitHeapPage(Relation relation, Buffer buffer)
 
     const char* algo = RelationGetAlgo(relation);
     if (RelationisEncryptEnable(relation) || (algo && *algo != '\0')) {
-        phdr->pd_upper -= sizeof(TdePageInfo);
-        phdr->pd_special -= sizeof(TdePageInfo);
-        PageSetTDE(page);
+        TdeInfo tde_info = {0};
+        GetTdeInfoFromRel(relation, &tde_info);
+        PageInitTdeInfo(page, &tde_info);
     }
 }
 

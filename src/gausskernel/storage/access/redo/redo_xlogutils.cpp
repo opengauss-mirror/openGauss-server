@@ -379,7 +379,7 @@ void DoRecordCheck(XLogRecParseState *recordstate, XLogRecPtr pageLsn, bool repl
             }
         } else {
             manager->refOperate->checkFunc(recordstate->refrecord, pageLsn,
-                                           recordstate->blockparse.extra_rec.blockdatarec.blockhead.cur_block_id,
+                                           XLogBlockDataGetBlockId(&recordstate->blockparse.extra_rec.blockdatarec),
                                            replayed);
         }
     }
@@ -435,6 +435,10 @@ void XLogRecSetBlockDataStateContent(XLogReaderState *record, uint32 blockid, XL
     blockdatarec->blockhead.auxiblk1 = InvalidBlockNumber;
     blockdatarec->blockhead.auxiblk2 = InvalidBlockNumber;
     blockdatarec->blockhead.cur_block_id = blockid;
+    /* Keep the TDE bit for heap redo, but expose only the numeric ID to callers. */
+    if (decodebkp->tdeinfo != NULL && InsertTdeInfoToCache(decodebkp->rnode, decodebkp->tdeinfo)) {
+        blockdatarec->blockhead.cur_block_id |= BKID_HAS_TDE_PAGE;
+    }
     blockdatarec->blockhead.flags = decodebkp->flags;
     blockdatarec->blockhead.has_image = decodebkp->has_image;
     blockdatarec->blockhead.has_data = decodebkp->has_data;

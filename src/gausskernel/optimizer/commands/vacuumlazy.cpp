@@ -1435,9 +1435,9 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                 phdr->pd_multi_base = 0;
                 const char* algo = RelationGetAlgo(onerel);
                 if (RelationisEncryptEnable(onerel) || (algo && *algo != '\0')) {
-                    phdr->pd_upper -= sizeof(TdePageInfo);
-                    phdr->pd_special -= sizeof(TdePageInfo);
-                    PageSetTDE(page);
+                    TdeInfo tde_info = {0};
+                    GetTdeInfoFromRel(onerel, &tde_info);
+                    PageInitTdeInfo(page, &tde_info);
                 }
                 empty_pages++;
             }

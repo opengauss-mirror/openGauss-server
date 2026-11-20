@@ -48,6 +48,7 @@
 #include "utils/rel_gs.h"
 #include "storage/page_compression.h"
 #include "tde_key_management/tde_key_manager.h"
+#include "storage/ipc.h"
 #include "tde_key_management/tde_key_storage.h"
 
 #define RS_CUSTOM_VALUE_TEN 10
@@ -1667,7 +1668,7 @@ void fillRelOptions(void *rdopts, Size basesize, relopt_value *options, int numo
 void fillTdeRelOptions(List *options, char relkind)
 {
     ListCell *listptr1 = NULL;
-    bool spec_encrypt = false;
+    bool encryptEnabled = false;
     bool algo_flag = false;
     bool dek_flag = false;
     bool cmk_flag = false;
@@ -1677,6 +1678,14 @@ void fillTdeRelOptions(List *options, char relkind)
 
     foreach(listptr1, options) {
         DefElem *defs = reinterpret_cast<DefElem *>(lfirst(listptr1));
+        /* Reject unsupported storage before creating or unwrapping a DEK. */
+        if (pg_strcasecmp(defs->defname, "storage_type") == 0 &&
+            pg_strcasecmp(defGetString(defs), TABLE_ACCESS_METHOD_USTORE) == 0) {
+            ForbidToSetOptionsForUstoreTbl(options);
+        } else if (pg_strcasecmp(defs->defname, "orientation") == 0 &&
+            pg_strcasecmp(defGetString(defs), ORIENTATION_COLUMN) == 0) {
+            ForbidToSetOptionsForColTbl(options);
+        }
         if (pg_strcasecmp(defs->defname, "enable_tde") == 0) {
             if (t_thrd.proc->workingVersionNum < TDE_VERSION_NUM) {
                 ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1692,7 +1701,12 @@ void fillTdeRelOptions(List *options, char relkind)
                         errcause("TDE feature is not supported for Create materialized views"),
                         erraction("check CREATE syntax about create the materialized views")));
             }
-            spec_encrypt = true;
+            if (defs->arg == NULL || nodeTag(defs->arg) == T_Integer) {
+                encryptEnabled = defGetBoolean(defs);
+            } else if (!parse_bool(defGetString(defs), &encryptEnabled)) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("%s requires a Boolean value", defs->defname)));
+            }
             continue;
         }
 
@@ -1713,6 +1727,7 @@ void fillTdeRelOptions(List *options, char relkind)
                     errdetail("%s requires a string parameter", defs->defname)));
             }
             dek_flag = true;
+            opt_dek = defs;
             continue;
         }
 
@@ -1723,14 +1738,15 @@ void fillTdeRelOptions(List *options, char relkind)
                     errdetail("%s requires a string parameter", defs->defname)));
             }
             cmk_flag = true;
+            opt_cmk = defs;
             continue;
         }
     }
 
-    if (!spec_encrypt && (dek_flag || cmk_flag)) {
+    if (!encryptEnabled && (dek_flag || cmk_flag)) {
         ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("set relation option failed"),
-            errdetail("enable_tde must be set when cmk_id or dek_cipher is set")));
+            errdetail("enable_tde must be on when cmk_id or dek_cipher is set")));
         return;
     }
 
@@ -1741,51 +1757,65 @@ void fillTdeRelOptions(List *options, char relkind)
         return;
     }
 
-    if (!g_instance.attr.attr_security.enable_tde && spec_encrypt) {
+    if (!g_instance.attr.attr_security.enable_tde && encryptEnabled) {
         ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("set relation option enable_tde failed"),
-            errdetail("guc parameter enable_tde must be set to on to enable TDE feature")));
+            errdetail("enable_tde must be set to on to enable TDE")));
         return;
     }
 
-    if (algo_flag && !spec_encrypt) {
+    if (algo_flag && !encryptEnabled) {
         ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("set relation option encrypt_algo failed"),
-            errdetail("enable_tde option must be set when encrypt_algo is set")));
+            errdetail("enable_tde must be on when encrypt_algo is set")));
         return;
     }
 
-    if (spec_encrypt) {
+    if (encryptEnabled) {
         if (!dek_flag && !cmk_flag) {
-            const TDEData* tde_data = NULL;
-            TDEKeyManager* tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
-            tde_key_manager->init();
-            tde_data = tde_key_manager->create_dek();
-            char* dek_cipher = (char *)palloc0(strlen(tde_data->dek_cipher) + 1); /* should not free in this function */
-            char* cmk_id = (char *)palloc0(strlen(tde_data->cmk_id) + 1); /* should not free in this function */
-            errno_t rc = EOK;
-            rc = strcpy_s(dek_cipher, strlen(tde_data->dek_cipher) + 1, tde_data->dek_cipher);
-            securec_check(rc, "\0", "\0");
-            rc = strcpy_s(cmk_id, strlen(tde_data->cmk_id) + 1, tde_data->cmk_id);
-            securec_check(rc, "\0", "\0");
+            TDEKeyManager* volatile tde_key_manager = NULL;
+            PG_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+            {
+                tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+                tde_key_manager->init();
+                const TDEData* tde_data = tde_key_manager->create_dek();
+                char* dek_cipher = (char *)palloc0(strlen(tde_data->dek_cipher) + 1); /* owned by options */
+                char* cmk_id = (char *)palloc0(strlen(tde_data->cmk_id) + 1); /* owned by options */
+                errno_t rc = EOK;
+                rc = strcpy_s(dek_cipher, strlen(tde_data->dek_cipher) + 1, tde_data->dek_cipher);
+                securec_check(rc, "\0", "\0");
+                rc = strcpy_s(cmk_id, strlen(tde_data->cmk_id) + 1, tde_data->cmk_id);
+                securec_check(rc, "\0", "\0");
 
-            opt_dek->type = T_DefElem;
-            opt_dek->defnamespace = NULL;
-            opt_dek->defname = "dek_cipher";
-            opt_dek->defaction = DEFELEM_UNSPEC;
-            opt_dek->arg = reinterpret_cast<Node *>(makeString(dek_cipher));
-            options = lappend(options, opt_dek);
+                opt_dek->type = T_DefElem;
+                opt_dek->defnamespace = NULL;
+                opt_dek->defname = "dek_cipher";
+                opt_dek->defaction = DEFELEM_UNSPEC;
+                opt_dek->arg = reinterpret_cast<Node *>(makeString(dek_cipher));
+                options = lappend(options, opt_dek);
 
-            opt_cmk->type = T_DefElem;
-            opt_cmk->defnamespace = NULL;
-            opt_cmk->defname = "cmk_id";
-            opt_cmk->defaction = DEFELEM_UNSPEC;
-            opt_cmk->arg = reinterpret_cast<Node *>(makeString(cmk_id));
-            options = lappend(options, opt_cmk);
-            if (IS_PGXC_DATANODE) {
-                tde_key_manager->save_key(tde_data);
+                opt_cmk->type = T_DefElem;
+                opt_cmk->defnamespace = NULL;
+                opt_cmk->defname = "cmk_id";
+                opt_cmk->defaction = DEFELEM_UNSPEC;
+                opt_cmk->arg = reinterpret_cast<Node *>(makeString(cmk_id));
+                options = lappend(options, opt_cmk);
+                if (IS_PGXC_DATANODE) {
+                    tde_key_manager->save_key(tde_data);
+                }
             }
-            DELETE_EX2(tde_key_manager);
+            PG_END_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+            TDEKeyManager::cleanup(0, PointerGetDatum(&tde_key_manager));
+        } else if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF) {
+            /* Validate SDF imports early without adding a KMS request to legacy CREATE/restore. */
+            TDEKeyManager* volatile tde_key_manager = NULL;
+            PG_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+            {
+                tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+                (void)tde_key_manager->get_dek(defGetString(opt_cmk), defGetString(opt_dek));
+            }
+            PG_END_ENSURE_ERROR_CLEANUP(TDEKeyManager::cleanup, PointerGetDatum(&tde_key_manager));
+            TDEKeyManager::cleanup(0, PointerGetDatum(&tde_key_manager));
         }
 
         if (!algo_flag) {
@@ -1793,7 +1823,8 @@ void fillTdeRelOptions(List *options, char relkind)
             opt_algo->defnamespace = NULL;
             opt_algo->defname = "encrypt_algo";
             opt_algo->defaction = DEFELEM_UNSPEC;
-            opt_algo->arg = reinterpret_cast<Node *>(makeString("AES_128_CTR"));
+            opt_algo->arg = reinterpret_cast<Node *>(makeString(pstrdup(
+                g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF ? "SM4_CTR" : "AES_128_CTR")));
             options = lappend(options, opt_algo);
         }
     }
@@ -2853,6 +2884,10 @@ static void ValidateStrOptEncryptAlgo(const char *val)
                         errmsg("Invalid string for \"encrypt_algo\" option"),
                         errdetail("Valid string are \"AES_128_CTR\", \"SM4_CTR\".")));
     }
+    if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF && pg_strcasecmp(val, "SM4_CTR") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("SDF TDE requires SM4_CTR for page encryption")));
+    }
 }
 
 /*
@@ -2867,7 +2902,7 @@ static void ValidateStrOptDekCipher(const char *val)
     if (strlen(val) < dek_cipher_len_min || strlen(val) > dek_cipher_len_max) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Invalid string for \"dek_cipher\" option"),
-                        errdetail("Valid string should be taken from kms.")));
+                        errdetail("Valid string should be taken from the configured TDE key provider.")));
     }
 }
 
@@ -2881,7 +2916,7 @@ static void ValidateStrOptCmkId(const char *val)
     if (strlen(val) != cmk_id_len) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Invalid string for \"cmk_id\" option"),
-                        errdetail("Valid string should be taken from kms and set to the tde_cmk_id guc parameter.")));
+                        errdetail("Valid string must be a UUID and match the configured TDE CMK ID.")));
     }
 }
 

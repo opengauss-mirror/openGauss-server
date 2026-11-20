@@ -78,7 +78,6 @@ typedef void (*relasexlogreadstate)(void* record);
 #define XLogBlockDataGetLastBlockLSN(_blockdata) ((_blockdata)->blockdata.last_lsn)
 #define XLogBlockDataGetBlockFlags(blockdata) ((blockdata)->blockhead.flags)
 
-#define XLogBlockDataGetBlockId(blockdata) ((blockdata)->blockhead.cur_block_id)
 #define XLogBlockDataGetAuxiBlock1(blockdata) ((blockdata)->blockhead.auxiblk1)
 #define XLogBlockDataGetAuxiBlock2(blockdata) ((blockdata)->blockhead.auxiblk2)
 /* for block data end  */
@@ -209,6 +208,11 @@ typedef struct {
     uint32 main_data_len; /* main data portion's length */
     char* main_data;      /* point to XLogReaderState's main_data */
 } XLogBlockDataParse;
+
+static inline int XLogBlockDataGetBlockId(const XLogBlockDataParse* blockdata)
+{
+    return BKID_GET_BKID(blockdata->blockhead.cur_block_id);
+}
 /* ********BLOCK DATE END ***************** */
 #define XLOG_BLOCK_DATA_PARSE_LEN sizeof(XLogBlockDataParse)
 

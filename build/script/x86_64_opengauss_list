@@ -19,6 +19,7 @@
 ./bin/gs_ctl
 ./bin/gs_initdb
 ./bin/gs_guc
+./bin/gs_tde_sdf
 ./bin/encrypt
 ./bin/openssl
 ./bin/gs_restore

@@ -30,6 +30,11 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_retrieve
     ${CMAKE_CURRENT_SOURCE_DIR}/smb_mgr
 )
+
+if(NOT WIN32)
+    install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gs_tde_sdf.py DESTINATION bin RENAME gs_tde_sdf)
+endif()
+
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
     add_subdirectory(gs_log)
     add_subdirectory(pg_upgrade)

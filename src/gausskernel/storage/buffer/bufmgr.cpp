@@ -2627,7 +2627,8 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
             ereport(ERROR, (errcode(ERRCODE_INVALID_BUFFER),
                 errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
         }
-        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+        if (g_instance.attr.attr_security.enable_tde &&
+            IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; 
         }
         if (found) {
@@ -2688,7 +2689,8 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
                 ereport(ERROR, (errcode(ERRCODE_INVALID_BUFFER),
                     errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
             }
-            if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+            if (g_instance.attr.attr_security.enable_tde &&
+                IS_PGXC_DATANODE) {
                 bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
             }
         }
@@ -2922,7 +2924,8 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
                 errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
         }
 
-        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+        if (g_instance.attr.attr_security.enable_tde &&
+            IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
         }
         if (found) {
@@ -6663,9 +6666,19 @@ char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf)
     char *bufToWrite = NULL;
     TdeInfo tde_info = {0};
 
-    if (bufdesc->extra->encrypt) {
+    /* Relation-level encryption also covers VM/FSM buffers, which have no TDE footer. */
+    if (!PageIsNew(page) && PageIsTDE(page)) {
+        if (!g_instance.attr.attr_security.enable_tde) {
+            ereport(ERROR, (errmsg("TDE provider is disabled for an encrypted buffer")));
+        }
         TDE::TDEBufferCache::get_instance().search_cache(bufdesc->tag.rnode, &tde_info);
-        if (strlen(tde_info.dek_cipher) == 0) {
+        if (tde_info.dek_cipher[0] == '\0') {
+            /* DMS may supply a plaintext page before this DN opens its relation.
+             * Keep that page's encryption identity; never replace newer relcache metadata. */
+            TdePageInfo* info = (TdePageInfo*)(page + BLCKSZ - sizeof(TdePageInfo));
+            transformTdeInfoFromPage(&tde_info, info);
+        }
+        if (tde_info.dek_cipher[0] == '\0') {
             ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("page buffer get TDE buffer cache entry failed, RelFileNode is %u/%u/%u",
                        bufdesc->tag.rnode.spcNode, bufdesc->tag.rnode.dbNode, bufdesc->tag.rnode.relNode),
@@ -9537,9 +9550,17 @@ void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
 bool InsertTdeInfoToCache(RelFileNode rnode, TdeInfo *tde_info)
 {
     bool result = false;
-    Assert(!TDE::TDEBufferCache::get_instance().empty());
     if (tde_info->algo == TDE_ALGO_NONE) {
         return false;
+    }
+    if (!g_instance.attr.attr_security.enable_tde) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot process TDE metadata while TDE is disabled"),
+            errhint("Restart with enable_tde=on and configure the key provider used to create the data.")));
+    }
+    if (TDE::TDEBufferCache::get_instance().empty()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("TDE relation key cache is not initialized")));
     }
 
     result = TDE::TDEBufferCache::get_instance().insert_cache(rnode, tde_info);

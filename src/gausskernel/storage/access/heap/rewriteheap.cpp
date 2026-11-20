@@ -1292,9 +1292,9 @@ static void raw_heap_insert(RewriteState state, HeapTuple tup)
              * For the reason of saving TdeInfo,
              * we need to move the pointer(pd_special) forward by the length of TdeInfo.
              */
-            phdr->pd_upper -= sizeof(TdePageInfo);
-            phdr->pd_special -= sizeof(TdePageInfo);
-            PageSetTDE(page);
+            TdeInfo tde_info = {0};
+            GetTdeInfoFromRel(state->rs_new_rel, &tde_info);
+            PageInitTdeInfo(page, &tde_info);
         }
     }
 

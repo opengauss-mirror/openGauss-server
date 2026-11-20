@@ -287,8 +287,8 @@ uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_
 }
 
 /*
- * Current, this function is only used by segment-page, which does not support TDE. If we want to support TDE,
- * we could add additional parameter.
+ * The caller supplies a physical page image, with TDE encryption already applied when needed.
+ * Do not use relation-cache encryption here: physical tags do not identify the logical relation.
  */
 uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flush_old_file)
 {
@@ -302,7 +302,7 @@ uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flus
 
     if (!dw_flush) {
         *flush_old_file = false;
-        pos = second_version_dw_single_flush(tag, block, PageGetLSN(block), false, tag);
+        pos = second_version_dw_single_flush(tag, block, PageGetLSN(block), tag);
     }
     return pos;
 }
@@ -312,7 +312,8 @@ uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file)
     bool dw_flush = false;
     uint16 pos = 0;
     BufferTag phy_tag = buf_desc->tag;
-    Block block = BufHdrGetBlock(buf_desc);
+    /* Both old and new DW formats must receive ciphertext for a TDE buffer. */
+    Block block = (Block)PageDataEncryptForBuffer((Page)BufHdrGetBlock(buf_desc), buf_desc, true);
 
     uint64 buf_state = LockBufHdr(buf_desc);
     XLogRecPtr page_lsn = BufferGetLSN(buf_desc);
@@ -327,7 +328,7 @@ uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file)
 
     if (!dw_flush) {
         *flush_old_file = false;
-        pos = second_version_dw_single_flush(buf_desc->tag, block, page_lsn, buf_desc->extra->encrypt, phy_tag);
+        pos = second_version_dw_single_flush(buf_desc->tag, block, page_lsn, phy_tag);
     }
     return pos;
 }

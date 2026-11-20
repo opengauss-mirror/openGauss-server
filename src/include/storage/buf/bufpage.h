@@ -521,6 +521,10 @@ extern bool page_index_tuple_overwrite(Page page, OffsetNumber offnum, Item new_
 extern void PageReinitWithDict(Page page, Size dictSize);
 extern bool PageFreeDict(Page page);
 extern char* PageDataEncryptIfNeed(Page page, TdeInfo* tdeinfo = NULL, bool need_copy = true, bool is_segbuf = false);
+extern char* PageDataEncryptForPhysicalWrite(Page page);
+extern void PageSetTdeInfo(Page page, TdeInfo* tdeinfo);
+extern void PageInitTdeInfo(Page page, TdeInfo* tdeinfo);
+extern void PageInitTdeInfoFromCache(Page page, const RelFileNode& rnode);
 extern void PageDataDecryptIfNeed(Page page);
 extern char* PageSetChecksumCopy(Page page, BlockNumber blkno, bool is_segbuf = false);
 extern char* AdioPageSetChecksumCopy(Page page, BlockNumber blkno, bool isSegbuf = false);

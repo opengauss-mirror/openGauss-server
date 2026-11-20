@@ -23,6 +23,7 @@
 #include "storage/pagecompress.h"
 #include "utils/snapmgr.h"
 #include "utils/builtins.h"
+#include "tde_key_management/tde_key_storage.h"
 #include "utils/aiomem.h"
 #include "access/ustore/knl_upage.h"
 
@@ -316,25 +317,78 @@ static inline void AllocPageCopyMem()
  * buffer, other processes might be updating hint bits in it, so we must
  * copy the page to private storage if we are going to change it.
  */
+static void CheckTdePageLayout(Page page)
+{
+    PageHeader header = (PageHeader)page;
+    if (!PageIsTDE(page) || header->pd_upper < SizeOfPageHeaderData ||
+        header->pd_upper > header->pd_special || header->pd_special > BLCKSZ - sizeof(TdePageInfo)) {
+        ereport(ERROR, (errmsg("invalid TDE page layout")));
+    }
+}
+
+void PageSetTdeInfo(Page page, TdeInfo* tde_info)
+{
+    CheckTdePageLayout(page);
+    if (tde_info->dek_cipher[0] == '\0' || tde_info->cmk_id[0] == '\0') {
+        ereport(ERROR, (errmsg("missing or invalid TDE context for page")));
+    }
+    TdePageInfo info = {0};
+    transformTdeInfoToPage(tde_info, &info);
+    errno_t rc = memcpy_s(page + BLCKSZ - sizeof(info), sizeof(info), &info, sizeof(info));
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+}
+
+/* Only call immediately after PageInit, before adding any tuples or TDE space. */
+void PageInitTdeInfo(Page page, TdeInfo* tde_info)
+{
+    PageHeader header = (PageHeader)page;
+    if (PageIsTDE(page) || header->pd_upper != BLCKSZ || header->pd_special != BLCKSZ) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("TDE initialization requires a freshly initialized empty page"),
+            errdetail("pd_upper=%u pd_special=%u flags=0x%x",
+                header->pd_upper, header->pd_special, header->pd_flags),
+            errhint("Initialize TDE immediately after PageInit, before adding tuples or reserving TDE space.")));
+    }
+    header->pd_upper -= sizeof(TdePageInfo);
+    header->pd_special -= sizeof(TdePageInfo);
+    PageSetTDE(page);
+    PageSetTdeInfo(page, tde_info);
+}
+
+void PageInitTdeInfoFromCache(Page page, const RelFileNode& rnode)
+{
+    TdeInfo info = {0};
+    TDE::TDEBufferCache::get_instance().search_cache(rnode, &info);
+    PageInitTdeInfo(page, &info);
+}
+
 char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool isSegbuf)
 {
     size_t plainLength = 0;
     size_t cipherLength = 0;
     errno_t ret = 0;
     int retval = 0;
-    TdePageInfo tde_page_info;
     char* dst = NULL;
 
-    if (PageIsNew(page) || !PageIsTDE(page) || !g_instance.attr.attr_security.enable_tde) {
+    if (PageIsNew(page) || !PageIsTDE(page)) {
         return (char*)page;
     }
-    Assert(!PageIsEncrypt(page));
+    if (!g_instance.attr.attr_security.enable_tde) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("TDE provider is disabled for an encrypted page")));
+    }
+    if (PageIsEncrypt(page)) {
+        ereport(ERROR, (errmsg("TDE page is already encrypted")));
+    }
+    CheckTdePageLayout(page);
 
     plainLength = ((PageHeader)page)->pd_special - ((PageHeader)page)->pd_upper;
     retval = RAND_bytes(tde_info->iv, RANDOM_IV_LEN);
     if (retval != 1) {
-        ereport(WARNING, (errmodule(MOD_SEC_TDE), errmsg("generate random iv for tde failed, errcode:%d", retval)));
-        return (char*)page;
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("generate random iv for TDE failed, errcode:%d", retval)));
     }
     if (need_copy) {
         AllocPageCopyMem();
@@ -353,15 +407,24 @@ char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool i
         tde_info);
     Assert(plainLength == cipherLength);
 
-    ret = memset_s(&tde_page_info, sizeof(TdePageInfo), 0, sizeof(TdePageInfo));
-    securec_check(ret, "\0", "\0");
-    transformTdeInfoToPage(tde_info, &tde_page_info);
-    ret = memcpy_s(dst + BLCKSZ - sizeof(TdePageInfo), sizeof(TdePageInfo), &tde_page_info, sizeof(TdePageInfo));
-    securec_check(ret, "\0", "\0");
+    PageSetTdeInfo(dst, tde_info);
 
     /* set the encryption flag */
     PageSetEncrypt((Page)dst);
     return dst;
+}
+
+/* Physical moves have no relation context; the page footer owns its key identity. */
+char* PageDataEncryptForPhysicalWrite(Page page)
+{
+    if (PageIsNew(page) || !PageIsTDE(page) || PageIsEncrypt(page)) {
+        return (char*)page;
+    }
+    CheckTdePageLayout(page);
+    TdeInfo tde_info = {0};
+    TdePageInfo* info = (TdePageInfo*)(page + BLCKSZ - sizeof(TdePageInfo));
+    transformTdeInfoFromPage(&tde_info, info);
+    return PageDataEncryptIfNeed(page, &tde_info, true, true);
 }
 
 void PageDataDecryptIfNeed(Page page)
@@ -371,6 +434,11 @@ void PageDataDecryptIfNeed(Page page)
 
     /* whether this page is both TDE page and encrypted  */
     if (PageIsEncrypt(page) && PageIsTDE(page)) {
+        CheckTdePageLayout(page);
+        if (!g_instance.attr.attr_security.enable_tde) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("TDE provider is disabled for an encrypted page")));
+        }
         size_t plainLength = 0;
         size_t cipherLength = ((PageHeader)page)->pd_special - ((PageHeader)page)->pd_upper;
         tde_page_info = (TdePageInfo*)((char*)(page) + BLCKSZ - sizeof(TdePageInfo));

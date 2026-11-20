@@ -336,7 +336,7 @@ XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, Redo
     if (skip) {
         XLogPhyBlock *pblk = (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL;
         bool tde = false;
-        if (record->isTde) {
+        if (record->blocks[block_id].tdeinfo != NULL) {
             tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
         }
         Buffer buf = XLogReadBufferExtended(blockinfo.rnode, blockinfo.forknum, blockinfo.blkno,
