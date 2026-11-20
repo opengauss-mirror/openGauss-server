@@ -37,6 +37,7 @@
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "communication/commproxy_interface.h"
 #include "executor/executor.h"
 #include "executor/exec/execStream.h"
 #include "executor/node/nodeModifyTable.h"
@@ -313,29 +314,31 @@ static void PerformAuthentication(Port* port)
      * during authentication.  Since we're inside a transaction and might do
      * database access, we have to use the statement_timeout infrastructure.
      */
-    if (!enable_sig_alarm(u_sess->attr.attr_security.AuthenticationTimeout * 1000, true))
+    extern bool enable_sig_alarm(int delayms, bool isStatementTimeout, pgsocket authenticationSocket);
+    extern THR_LOCAL volatile bool g_authenticationTimedOut;
+    const int authTimeout = u_sess->attr.attr_security.AuthenticationTimeout;
+    const pgsocket socket = port->sock;
+    const bool useKernelSocket = IS_THREAD_POOL_WORKER && socket != PGINVALID_SOCKET && AmIKernelModeSockfd(socket);
+    g_authenticationTimedOut = false;
+    /* Convert the authentication timeout to milliseconds (1000 milliseconds per second). */
+    if (!enable_sig_alarm(authTimeout * 1000, true, useKernelSocket ? socket : PGINVALID_SOCKET))
         ereport(FATAL, (errmsg("could not set timer for authorization timeout")));
 
-    /*
-     * Unblock SIGUSR2 so that SIGALRM can be triggered when perform authentication timeout.
-     */
+    /* Unblock SIGUSR2 so the authentication timer can fire during the protocol exchange. */
     old_sigset = gs_signal_unblock_sigusr2();
-
-    /*
-     * Now perform authentication exchange.
-     */
     port->protocol_config->fn_authenticate(port);
-
-    /*
-     * recover the signal mask before call ClientAuthentication.
-     */
     gs_signal_recover_mask(old_sigset);
 
-    /*
-     * Done with authentication.  Disable the timeout, and log if needed.
-     */
+    /* Stop the timer before checking whether it shut down the socket. */
     if (!disable_sig_alarm(true))
         ereport(FATAL, (errmsg("could not disable timer for authorization timeout")));
+
+    if (g_authenticationTimedOut) {
+        /* The password may have arrived just before the read side was shut down. */
+        ereport(LOG, (errcode(ERRCODE_QUERY_CANCELED),
+            errmsg("terminate because authentication timeout(%ds)", authTimeout)));
+        proc_exit(0);
+    }
 
     if (u_sess->attr.attr_storage.Log_connections) {
         if (AM_WAL_SENDER)

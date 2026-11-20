@@ -87,11 +87,11 @@ int recv_and_check_password_packet(Port* port);
 #define IDENT_PORT 113
 
 #define CLEAR_AND_FREE_PASSWORD(passwd, len) \
-    do {\
-        int _rc = memset_s(passwd, len, 0, len);\
-        securec_check(_rc, "", "");\
-        pfree(passwd);\
-        (passwd) = NULL;\
+    do { \
+        int rc = memset_s(passwd, len, 0, len); \
+        securec_check(rc, "", ""); \
+        pfree(passwd); \
+        (passwd) = NULL; \
     } while (0)
 
 #ifdef USE_IDENT
@@ -1300,6 +1300,18 @@ static
      * t_thrd.int_cxt.ImmediateInterruptOK to true in some block condition and reset it at the end.
      */
     t_thrd.int_cxt.ImmediateInterruptOK = false;
+
+    extern THR_LOCAL volatile bool g_authenticationTimedOut;
+    if (g_authenticationTimedOut) {
+        /* The read side was shut down. Use the existing EOF cleanup path. */
+        if (passwd != NULL) {
+            CLEAR_AND_FREE_PASSWORD(passwd, strlen(passwd));
+        }
+        ereport(LOG, (errcode(ERRCODE_QUERY_CANCELED),
+            errmsg("terminate because authentication timeout(%ds)", u_sess->attr.attr_security.AuthenticationTimeout)));
+        t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
+        return STATUS_EOF;
+    }
 
     /* client wouldn't send password */
     if (passwd == NULL) {
