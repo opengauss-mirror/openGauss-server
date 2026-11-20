@@ -673,6 +673,9 @@ static bool gs_signal_handle_check(const GsSndSignal* local_node)
     switch (local_node->check.check_type) {
         case SIGNAL_CHECK_EXECUTOR_STOP:
         case SIGNAL_CHECK_STREAM_STOP: {
+            if (t_thrd.int_cxt.ignoreSessionBackendSignal) {
+                return false;
+            }
             if (u_sess != NULL && local_node->check.debug_query_id == u_sess->debug_query_id) {
                 return true;
             }
@@ -685,6 +688,9 @@ static bool gs_signal_handle_check(const GsSndSignal* local_node)
             return false;
         }
         case SIGNAL_CHECK_SESS_KEY: {
+            if (t_thrd.int_cxt.ignoreSessionBackendSignal) {
+                return false;
+            }
             return (u_sess != NULL && local_node->check.session_id == u_sess->session_id);
         }
         default: {
