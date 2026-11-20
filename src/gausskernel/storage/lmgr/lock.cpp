@@ -1720,6 +1720,14 @@ static void ReportWaitLockInfo(const LOCALLOCK *locallock)
  * it through the plain WAIT_EVENT_END path: that records counter/duration,
  * which would double count timed-out waits (both failed and acquired) and
  * record cancelled waits as successes with the failure lost.
+ *
+ * Do not gate on st_waitevent matching the lock tag, nor take the duration
+ * from waitInfo.event_info.start_time: on some paths (e.g. a tuple-lock wait
+ * aborted by lockwait_timeout) the wait event has already been ended before
+ * the error reaches the PG_CATCH in WaitOnLock, so those anchors were
+ * silently dropping the failed-wait record. Anchor on proc->waitStart,
+ * which ProcSleep sets unconditionally when the wait begins and which only
+ * the success path (ProcWakeup) clears.
  */
 static void ReportWaitLockFailInfo(const LOCALLOCK *locallock)
 {
@@ -1730,17 +1738,16 @@ static void ReportWaitLockFailInfo(const LOCALLOCK *locallock)
         return;
 
     pgstat_increment_changecount_before(beentry);
-    if (beentry->st_waitevent == wait_event_info) {
-        if (u_sess->attr.attr_common.enable_instr_track_wait) {
-            UpdateWaitEventFaildStat(&beentry->waitInfo, wait_event_info);
-            if (beentry->waitInfo.event_info.start_time != 0) {
-                beentry->waitInfo.event_info.duration =
-                    GetCurrentTimestamp() - beentry->waitInfo.event_info.start_time;
-            }
+    if (u_sess->attr.attr_common.enable_instr_track_wait) {
+        TimestampTz waitStart = (TimestampTz)pg_atomic_read_u64(&t_thrd.proc->waitStart);
+
+        UpdateWaitEventFaildStat(&beentry->waitInfo, wait_event_info);
+        if (waitStart != 0) {
+            beentry->waitInfo.event_info.duration = GetCurrentTimestamp() - waitStart;
         }
-        beentry->waitInfo.event_info.start_time = 0;
-        beentry->st_waitevent = WAIT_EVENT_END;
     }
+    beentry->waitInfo.event_info.start_time = 0;
+    beentry->st_waitevent = WAIT_EVENT_END;
     pgstat_increment_changecount_after(beentry);
 }
 
