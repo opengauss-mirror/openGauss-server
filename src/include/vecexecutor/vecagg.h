@@ -28,6 +28,7 @@
 #include "vecexecutor/vechashtable.h"
 #include "vecexecutor/vecnodes.h"
 #include "utils/batchsort.h"
+#include "executor/node/nodeAgg.h"
 
 extern VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags);
 extern VectorBatch* ExecVecAggregation(VecAggState* node);
