@@ -468,22 +468,22 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
 
     /* Fetch our pg_database row normally, via syscache */
     tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId));
-
     if (!HeapTupleIsValid(tup))
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("cache lookup failed for database %u", u_sess->proc_cxt.MyDatabaseId)));
 
+    /* Recheck that the database name still matches the catalog entry. */
     dbform = (Form_pg_database)GETSTRUCT(tup);
-
-    /* This recheck is strictly paranoia */
-    if (strcmp(name, NameStr(dbform->datname)) != 0)
-        ereport(FATAL,
+    if (strcmp(name, NameStr(dbform->datname)) != 0) {
+        int elevel = check_error_or_fatal_for_tplworker(u_sess);
+        ereport(elevel,
             (errcode(ERRCODE_UNDEFINED_DATABASE),
                 errmsg("database \"%s\" has disappeared from pg_database", name),
                 errdetail("Database OID %u now seems to belong to \"%s\".",
                     u_sess->proc_cxt.MyDatabaseId,
                     NameStr(dbform->datname))));
+    }
 
     /*
      * Check permissions to connect to the database.
@@ -510,11 +510,13 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
          * and save a few cycles.)
          */
         if (!am_superuser &&
-            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK)
-            ereport(FATAL,
+            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK) {
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
                     errdetail("User does not have CONNECT privilege.")));
+        }
 
         /*
          * Check connection limit for this database.
@@ -531,7 +533,8 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
             CountDBBackends(u_sess->proc_cxt.MyDatabaseId) > dbform->datconnlimit) {
             ReportAlarmTooManyDatabaseConn(name);
 
-            ereport(FATAL,
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for database \"%s\"", name)));
         } else if (!am_superuser) {
             ReportResumeTooManyDatabaseConn(name);
@@ -556,7 +559,8 @@ static void CheckConnAuthority(const char* name, bool am_superuser)
         /* Database Security: Check privilege to connect to the database.
          * Only superuser on the local machine can connect to "template1".*/
         if (strcmp(name, "template1") == 0 && IsConnFromApp() && !(am_superuser && isLocalAddr)) {
-            ereport(FATAL,
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
                     errdetail("User does not have CONNECT privilege.")));
@@ -2625,7 +2629,8 @@ void PostgresInitializer::SetDatabaseByName()
             m_indbname);
         securec_check_ss(rc, "\0", "\0");
         pgaudit_user_login(FALSE, (char*)m_indbname, m_details);
-        ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
+        int elevel = check_error_or_fatal_for_tplworker(u_sess);
+        ereport(elevel, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
     // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 
