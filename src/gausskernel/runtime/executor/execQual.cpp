@@ -7236,10 +7236,9 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
            }
        }
 
-
-        bool isClobAndNotNull = false;
-        isClobAndNotNull = (IsA(tle->expr, Param)) && (!isnull[resind]) && (((Param*)tle->expr)->paramtype == CLOBOID
-            || ((Param*)tle->expr)->paramtype == BLOBOID);
+        Oid expr_type = exprType((Node*)tle->expr);
+        bool isClobAndNotNull = (IsA(tle->expr, Param) || IsA(tle->expr, Const)) && !isnull[resind] &&
+            (expr_type == CLOBOID || expr_type == BLOBOID);
         if (isClobAndNotNull && econtext->ecxt_scantuple != NULL) {
            /* if is big lob, fetch and copy from toast */
            if (VARATT_IS_HUGE_TOAST_POINTER(values[resind])) {
