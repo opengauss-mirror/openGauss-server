@@ -261,7 +261,7 @@ trying dbname=postgres port=7783 user=ipv6_tmp password=Gauss@123 target_session
 Connection to database failed: session is read-only
 
 trying dbname=postgres port=7783 user=ipv6_tmp
-Connection to database failed: FATAL:  Invalid username/password,login denied.
+Connection to database failed: ERROR:  Invalid username/password,login denied.
 
 trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123
 Connection to database failed: could not match 2 port numbers to 1 hosts
