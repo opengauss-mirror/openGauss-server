@@ -32,6 +32,17 @@ http://localhost:8090
 | POST | `/api/v1/search_memory` | 语义搜索记忆 | 走查询规划、L0/L1/L2 分层召回和结果组装 |
 | POST | `/api/v1/get_memory` | 按 URI 读取记忆 | 读取指定 `ctx://` 记忆节点 |
 
+## 代码检索接口
+
+代码检索接口用于注册、同步和检索代码仓，开启方式与示例见 [代码检索](ogmem_code_search.md)。注册和同步需启用角色控制，并使用 Root 或账户 Admin Key。
+
+| 方法 | 路径 | 用途 | 备注 |
+| --- | --- | --- | --- |
+| POST | `/api/v1/resources/code/sync/registrations` | 注册代码仓 | 路径须在 `code_workspace_allowed_roots` 内，返回 `root_id` 和 `resource_root_slug` |
+| POST | `/api/v1/resources/code/sync` | 同步代码仓 | `wait_mode=index_visible` 时等待索引可检索 |
+| POST | `/api/v1/resources/code/search` | 检索代码 | 返回带文件和行号的代码片段 |
+| POST | `/api/v1/resources/code/snippet` | 读取代码片段 | 按检索结果的 `uri` 读取片段 |
+
 ## 会话接口
 
 会话接口用于管理活跃 session 的消息、状态、归档和上下文。
