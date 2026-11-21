@@ -1,0 +1,2 @@
+-- Recovery conflict retries must acquire the original partition lock.
+\! python3 "@abs_srcdir@/input/standby_partition_lock.py" "@abs_bindir@" "@abs_builddir@"
