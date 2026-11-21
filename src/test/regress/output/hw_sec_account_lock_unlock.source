@@ -6,29 +6,29 @@
 ----
 create user account_login password 'Ttest@123';
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@  
-gsql: FATAL:  The account has been locked.
+--?gsql: (?:ERROR|FATAL):  The account has been locked\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'Ttest@123' -p @portstring@ 
-gsql: FATAL:  The account has been locked.
+--?gsql: (?:ERROR|FATAL):  The account has been locked\x2e$
 select pg_sleep(10);
  pg_sleep 
 ----------
@@ -37,7 +37,7 @@ select pg_sleep(10);
 
 alter role account_login account unlock;
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'Ttest@123' -p @portstring@ -c ""
 select pg_user_status.failcount,pg_user_status.rolstatus,pg_roles.rolname from pg_user_status,pg_roles where pg_user_status.roloid=pg_roles.oid and pg_roles.rolname='account_login';
  failcount | rolstatus |    rolname    
@@ -46,27 +46,27 @@ select pg_user_status.failcount,pg_user_status.rolstatus,pg_roles.rolname from p
 (1 row)
 
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
-gsql: FATAL:  The account has been locked.
+--?gsql: (?:ERROR|FATAL):  The account has been locked\x2e$
  
 alter role account_login account unlock;
 select failcount,rolstatus from pg_user_status where roloid=(select oid from pg_roles where rolname='account_login');
@@ -164,7 +164,7 @@ select * from tab_account_admin_man_lock_tran;
 (0 rows)
 
 \! @abs_bindir@/gsql -d postgres -U user_account_admin_man_lock_tran -W Ttest@123 -p @portstring@ -c "select user;"
-gsql: FATAL:  The account has been locked.
+--?gsql: (?:ERROR|FATAL):  The account has been locked\x2e$
 select failcount,rolstatus from pg_user_status where roloid=(select oid from pg_roles where rolname='user_account_admin_man_lock_tran');
  failcount | rolstatus 
 -----------+-----------
@@ -191,7 +191,7 @@ create user account_with_validpwd0 with password 'Ttest@123' valid begin '2215-1
 ERROR:  The expiration time could not be earlier than the starting time.
 create user account_with_validpwd1 with password 'Ttest@123' valid begin '2015-10-10 14:00:00' valid until '2015-10-10 18:00:00';
 \! @abs_bindir@/gsql -d postgres -U account_with_validpwd1 -W 'Ttest@123' -p @portstring@
-gsql: FATAL:  The account is not within the period of validity.
+--?gsql: (?:ERROR|FATAL):  The account is not within the period of validity\x2e$
 select pg_sleep(5);
  pg_sleep 
 ----------
@@ -201,7 +201,7 @@ select pg_sleep(5);
 drop user account_with_validpwd1;
 create user account_with_validpwd2 with password 'Ttest@123' valid begin '2215-10-10 14:00:00' valid until '2215-10-10 18:00:00';
 \! @abs_bindir@/gsql -d postgres -U account_with_validpwd2 -W 'Ttest@123' -p @portstring@
-gsql: FATAL:  The account is not within the period of validity.
+--?gsql: (?:ERROR|FATAL):  The account is not within the period of validity\x2e$
 alter user account_with_validpwd2 with valid begin '2015-10-10 14:00:00';
 \! @abs_bindir@/gsql -d postgres -U account_with_validpwd2 -W 'Ttest@123' -p @portstring@ -c "select * from pg_authid where rolname='account_with_validpwd2'";
 ERROR:  permission denied for relation pg_authid
@@ -295,13 +295,13 @@ drop user account_createrole2;
 create user user_normal1 with password 'ttest@123';
 create user user_normal2 with password 'ttest@123' valid until '2000-12-12 10:00:00';
 \! @abs_bindir@/gsql -d postgres -U user_normal1 -W 'Ttest@123' -p @portstring@ -h localhost -c "select user";
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U user_normal1 -W 'Ttest@123' -p @portstring@ -h 127.0.0.1 -c "select user";
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -U user_normal2 -W 'ttest@123' -p @portstring@ -h localhost -c "select user";
-gsql: FATAL:  The account is not within the period of validity.
+--?gsql: (?:ERROR|FATAL):  The account is not within the period of validity\x2e$
 \! @abs_bindir@/gsql -d postgres -U user_normal2 -W 'ttest@123' -p @portstring@ -h 127.0.0.1 -c "select user";
-gsql: FATAL:  The account is not within the period of validity.
+--?gsql: (?:ERROR|FATAL):  The account is not within the period of validity\x2e$
 drop user user_normal1;
 drop user user_normal2;
 ----

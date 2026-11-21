@@ -45,6 +45,7 @@
 #include "pgxc/pgxc.h"
 #include "portability/instr_time.h"
 #include "postmaster/postmaster.h"
+#include "threadpool/threadpool.h"
 #include "utils/acl.h"
 #include "gs_policy/policy_common.h"
 #include "alarm/alarm.h"
@@ -349,7 +350,7 @@ static
         user_login_hook(port->database_name, port->user_name, false, true);
 	}
     pgaudit_user_login(FALSE, port->database_name, details);
-    ereport(FATAL, (errcode(errcode_return), errmsg(errstr, port->user_name)));
+    ereport(IS_THREAD_POOL_WORKER ? ERROR : FATAL, (errcode(errcode_return), errmsg(errstr, port->user_name)));
     /* doesn't return */
 }
 
@@ -369,11 +370,12 @@ bool isRemoteInitialUser(Port* port)
 
 /*
  * Client authentication starts here.  If there is an error, this
- * function does not return and the backend process is terminated.
+ * function does not return and the connection is closed.
  */
 void ClientAuthentication(Port* port)
 {
     int status = STATUS_ERROR;
+    const int elevel = IS_THREAD_POOL_WORKER ? ERROR : FATAL;
     /* Database Security: Support password complexity */
     char details[PGAUDIT_MAXLENGTH] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
@@ -413,7 +415,7 @@ void ClientAuthentication(Port* port)
          */
 #ifdef USE_SSL
         if (port->peer == NULL) {
-            ereport(FATAL,
+            ereport(elevel,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                     errmsg("connection requires a valid client certificate")));
         }
@@ -435,13 +437,13 @@ void ClientAuthentication(Port* port)
     if (IS_PGXC_DATANODE && IsConnFromCoord()) {
 #ifdef ENABLE_GSS
         if (port->hba->auth_method != uaTrust && port->hba->auth_method != uaGSS) {
-            ereport(FATAL,
+            ereport(elevel,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                         errmsg("Connection from CN must use trust or gss auth method.")));
         }
 #else
         if (port->hba->auth_method != uaTrust) {
-            ereport(FATAL,
+            ereport(elevel,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                         errmsg("Connection from CN must use trust auth method.")));
         }
@@ -485,14 +487,14 @@ void ClientAuthentication(Port* port)
                     &port->raddr.addr, port->raddr.salen, hostinfo, sizeof(hostinfo), NULL, 0, NI_NUMERICHOST);
                 if (AM_WAL_SENDER) {
 #ifdef USE_SSL
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("pg_hba.conf rejects replication connection for host \"%s\", user \"%s\", %s",
                                 hostinfo,
                                 port->user_name,
                                 port->ssl ? _("SSL on") : _("SSL off"))));
 #else
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("pg_hba.conf rejects replication connection for host \"%s\", user \"%s\"",
                                 hostinfo,
@@ -500,7 +502,7 @@ void ClientAuthentication(Port* port)
 #endif
                 } else {
 #ifdef USE_SSL
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("pg_hba.conf rejects connection for host \"%s\", user \"%s\", database \"%s\", %s",
                                 hostinfo,
@@ -508,7 +510,7 @@ void ClientAuthentication(Port* port)
                                 port->database_name,
                                 port->ssl ? _("SSL on") : _("SSL off"))));
 #else
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("pg_hba.conf rejects connection for host \"%s\", user \"%s\", database \"%s\"",
                                 hostinfo,
@@ -552,7 +554,7 @@ void ClientAuthentication(Port* port)
 
                 if (AM_WAL_SENDER) {
 #ifdef USE_SSL
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("no pg_hba.conf entry for replication connection from host \"%s\", user \"%s\", %s",
                                 hostinfo,
@@ -560,7 +562,7 @@ void ClientAuthentication(Port* port)
                                 port->ssl ? _("SSL on") : _("SSL off")),
                             HOSTNAME_LOOKUP_DETAIL(port)));
 #else
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("no pg_hba.conf entry for replication connection from host \"%s\", user \"%s\"",
                                 hostinfo,
@@ -569,7 +571,7 @@ void ClientAuthentication(Port* port)
 #endif
                 } else {
 #ifdef USE_SSL
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("no pg_hba.conf entry for host \"%s\", user \"%s\", database \"%s\", %s",
                                 hostinfo,
@@ -578,7 +580,7 @@ void ClientAuthentication(Port* port)
                                 port->ssl ? _("SSL on") : _("SSL off")),
                             HOSTNAME_LOOKUP_DETAIL(port)));
 #else
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("no pg_hba.conf entry for host \"%s\", user \"%s\", database \"%s\"",
                                 hostinfo,
@@ -636,7 +638,7 @@ void ClientAuthentication(Port* port)
         case uaMD5:
             /*Forbid remote connection with initial user.*/
             if (isRemoteInitialUser(port)) {
-                ereport(FATAL,
+                ereport(elevel,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                         errmsg("Forbid remote connection with initial user.")));
             }
@@ -649,7 +651,7 @@ void ClientAuthentication(Port* port)
         case uaSM3:
             /*Forbid remote connection with initial user.*/
             if (isRemoteInitialUser(port)) {
-                ereport(FATAL,
+                ereport(elevel,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                         errmsg("Forbid remote connection with initial user.")));
             }
@@ -693,7 +695,7 @@ void ClientAuthentication(Port* port)
 #ifdef USE_SSL
             /* Forbid remote connection with initial user. */
             if (isRemoteInitialUser(port)) {
-                ereport(FATAL,
+                ereport(elevel,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                         errmsg("Forbid remote connection with initial user.")));
             }
@@ -761,7 +763,7 @@ void ClientAuthentication(Port* port)
 
                     /* Show locked errror messages when the account has been locked. */
                     ReportAlarmLoginFailed(port->user_name);
-                    ereport(FATAL,
+                    ereport(elevel,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("The account has been locked.")));
                 }
             } else if (status == STATUS_OK) {
@@ -890,6 +892,7 @@ static
 #endif
  void sendAuthRequest(Port* port, AuthRequest areq)
 {
+    const int elevel = IS_THREAD_POOL_WORKER ? ERROR : FATAL;
     /* Database Security:  Support SHA256.*/
     int32 stored_method = 0;
     StringInfoData buf;
@@ -1022,7 +1025,7 @@ static
                         return;
                     } else {
                         if (!is_cluster_internal_connection(port)) {
-                            ereport(FATAL,
+                            ereport(elevel,
                                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                                     errmsg("GSS authentication method is not allowed because %s user password is not "
                                            "disabled.",
@@ -1047,7 +1050,7 @@ static
         t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
         rc = memset_s(encryptString, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH + 1);
         securec_check(rc, "\0", "\0");
-        ereport(FATAL,
+        ereport(elevel,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("Invalid username/password,login denied.")));
     }
 

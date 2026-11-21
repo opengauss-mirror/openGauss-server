@@ -952,7 +952,7 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
         securec_check_ss(rcs, "\0", "\0");
         pgaudit_user_login(FALSE, u_sess->proc_cxt.MyProcPort->database_name, details);
 
-        ereport(FATAL,
+        ereport(IS_THREAD_POOL_WORKER ? ERROR : FATAL,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("Invalid username/password,login denied.")));
     }
 
