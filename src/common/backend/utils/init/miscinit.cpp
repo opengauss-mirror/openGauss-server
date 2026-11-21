@@ -47,6 +47,7 @@
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
 #include "storage/proc.h"
+#include "threadpool/threadpool.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -998,10 +999,12 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
             IncreaseUserCount(roleid);
         }
 
-        if (!rform->rolcanlogin)
-            ereport(FATAL,
+        if (!rform->rolcanlogin) {
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                     errmsg("role \"%s\" is not permitted to login", rolename)));
+        }
 
         /*
          * Check connection limit for this role.
@@ -1016,7 +1019,8 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
         if (rform->rolconnlimit >= 0 && !u_sess->misc_cxt.AuthenticatedUserIsSuperuser &&
             CountUserBackends(roleid) > rform->rolconnlimit) {
             ReportAlarmTooManyDbUserConn(rolename);
-            ereport(FATAL,
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for role \"%s\"", rolename)));
         } else if (!u_sess->misc_cxt.AuthenticatedUserIsSuperuser) {
             ReportResumeTooManyDbUserConn(rolename);
