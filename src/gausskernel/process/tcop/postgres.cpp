@@ -991,10 +991,45 @@ void client_read_ended(void)
 
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 
+static void ReleaseSqlPluginOwner(ResourceOwner owner, ResourceOwner savedIsolatedOwner, bool isCommit)
+{
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_LOCKS, isCommit, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, true);
+    t_thrd.utils_cxt.CurrentResourceOwner = NULL;
+    ResourceOwnerDelete(owner);
+    IsolatedResourceOwner = savedIsolatedOwner;
+}
+
+static CFunInfo LoadSqlPluginFunction(const char *filename, char *funcname)
+{
+    if (t_thrd.utils_cxt.CurrentResourceOwner != NULL) {
+        return load_external_function(filename, funcname, false, false);
+    }
+
+    ResourceOwner savedIsolatedOwner = IsolatedResourceOwner;
+    ResourceOwner owner = ResourceOwnerCreate(NULL, "ForLoadSqlPlugin",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    t_thrd.utils_cxt.CurrentResourceOwner = owner;
+
+    CFunInfo func;
+    PG_TRY();
+    {
+        func = load_external_function(filename, funcname, false, false);
+    }
+    PG_CATCH();
+    {
+        ReleaseSqlPluginOwner(owner, savedIsolatedOwner, false);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    ReleaseSqlPluginOwner(owner, savedIsolatedOwner, true);
+    return func;
+}
+
 void ExecuteFunctionIfExisted(const char *filename, char *funcname)
 {
-    CFunInfo tmpCF;
-    tmpCF = load_external_function(filename, funcname, false, false);
+    CFunInfo tmpCF = LoadSqlPluginFunction(filename, funcname);
     if (tmpCF.user_fn != NULL) {
         ((void* (*)(void))(tmpCF.user_fn))();
     }
