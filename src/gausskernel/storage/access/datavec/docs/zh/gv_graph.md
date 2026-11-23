@@ -227,7 +227,8 @@ LIMIT 100;
 
 ## 使用限制
 
-- 只支持ASTORE和USTORE行存表。
+- 只支持ASTORE和USTORE行存表。不支持段页式表（`segment=on`）、全局临时表、UNLOGGED表和物化视图。
+- 在支持的分区表上创建索引时，请显式指定`LOCAL`。
 - 只支持单个`vector`列，不支持多列索引、`INCLUDE`列和唯一索引。
 - 向量列必须声明维度，GV_GRAPH最大支持4096维。
 - NULL向量不会写入索引。业务不需要NULL值时，建议将向量列定义为`NOT NULL`。

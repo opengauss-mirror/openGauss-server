@@ -227,7 +227,8 @@ If the execution plan does not use the GV_GRAPH index, check the following in or
 
 ## Restrictions
 
-- Only ASTORE and USTORE row-store tables are supported.
+- Only ASTORE and USTORE row-store tables are supported. Segment tables (`segment=on`), global temporary tables, unlogged tables, and materialized views are not supported.
+- Specify `LOCAL` explicitly when creating an index on a supported partitioned table.
 - Only a single `vector` column is supported. Multicolumn indexes, `INCLUDE` columns, and unique indexes are not supported.
 - The vector column must declare its dimensions. GV_GRAPH supports up to 4096 dimensions.
 - NULL vectors are not added to the index. If your application does not need NULL values, define the vector column as `NOT NULL`.
