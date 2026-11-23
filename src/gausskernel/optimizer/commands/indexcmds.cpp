@@ -889,6 +889,11 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         return address;
     }
 
+    if (strcmp(stmt->accessMethod, "gv_graph") == 0 && RelationIsSegmentTable(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("gv_graph indexes are not supported on segment tables")));
+    }
+
     if (stmt->schemaname != NULL) {
         if (namespaceId != get_namespace_oid(stmt->schemaname, false)) {
             ereport(ERROR,
