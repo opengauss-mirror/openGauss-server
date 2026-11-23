@@ -837,3 +837,6 @@ test: remotetype_trust_security
 
 # test replication=standbywrite non-internal trust bypass security
 test: replication_standbywrite_security
+
+# Recovery lock retries must preserve partition tags.
+test: standby_partition_lock

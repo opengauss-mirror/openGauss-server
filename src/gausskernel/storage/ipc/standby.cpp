@@ -42,7 +42,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
                                                    ProcSignalReason reason, TimestampTz waitStart, int retry_count,
                                                    TransactionId limitXmin = InvalidTransactionId);
 
-static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
+static void ResolveRecoveryConflictWithLock(const LOCKTAG* locktag);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
 static void log_access_exclusive_locks_new(int nlocks, XlStandbyLockNew* locks);
 static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts);
@@ -444,17 +444,17 @@ void ResolveRecoveryConflictWithDatabase(Oid dbid)
     }
 }
 
-static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
+static void ResolveRecoveryConflictWithLock(const LOCKTAG* locktag)
 {
+    const int cancelAllBackendsAttempt = 3;
     VirtualTransactionId* backends = NULL;
     bool lock_acquired = false;
     int num_attempts = 0;
-    LOCKTAG locktag;
     TimestampTz waitStart;
     int retry_count;
     uint64 expected;
 
-    SET_LOCKTAG_RELATION(locktag, dbOid, relOid);
+    /* Retry the original tag, including its partition or object identity. */
 
     /*
      * If blowing away everybody with conflicting locks doesn't work, after
@@ -471,17 +471,19 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
 
     retry_count = 0;
     while (!lock_acquired) {
-        if (++num_attempts < 3)
-            backends = GetLockConflicts(&locktag, AccessExclusiveLock);
-        else
+        if (++num_attempts < cancelAllBackendsAttempt) {
+            backends = GetLockConflicts(locktag, AccessExclusiveLock);
+        } else {
             backends = GetConflictingVirtualXIDs(InvalidTransactionId, InvalidOid);
+        }
 
         retry_count++;
         ResolveRecoveryConflictWithVirtualXIDs(backends, NULL, PROCSIG_RECOVERY_CONFLICT_LOCK, 
             waitStart, retry_count);
 
-        if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) != LOCKACQUIRE_NOT_AVAIL)
+        if (LockAcquireExtended(locktag, AccessExclusiveLock, true, true, false) != LOCKACQUIRE_NOT_AVAIL) {
             lock_acquired = true;
+        }
     }
 }
 
@@ -694,8 +696,9 @@ void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid,
         SET_LOCKTAG_RELATION(locktag, newlock->dbOid, newlock->relOid);
     }
 
-    if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) == LOCKACQUIRE_NOT_AVAIL)
-        ResolveRecoveryConflictWithLock(newlock->dbOid, newlock->relOid);
+    if (LockAcquireExtended(&locktag, AccessExclusiveLock, true, true, false) == LOCKACQUIRE_NOT_AVAIL) {
+        ResolveRecoveryConflictWithLock(&locktag);
+    }
 }
 
 static void StandbyReleaseLockList(List *locks)
