@@ -21094,6 +21094,12 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         }
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX: {
+            if ((operation == AT_SetRelOptions || operation == AT_ResetRelOptions) &&
+                strcmp(NameStr(rel->rd_am->amname), "gv_graph") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("ALTER INDEX SET/RESET is not supported for gv_graph indexes"),
+                    errhint("Create a new index with the desired options.")));
+            }
             if (strcmp(rel->rd_am->amname.data, "bm25") == 0 &&
                 CheckDefListContainsOption(defList, "dict_path")) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
