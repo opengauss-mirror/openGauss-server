@@ -119,13 +119,8 @@ static annlite::IndexOptions make_quant_opts(const char *quant_type, uint32_t di
 {
     static constexpr size_t default_lvq_clusters = 128;
     static constexpr size_t pq_max_use_all_subs = 128;
-    /* fp32:不量化 */
-    if (strcmp(quant_type, "fp32") == 0) {
-        FAST_NOTICE("fp32 is not supported now, defaulting to lvq");
-        return annlite::VectorQuantizationConfig::make_quantized_lvq(dim, default_lvq_clusters);
-    }
     /* pq: Product Quantization (默认 16 centroids，即pq4bit) */
-    if (strcmp(quant_type, "pq") == 0) {
+    if (pg_strcasecmp(quant_type, "pq") == 0) {
         size_t segment_count = ((dim > pq_max_use_all_subs) && (dim % 2 == 0)) ? dim : dim / 2;
         if (segment_count == 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -134,12 +129,10 @@ static annlite::IndexOptions make_quant_opts(const char *quant_type, uint32_t di
         }
         return annlite::VectorQuantizationConfig::make_quantized_pq4bit(dim, segment_count);
     }
-    /* lvq: Locally Adaptive Vector Quantization (默认) */
-    if (strcmp(quant_type, "lvq") == 0) {
-        return annlite::VectorQuantizationConfig::make_quantized_lvq(dim, default_lvq_clusters);
+    /* Preserve the fallback for older indexes with invalid catalog values. */
+    if (pg_strcasecmp(quant_type, "lvq") != 0) {
+        FAST_NOTICE("unknown quantization_type '%s', defaulting to lvq", quant_type);
     }
-    /* 未知类型，默认lvq */
-    FAST_NOTICE("unknown quantization_type '%s', defaulting to lvq", quant_type);
     return annlite::VectorQuantizationConfig::make_quantized_lvq(dim, default_lvq_clusters);
 }
 

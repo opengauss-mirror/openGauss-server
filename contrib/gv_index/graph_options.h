@@ -83,7 +83,7 @@ struct GraphOptions {
 #define GRAPH_RELOPTIONS(XX) \
     XX("storage_type", "storage_type: auto/ustore/astore", STRING, "auto", 0, 0, ValidateStorageTypeOption, storage_type) \
     XX("index_type", "USTORE index type: rcr/pcr", STRING, NULL, 0, 0, ValidateGraphIndexTypeOption, std_options.index_type) \
-    XX("quantization_type", "quantization type: lvq/pq", STRING, "lvq", 0, 0, NULL, quantization_type) \
+    XX("quantization_type", "quantization type: lvq/pq", STRING, "lvq", 0, 0, ValidateQuantizationType, quantization_type) \
     XX("prune_alg", "prune algorithm: vamana/npu_knn", STRING, "vamana", 0, 0, ValidatePruneAlg, pruneAlg) \
     XX("subgraph_count", "number of subgraphs", INT, 1, 1, 64, 0, subgraph_count) \
     XX("num_parallels", "max threads for build", INT, 32, 1, 64, 0, num_parallels) \
