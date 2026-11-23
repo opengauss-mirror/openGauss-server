@@ -54,6 +54,15 @@
 #include "storage/smgr/smgr.h"
 #include "access/generic_xlog.h"
 
+static void ValidateQuantizationType(const char *value)
+{
+    if (pg_strcasecmp(value, "lvq") != 0 && pg_strcasecmp(value, "pq") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid quantization_type value \"%s\"", value),
+                        errhint("Valid values are \"lvq\" and \"pq\".")));
+    }
+}
+
 static void ValidatePruneAlg(const char *value)
 {
     if (pg_strcasecmp(value, "vamana") != 0 && pg_strcasecmp(value, "npu_knn") != 0) {
