@@ -122,6 +122,8 @@
 ./share/postgresql/extension/age.control
 ./share/postgresql/extension/datavec--1.0.sql
 ./share/postgresql/extension/datavec.control
+./share/postgresql/extension/gv_index--1.0.sql
+./share/postgresql/extension/gv_index.control
 ./share/postgresql/extension/chparser--1.0.sql
 ./share/postgresql/extension/chparser.control
 ./share/postgresql/extension/assessment--1.0.sql
@@ -896,6 +898,7 @@
 ./lib/postgresql/age.so
 ./lib/postgresql/libog_query.so
 ./lib/postgresql/datavec.so
+./lib/postgresql/libgv_index.so
 ./lib/postgresql/chparser.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
@@ -987,6 +990,10 @@
 ./lib/libonnx*.so*
 ./lib/libtokenizers.so*
 ./lib/libkvecturbo.so*
+./lib/libannlite.so
+./lib/libascend_kernels.so
+./lib/lib_ascend_ai_core_a.so
+./lib/lib_ascend_vector_core_v.so
 ./lib/libconfig.so*
 ./lib/libpgport_tool.so
 ./lib/libpgport_tool.so.1
