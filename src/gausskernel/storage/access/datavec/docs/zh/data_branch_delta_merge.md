@@ -28,6 +28,31 @@ neon_local endpoint start --enable-oggit --oggit-database postgres <target_endpo
 
 `--enable-oggit` 管理 `neon.oggit_enabled`，使 `OggitWorker` 随 endpoint 启动。`--oggit-database` 指定解码和维护元数据的数据库；省略时沿用 endpoint 上次保存的选择，没有历史选择时使用 `postgres`。显式指定 `postgres` 可以重置此前的数据库选择。
 
+### 命令入口与部署模式
+
+本文未特别标注的 `neon_local` 命令用于源码部署的本地栈。Docker 环境在部署目录的 `docker-compose/` 下使用 `bin/docker_local`，由 control plane 访问 endpoint。
+
+| 操作 | 本地 `neon_local` | Docker `bin/docker_local` |
+| --- | --- | --- |
+| `branch diff/merge` 定位两端 | `--source-branch/--target-branch`，必要时显式指定 endpoint | 必须使用 `--source-endpoint/--target-endpoint`，不接受 source/target branch 参数 |
+| 冲突查询和恢复命令定位目标 | 使用 `--target-branch` 或明确的 target endpoint | 建议明确使用 `--target-endpoint` |
+| 数据库 | 显式指定 `--database`；冲突查询和恢复命令也必须指定 | 同样显式指定 `--database` |
+
+Docker 增量合并示例中，`dev`、`main` 均是 endpoint ID，仍须对应直接父子 timeline：
+
+```bash
+bin/docker_local branch merge \
+  --source-endpoint dev \
+  --target-endpoint main \
+  --source-schema public \
+  --target-schema public \
+  --database postgres \
+  --incremental-oggit \
+  --strategy manual
+```
+
+Docker 增量 diff 使用相同的 endpoint、schema、database 参数，将子命令改为 `branch diff` 并去掉 `--strategy`。增量模式要求 source/target schema 同名、两端均存在且连接用户具有 `USAGE` 权限；不支持内部 schema 或跨 schema 名称映射。
+
 ## 三、 工作机制与增量窗口
 
 两端 `OggitWorker` 从 WAL 逻辑解码生成结构化事件，分别维护本地 `oggit` 元数据。target 通过 FDW 读取 source 的元数据，再进行差异分析和合并规划，而不是映射业务表执行全量比较。
@@ -143,11 +168,22 @@ ALTER TABLE public.accounts_by_code
 
 - `safe_additive`：如新增可空列、创建普通索引，两个方向均可自动重放。
 - `requires_validation`：如新增约束、设置 NOT NULL，两个方向均先在保存点内校验，通过后重放。
-- `semantic`：如重命名、类型变更以及视图、函数、触发器等语义变化，父合子可自动重放，子合父进入对象冲突，需人工确认。
+- `semantic`：如重命名、类型变更，子合父需人工确认；父合子在受支持的对象类型及重放范围内可自动应用。
 - `destructive`：如 DROP、TRUNCATE，父合子可自动重放，子合父进入对象冲突，需人工确认。
 - `unsupported`：无法解析、安全重放或缺少重放 SQL 的事件，两个方向均进入对象冲突。
 
 双方修改同一对象且变更不同，记录 `object_conflict`；等价对象变更不重复处理。上述规则不表示支持任意 DDL，仍受事件采集和数据库执行能力限制。
+
+父子方向的主要差异如下，自动应用均以不存在对象冲突且数据库检查通过为前提：
+
+| 变更情况 | 子分支合入父分支 | 父分支同步到子分支 |
+| --- | --- | --- |
+| `safe_additive` / `requires_validation` | 自动应用或校验后应用 | 自动应用或校验后应用 |
+| source 独有的 `semantic` / `destructive` 对象变更 | 需要人工确认 | 在支持的重放范围内可自动应用 |
+| 双方对同一对象作出不同变更 | `object_conflict`，需要处理对象冲突 | 同样需要处理对象冲突 |
+| source 有行变更，target 对该表有不兼容对象变更 | 可能产生 `parent_object_change` | 同样可能产生 `parent_object_change` |
+
+`parent_object_change` 表示“目标侧存在阻碍来源行变更应用的对象变化”，名称中的 parent 不代表它永远发生在父分支。例如 source 更新某表的行，而 target 已对该表作出不兼容 DDL 或 TRUNCATE 时，应检查 target 的对象变化与 source 行变更是否仍可兼容。
 
 > 注意：父分支同步到子分支时，符合条件的 DROP、TRUNCATE 会影响目标对象或数据。执行前应查看增量差异并确认合并方向。
 
@@ -164,12 +200,43 @@ ALTER TABLE public.accounts_by_code
 - 保留供恢复流程使用的 FDW 元数据访问对象，不应手工清理。
 - 同一 target 不允许启动新的 active merge，应先完成或终止当前合并。
 
+### 冲突范围与决议参数
+
+`conflict_scope` 表示冲突范围，`conflict_type` 表示该范围内的具体原因，两者需要结合查看：
+
+| conflict_scope | 含义与常见内容 |
+| --- | --- |
+| `row` | 行级冲突，如同列更新、删除与更新冲突或 `parent_object_change` |
+| `ddl` | 表、列、索引、约束等对象事件，双方修改同一对象时可出现 `object_conflict` |
+| `sequence` | sequence 对象事件或序列修复问题 |
+| `truncate` | TRUNCATE 对象事件的冲突或执行问题 |
+| `unsupported` | 暂不支持安全处理的事件或冲突 |
+
+`apply_error` 是执行失败原因，可出现在不同 scope 中，不是另一个 scope。对象冲突应结合 `source_change_id`、来源 DDL、目标变更及 `reason` 分析；同表多条来源 DDL 分别决议，不共用一次对象级批准。
+
+本地 `neon_local branch resolve` 要求在 `--resolution` 与 `--custom-sql` 中选择一个：两者都不提供会报错，同时提供会因互斥被拒绝。`--resolution` 没有默认值，可取 `ours`、`theirs`、`skip`；`--custom-sql` 保存 SQL，待 continue 时执行，resolve 本身不立即执行。
+
+Docker `bin/docker_local branch resolve` 的当前入口行为不同：未给 `--custom-sql` 时，`--resolution` 默认是 `theirs`；给出非空 `--custom-sql` 时会提交自定义 SQL，优先于 resolution。为明确表达决议，两个入口都建议只选择一种方式并显式填写，不能将 Docker 的默认值套用到本地命令。
+
+Docker 下的目标定位示例：
+
+```bash
+bin/docker_local branch resolve \
+  --target-endpoint main \
+  --merge-id <merge_id> \
+  --conflict-id <conflict_id> \
+  --database postgres \
+  --resolution ours
+```
+
+Docker 下的 conflicts、merge-status、continue、abort 也使用对应的 `bin/docker_local branch` 子命令，并明确传入 `--target-endpoint`、`--merge-id`、`--database`。
+
 以下示例中的 `<merge_id>` 和 `<conflict_id>` 应替换为实际命令返回的标识。
 
 查看冲突：
 
 ```bash
-neon_local branch conflicts --target-branch main --merge-id <merge_id>
+neon_local branch conflicts --target-branch main --merge-id <merge_id> --database postgres
 ```
 
 逐项选择决议：`ours` 保留目标变更，`theirs` 采用来源变更，`skip` 跳过对应项。以下示例选择 `ours`，其他决议按实际需要替换：
@@ -179,6 +246,7 @@ neon_local branch resolve \
   --target-branch main \
   --merge-id <merge_id> \
   --conflict-id <conflict_id> \
+  --database postgres \
   --resolution ours
 ```
 
@@ -189,6 +257,7 @@ neon_local branch resolve \
   --target-branch main \
   --merge-id <merge_id> \
   --conflict-id <conflict_id> \
+  --database postgres \
   --custom-sql 'UPDATE public.items SET price = 22 WHERE id = 2;'
 ```
 
@@ -197,7 +266,7 @@ neon_local branch resolve \
 处理完所有冲突后继续：
 
 ```bash
-neon_local branch continue --target-branch main --merge-id <merge_id>
+neon_local branch continue --target-branch main --merge-id <merge_id> --database postgres
 ```
 
 `continue` 按原窗口重新构造执行计划，不纳入后续 source 写入。如果检测到 target 出现窗口外用户变更，会拒绝继续；此时需要终止本次合并并重新规划。约束、唯一键、外键、对象缺失或 SQL 执行错误可能在实际应用阶段产生 `apply_error`，需根据冲突原因重新处理，不能假定 resolve 后一定成功。
@@ -205,14 +274,37 @@ neon_local branch continue --target-branch main --merge-id <merge_id>
 放弃本次合并：
 
 ```bash
-neon_local branch abort --target-branch main --merge-id <merge_id>
+neon_local branch abort --target-branch main --merge-id <merge_id> --database postgres
 ```
 
 `abort` 将合并状态置为 `aborted` 并关闭 target 写屏障，不删除历史冲突记录，也不回滚 source 后续写入。它不是撤销已成功合并数据的命令。
 
+### 对象级冲突处置示例
+
+假设子分支对 `public.t_uk` 先修改列类型、再删除另一列，父分支同时给该表新增一列。以 `manual` 将子合父后，`branch conflicts` 应分别列出两条来源 DDL 的冲突。核对每个 `conflict_id`、`source_change_id` 和实际 SQL 后，再逐项决定保留目标、采用来源或使用自定义 SQL。
+
+以下示例仅适用于已确认需要在 target 执行这两条来源 DDL 的情况；`<type_conflict_id>`、`<drop_conflict_id>` 使用查询结果中的实际 ID：
+
+```bash
+neon_local branch resolve \
+  --target-branch main --merge-id <merge_id> \
+  --conflict-id <type_conflict_id> --database postgres --resolution theirs
+
+neon_local branch resolve \
+  --target-branch main --merge-id <merge_id> \
+  --conflict-id <drop_conflict_id> --database postgres --resolution theirs
+
+neon_local branch continue \
+  --target-branch main --merge-id <merge_id> --database postgres
+```
+
+只解决第一条时，continue 应提示仍有 pending 冲突；不应将第一条决议自动用于第二条。对于旧版本遗留的 blocked 合并，continue 可能先补齐遗漏的事件冲突并返回 blocked，应重新查询并决议新增冲突，再继续。
+
+需要改写某条来源操作时，可针对该冲突改用 `--custom-sql`。各事件按来源 LSN、ordinal、ID 的顺序构造执行计划；跳过前置 DDL 后，依赖它的后续 DDL 仍可能失败。continue 若返回 blocked，应查看新的 pending/`apply_error` 及 `reason`，修正决议或 SQL 后再重试；同次应用中已执行的事务内修改会随失败回滚。若无法确定安全处理方式，使用 abort 终止后重新规划，不手工删除冲突或绕过写屏障。
+
 ## 九、 示例：增量修改与人工决议
 
-假设 `dev` 从 `main` 直接派生，分支点时双方 `public.items` 包含 `id = 2, name = 'banana', price = 20`，表定义同第八节。
+假设 `dev` 从 `main` 直接派生，分支点时双方 `public.items` 包含 `id = 2, name = 'banana', price = 20`，其中 `id` 为主键，`name`、`price` 分别为名称与价格列。
 
 1. 在 `dev` 将 `id = 2` 的 `name` 改为 `banana-dev`，在 `main` 将该行 `price` 改为 25。执行本节增量 diff 后，这类不同列更新可判定为 `mergeable`。使用增量 merge 合入后，目标行同时保留 `name = 'banana-dev'` 和 `price = 25`。
 2. 在上述成功合并之后，继续在 `dev` 将该行 `price` 改为 30，在 `main` 将其改为 35。再次执行增量 diff/merge 时，仅处理新的窗口；双方同列不同值会产生行级冲突。
@@ -228,4 +320,50 @@ neon_local branch abort --target-branch main --merge-id <merge_id>
 
 删除子分支后，系统异步回收 root parent 上不再需要的增量事件，按当前存活子分支重新计算安全边界。不要手工删除 `oggit` 历史记录，以免破坏后续 diff/merge 所需窗口。
 
-第七节的“目标表必须有主键”“不删除目标侧独有行或表”和源独有表复制对象清单仅描述全量模式。增量模式按本节行身份、显式删除事件及 DDL 安全分类处理，不应将全量限制直接套用到增量模式。未指定 `--incremental-oggit` 时仍执行默认全量模式。
+[全量分支合并](./data_branch_full_merge.md)第七节的“目标表必须有主键”“不删除目标侧独有行或表”和源独有表复制对象清单仅描述全量模式。增量模式按本节行身份、显式删除事件及 DDL 安全分类处理，不应将全量限制直接套用到增量模式。未指定 `--incremental-oggit` 时仍执行默认全量模式。
+
+### 手动回收增量元数据
+
+`oggit gc` 回收 root parent 上已不需要的 `oggit.change_log`、`oggit.object_change` 事件。它不删除业务行，也不等同于物理 WAL 文件清理；执行前应确认后续合并所需的增量窗口仍完整。
+
+```bash
+# 本地栈：使用默认 tenant，也可增加 --tenant-id <tenant_id>
+neon_local oggit gc --retention-lsn-distance 16777216
+
+# Docker：在部署目录的 docker-compose/ 下执行
+bin/docker_local oggit gc --retention-lsn-distance 16777216 -t 900
+```
+
+| 参数 | 说明 |
+| --- | --- |
+| `--retention-lsn-distance` | 无存活直接子分支时保留的 LSN 字节距离，默认 `16777216`，即 16 MiB |
+| `--tenant-id` | 仅本地 `neon_local oggit gc` 支持；省略时使用默认 tenant |
+| `-t/--timeout` | 仅 Docker GC 入口支持的请求超时，单位秒，默认 `900`；`-t` 不是 tenant 参数 |
+
+Docker GC 由 control plane 枚举受管 tenant 的 root parent，不接受 `--tenant-id`。两种入口均使用对应 endpoint 的 Oggit 数据库选择，不另设 `--database`。
+
+回收下界 `floor_lsn` 由系统计算：有存活直接子分支时取最小 `ancestor_lsn`；无子分支时取 `max(scanned_lsn, decode_lsn)` 减去保留距离，下限为 `0/0`。只清理 `commit_lsn` 严格小于下界的事件。下界为 `0/0`、缺少唯一可用的 running endpoint，或未完成合并仍需保留相关窗口等情况下会跳过。
+
+检查输出中的 `tenant_id`、`timeline_id`、`status`、`deleted_change_log`、`deleted_object_change` 和 `skipped_reason`。本地输出的 `gc_lsn` 对应 Docker 返回的 `floor_lsn`；`skipped` 应结合原因判断，不表示已经完成回收。不要通过手工删除内部表记录代替 GC。
+
+### 常见失败与排查入口
+
+先区分“命令执行失败”和“已生成 merge_id 且状态为 blocked”。HTTP 500 / `branch merge failed` 是外层失败信息，应继续查看响应体、完整错误链和目标 endpoint 日志，不能仅据此判断为数据冲突。
+
+| 现象或原因 | 检查与处理 |
+| --- | --- |
+| source/target schema 不存在或无权限 | 在两端核对 schema 名、database 和连接用户的 `USAGE` 权限；增量模式要求同名 schema。修正参数或权限后重新执行，不把无效 schema 当成空差异 |
+| 两端不是直接父子 timeline | 核对 source/target 是否写成同一分支，以及实际 ancestor 关系；按直接父子关系选择目标 |
+| TRUNCATE 合并失败 | 先核对方向：父合子在 source 独有且无冲突时可自动重放；子合父需要人工确认。再检查 conflict_scope、reason、数据库依赖和完整错误链；若报 `cannot be replayed automatically`，核对运行中的程序是否包含相应修复 |
+| `object_conflict` / 同表多条 DDL | 按上述对象级示例逐事件查询、决议；确认每条事件都有对应处理，尤其是后续 DROP、类型变更等事件 |
+| resolve 后 continue 仍失败或 blocked | resolve 只记录决议。重新查询 pending/`apply_error`，检查 SQL、唯一键、外键、缺失对象和前置 DDL 依赖；修正后继续，无法处理时 abort |
+| target 在计划窗口后又发生用户变更 | 按提示终止当前合并，并基于最新窗口重新 diff/merge |
+
+本地日志位于 `.neon/endpoints/<target_endpoint>/compute.log` 及其数据库日志目录。Docker 可查询 control plane 和目标 endpoint 日志，例如：
+
+```bash
+bin/docker_local logs docker_control_plane --tail 100
+bin/docker_local logs <target_service> --tail 100
+```
+
+`<target_service>` 替换为目标 endpoint 实际的 Compose 服务名，可通过 endpoint 信息确认。复核状态时使用 `branch merge-status`、`branch conflicts`；所有恢复操作均使用原 merge_id、原 target 和原 database。只有状态为 `applied` 才表示合并成功，`abort` 也不用于撤销已经 applied 的合并。
