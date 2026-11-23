@@ -93,7 +93,8 @@ BUILD_TYPE=release make -j64
 ```bash
 cd neon
 
-./target/release/neon_local init (数据路径在neon/.neon)
+# 数据默认保存在 neon/.neon
+./target/release/neon_local init
 ./target/release/neon_local start
 ```
 
@@ -132,10 +133,10 @@ SELECT * FROM branch_demo ORDER BY id;
 ./target/release/neon_local endpoint list
 ```
 
-连接新分支，验证 main 分支已有数据会被继承：
+先从 `endpoint list` 确认 branch1 的数据库端口，将下面的 `<branch1_pg_port>` 替换为实际值，再连接并验证继承的数据：
 
 ```bash
-gsql -d postgres -U cloud_admin -p 55435 -h 127.0.0.1
+gsql -d postgres -U cloud_admin -p <branch1_pg_port> -h 127.0.0.1
 ```
 
 ```sql
@@ -173,59 +174,130 @@ rm -rf .neon
 
 ## 二、Docker 部署
 
-### 1. 准备工作
+### 1. 选择架构和镜像
 
-Docker 部署默认使用以下镜像：
+发布镜像仓库为 `swr.cn-north-4.myhuaweicloud.com/kunpeng-ai`，按宿主机架构选择同一批次的存储、计算镜像：
 
-| 镜像 | 说明 |
+| 架构 | 存储及控制侧镜像 | 计算侧镜像 |
+| --- | --- | --- |
+| ARM64 / aarch64 | `og_storage:arm` | `og_compute:arm` |
+| x86_64 / amd64 | `og_storage:x86` | `og_compute:x86` |
+
+`og_storage` 包含 control plane、pageserver、safekeeper 等服务；`og_compute` 包含 openGauss、`compute_ctl` 和 Neon 扩展。以下部署脚本会拉取所选架构的镜像，并分别设置本地运行别名 `og_storage:latest`、`og_compute:latest`，供当前部署配置使用。
+
+### 2. 安装并启动
+
+宿主机需安装 Docker、Docker Compose v2、`curl` 和 `python3`。全新环境通过安装脚本获取部署文件，再由部署脚本初始化 control plane、启动存储服务并创建默认 main endpoint：
+
+```bash
+curl -fsSL https://raw.gitcode.com/opengauss/neon/raw/neon_release_9129/deployment/deploy_docker/install.sh -o install.sh
+bash install.sh
+
+# ARM64 / aarch64
+bash openGauss-branching-deploy/deploy.sh arm
+```
+
+x86_64 环境将最后一条命令替换为：
+
+```bash
+bash openGauss-branching-deploy/deploy.sh x86
+```
+
+已有匹配的本地运行别名镜像时，可增加 `--skip-pull` 跳过拉取。已有环境的 1.0→1.1 升级按下一节操作，不重新执行清空状态的初始化流程。对象存储、镜像交付及部署配置详见 Neon 仓库 `deployment/deploy_docker/README.md`。
+
+### 3. 日常管理与连接
+
+日常管理使用部署目录内的 `bin/docker_local`，由它调用 control plane 管理动态 endpoint：
+
+```bash
+cd openGauss-branching-deploy/docker-compose
+bin/docker_local status
+bin/docker_local endpoint list
+bin/docker_local logs pageserver --tail 100
+```
+
+默认端口需按部署模式区分：
+
+| 场景或服务 | 默认端口及含义 |
 | --- | --- |
-| `neon:latest_opgs` | 存储侧和控制侧服务镜像，包含 `storage_broker`、`pageserver`、`safekeeper`、`endpoint_storage` 等组件 |
-| `compute-node-opengauss-v702:latest` | openGauss 计算节点镜像，包含 compute 启动脚本、`compute_ctl`、openGauss V702 和 Neon 扩展 |
+| 本地源码部署 main | `55432`，数据库连接端口 |
+| Docker 一键部署 main | 宿主机 `55433`，数据库连接端口；`3080`，compute HTTP 端口 |
+| Docker control plane | 宿主机 `127.0.0.1:8080`，管理 API |
+| Docker pageserver | `9898`，HTTP 管理端口 |
+| storage broker | `50051`，broker gRPC 端口 |
 
+endpoint 的端口可由配置或创建参数指定，端口占用时也可能调整，连接时以 `endpoint list/status` 的实际映射为准。实验环境中的 main `55432`、dev1 `55435`、main2 `55436` 等是具体环境的 endpoint 端口，不能替代所有 Docker 部署的默认值。
 
-### 2. 启动全部组件
-
-进入 Docker Compose 目录并启动服务：
-
-```bash
-cd docker-compose
-OG_VERSION=V702 \
-NEON_IMAGE=neon:latest_opgs \
-COMPUTE_IMAGE=compute-node-opengauss-v702:latest \
-docker compose -f docker-compose.yml up -d
-```
-
-等待计算节点就绪：
+默认 Docker main 的宿主机连接示例：
 
 ```bash
-docker compose -f docker-compose.yml logs -f compute_is_ready
+gsql -d postgres -U cloud_admin -p 55433 -h 127.0.0.1
 ```
 
-看到如下日志表示 compute 已可连接：
-
-```text
-All computes are started
-```
-
-
-### 3. 查看状态和日志
+停止时保留已有配置和数据：
 
 ```bash
-docker compose -f docker-compose.yml ps
-docker compose -f docker-compose.yml logs -f pageserver
-docker compose -f docker-compose.yml logs -f safekeeper1
-docker compose -f docker-compose.yml logs -f compute1
+bin/docker_local stop --include-control-plane
 ```
 
-### 4. 停止和清理
+完整的启停、扩容及 endpoint 管理命令见 Neon 仓库 `docker-compose/README.md`。
 
-停止并删除容器，保留 `.neon` 数据目录：
+## 三、neon 扩展从 1.0 升级到 1.1
 
-```bash
-docker compose -f docker-compose.yml down
+本节仅说明数据库内 neon 扩展从 `1.0` 到 `1.1` 的 SQL 升级。前置条件是运行环境已确认兼容，并已提供匹配的新版扩展库和升级脚本；计算节点、存储组件、控制工具应使用兼容的交付版本。
+
+容器镜像更新与扩展 SQL 升级是两项操作：仅执行 `docker pull` 不会更新运行中的容器，也不会自动执行 `ALTER EXTENSION`。更换镜像通常需要停止并重新创建相应容器、保留持久化数据，但目前尚未完成整套旧镜像到新镜像环境的跨版本兼容与升级验证，本节不提供镜像原地升级或滚动升级流程。`arm`、`x86` tag 表示镜像架构，不能据此判断版本升级兼容性。
+
+`deploy.sh` 包含初始化及默认 tenant/endpoint 创建流程，不能直接作为已有环境的升级工具。需要更新程序或镜像时，先按对应交付版本已确认的兼容流程准备好运行环境，再执行以下扩展升级步骤。
+
+### 1. 升级前准备
+
+1. 安排维护窗口，暂停相关分支写入和新的增量合并。已有 `blocked` 合并先完成冲突决议并 continue，或通过 abort 终止，具体命令见[增量分支合并](./data_branch_delta_merge.md#八-人工冲突处理继续与终止)。
+2. 记录 tenant、timeline、endpoint、worker 维护的 database 和当前扩展版本，备份配置及数据。Docker 环境保留部署目录、`deploy.env`、`.neon` 和相关持久化存储；源码环境保留 `.neon` 与 endpoint 配置。
+3. 确认计算节点实际使用的安装目录同时提供匹配的 `neon.so`、`neon--1.1.sql` 和 `neon--1.0--1.1.sql`。更新扩展库后需要重启计算节点加载新库；镜像或程序环境的更新须先完成兼容性确认，不能只修改 SQL 文件中的版本号。
+
+升级期间不执行 `init --force=remove-all-contents`，也不删除 `.neon`、业务数据或 oggit 元数据。
+
+### 2. 执行扩展升级
+
+新版本计算节点可连接后，以有扩展升级权限的管理员连接每个安装了 neon 的数据库；增量合并使用的数据库应与该 endpoint 的 `--oggit-database` 一致。先检查已安装版本及可用版本：
+
+```sql
+SELECT extname, extversion
+FROM pg_extension
+WHERE extname = 'neon';
+
+SELECT version, installed
+FROM pg_available_extension_versions
+WHERE name = 'neon'
+ORDER BY version;
 ```
 
-## 三、常见问题
+当前已安装版本为 `1.0`，且可用版本中包含 `1.1` 时执行：
+
+```sql
+ALTER EXTENSION neon UPDATE TO '1.1';
+
+SELECT extname, extversion
+FROM pg_extension
+WHERE extname = 'neon';
+-- 预期 extversion 为 1.1
+```
+
+已是 `1.1` 的数据库无需重复升级。若找不到升级路径或脚本，先检查计算节点实际使用的安装目录、镜像及交付文件，不使用 DROP/CREATE EXTENSION 代替升级。
+
+### 3. 升级后检查
+
+按原有部署方式重新启用 Oggit，保持原来的 database 选择；对参与增量合并的两端分别确认扩展版本及 worker 状态：
+
+```sql
+SELECT timeline_id, status, decode_lsn, scanned_lsn, last_error
+FROM oggit.state;
+```
+
+确认分支身份正确、worker 为 `active`，并等待扫描进度追齐，再执行一次增量 diff 核对结果后恢复合并。保留升级前备份和日志；升级脚本若失败，先根据数据库错误修正原因，再确认事务和扩展版本后重试。
+
+## 四、常见问题
 
 ### 1. `protoc` 版本过低
 
@@ -237,4 +309,4 @@ Neon 编译要求 `protoc` 版本不低于 3.15。如果系统仓库版本过低
 
 ### 3. 端口冲突
 
-源码部署默认使用 `55432` 等端口；Docker 部署默认映射 `55433`、`9898`、`50051` 等端口。如果端口已被占用，请停止占用进程，或在创建 endpoint / 修改 `docker-compose.yml` 时调整端口。
+先按本节端口表确认连接的是数据库端口还是管理端口，再使用 `ss -ltnp` 检查监听进程，并用 `ss -tanop` 检查 TIME_WAIT 等连接状态。若服务端口落在系统 `ip_local_port_range` 内，出站连接也可能临时占用该端口；可由管理员将服务端口加入 `ip_local_reserved_ports`，保留已有保留端口配置，或在创建 endpoint 时选择临时端口范围外的端口。实际数据库端口以 endpoint 返回信息为准。

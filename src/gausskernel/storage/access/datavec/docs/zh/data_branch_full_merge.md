@@ -9,6 +9,20 @@
 
 分支合并基于已有 openGauss endpoint 连接能力和 `postgres_fdw` 实现。目标 endpoint 会临时映射源 endpoint 中待比较的表，并通过 `neon` 扩展函数在目标 endpoint 内完成表结构校验、主键匹配、行级差异识别和合并。
 
+本文 `neon_local` 示例用于源码部署的本地栈。Docker 环境在部署目录的 `docker-compose/` 下使用 `bin/docker_local`，diff/merge 必须通过 `--source-endpoint`、`--target-endpoint` 指定 endpoint ID，不接受本地栈的 `--source-branch`、`--target-branch` 参数。例如：
+
+```bash
+bin/docker_local branch merge \
+  --source-endpoint dev \
+  --target-endpoint main \
+  --source-schema public \
+  --target-schema public \
+  --database postgres \
+  --strategy fail
+```
+
+Docker 全量 diff 使用相同的 endpoint、schema、database 参数，将子命令改为 `branch diff` 并去掉 `--strategy`。不指定 `--incremental-oggit` 时，两种入口均执行全量模式；增量模式及人工冲突恢复见[增量分支合并](./data_branch_delta_merge.md)。
+
 ## 二、适用场景
 
 全量分支合并适用于以下场景：
@@ -39,7 +53,8 @@
 ```bash
 neon_local branch diff \
   --source-branch <source_branch> \
-  --target-branch <target_branch>
+  --target-branch <target_branch> \
+  --database postgres
 ```
 
 常用可选参数如下：
@@ -54,12 +69,11 @@ neon_local branch diff \
   --target-schema <target_schema> \
   --database <database> \
   --user <user> \
-  --fdw-schema <fdw_schema> \
   --fdw-server <fdw_server> \
   --keep-fdw
 ```
 
-默认情况下，源 schema 和目标 schema 均为 `public`。
+`--database` 必填；源 schema 和目标 schema 默认均为 `public`。临时 FDW schema 由控制工具管理，不提供 `--fdw-schema` 参数。
 
 参数说明：
 
@@ -73,7 +87,6 @@ neon_local branch diff \
 | `--target-schema` | 目标分支中参与比较的 schema，默认值为 `public`。 |
 | `--database` | 连接源 endpoint 和目标 endpoint 使用的数据库名。 |
 | `--user` | 连接源 endpoint 和目标 endpoint 使用的数据库用户。 |
-| `--fdw-schema` | 在目标 endpoint 中创建的临时 FDW schema 名称，用于挂载源分支 foreign table。 |
 | `--fdw-server` | 在目标 endpoint 中创建的临时 FDW server 名称，用于连接源 endpoint。 |
 | `--keep-fdw` | 命令结束后保留临时 FDW schema、server 和 foreign table，便于调试。默认会自动清理。 |
 
@@ -107,7 +120,8 @@ neon_local branch diff \
 ```bash
 neon_local branch merge \
   --source-branch <source_branch> \
-  --target-branch <target_branch>
+  --target-branch <target_branch> \
+  --database postgres
 ```
 
 指定冲突处理策略：
@@ -116,7 +130,8 @@ neon_local branch merge \
 neon_local branch merge \
   --source-branch <source_branch> \
   --target-branch <target_branch> \
-  --strategy fail
+  --strategy fail \
+  --database postgres
 ```
 
 `branch merge` 支持与 `branch diff` 相同的分支、endpoint、schema、database 和 user 参数。
@@ -133,10 +148,9 @@ neon_local branch merge \
   --target-schema <target_schema> \
   --database <database> \
   --user <user> \
-  --fdw-schema <fdw_schema> \
   --fdw-server <fdw_server> \
   --keep-fdw \
-  --strategy fail|ours|theirs \
+  --strategy fail \
   --no-copy-source-only-tables
 ```
 
@@ -152,11 +166,12 @@ neon_local branch merge \
 | `--target-schema` | 目标分支中接收合并结果的 schema，默认值为 `public`。 |
 | `--database` | 连接源 endpoint 和目标 endpoint 使用的数据库名。 |
 | `--user` | 连接源 endpoint 和目标 endpoint 使用的数据库用户。 |
-| `--fdw-schema` | 在目标 endpoint 中创建的临时 FDW schema 名称，用于挂载源分支 foreign table。 |
 | `--fdw-server` | 在目标 endpoint 中创建的临时 FDW server 名称，用于连接源 endpoint。 |
 | `--keep-fdw` | 命令结束后保留临时 FDW schema、server 和 foreign table，便于调试。默认会自动清理。 |
 | `--strategy` | 冲突处理策略，取值为 `fail`、`ours` 或 `theirs`。默认值为 `fail`。 |
 | `--no-copy-source-only-tables` | 不复制源分支独有表，只处理源分支和目标分支均存在的共有表。 |
+
+全量模式仅支持 `fail`、`ours`、`theirs`。`manual` 仅用于带 `--incremental-oggit` 的增量模式，人工决议、continue 和 abort 流程见[增量分支合并](./data_branch_delta_merge.md#八-人工冲突处理继续与终止)。
 
 ### 2. merge 内容
 
@@ -196,21 +211,24 @@ neon_local branch merge \
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy fail
+  --strategy fail \
+  --database postgres
 ```
 
 ```bash
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy ours
+  --strategy ours \
+  --database postgres
 ```
 
 ```bash
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy theirs
+  --strategy theirs \
+  --database postgres
 ```
 
 ## 七、约束与限制
@@ -302,7 +320,8 @@ neon_local branch diff \
   --source-branch dev \
   --target-branch main \
   --source-schema public \
-  --target-schema public
+  --target-schema public \
+  --database postgres
 ```
 
 示例输出：
@@ -325,7 +344,8 @@ diff 只展示差异数据，不修改源分支或目标分支。
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy fail
+  --strategy fail \
+  --database postgres
 ```
 
 由于 `id = 2` 存在冲突，合并失败，目标分支数据不变。
@@ -346,7 +366,8 @@ neon_local branch merge \
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy ours
+  --strategy ours \
+  --database postgres
 ```
 
 示例输出：
@@ -374,7 +395,8 @@ public      | items      | 1              | 0
 neon_local branch merge \
   --source-branch dev \
   --target-branch main \
-  --strategy theirs
+  --strategy theirs \
+  --database postgres
 ```
 
 示例输出：
