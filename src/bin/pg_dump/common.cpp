@@ -220,6 +220,11 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     g_curStep++;
 
     if (g_verbose)
+        write_msg(NULL, "reading user-defined access methods\n");
+    getAccessMethods(fout, &numAccessMethods);
+    g_curStep++;
+
+    if (g_verbose)
         write_msg(NULL, "reading table inheritance information\n");
     inhinfo = getInherits(fout, &numInherits);
     g_curStep++;
@@ -321,11 +326,6 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading event triggers\n");
     }
     getEventTriggers(fout, &numEventTriggers);
-    g_curStep++;
-
-    if (g_verbose)
-        write_msg(NULL, "reading user-defined access methods\n");
-    getAccessMethods(fout, &numAccessMethods);
     g_curStep++;
 
     *numTablesPtr = numTables;
