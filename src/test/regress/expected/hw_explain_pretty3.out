@@ -27,10 +27,10 @@ select relname, reltuples, relpages from pg_class where relname='aa_t1';
 create table aa_t2 (id int, num int);
 -- aa_t1 yes, aa_t2 no
 explain analyze insert into aa_t2 select * from aa_t1;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
  [Bypass]
---? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Insert (batch mode) on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (4 rows)
@@ -44,10 +44,10 @@ select relname, reltuples, relpages from pg_class where relname='aa_t1' or relna
 
 -- aa_t1 no, aa_t2 no
 explain analyze insert into aa_t2 select * from aa_t1;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
  [Bypass]
---? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Insert (batch mode) on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (4 rows)
@@ -62,10 +62,10 @@ select relname, reltuples, relpages from pg_class where relname='aa_t1' or relna
 -- create table as
 -- aa_t2 yes, aa_t3 no
 explain analyze create table aa_t3 as select * from aa_t2;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
  [Bypass]
---? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
+--? Insert (batch mode) on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
 --?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
 --? Total runtime: .* ms
 (4 rows)
@@ -304,10 +304,10 @@ drop table aa_t3;
 start transaction;
 -- aa_t3 no, aa_t2 yes
 explain analyze create table aa_t3 as select * from aa_t2;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
  [Bypass]
---? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Insert (batch mode) on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
 --? Total runtime: .* ms
 (4 rows)

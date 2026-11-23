@@ -3066,12 +3066,17 @@ static void UpdateXmaxHintBits(HeapTupleHeader tuple, Buffer buffer, Transaction
 /*
  * GetBulkInsertState - prepare status object for a bulk insert
  */
-BulkInsertState GetBulkInsertState(void)
+BulkInsertState GetBulkInsertState(bool isBatchInsert)
 {
     BulkInsertState bistate;
 
     bistate = (BulkInsertState)palloc(sizeof(BulkInsertStateData));
-    bistate->strategy = GetAccessStrategy(BAS_BULKWRITE);
+    if (!isBatchInsert) {
+        bistate->strategy = GetAccessStrategy(BAS_BULKWRITE);
+    } else {
+        /* do not use ring buffer for insert select(batch insert) */
+        bistate->strategy = NULL;
+    }
     bistate->current_buf = InvalidBuffer;
     bistate->next_free = InvalidBlockNumber;
     bistate->last_free = InvalidBlockNumber;

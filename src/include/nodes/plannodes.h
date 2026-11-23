@@ -454,6 +454,8 @@ typedef struct ModifyTable {
     int epqParam;          /* ID of Param for EvalPlanQual re-eval */
     bool partKeyUpdated;   /* when update on a partitioned table,true: part key  column
                               is to be updated,false: no part key column is to updated */
+    bool partKeyIsConst;   /* when insert into a partitioned table, whether the part key
+                              column is a pseudo const value */
 #ifdef PGXC
     List* remote_plans; /* per-target-table remote node */
     List* remote_insert_plans;
@@ -461,6 +463,7 @@ typedef struct ModifyTable {
     List* remote_delete_plans;
 #endif
     bool is_dist_insertselect;
+    bool batchInsert;    /* Whether to do batch insert */
 
     ErrorCacheEntry* cacheEnt; /* Error record cache */
 

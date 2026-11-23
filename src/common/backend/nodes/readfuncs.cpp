@@ -4768,6 +4768,9 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(rowMarks);
     READ_INT_FIELD(epqParam);
     READ_BOOL_FIELD(partKeyUpdated);
+    IF_EXIST (partKeyIsConst) {
+        READ_BOOL_FIELD(partKeyIsConst);
+    }
     IF_EXIST (isReplace) {
         READ_BOOL_FIELD(isReplace);
     }
@@ -4778,6 +4781,9 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(remote_delete_plans);
 #endif
     READ_BOOL_FIELD(is_dist_insertselect);
+    IF_EXIST (batchInsert) {
+        READ_BOOL_FIELD(batchInsert);
+    }
     READ_NODE_FIELD(cacheEnt);
 
     IF_EXIST(mergeTargetRelation) {
@@ -5910,12 +5916,18 @@ static VecModifyTable* _readVecModifyTable(VecModifyTable* local_node)
     READ_NODE_FIELD(rowMarks);
     READ_INT_FIELD(epqParam);
     READ_BOOL_FIELD(partKeyUpdated);
+    IF_EXIST (partKeyIsConst) {
+        READ_BOOL_FIELD(partKeyIsConst);
+    }
 #ifdef PGXC
     READ_NODE_FIELD(remote_plans);
     READ_NODE_FIELD(remote_insert_plans);
     READ_NODE_FIELD(remote_update_plans);
     READ_NODE_FIELD(remote_delete_plans);
 #endif
+    IF_EXIST (batchInsert) {
+        READ_BOOL_FIELD(batchInsert);
+    }
     READ_NODE_FIELD(cacheEnt);
 
     IF_EXIST(mergeTargetRelation) {

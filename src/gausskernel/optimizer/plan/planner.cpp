@@ -166,6 +166,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
 static void compute_distinct_sorted_path_cost(Path* sorted_p, List* sorted_pathkeys, Query* parse, PlannerInfo* root, 
     int numDistinctCols, Cost sorted_startup_cost, Cost sorted_total_cost, double path_rows, 
     Distribution* sorted_distribution, int path_width, double dNumDistinctRows, double limit_tuples);
+static bool UseMultiInsert(Query *parse, Plan *plan, Relation mainRel);
 static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, double limit_tuples, double path_rows,
     int path_width, Cost cheapest_startup_cost, Cost cheapest_total_cost, Distribution* cheapest_distribution,
     Cost sorted_startup_cost, Cost sorted_total_cost, Distribution* sorted_distribution, List* sorted_pathkeys,
@@ -2157,19 +2158,23 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             List* rowMarks = NIL;
             Relation mainRel = NULL;
             Oid taleOid = rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->relid;
-            bool partKeyUpdated;
-            bool isPartitioned;
+            bool partKeyUpdated = false;
+            bool partKeyConst = false;
+            bool useMultiInsert = false;
 
             if (OidIsValid(taleOid)) {
+                /* simple insert or upsert none case */
+                const bool simpleInsert = (parse->commandType == CMD_INSERT && !IsA(plan, BaseResult) &&
+                 !IsA(plan, ValuesScan) && (parse->upsertClause == NULL || parse->upsertClause->upsertAction == UPSERT_NONE));
                 mainRel = RelationIdGetRelation(taleOid);
-                isPartitioned = RELATION_IS_PARTITIONED(mainRel);
-                RelationClose(mainRel);
-
-                if (isPartitioned) {
-                    partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
-                } else {
-                    partKeyUpdated = false;
+                /* don't support partition key optimization for expr partition key(we may fit it in the future) */
+                partKeyConst = RELATION_IS_PARTITIONED(mainRel) && simpleInsert &&
+                    u_sess->attr.attr_sql.enable_partition_oid_caching && PartExprKeyIsNull(mainRel, NULL);
+                if (RELATION_IS_PARTITIONED(mainRel)) {
+                    targetListHasPartitionKey(root, parse->targetList, taleOid, &partKeyUpdated, &partKeyConst);
                 }
+                useMultiInsert = simpleInsert && UseMultiInsert(parse, plan, mainRel);
+                RelationClose(mainRel);
             }
 
             /*
@@ -2206,6 +2211,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 rowMarks,
                 SS_assign_special_param(root),
                 partKeyUpdated,
+                partKeyConst,
+                useMultiInsert,
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
@@ -2220,6 +2227,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 rowMarks,
                 SS_assign_special_param(root),
                 partKeyUpdated,
+                partKeyConst,
+                useMultiInsert,
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
@@ -2271,6 +2280,40 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     }
 
     return plan;
+}
+
+static bool UseMultiInsert(Query *parse, Plan *plan, Relation mainRel)
+{
+    /* Count only successfully inserted rows when IGNORE skips a duplicate. */
+    if (parse->hasIgnore) {
+        return false;
+    }
+
+    UpsertAction upsertAction = parse->upsertClause == NULL ? UPSERT_NONE : parse->upsertClause->upsertAction;
+
+    /* Apply the same heap multi-insert restrictions as ExecModifyTable. */
+    if (mainRel == NULL ||
+        !CanUseHeapMultiInsert(mainRel, mainRel->trigdesc, upsertAction, parse->isReplace)) {
+        return false;
+    }
+
+    /* Only plan batch inserts into permanent tables without RETURNING. */
+    if (mainRel->rd_rel->relkind != RELKIND_RELATION ||
+        mainRel->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT || parse->returningList != NULL) {
+        return false;
+    }
+
+    /* batch_insert_min_rows < 0 means disable batch insert */
+    if (u_sess->attr.attr_sql.batch_insert_min_rows < 0 ||
+        plan->plan_rows < u_sess->attr.attr_sql.batch_insert_min_rows) {
+        return false;
+    }
+
+    if (contain_volatile_functions((Node *)parse, true)) {
+        return false;
+    }
+
+    return true;
 }
 
 /*
@@ -2518,7 +2561,9 @@ static Plan* inheritance_planner(PlannerInfo* root)
     bool partKeyUpdated = false;
     Oid taleOid = rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->relid;
     Relation mainRel = NULL;
-    partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
+    /* don't support inheritance table for now, so set partKeyIsConst to false */
+    bool partKeyIsConst = false;
+    targetListHasPartitionKey(root, parse->targetList, taleOid, &partKeyUpdated, &partKeyIsConst);
 
     mainRel = RelationIdGetRelation(taleOid);
     AssertEreport(RelationIsValid(mainRel),

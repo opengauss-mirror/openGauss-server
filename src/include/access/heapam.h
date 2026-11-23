@@ -346,7 +346,7 @@ extern void heap_get_latest_tid(Relation relation, Snapshot snapshot, ItemPointe
 extern void setLastTid(const ItemPointer tid);
 extern void heap_get_max_tid(Relation rel, ItemPointer ctid);
 
-extern BulkInsertState GetBulkInsertState(void);
+extern BulkInsertState GetBulkInsertState(bool isBatchInsert = false);
 extern void FreeBulkInsertState(BulkInsertState);
 
 extern Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, BulkInsertState bistate,

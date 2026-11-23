@@ -50,10 +50,17 @@ void GetPlanNodePlainText(
             *pt_operation = "MODIFY TABLE";
             switch (((ModifyTable*)plan)->operation) {
                 case CMD_INSERT:
-                    if (((ModifyTable*)plan)->isReplace)
+                    if (((ModifyTable*)plan)->isReplace) {
                         *pname = *operation = *pt_options = "Replace";
-                    else
+                    } else if (((ModifyTable*)plan)->batchInsert && ((ModifyTable*)plan)->partKeyIsConst) {
+                        *pname = *operation = *pt_options = "Insert (batch mode, const partition key)";
+                    } else if (((ModifyTable*)plan)->batchInsert) {
+                        *pname = *operation = *pt_options = "Insert (batch mode)";
+                    } else if (((ModifyTable*)plan)->partKeyIsConst) {
+                        *pname = *operation = *pt_options = "Insert (const partition key)";
+                    } else {
                         *pname = *operation = *pt_options = "Insert";
+                    }
                     break;
                 case CMD_UPDATE:
                     *pname = *operation = *pt_options = "Update";

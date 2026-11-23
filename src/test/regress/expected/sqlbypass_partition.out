@@ -2558,7 +2558,7 @@ explain insert into test_bypass_sql_partition select * from test_bypass_sql_part
                                                            QUERY PLAN                                                           
 --------------------------------------------------------------------------------------------------------------------------------
  [No Bypass]reason: Bypass not executed because query combines insert operator with others.
- Insert on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+ Insert (const partition key) on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
    ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
          Index Cond: (col1 = 0)
          Selected Partitions:  1

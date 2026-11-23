@@ -2315,19 +2315,38 @@ bool is_redundant_derived_clause(RestrictInfo* rinfo, List* clauselist)
  * @Description: Get include this expr EquivalenceClass.
  * @in root - Per-query information for planning/optimization.
  * @in expr - Need to find expr.
+ * @in checkConst - If true, require an unbroken constant EC that is not below
+ *                 an outer join, and match the complete expression exactly.
  * @return - If found return this EquivalenceClass else return NULL.
  */
-EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr)
+EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr, bool checkConst)
 {
     EquivalenceClass* ec = NULL;
     ListCell* lc = NULL;
 
     foreach (lc, root->eq_classes) {
         ec = (EquivalenceClass*)lfirst(lc);
-        bool found = find_ec_memeber_for_var(ec, (Node*)expr);
+        if (checkConst) {
+            if (ec == NULL || !ec->ec_has_const || ec->ec_below_outer_join || ec->ec_broken) {
+                continue;
+            }
 
-        if (found)
+            /*
+             * Distribution-key matching may strip casts from EC members.
+             * That is not a proof of constancy: distinct values can have the
+             * same result after a lossy cast. Preserve the full expression on
+             * both sides when deciding whether partition routing can be cached.
+             */
+            ListCell* memberCell = NULL;
+            foreach (memberCell, ec->ec_members) {
+                EquivalenceMember* member = (EquivalenceMember*)lfirst(memberCell);
+                if (equal(expr, member->em_expr)) {
+                    return ec;
+                }
+            }
+        } else if (find_ec_memeber_for_var(ec, (Node*)expr)) {
             return ec;
+        }
     }
 
     return NULL;

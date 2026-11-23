@@ -952,6 +952,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(rowMarks);
     WRITE_INT_FIELD(epqParam);
     WRITE_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= BATCH_INSERT_VERSION_NUM) {
+        WRITE_BOOL_FIELD(partKeyIsConst);
+    }
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         WRITE_BOOL_FIELD(isReplace);
     }
@@ -962,6 +965,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(remote_delete_plans);
 #endif
     WRITE_BOOL_FIELD(is_dist_insertselect);
+    if (t_thrd.proc->workingVersionNum >= BATCH_INSERT_VERSION_NUM) {
+        WRITE_BOOL_FIELD(batchInsert);
+    }
     WRITE_NODE_FIELD(cacheEnt);
 
     WRITE_INT_FIELD(mergeTargetRelation);
@@ -6470,12 +6476,18 @@ static void _outVecModifyTable(StringInfo str, VecModifyTable* node)
     WRITE_NODE_FIELD(rowMarks);
     WRITE_INT_FIELD(epqParam);
     WRITE_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= BATCH_INSERT_VERSION_NUM) {
+        WRITE_BOOL_FIELD(partKeyIsConst);
+    }
 #ifdef PGXC
     WRITE_NODE_FIELD(remote_plans);
     WRITE_NODE_FIELD(remote_insert_plans);
     WRITE_NODE_FIELD(remote_update_plans);
     WRITE_NODE_FIELD(remote_delete_plans);
 #endif
+    if (t_thrd.proc->workingVersionNum >= BATCH_INSERT_VERSION_NUM) {
+        WRITE_BOOL_FIELD(batchInsert);
+    }
     WRITE_NODE_FIELD(cacheEnt);
     WRITE_INT_FIELD(mergeTargetRelation);
     WRITE_NODE_FIELD(mergeSourceTargetList);

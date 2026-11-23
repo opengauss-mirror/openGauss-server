@@ -45,7 +45,7 @@ PlanState* ExecInitNodeStubNorm(Plan* node, EState* estate, int eflags)
         case T_VecModifyTable: {
             ModifyTable* mtplan = (ModifyTable*)node;
 
-            if (mtplan->is_dist_insertselect) {
+            if (mtplan->is_dist_insertselect || mtplan->batchInsert) {
                 ps = (PlanState*)makeNode(DistInsertSelectState);
             } else {
                 ps = (PlanState*)makeNode(ModifyTableState);

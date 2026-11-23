@@ -1604,6 +1604,7 @@ typedef struct ModifyTableState {
     EPQState mt_epqstate;         /* for evaluating EvalPlanQual rechecks */
     bool fireBSTriggers;          /* do we need to fire stmt triggers? */
     Relation delete_delta_rel;    /* for online expansion's delete data catchup */
+    Oid mt_part_oid[2];   /* partiton and subpartition oid if it's a const partition insert */
 
     // For error table
     //

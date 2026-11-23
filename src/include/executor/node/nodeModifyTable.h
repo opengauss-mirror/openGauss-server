@@ -25,6 +25,7 @@ extern ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, 
 extern void ExecEndModifyTable(ModifyTableState* node);
 extern void ExecReScanModifyTable(ModifyTableState* node);
 extern void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, const Relation deldelta_rel);
+extern bool CanUseHeapMultiInsert(Relation rel, const TriggerDesc* trigDesc, UpsertAction upsertAction, bool isReplace);
 
 /* May move all resizing declaration to appropriate postion sometime. */
 extern bool RelationInClusterResizing(const Relation rel);

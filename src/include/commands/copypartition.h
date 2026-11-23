@@ -99,29 +99,37 @@ extern void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* 
     int hi_options, ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, bool forceToFlush, BulkInsertState bistate);
 
 extern CopyFromBulk findBulk(CopyFromManager mgr, Oid partOid, int2 bucketId, bool *toFlush);
-extern bool isBulkFull(CopyFromBulk bulk);
+extern bool isBulkFull(CopyFromBulk bulk, Size maxBulkSize = INT_MAX);
 template<bool isInsertSelect> void AddToBulk(CopyFromBulk bulk, HeapTuple tup, bool needCopy);
 template<bool isInsertSelect> void AddToUHeapBulk(CopyFromBulk bulk, UHeapTuple tup, bool needCopy);
 
 template<bool isInsertSelect>
 bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, CopyFromManager mgr,
     PageCompress* pCState, CommandId mycid, int hiOptions, ResultRelInfo* resultRelInfo, TupleTableSlot* myslot,
-    BulkInsertState bistate)
+    BulkInsertState bistate, List** partitionList = NULL)
 {
     int cnt;
     CopyFromMemCxt copyFromMemCxt = bulk->memCxt;
     MemoryContext oldCxt;
 
     if (!mgr->isPartRel) {
-
         if (isInsertSelect) {
-            CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions, resultRelInfo, myslot, mgr->LastFlush, bistate);
+            CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions,
+                resultRelInfo, myslot, mgr->LastFlush, bistate);
+            /*
+             * we still need to add the partition oid to partition_list, because if the partition key is constant,
+             * mgr->isPartRel also can be false.
+             */
+            if (partitionList != NULL) {
+                *partitionList = list_append_unique_oid(*partitionList, bulk->partOid);
+            }
             if (bulk->numTuples == 0) {
                 MemoryContextReset(copyFromMemCxt->memCxtCandidate);
                 copyFromMemCxt->memCxtSize = 0;
             }
         } else
-            CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions, resultRelInfo, myslot, mgr->LastFlush, bistate);
+            CopyFromBulkInsert(estate, bulk, pCState, mycid, hiOptions,
+                resultRelInfo, myslot, mgr->LastFlush, bistate);
         return (0 == bulk->numTuples);
     }
 
@@ -132,6 +140,11 @@ bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, Co
         CopyFromBulkKey key = {bulkItem->partOid, bulkItem->bucketId};
         bool found = false;
         CopyFromBulkInsert(estate, bulkItem, pCState, mycid, hiOptions, resultRelInfo, myslot, true, bistate);
+        if (partitionList) {
+            *partitionList = list_append_unique_oid(*partitionList, bulkItem->partOid);
+        }
+        // After adding to partition_list, restore bul_kItem->partOid for hash search
+        bulkItem->partOid = key.partOid;
         (void)hash_search(mgr->hash, &key, HASH_REMOVE, &found);
         Assert(found);
     }

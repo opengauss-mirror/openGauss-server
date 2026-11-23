@@ -37,6 +37,8 @@
 #include "utils/hsearch.h"
 #include "utils/relcache.h"
 
+typedef struct PlannerInfo PlannerInfo;
+
 /*
  * ---------------------------------------------------------------------------------------
  *
@@ -185,7 +187,8 @@ extern int partitonKeyCompare(Const** value1, Const** value2, int len, bool null
 extern int getPartitionNumber(PartitionMap* map);
 extern int GetSubPartitionNumber(Relation rel);
 
-extern bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid);
+extern void targetListHasPartitionKey(PlannerInfo* root, List* targetList, Oid partitiondtableid, bool* hasPartKey,
+                                      bool* constPartKey);
 
 extern int constCompare_constType(Const* value1, Const* value2, Oid collation);
 
