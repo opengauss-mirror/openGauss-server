@@ -1943,9 +1943,8 @@ static void load_libraries(const char* libraries, const char* gucname, bool rest
 
     /* Need a modifiable copy of string */
     rawstring = pstrdup(libraries);
-
     /* Parse string into list of identifiers */
-    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+    if (!SplitIdentifierString(rawstring, ',', &elemlist, false, false)) {
         /* syntax error in list */
         pfree(rawstring);
         list_free(elemlist);

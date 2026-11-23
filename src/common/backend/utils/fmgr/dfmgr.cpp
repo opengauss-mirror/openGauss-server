@@ -667,6 +667,111 @@ char* expand_dynamic_library_name(const char* name)
     return pstrdup(name);
 }
 
+/* Match a complete library basename, with or without the platform suffix. */
+static bool LibraryBasenameIs(const char* name, const char* libraryName)
+{
+    size_t nameLength = strlen(libraryName);
+    return strcmp(name, libraryName) == 0 ||
+        (strncmp(name, libraryName, nameLength) == 0 && strcmp(name + nameLength, DLSUFFIX) == 0);
+}
+
+/*
+ * Follow the loader's suffix selection without raising an error in a GUC
+ * check hook.  The loader will report inaccessible or invalid files later.
+ */
+static char* ResolveLibraryFile(const char* path, struct stat* fileStat)
+{
+    if (stat(path, fileStat) == 0) {
+        if (!S_ISDIR(fileStat->st_mode)) {
+            return pstrdup(path);
+        }
+    } else if (errno != ENOENT && errno != ENOTDIR && errno != EACCES) {
+        return NULL;
+    }
+
+    size_t pathLength = strlen(path) + strlen(DLSUFFIX) + 1;
+    char* suffixedPath = (char*)palloc(pathLength);
+    int rc = snprintf_s(suffixedPath, pathLength, pathLength - 1, "%s%s", path, DLSUFFIX);
+    if (rc < 0) {
+        pfree(suffixedPath);
+        return NULL;
+    }
+    if (stat(suffixedPath, fileStat) == 0 && !S_ISDIR(fileStat->st_mode)) {
+        return suffixedPath;
+    }
+    pfree(suffixedPath);
+    return NULL;
+}
+
+static bool LibraryFilesMatch(const char* candidateName, const char* installedName)
+{
+    struct stat candidateStat;
+    struct stat installedStat;
+    char* candidatePath = ResolveLibraryFile(candidateName, &candidateStat);
+    char* installedPath = ResolveLibraryFile(installedName, &installedStat);
+    bool matches = false;
+    if (candidatePath != NULL && installedPath != NULL) {
+#ifdef WIN32
+        matches = pg_strcasecmp(candidatePath, installedPath) == 0;
+#else
+        matches = candidateStat.st_dev == installedStat.st_dev && candidateStat.st_ino == installedStat.st_ino;
+#endif
+    }
+    pfree_ext(installedPath);
+    pfree_ext(candidatePath);
+    return matches;
+}
+
+/*
+ * Recognize the normal references to an installed library without loading it.
+ * Bare names retain dynamic_library_path semantics.  Explicit absolute paths
+ * and nonstandard $libdir paths must identify the installed file.
+ */
+bool LibraryNameIs(const char* name, const char* libraryName)
+{
+    if (first_dir_separator(name) == NULL) {
+        return LibraryBasenameIs(name, libraryName);
+    }
+
+    char* canonicalName = pstrdup(name);
+    canonicalize_path(canonicalName);
+    const char libdirPrefix[] = "$libdir/";
+    const size_t libdirPrefixLength = sizeof(libdirPrefix) - 1;
+    const bool usesLibdir = strncmp(canonicalName, libdirPrefix, libdirPrefixLength) == 0;
+    if (usesLibdir && LibraryBasenameIs(canonicalName + libdirPrefixLength, libraryName)) {
+        pfree(canonicalName);
+        return true;
+    }
+    if (t_thrd.proc_cxt.proc_cold == NULL || (!usesLibdir && !is_absolute_path(canonicalName))) {
+        pfree(canonicalName);
+        return false;
+    }
+    const char* installedDirectory = t_thrd.proc_cxt.proc_cold->pkglib_path;
+    if (!is_absolute_path(installedDirectory)) {
+        pfree(canonicalName);
+        return false;
+    }
+    if (usesLibdir) {
+        char* expandedName = substitute_libpath_macro(canonicalName);
+        pfree(canonicalName);
+        canonicalName = expandedName;
+    }
+
+    size_t installedLength = strlen(installedDirectory) + strlen(libraryName) + 2;
+    char* installedName = (char*)palloc(installedLength);
+    int rc = snprintf_s(installedName, installedLength, installedLength - 1, "%s/%s", installedDirectory, libraryName);
+    if (rc < 0) {
+        pfree(installedName);
+        pfree(canonicalName);
+        return false;
+    }
+    canonicalize_path(installedName);
+    const bool matches = LibraryFilesMatch(canonicalName, installedName);
+    pfree(installedName);
+    pfree(canonicalName);
+    return matches;
+}
+
 /*
  * Check a restricted library name.  It must begin with "$libdir/plugins/"
  * and there must not be any directory separators after that (this is
