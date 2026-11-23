@@ -889,6 +889,23 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         return address;
     }
 
+    if (strcmp(stmt->accessMethod, "gv_graph") == 0) {
+        /* Partitioned parents have a storage type but no physical bucket node. */
+        if (rel->storage_type == SEGMENT_PAGE) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("gv_graph indexes are not supported on segment tables")));
+        }
+        if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("gv_graph indexes are not supported on global temporary tables")));
+        }
+        /* gv_graph does not initialize the index fork used for crash recovery. */
+        if (relPersistence == RELPERSISTENCE_UNLOGGED) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("gv_graph indexes are not supported on unlogged tables")));
+        }
+    }
+
     if (stmt->schemaname != NULL) {
         if (namespaceId != get_namespace_oid(stmt->schemaname, false)) {
             ereport(ERROR,
