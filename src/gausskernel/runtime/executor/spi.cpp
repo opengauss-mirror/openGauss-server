@@ -145,6 +145,7 @@ int SPI_connect_ext(CommandDest dest, void (*spiCallbackfn)(void *), void *clien
             u_sess->SPI_cxt._stack =
                 (_SPI_connection *)repalloc(u_sess->SPI_cxt._stack, new_depth * sizeof(_SPI_connection));
             u_sess->SPI_cxt._stack_depth = new_depth;
+            u_sess->SPI_cxt._current = &(u_sess->SPI_cxt._stack[u_sess->SPI_cxt._connected]);
         }
     }
 
