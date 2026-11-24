@@ -347,8 +347,10 @@ void ThreadPoolControler::ParseBindCpu()
 
     ptoken = TrimStr(strtok_r(scpu, pdelimiter, &psave));
     ptoken = pg_strtolower(ptoken);
-
-    if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
+    if (ptoken == NULL) {
+        INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', 'nodebind' and 'numabind' "
+            "are valid attribute."));
+    } else if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
         m_cpuInfo.bindType = NO_CPU_BIND;
         return;
     } else if (strncmp("allbind", ptoken, strlen("allbind")) == 0) {
