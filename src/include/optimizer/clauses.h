@@ -175,4 +175,8 @@ extern Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundPar
 extern Query *flatten_join_alias_var_optimizer(Query *query, int queryLevel);
 extern Expr *transform_array_Const_to_ArrayExpr(Const *c);
 #endif
+
+extern Param* BuildParamFromConst(Const* con, int paramid);
+
+
 #endif /* CLAUSES_H */

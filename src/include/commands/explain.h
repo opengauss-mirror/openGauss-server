@@ -471,7 +471,12 @@ typedef struct ExplainState {
     DN_RunInfo datanodeinfo;
     int* wlm_statistics_plan_max_digit; /* print plan for wlm statistics */
     char* statement_id;                 /* statement_id for EXPLAIN PLAN */
-    bool is_explain_gplan;
+    bool is_explain_gplan;          /* true once Generic Plan generation starts (set unconditionally) */
+    bool is_explain_normalized;     /* user specified EXPLAIN (NORMALIZED) */
+    bool is_explain_generic_plan;   /* user specified EXPLAIN (GENERIC_PLAN) — distinct from is_explain_gplan */
+    char* normalized_query;         /* normalized SQL text with $N placeholders (freed by MemoryContext cleanup) */
+    char* param_values;             /* "Parameter Values: $1 = 'x', ..." display string */
+    uint64 unique_sql_id;           /* unique SQL ID matching dbe_perf.statement.unique_sql_id */
     char* opt_model_name;
     ExplainFRSqlState es_frs;   /* explain state for remote sql of foreign scan. */
 #ifdef USE_SPQ

@@ -218,6 +218,7 @@ static void insertSelectOptions(SelectStmt *stmt,
 static Node *makeSetOp(SetOperation op, bool all, Node *larg, Node *rarg);
 static Node *doNegate(Node *n, int location);
 static void doNegateFloat(Value *v);
+static bool ExplainGenericPlanEnabled(List *options);
 static Node *makeAArrayExpr(List *elements, int location);
 static Node *makeXmlExpr(XmlExprOp op, char *name, List *named_args,
 						 List *args, int location);
@@ -980,7 +981,7 @@ static bool is_temp_table(const char relpst);
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
-	GENERATED GET GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
+	GENERATED GENERIC_PLAN GET GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P HOUR_MINUTE_P HOUR_SECOND_P
 
@@ -1000,7 +1001,7 @@ static bool is_temp_table(const char relpst);
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MESSAGE_TEXT METHOD MINUS_P MINUTE_P MINUTE_SECOND_P MINVALUE MINEXTENTS MODE
 	MODEL MODIFY_P MONTH_P MOVE MOVEMENT MYSQL_ERRNO
 	// DB4AI
-	NAME_P NAMES NAN_P NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
+	NAME_P NAMES NAN_P NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE NORMALIZED
 	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NTH_VALUE_P NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
@@ -24144,12 +24145,30 @@ ExplainStmt:
 					n->options = list_make1(makeDefElem("verbose", NULL));
 					$$ = (Node *) n;
 				}
-		| EXPLAIN '(' explain_option_list ')' ExplainableStmt
+		| EXPLAIN '(' explain_option_list
+					{
+						/*
+						 * While the inner statement is lexed, scan.l treats
+						 * '?' as a parameter placeholder -- but only when the
+						 * option list enables GENERIC_PLAN.  The mid-rule
+						 * action runs before the first token of
+						 * ExplainableStmt is scanned (only the lookahead
+						 * token, which cannot itself be a '?', may already
+						 * have been read).
+						 */
+						u_sess->parser_cxt.qmark_param_mode =
+							ExplainGenericPlanEnabled($3);
+						if (u_sess->parser_cxt.qmark_param_mode)
+							u_sess->parser_cxt.has_dollar = false;
+					}
+				')' ExplainableStmt
 				{
 					ExplainStmt *n = makeNode(ExplainStmt);
-					n->query = $5;
+					n->query = $6;
 					n->options = $3;
 					$$ = (Node *) n;
+					u_sess->parser_cxt.qmark_param_mode = false;
+					u_sess->parser_cxt.qmark_param_idx = 0;
 				}
 		| EXPLAIN PLAN SET STATEMENT_ID '=' Sconst FOR ExplainableStmt
 				{
@@ -32870,6 +32889,7 @@ unreserved_keyword:
 			| FUNCTION
 			| FUNCTIONS
 			| GENERATED
+			| GENERIC_PLAN
 			| GET
 			| GLOBAL
 			| GRANTED
@@ -32975,6 +32995,7 @@ unreserved_keyword:
 			| NOLOGGING
 			| NOMAXVALUE
 			| NOMINVALUE
+			| NORMALIZED
 			| NOTHING
 			| NOTIFY
 			| NOVALIDATE
@@ -33512,6 +33533,29 @@ static void
 base_yyerror(YYLTYPE *yylloc, core_yyscan_t yyscanner, const char *msg)
 {
 	parser_yyerror(msg);
+}
+
+/*
+ * ExplainGenericPlanEnabled - does an EXPLAIN option list enable GENERIC_PLAN?
+ *
+ * Mirrors ExplainQuery()'s interpretation: only the generic_plan option
+ * matters, and when it is repeated the last occurrence wins (a bare
+ * GENERIC_PLAN has a NULL argument, which defGetBoolean() reads as true).
+ */
+static bool
+ExplainGenericPlanEnabled(List *options)
+{
+	bool		result = false;
+	ListCell   *lc = NULL;
+
+	foreach (lc, options)
+	{
+		DefElem    *def = (DefElem *)lfirst(lc);
+
+		if (strcmp(def->defname, "generic_plan") == 0)
+			result = defGetBoolean(def);
+	}
+	return result;
 }
 
 static Node *

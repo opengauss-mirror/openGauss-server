@@ -38,6 +38,7 @@
 #include "foreign/dummyserver.h"
 #include "foreign/fdwapi.h"
 #include "instruments/generate_report.h"
+#include "nodes/makefuncs.h"
 #include "nodes/print.h"
 #include "opfusion/opfusion_util.h"
 #include "opfusion/opfusion.h"
@@ -52,6 +53,7 @@
 #include "optimizer/planner.h"
 #include "optimizer/randomplan.h"
 #include "parser/parse_hint.h"
+#include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteHandler.h"
 #include "tcop/tcopprot.h"
@@ -59,6 +61,7 @@
 #include "utils/hotkey.h"
 #include "utils/json.h"
 #include "utils/lsyscache.h"
+#include "instruments/unique_query.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
@@ -87,7 +90,7 @@ THR_LOCAL bool PTFastQueryShippingStore = true;
 THR_LOCAL bool IsExplainPlanStmt = false;
 THR_LOCAL bool IsExplainPlanSelectForUpdateStmt = false;
 
-/* Hook for plugins to get control in explain_get_index_name() */               
+/* Hook for plugins to get control in explain_get_index_name() */
 THR_LOCAL explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
 
 extern TrackDesc trackdesc[];
@@ -390,10 +393,14 @@ void ExplainQuery(
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("unrecognized value for EXPLAIN option \"%s\": \"%s\"", opt->defname, p)));
-#ifndef ENABLE_MULTIPLE_NODES 
+#ifndef ENABLE_MULTIPLE_NODES
         } else if (strcmp(opt->defname, "predictor") == 0) {
             es.opt_model_name = defGetString(opt);
-#endif       
+#endif
+        } else if (strcmp(opt->defname, "normalized") == 0) {
+            es.is_explain_normalized = defGetBoolean(opt);
+        } else if (strcmp(opt->defname, "generic_plan") == 0) {
+            es.is_explain_generic_plan = defGetBoolean(opt);
         } else
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized EXPLAIN option \"%s\"", opt->defname)));
     }
@@ -431,6 +438,15 @@ void ExplainQuery(
     /* check that timing is used with EXPLAIN ANALYZE */
     if (es.timing && !es.analyze)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("EXPLAIN option TIMING requires ANALYZE")));
+
+    if (es.is_explain_generic_plan && es.is_explain_normalized)
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("EXPLAIN option GENERIC_PLAN cannot be used together with NORMALIZED")));
+    if (es.is_explain_generic_plan && es.analyze)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("EXPLAIN option GENERIC_PLAN is not supported with ANALYZE")));
 
     /*
      * Parse analysis was done already, but we still have to run the rule
@@ -576,6 +592,11 @@ void ExplainInitState(ExplainState* es)
     /* Reset flag for plan_table. */
     IsExplainPlanStmt = false;
     IsExplainPlanSelectForUpdateStmt = false;
+    es->is_explain_normalized = false;
+    es->is_explain_generic_plan = false;
+    es->normalized_query = NULL;
+    es->param_values = NULL;
+    es->unique_sql_id = 0;
 }
 
 /*
@@ -608,7 +629,7 @@ TupleDesc ExplainResultDesc(ExplainStmt* stmt)
         } else if (strcmp(opt->defname, "plan") == 0 && defGetBoolean(opt) && list_length(stmt->options) == 1) {
             /* For explain plan */
             explain_plan = true;
-        }          
+        }
     }
 
     if (!explain_plan) {
@@ -629,6 +650,444 @@ TupleDesc ExplainResultDesc(ExplainStmt* stmt)
     }
 
     return tupdesc;
+}
+
+/*
+ * ConstToParamContext - context for const_to_param_mutator
+ */
+typedef struct {
+    int nextParamId;
+} ConstToParamContext;
+
+/*
+ * The shared query_tree_walker/query_tree_mutator do not visit
+ * Query.windowClause, while UniqueSql::JumbleQuery does.  EXPLAIN NORMALIZED
+ * and GENERIC_PLAN must use the same tree coverage as the normalization
+ * engine, otherwise window-frame constants are omitted from Parameter Values
+ * and from Const/Param conversion.  Keep this extension local to EXPLAIN
+ * rather than changing the semantics of every generic query-tree walker.
+ *
+ * expression_tree_walker/expression_tree_mutator already handle WindowClause,
+ * including startOffset and endOffset, so passing the list to the supplied
+ * callback is sufficient.  Apply it after the standard Query fields and
+ * propagate a walker's early-stop result.  The context types are known at
+ * every call site, so both helpers are typed (the walker as a template over
+ * its context) instead of taking void* arguments; only the call into the
+ * shared query_tree_walker/query_tree_mutator needs their historical
+ * untyped convention.
+ */
+template <typename Context>
+static bool g_explainQueryTreeWalker(Query* query, bool (*walker)(Node*, Context*), Context* context, int flags)
+{
+    if (query_tree_walker(query, (bool (*)())walker, context, flags)) {
+        return true;
+    }
+    return walker((Node*)query->windowClause, context);
+}
+
+static Query* g_explainQueryTreeMutator(Query* query, Node* (*mutator)(Node*, ConstToParamContext*),
+    ConstToParamContext* context, int flags)
+{
+    Query* result = query_tree_mutator(query, (Node* (*)(Node*, void*))mutator, context, flags);
+
+    result->windowClause = (List*)mutator((Node*)result->windowClause, context);
+    return result;
+}
+
+/*
+ * find_max_existing_paramid_walker — walk the query tree to find the
+ * largest paramid among existing PARAM_EXTERN Param nodes, so that
+ * newly assigned paramid values don't collide.
+ */
+static bool find_max_existing_paramid_walker(Node* node, int* maxId)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Param)) {
+        Param* param = (Param*)node;
+        if (param->paramkind == PARAM_EXTERN && param->paramid > *maxId) {
+            *maxId = param->paramid;
+        }
+        return false;
+    }
+    if (IsA(node, Query)) {
+        /* flags = 0 (not QTW_EXAMINE_RTES): query_tree_walker still descends
+         * into CTE and RTE-subquery Query nodes, which is where pre-existing
+         * Params (explicit $N references and lexed '?' placeholders) can
+         * appear.  QTW_EXAMINE_RTES is avoided because openGauss extension
+         * node types (e.g. node 925 between T_UserVar and T_ModifyTablePath)
+         * in plain RTE fields are not handled by expression_tree_walker's
+         * switch and would trigger "unrecognized node type" errors. */
+        return g_explainQueryTreeWalker((Query*)node, find_max_existing_paramid_walker, maxId, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())find_max_existing_paramid_walker, maxId);
+}
+
+/*
+ * const_to_param_mutator - replace Const nodes with Param nodes.
+ *
+ * Uses the shared BuildParamFromConst() helper in clauses.cpp so that
+ * the Const→Param conversion logic stays in sync with prepare.cpp.
+ */
+static Node* const_to_param_mutator(Node* node, ConstToParamContext* context)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+    if (IsA(node, Const)) {
+        return (Node*)BuildParamFromConst((Const*)node, context->nextParamId++);
+    }
+    /*
+     * Handle Query nodes explicitly: expression_tree_mutator does nothing
+     * on T_Query, so we must use query_tree_mutator to reach constants
+     * inside CTEs and subquery RTEs.  Without this, GENERIC_PLAN would
+     * fail to replace constants in CTE/subquery bodies with Param nodes.
+     */
+    if (IsA(node, Query)) {
+        return (Node*)g_explainQueryTreeMutator((Query*)node,
+            const_to_param_mutator,
+            context, QTW_EXAMINE_RTES);
+    }
+    return expression_tree_mutator(node, (Node* (*)(Node*, void*))const_to_param_mutator, (void*)context);
+}
+
+/*
+ * param_to_null_const_mutator - replace external Param nodes with
+ * type-equivalent NULL Const nodes.
+ *
+ * Used only to compute the Unique SQL ID for EXPLAIN (GENERIC_PLAN): the
+ * unique-SQL jumble hashes a constant's type (and records its parse
+ * location), so a placeholder that stayed a Param through parse analysis
+ * must be rendered as a Const again to keep the ID identical to the same
+ * query written with a literal (and to earlier releases that substituted a
+ * stand-in constant).  The NULL Const is never evaluated, so no type input
+ * function runs on a made-up value.
+ *
+ * The equivalence holds where the placeholder's analyzed type equals the
+ * literal's source type.  It cannot hold where parse analysis would have
+ * wrapped a literal in an implicit coercion but types a placeholder
+ * directly: a ROWS window-frame offset, for example, is coerced to int8,
+ * so a literal 1 jumbles as an int4 Const under the int4->int8 coercion
+ * FuncExpr, while a placeholder becomes a bare int8 Param (and hence an
+ * int8 NULL Const here).  The literal's pre-coercion type is not
+ * recoverable after analysis, so those statements legitimately hash to a
+ * different ID than the literal spelling.
+ */
+static Node* param_to_null_const_mutator(Node* node, ConstToParamContext* context)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+    if (IsA(node, Param)) {
+        Param* param = (Param*)node;
+        if (param->paramkind != PARAM_EXTERN) {
+            return node;
+        }
+        Const* nullConst = makeNullConst(param->paramtype, param->paramtypmod, param->paramcollid);
+        nullConst->location = param->location;
+        return (Node*)nullConst;
+    }
+    /* Same Query-node handling as const_to_param_mutator. */
+    if (IsA(node, Query)) {
+        return (Node*)g_explainQueryTreeMutator((Query*)node,
+            param_to_null_const_mutator,
+            context, QTW_EXAMINE_RTES);
+    }
+    return expression_tree_mutator(node, (Node* (*)(Node*, void*))param_to_null_const_mutator, context);
+}
+
+/*
+ * ReplaceQmarkWithDollarN - replace constant-placeholder '?' in normalized
+ * query with $N, using a numbering that matches Parameter Values.
+ *
+ * The placeholder positions are the EXACT output offsets recorded by
+ * GenerateNormalizedQuery (via normalized_unique_querystring_ex) while it
+ * emitted each '?'.  Using generation-time positions instead of re-lexing the
+ * text keeps the rewrite correct for every '?' that survives from the
+ * original query as an operator — built-in jsonb/hstore operators (?, ?|,
+ * ?&), user-defined operators starting with '?' (??, ?~, ...), and operators
+ * adjacent to constants (e.g. "1|2" normalizes to "?|?", "1+1" to "?+?"),
+ * which no purely textual heuristic can distinguish reliably.
+ *
+ * maxExistingParamId is the largest paramid among the PARAM_EXTERN nodes of
+ * the analyzed query tree, found by find_max_existing_paramid_walker().  The
+ * caller supplies it so that generated $N start above every real placeholder
+ * already in the statement, and so that the numbering here agrees with the
+ * Parameter Values list, which numbers constants from the same first parameter
+ * id upward in source-location order.
+ *
+ * The max is taken from the query tree rather than by scanning the text for
+ * '$' + digits: '$' is a legal identifier continuation character
+ * (ident_cont in scan.l), so a bare token such as "foo$9" is a single
+ * identifier, not a $9 parameter reference.  A text scan would misread it as
+ * a taken parameter number and renumber the constants above the true count,
+ * desynchronizing the normalized text from Parameter Values.  Only a real
+ * PARAM_EXTERN node denotes a placeholder, so only those numbers are reserved.
+ */
+static char* ReplaceQmarkWithDollarN(const char* normalizedQuery, const int* qpos, int qcount,
+    int maxExistingParamId)
+{
+    /* Replace the placeholder '?' at each recorded position with $N, starting
+     * above every real PARAM_EXTERN already present in the statement. */
+    int nextN = maxExistingParamId + 1;
+    StringInfo result = makeStringInfo();
+    int last = 0;
+
+    for (int i = 0; i < qcount; i++) {
+        int pos = qpos[i];
+        if (pos < last || normalizedQuery[pos] != '?') {
+            /*
+             * Positions must be increasing and point at '?'.  If they do not,
+             * the text is left untouched rather than corrupted.
+             */
+            appendStringInfoString(result, normalizedQuery + last);
+            char* data = result->data;
+            result->data = NULL;  /* detach buffer before freeing the container */
+            pfree(result);
+            return data;
+        }
+        appendBinaryStringInfo(result, normalizedQuery + last, pos - last);
+        appendStringInfo(result, "$%d", nextN++);
+        last = pos + 1;
+    }
+    appendStringInfoString(result, normalizedQuery + last);
+
+    char* data = result->data;
+    result->data = NULL;  /* detach buffer before freeing the container */
+    pfree(result);
+    return data;
+}
+
+/*
+ * ConstValue — holds a collected Const node's text location and string value
+ * for location-ordered output matching the normalized SQL $N numbering.
+ */
+typedef struct {
+    int location;
+    char* value; /* NULL represents SQL NULL */
+} ConstValue;
+
+/*
+ * CollectConstContext - context for walking query tree to collect Const values
+ */
+typedef struct {
+    List* values; /* List of ConstValue* */
+} CollectConstContext;
+
+/*
+ * sort_const_values_by_location — sort the ConstValue list by text location
+ * so that $N numbering matches the order in normalized_unique_querystring output.
+ */
+static void sort_const_values_by_location(List** values)
+{
+    int n = list_length(*values);
+    if (n < 2) {
+        return;
+    }
+
+    /* Create an array of ConstValue pointers and sort it by location */
+    ConstValue** arr = (ConstValue**)palloc(n * sizeof(ConstValue*));
+    ListCell* lc = NULL;
+    int i = 0;
+    foreach (lc, *values) {
+        arr[i++] = (ConstValue*)lfirst(lc);
+    }
+
+    /* A statement has few constants, so a simple insertion sort suffices */
+    for (i = 1; i < n; i++) {
+        ConstValue* cur = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j]->location > cur->location) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = cur;
+    }
+
+    /* Rebuild the list in sorted order */
+    list_free(*values);
+    *values = NIL;
+    for (i = 0; i < n; i++) {
+        *values = lappend(*values, arr[i]);
+    }
+
+    pfree(arr);
+}
+
+static bool collect_const_walker(Node* node, CollectConstContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Const)) {
+        Const* con = (Const*)node;
+        /*
+         * Only collect constants that carry a valid source location (>= 0), to
+         * stay consistent with the normalization engine: RecordConstLocation()
+         * in unique_query.cpp records only location >= 0.  Synthetic constants
+         * produced by implicit casts or constant folding carry location == -1
+         * and are NOT normalized in the Normalized SQL text, so they must not
+         * appear in Parameter Values either — otherwise the $N numbering of the
+         * normalized text and the parameter values would diverge (defect D-01).
+         */
+        if (con->location < 0) {
+            return false;
+        }
+        ConstValue* cv = (ConstValue*)palloc(sizeof(ConstValue));
+        cv->location = con->location;
+        if (!con->constisnull) {
+            Oid typoutput;
+            bool typIsVarlena;
+            getTypeOutputInfo(con->consttype, &typoutput, &typIsVarlena);
+            cv->value = OidOutputFunctionCall(typoutput, con->constvalue);
+        } else {
+            /* Store NULL pointer to represent SQL NULL, so it can be
+             * distinguished from the string "NULL" in the output. */
+            cv->value = NULL;
+        }
+        context->values = lappend(context->values, cv);
+        return false;
+    }
+    /*
+     * Handle Query nodes explicitly: expression_tree_walker does nothing
+     * on T_Query, so we must use query_tree_walker to reach constants
+     * inside CTEs and subquery RTEs.
+     */
+    if (IsA(node, Query)) {
+        /* flags = 0: same rationale as find_max_existing_paramid_walker — openGauss
+         * extension nodes in RTE subqueries unsupported by expression_tree_walker. */
+        return g_explainQueryTreeWalker((Query*)node, collect_const_walker, context, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())collect_const_walker, context);
+}
+
+/*
+ * collect_plan_param_values - build the "Parameter Values" list for the
+ * constants of the analyzed query, numbered to match the normalized SQL text.
+ *
+ * firstParamId is the number assigned to the first (source-location-ordered)
+ * constant.  It must be the same base ReplaceQmarkWithDollarN() used when it
+ * rewrote the '?' placeholders, i.e. one above the largest PARAM_EXTERN
+ * paramid already present in the statement, so that "$N = value" here refers
+ * to exactly the "$N" shown in the Normalized SQL text.
+ */
+static char* collect_plan_param_values(Query* query, List** constValuesOut, int firstParamId)
+{
+    CollectConstContext ctx;
+    ctx.values = NIL;
+
+    g_explainQueryTreeWalker(query, collect_const_walker, &ctx, 0);
+
+    if (ctx.values == NIL) {
+        if (constValuesOut != NULL) {
+            *constValuesOut = NIL;
+        }
+        return NULL;
+    }
+
+    /* Sort collected Const nodes by text location so that $N numbering
+     * matches the order in normalized_unique_querystring output. */
+    sort_const_values_by_location(&ctx.values);
+
+    /*
+     * Deduplicate by source location.  The normalization engine consumes each
+     * distinct source location only once (fill_in_constant_lengths() skips an
+     * entry whose location was already handled), so CTE / subquery inlining
+     * that copies the same constant into several query-tree positions must not
+     * inflate Parameter Values with duplicate $N entries (defect D-02).  The
+     * list is already sorted by location, so duplicates are adjacent.
+     */
+    {
+        List* deduped = NIL;
+        int prevLocation = -1;
+        ListCell* dc = NULL;
+        foreach (dc, ctx.values) {
+            ConstValue* cv = (ConstValue*)lfirst(dc);
+            if (deduped == NIL || cv->location != prevLocation) {
+                deduped = lappend(deduped, cv);
+                prevLocation = cv->location;
+            }
+        }
+        ctx.values = deduped;
+    }
+
+    /* Return the sorted, deduplicated ConstValue list for plan-text normalization */
+    if (constValuesOut != NULL) {
+        *constValuesOut = ctx.values;
+    }
+
+    StringInfo result = makeStringInfo();
+    int i = firstParamId;
+    ListCell* lc = NULL;
+    foreach (lc, ctx.values) {
+        ConstValue* cv = (ConstValue*)lfirst(lc);
+        if (i > firstParamId) {
+            appendStringInfoString(result, ", ");
+        }
+        if (cv->value == NULL) {
+            /* SQL NULL value — display unquoted */
+            appendStringInfo(result, "$%d = NULL", i++);
+        } else {
+            const char* p = cv->value;
+            appendStringInfo(result, "$%d = '", i++);
+            while (*p) {
+                if (SQL_STR_DOUBLE(*p, true)) {
+                    appendStringInfoChar(result, *p);
+                }
+                appendStringInfoChar(result, *p);
+                p++;
+            }
+            appendStringInfoChar(result, '\'');
+        }
+    }
+
+    char* data = result->data;
+    result->data = NULL;  /* detach buffer before freeing the container */
+    pfree(result);
+    return data;
+}
+
+/*
+ * SkipExplainLeadingTrivia - skip SQL whitespace and comments.
+ *
+ * The EXPLAIN-prefix stripping below must also work when the statement
+ * starts with leading blanks or comments (e.g. " EXPLAIN ..." or a block
+ * comment followed by "EXPLAIN ..."), otherwise the normalized display
+ * keeps the EXPLAIN (...) prefix and diverges from dbe_perf.statement's
+ * format.  Block comments nest, exactly as in scan.l.
+ */
+static const char* SkipExplainLeadingTrivia(const char* p)
+{
+    for (;;) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f') {
+            p++;
+        }
+        if (*p == '/' && *(p + 1) == '*') {
+            int depth = 1;
+            p += 2;
+            while (*p != '\0' && depth > 0) {
+                if (*p == '/' && *(p + 1) == '*') {
+                    depth++;
+                    p += 2;
+                } else if (*p == '*' && *(p + 1) == '/') {
+                    depth--;
+                    p += 2;
+                } else {
+                    p++;
+                }
+            }
+            continue;
+        }
+        if (*p == '-' && *(p + 1) == '-') {
+            p += 2;
+            while (*p != '\0' && *p != '\n' && *p != '\r') {
+                p++;
+            }
+            continue;
+        }
+        return p;
+    }
 }
 
 /*
@@ -713,26 +1172,197 @@ static void ExplainOneQuery(
                     errdetail("Query is not actually executed when declaring a cursor.")));
     }
     PlannedStmt* plan = NULL;
+    Query* plan_query = query;
+    Query* hash_query = query;
+
+    if (es->is_explain_generic_plan) {
+        ConstToParamContext ctx;
+        int maxExisting = 0;
+        (void)find_max_existing_paramid_walker((Node*)query, &maxExisting);
+        ctx.nextParamId = maxExisting + 1;
+        /*
+         * query_tree_mutator internally FLATCOPYs the Query node (unless
+         * QTW_DONT_COPY_QUERY is set), so we'd normally pass the original
+         * query directly.  However, openGauss extension nodes inside the
+         * query tree are not handled by expression_tree_mutator's default
+         * branch; a deep copyObject first ensures all node types are
+         * reachable by the mutator.
+         */
+        plan_query = (Query*)copyObject(query);
+        plan_query = g_explainQueryTreeMutator(plan_query, const_to_param_mutator, &ctx, QTW_EXAMINE_RTES);
+        /*
+         * A second copy renders every placeholder Param as a type-equivalent
+         * NULL Const.  It is used only for the Unique SQL ID below, so the
+         * hash matches the same query written with literals (and earlier
+         * releases that substituted a stand-in constant before analysis),
+         * except where an implicit coercion typed the literal and the
+         * placeholder differently (see param_to_null_const_mutator).
+         */
+        hash_query = (Query*)copyObject(query);
+        hash_query = (Query*)g_explainQueryTreeMutator(hash_query, param_to_null_const_mutator, NULL, QTW_EXAMINE_RTES);
+    }
+
+    if (es->is_explain_generic_plan) {
+        /*
+         * GENERIC_PLAN never displays a normalized query string: its $N
+         * numbering comes from const_to_param_mutator's tree-walk order,
+         * while '?' placeholders are already Params (lexed by scan.l), so a
+         * text-derived display could not number everything consistently.
+         * Only the Unique SQL ID is produced, from the const view of the
+         * analyzed tree.  The query string is not consulted for a
+         * non-utility Query.
+         */
+        es->unique_sql_id = (uint64)generate_unique_queryid(hash_query, NULL);
+    } else if (es->is_explain_normalized) {
+        /*
+         * Normalization must run BEFORE pg_plan_query(): the planner's
+         * eval_const_expressions() folds implicit-cast constants (e.g. the
+         * int4->numeric coercion of `salary > 50000`) into a synthetic Const
+         * with location == -1, and mutates the query tree in place.  If we
+         * normalized after planning, those constants would be invisible to
+         * the normalization engine (which only records location >= 0) and the
+         * display would fall back to raw text (defect D-01/D-02 related).
+         * The pre-planning tree still carries the original literal's location,
+         * which is also the tree dbe_perf.statement uses for unique_sql_id.
+         *
+         * Extract the inner SQL (without EXPLAIN prefix) from queryString.
+         * This is needed for:
+         * 1. generate_unique_queryid — must match dbe_perf.statement's ID
+         *    (which is computed from the raw SQL, not the EXPLAIN wrapper).
+         * 2. The normalized SQL display text — we strip the EXPLAIN prefix
+         *    so the output matches dbe_perf.statement's normalized format.
+         *
+         * normalized_unique_querystring() still receives the FULL queryString
+         * because its fill_in_constant_lengths uses absolute text locations.
+         * Those locations are relative to the original simple-query message,
+         * so when the portal's source text is a per-statement snippet
+         * (multi-statement message on an app/internal-tool connection),
+         * exec_simple_query() has recorded the snippet's base offset in
+         * t_thrd.explain_cxt.multi_sql_offset; pass it so every constant
+         * location is mapped onto the snippet.  The offset is consumed here
+         * and cleared so unrelated EXPLAIN entry points (SPI, ...) start
+         * clean.
+         */
+        const char* innerSql = SkipExplainLeadingTrivia(queryString);
+        char* innerSqlCopy = NULL;
+        if (strncasecmp(innerSql, "EXPLAIN", 7) == 0) {
+            innerSql += 7;
+            while (*innerSql == ' ') {
+                innerSql++;
+            }
+            if (*innerSql == '(') {
+                int pd = 1;
+                innerSql++;
+                /* Simple paren counter; does not handle parens inside string literals */
+                while (*innerSql && pd > 0) {
+                    if (*innerSql == '(') {
+                        pd++;
+                    } else if (*innerSql == ')') {
+                        pd--;
+                    }
+                    innerSql++;
+                }
+            }
+            while (*innerSql == ' ') {
+                innerSql++;
+            }
+            innerSqlCopy = pstrdup(innerSql);
+            innerSql = innerSqlCopy;
+        }
+
+        int queryLen = strlen(queryString);
+        char* normalizedBuf = (char*)palloc0(queryLen + 1);
+        int* qmarkPos = NULL;
+        int qmarkCount = 0;
+        /*
+         * Reserve the parameter numbers already used by real PARAM_EXTERN
+         * nodes (e.g. bound $N in a PREPARE/EXECUTE or SPI context).  Generated
+         * $N must start above these, and the same maximum drives both the
+         * normalized text and Parameter Values so the two stay in sync.
+         */
+        int maxExistingParamId = 0;
+        (void)find_max_existing_paramid_walker((Node*)query, &maxExistingParamId);
+        uint32 multiSqlOffset = (uint32)t_thrd.explain_cxt.multi_sql_offset;
+        t_thrd.explain_cxt.multi_sql_offset = 0;
+        bool normOk = normalized_unique_querystring_ex(query, queryString,
+            normalizedBuf, queryLen + 1, multiSqlOffset, &qmarkPos, &qmarkCount);
+        if (normOk) {
+            es->normalized_query = ReplaceQmarkWithDollarN(normalizedBuf, qmarkPos, qmarkCount,
+                maxExistingParamId);
+            /*
+             * Strip the EXPLAIN prefix from display output too, skipping
+             * any leading trivia that precedes it.
+             */
+            const char* s = SkipExplainLeadingTrivia(es->normalized_query);
+            if (strncasecmp(s, "EXPLAIN", 7) == 0) {
+                s += 7;
+                while (*s == ' ') {
+                    s++;
+                }
+                if (*s == '(') {
+                    int pd = 1;
+                    s++;
+                    while (*s && pd > 0) {
+                        if (*s == '(') {
+                            pd++;
+                        } else if (*s == ')') {
+                            pd--;
+                        }
+                        s++;
+                    }
+                }
+                while (*s == ' ') {
+                    s++;
+                }
+                char* stripped = pstrdup(s);
+                pfree(es->normalized_query);
+                es->normalized_query = stripped;
+            }
+        } else {
+            es->normalized_query = pstrdup(innerSql);
+        }
+        pfree(normalizedBuf);
+        if (qmarkPos != NULL) {
+            pfree(qmarkPos);
+        }
+
+        /*
+         * Generate unique SQL ID from the INNER query (without EXPLAIN
+         * prefix) so that it matches the ID in dbe_perf.statement for the
+         * same SQL executed without EXPLAIN.
+         */
+        es->unique_sql_id = (uint64)generate_unique_queryid(query, innerSql);
+        if (innerSqlCopy != NULL) {
+            pfree(innerSqlCopy);
+        }
+
+        if (es->analyze) {
+            es->param_values = collect_plan_param_values(query, NULL, maxExistingParamId + 1);
+        } else if (es->is_explain_normalized) {
+            es->param_values = collect_plan_param_values(query, NULL, maxExistingParamId + 1);
+        }
+    }
 
     /*
      * plan the query
      * Temporarily apply SET hint using PG_TRY for later recovery
      */
-    int nest_level = apply_set_hint(query);
+    int nestLevel = apply_set_hint(plan_query);
     AFTER_EXPLAIN_APPLY_SET_HINT();
     PG_TRY();
     {
-        plan = pg_plan_query(query, CURSOR_OPT_SPQ_OK, params, true);
+        plan = pg_plan_query(plan_query, CURSOR_OPT_SPQ_OK,
+            es->is_explain_generic_plan ? NULL : params, true);
     }
     PG_CATCH();
     {
-        recover_set_hint(nest_level);
+        recover_set_hint(nestLevel);
         AFTER_EXPLAIN_RECOVER_SET_HINT();
         PG_RE_THROW();
     }
     PG_END_TRY();
 
-    recover_set_hint(nest_level);
+    recover_set_hint(nestLevel);
     AFTER_EXPLAIN_RECOVER_SET_HINT();
     CleanHotkeyCandidates(true);
 
@@ -1213,7 +1843,7 @@ void ExplainOnePlan(
     /* Check plan was influenced by row level security or not, here need to skip remote dummy node */
     if (range_table_walker(
         plannedstmt->rtable, (bool (*)())ContainRlsQualInRteWalker, NULL, QTW_EXAMINE_RTES | QTW_IGNORE_DUMMY)) {
-        if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL 
+        if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL
             && es->planinfo->m_detailInfo != NULL) {
             appendStringInfo(es->planinfo->m_detailInfo->info_str,
                 "Notice: This query is influenced by row level security feature\n");
@@ -1327,11 +1957,57 @@ void ExplainOnePlan(
  *
  * NB: will not work on utility statements
  */
+
 void ExplainPrintPlan(ExplainState* es, QueryDesc* queryDesc)
 {
     AssertEreport(queryDesc->plannedstmt != NULL, MOD_EXECUTOR, "unexpect null value");
     es->pstmt = queryDesc->plannedstmt;
     es->rtable = queryDesc->plannedstmt->rtable;
+
+    if (es->is_explain_normalized || es->is_explain_generic_plan) {
+        /*
+         * For TEXT format, append normalized SQL, unique SQL ID, and
+         * parameter values to es->str so they appear directly in the
+         * output.  For non-TEXT formats (JSON/XML/YAML), skip es->str
+         * because do_text_output_oneline would flatten multi-line content
+         * into a single garbled string.
+         */
+        if (es->format == EXPLAIN_FORMAT_TEXT) {
+            /* Normalized SQL text is NORMALIZED-mode only; GENERIC_PLAN's
+             * $N numbering comes from const_to_param_mutator's tree-walk
+             * order, which may differ from normalization-engine text order
+             * (notably in CTE/subquery cases).  Showing both would be
+             * misleading, so we only show Normalized SQL in NORMALIZED mode,
+             * matching PG 16 behavior where GENERIC_PLAN has no normalized
+             * text at all. */
+            if (!es->is_explain_generic_plan && es->normalized_query != NULL)
+                appendStringInfo(es->str, "Normalized SQL: %s\n", es->normalized_query);
+            if (es->unique_sql_id != 0)
+                appendStringInfo(es->str, "Unique SQL ID: %lu\n", es->unique_sql_id);
+            if (es->param_values != NULL)
+                appendStringInfo(es->str, "Parameter Values: %s\n", es->param_values);
+        }
+
+        /*
+         * For performance mode (explain_perf_mode != EXPLAIN_NORMAL), the
+         * output goes through es->planinfo->dump(dest) which does NOT use
+         * es->str.  Append to the query summary so the normalized SQL is
+         * visible in performance-mode output as well.
+         */
+        if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL &&
+            es->planinfo->m_query_summary != NULL) {
+            if (!es->is_explain_generic_plan && es->normalized_query != NULL)
+                appendStringInfo(es->planinfo->m_query_summary->info_str,
+                    "Normalized SQL: %s\n", es->normalized_query);
+            if (es->unique_sql_id != 0)
+                appendStringInfo(es->planinfo->m_query_summary->info_str,
+                    "Unique SQL ID: %lu\n", es->unique_sql_id);
+            if (es->param_values != NULL)
+                appendStringInfo(es->planinfo->m_query_summary->info_str,
+                    "Parameter Values: %s\n", es->param_values);
+        }
+    }
+
     if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL) {
         es->planinfo->m_query_id = queryDesc->plannedstmt->queryId;
         /* print peak memory info if analyze is on */
@@ -2033,14 +2709,14 @@ static void PredAppendInfo(Plan* plan, StringInfoData buf, ExplainState* es)
     }
 
     if (es->planinfo->m_planInfo->m_pred_row && plan->pred_rows >= 0) {
-        es->planinfo->m_planInfo->put(PREDICT_ROWS, 
+        es->planinfo->m_planInfo->put(PREDICT_ROWS,
                                         DirectFunctionCall1(dround,
                                                             Float8GetDatum(plan->pred_rows)));
     }
 
     if (es->planinfo->m_planInfo->m_pred_mem && plan->pred_max_memory >= 0) {
         es->planinfo->m_planInfo->put(PREDICT_MEMORY,
-                                        DirectFunctionCall1(pg_size_pretty, 
+                                        DirectFunctionCall1(pg_size_pretty,
                                                             Int64GetDatum(plan->pred_max_memory)));
     }
 }
@@ -2059,7 +2735,7 @@ static void PredGetInfo(Plan* plan, ExplainState* es)
     if (plan->pred_max_memory >= 0) {
         ExplainPropertyLong("Pred Peak Memory", plan->pred_max_memory, es);
     }
-} 
+}
 #endif
 
 /*
@@ -2221,11 +2897,11 @@ static void ExplainNode(
             es->current_id = ((Stream*)plan)->streamID;
         }
         break;
- 
+
         case T_ShareInputScan:  {
             ShareInputScan *sisc = (ShareInputScan *) plan;
             int slice_id = es->current_id;
- 
+
             if (es->format == EXPLAIN_FORMAT_TEXT) {
                 appendStringInfo(es->str, " (%s; slice%d; share%d; producer:%d)",
                                     (sisc->is_producer ? "Producer" : "Consumer"),
@@ -2244,7 +2920,7 @@ static void ExplainNode(
         case T_VecRemoteQuery:
 #ifdef USE_SPQ
             es->current_id = ((RemoteQuery*)plan)->streamID;
-#endif 
+#endif
             /* Emit node execution list */
             ExplainExecNodes(((RemoteQuery*)plan)->exec_nodes, es);
 #ifdef STREAMPLAN
@@ -2740,7 +3416,7 @@ static void ExplainNode(
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
             show_llvm_info(planstate, es);
-            break;       
+            break;
 #ifdef PGXC
         case T_ModifyTable:
         case T_VecModifyTable: {
@@ -2934,7 +3610,7 @@ static void ExplainNode(
                 if (plan->qual)
                     show_instrumentation_count("Rows Removed by Filter", 1,
                                                planstate, es);
-            } 
+            }
             break;
         case T_ForeignScan:
         case T_VecForeignScan: {
@@ -3043,7 +3719,7 @@ static void ExplainNode(
             show_upper_qual(((VecAsofJoin*)plan)->hashclauses, "Part Cond", planstate, ancestors, es);
             show_upper_qual(((VecAsofJoin*)plan)->join.joinqual, "Merge Cond", planstate, ancestors, es);
             show_skew_optimization(planstate, es);
-        } break;            
+        } break;
         case T_VecAgg:
         case T_Agg:
             show_groupby_keys((AggState*)planstate, ancestors, es);
@@ -4497,7 +5173,7 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
                             spaceType,
                             spaceUsed);
                     }
-                    
+
                     continue;
                 }
 
@@ -4537,7 +5213,7 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
                     min_memoryUsed = rtl::min(spaceUsed, min_memoryUsed);
                 }
             }
-            if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL 
+            if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL
                 && es->planinfo->m_staticInfo != NULL) {
                 if (max_memoryUsed != 0) {
                     es->planinfo->m_staticInfo->set_plan_name<true, true>();
@@ -4624,7 +5300,7 @@ static void show_sort_group_info(SortGroupState *state, ExplainState *es)
                 appendStringInfoSpaces(es->str, es->indent * 2);
             appendStringInfo(es->str, "Space Used: %s : " INT64_FORMAT "kB\n", state->spaceType,
                              spaceUsed);
-        } 
+        }
         else {
             ExplainPropertyInteger("Sort Space Used(kB)", spaceUsed, es);
             ExplainPropertyText("Sort Space Type", state->spaceType, es);
@@ -5150,7 +5826,7 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 nbatch = instr->sorthashinfo.nbatch;
                 nbatch_original = instr->sorthashinfo.nbatch_original;
                 nbuckets = instr->sorthashinfo.nbuckets;
-                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo 
+                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo
                     && es->planinfo->m_staticInfo && es->planinfo->m_runtimeinfo) {
                     es->planinfo->m_runtimeinfo->put(i, 0, HASH_BATCH, nbatch);
                     es->planinfo->m_runtimeinfo->put(i, 0, HASH_BATCH_ORIGNAL, nbatch_original);
@@ -5497,7 +6173,7 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
 
                 double build_time = instr->sorthashinfo.hashbuild_time;
                 double probe_time = instr->sorthashinfo.hashagg_time;
-                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && 
+                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL &&
                     es->planinfo != NULL && es->planinfo->m_staticInfo != NULL) {
                     if (is_writefile)
                         es->planinfo->m_runtimeinfo->put(i, 0, HASH_FILENUM, file_num);
@@ -6908,12 +7584,12 @@ static void show_track_time_without_plannodeid(ExplainState* es)
             if (threadinstr_tmp != NULL) {
                 Track* generaltrack_tmp = &threadinstr_tmp->m_generalTrackArray[i];
                 int segmentid_tmp = threadinstr_tmp->getSegmentId();
-                if (segmentid_tmp > 0 && generaltrack_tmp->registerTrackId == track_Id && 
+                if (segmentid_tmp > 0 && generaltrack_tmp->registerTrackId == track_Id &&
                     IS_NULL(generaltrack_tmp->active)) {
                     int nodeidx = (j - 1) / ((m_gather_count + m_num_streams) * m_query_dop);
                     int smpid = (j - 1) % m_query_dop;
 
-                    instrument = get_instrument<true>(nodeidx, smpid, generaltrack_tmp, segmentid_tmp, str, 
+                    instrument = get_instrument<true>(nodeidx, smpid, generaltrack_tmp, segmentid_tmp, str,
                                                       &first_time);
                     if (instrument != NULL && instrument->nloops > 0) {
                         double nloops = instrument->nloops;
@@ -7919,7 +8595,7 @@ static void show_foreignscan_info(ForeignScanState* fsstate, ExplainState* es)
     /* Let the FDW emit whatever fields it wants */
     if (NULL != fdwroutine && NULL != fdwroutine->ExplainForeignScan)
         fdwroutine->ExplainForeignScan(fsstate, es);
-    
+
     /* Let the FDW get the remote plan */
     if (u_sess->attr.attr_common.show_fdw_remote_plan) {
         /* Set a title */
@@ -10966,7 +11642,7 @@ int checkPermsForPlanTable(RangeTblEntry* rte)
     } else {
         /* For other action(insert/update) will be contorl by rel_acl. */
         return -1;
-    } 
+    }
 }
 
 /* ----------------------End for explain plan----------------------------------- */

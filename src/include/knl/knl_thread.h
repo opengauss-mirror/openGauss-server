@@ -1366,6 +1366,15 @@ typedef struct knl_t_async_context {
 typedef struct knl_t_explain_context {
     int explain_perf_mode;
     bool explain_light_proxy;
+    /*
+     * Offset of the current portal's source text within the original
+     * simple-query message.  exec_simple_query() cuts per-statement
+     * snippets for app/internal-tool connections; parse locations are
+     * message-relative, so EXPLAIN (NORMALIZED) must hand this offset to
+     * the normalization engine together with the snippet text.  Set next
+     * to PortalDefineQuery(), consumed (and cleared) by ExplainOneQuery().
+     */
+    int multi_sql_offset;
 } knl_t_explain_context;
 
 typedef struct knl_t_arch_context {
