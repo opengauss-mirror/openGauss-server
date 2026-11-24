@@ -320,7 +320,7 @@ void BackgroundWorkerMain(void)
             pfree_ext(bwc->databaseName);
             pfree_ext(bwc->userName);
             pfree_ext(bwc->bgshared);
-            pfree(bwc);
+            pfree(t_thrd.bgworker_cxt.bgwcontext);
         }
 
         /* and go away */
@@ -390,7 +390,7 @@ void BackgroundWorkerMain(void)
         pfree_ext(bwc->databaseName);
         pfree_ext(bwc->userName);
         pfree_ext(bwc->bgshared);
-        pfree(bwc);
+        pfree(t_thrd.bgworker_cxt.bgwcontext);
     }
 
 out:
@@ -454,22 +454,21 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc, int flag)
 static void BgworkerCleanupSharedContext()
 {
     /* clean up backgroud shared context */
-    if (t_thrd.bgworker_cxt.bgwcontext) {
-        BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.bgwcontext;
-        if (!(bwc->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD)) {
-            if (bwc->exit_entry) {
-                bwc->exit_entry(bwc);
-            }
-            pfree_ext(bwc->bgshared);
-
-            /*
-             * bgwcontext's memory is allocated in LaunchBackgroundWorkers, belong to
-             * INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), instance level, but
-             * we can't free it now, cause bgworker is still running. we will free it
-             * when individual bgworker exit
-             */
-            pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
+    if (t_thrd.bgworker_cxt.subbgwcontext) {
+        BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.subbgwcontext;
+        Assert(!(bwc->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD));
+        if (bwc->exit_entry) {
+            bwc->exit_entry(bwc);
         }
+        pfree_ext(bwc->bgshared);
+
+        /*
+         * bgwcontext's memory is allocated in LaunchBackgroundWorkers, belong to
+         * INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), instance level, but
+         * we can't free it now, cause bgworker is still running. we will free it
+         * when individual bgworker exit
+         */
+        pfree_ext(t_thrd.bgworker_cxt.subbgwcontext);
     }
     slist_init(&t_thrd.bgworker_cxt.bgwlist);
 }
@@ -541,12 +540,10 @@ void BgworkerListRecycleFinished()
         }
     }
 
-    if (slist_is_empty(&t_thrd.bgworker_cxt.bgwlist) && t_thrd.bgworker_cxt.bgwcontext != NULL) {
-        BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.bgwcontext;
-        if (!(bwc->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD)) {
-            /* bgshared is the caller's; databaseName lives in the transaction context */
-            pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
-        }
+    if (slist_is_empty(&t_thrd.bgworker_cxt.bgwlist) && t_thrd.bgworker_cxt.subbgwcontext != NULL) {
+        Assert(!(((BgWorkerContext*)t_thrd.bgworker_cxt.subbgwcontext)->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD));
+        /* bgshared is the caller's; databaseName lives in the transaction context */
+        pfree_ext(t_thrd.bgworker_cxt.subbgwcontext);
     }
 }
 
@@ -663,7 +660,9 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     bwc->exit_entry = bgexit;
     bwc->flag = flag;
 
-    t_thrd.bgworker_cxt.bgwcontext = bwc;
+    if (!individualThread) {
+        t_thrd.bgworker_cxt.subbgwcontext = bwc;
+    }
 
     if (!individualThread) {
         StreamSaveTxnContext(&bwc->transactionCxt);

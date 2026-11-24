@@ -1877,6 +1877,7 @@ static void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
 {
     slist_init(&bgworker_cxt->bgwlist);
     bgworker_cxt->bgwcontext = NULL;
+    bgworker_cxt->subbgwcontext = NULL;
     bgworker_cxt->bgworker = NULL;
 }
 

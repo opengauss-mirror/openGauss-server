@@ -3181,6 +3181,7 @@ typedef struct knl_t_csnmin_sync_context {
 typedef struct knl_t_bgworker_context {
     slist_head  bgwlist;
     void   *bgwcontext;
+    void   *subbgwcontext;
     void   *bgworker;
     uint64  bgworkerId;
 } knl_t_bgworker_context;
