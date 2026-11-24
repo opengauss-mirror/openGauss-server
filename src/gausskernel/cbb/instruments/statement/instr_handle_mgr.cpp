@@ -176,8 +176,9 @@ void statement_init_metric_context()
     } else {
         instr_stmt_report_stat_at_handle_init();
         instr_stmt_reset_wait_events_bitmap();
-        if (is_stmt_wait_events_enabled()) {
-            BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap = true;
+        BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap = is_stmt_wait_events_enabled() &&
+            !BEENTRY_STMEMENET_CXT.is_wait_events_oom && BEENTRY_STMEMENET_CXT.wait_events != NULL;
+        if (BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap) {
             instr_stmt_copy_wait_events();
         }
         if (IsConnFromCoord()) {

@@ -2677,7 +2677,8 @@ static bool init_session_bms(uint32 index)
 void instr_stmt_copy_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || BEENTRY_STMEMENET_CXT.is_wait_events_oom) {
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || BEENTRY_STMEMENET_CXT.is_wait_events_oom ||
+        BEENTRY_STMEMENET_CXT.wait_events == NULL) {
         return;
     }
 
@@ -2756,7 +2757,8 @@ void instr_stmt_copy_wait_events()
 void instr_stmt_diff_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (!BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap || BEENTRY_STMEMENET_CXT.is_wait_events_oom) {
+    if (!BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap || BEENTRY_STMEMENET_CXT.is_wait_events_oom ||
+        BEENTRY_STMEMENET_CXT.wait_events == NULL) {
         return;
     }
     /*
