@@ -39,6 +39,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <poll.h>
 
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
@@ -101,6 +102,129 @@
 #define NUM_ARCHIVE_RETRIES 3
 
 #define ARCHIVE_BUF_SIZE (1024 * 1024)
+
+#define ARCHIVE_RESULT_TIMEOUT 120000
+
+#ifndef ENABLE_LITE_MODE
+/*
+ * Messages exchanged with the archive command agent over the execute/result
+ * pipes. Both directions carry a request id, so a result that the agent writes
+ * for an earlier command abandoned by the archiver (e.g. after a timeout) is
+ * recognized by its id and discarded instead of being mistaken for the result
+ * of a later command.
+ */
+typedef struct ArchiveCmdMsg {
+    uint64 reqId;           /* request id assigned by the archiver */
+    char cmd[MAXPGPATH];    /* NUL-terminated archive command */
+} ArchiveCmdMsg;
+
+typedef struct ArchiveCmdResultMsg {
+    uint64 reqId;           /* id of the request this result belongs to */
+    int exitCode;           /* command exit code; -1 means timed out or unknown */
+} ArchiveCmdResultMsg;
+
+/* read exactly len bytes; returns len, 0 on EOF (peer closed), or -1 on error */
+static ssize_t read_full(int fd, void* buf, size_t len)
+{
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(fd, (char*)buf + got, len - got);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            /* the peer closed its end of the pipe */
+            return 0;
+        }
+        got += (size_t)n;
+    }
+    return (ssize_t)got;
+}
+
+/* write exactly len bytes; returns false on error */
+static bool write_full(int fd, const void* buf, size_t len)
+{
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = write(fd, (const char*)buf + sent, len - sent);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        sent += (size_t)n;
+    }
+    return true;
+}
+
+/* waitpid() that survives EINTR; returns waitpid()'s result */
+static pid_t waitpid_retry(pid_t pid, int* status, int options)
+{
+    pid_t ret = -1;
+    do {
+        ret = waitpid(pid, status, options);
+    } while (ret == -1 && errno == EINTR);
+    return ret;
+}
+
+/* current time in milliseconds on a monotonic clock */
+static int64 now_ms(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    return (int64)ts.tv_sec * 1000 + (int64)ts.tv_nsec / 1000000;
+}
+
+/*
+ * poll() on a single fd with EINTR retry that never waits past deadline_ms,
+ * an absolute deadline in now_ms() time. Returns poll()'s result.
+ */
+static int poll_deadline(struct pollfd* fds, int64 deadline_ms)
+{
+    for (;;) {
+        int timeout = (int)(deadline_ms - now_ms());
+        if (timeout < 0) {
+            timeout = 0;
+        }
+        int ret = poll(fds, 1, timeout);
+        if (ret < 0 && errno == EINTR) {
+            continue;
+        }
+        return ret;
+    }
+}
+
+/*
+ * Request ids must stay unique across archiver restarts: the agent and its
+ * pipes survive an archiver restart and may still hold results of requests
+ * sent by the previous archiver, so ids never start over at a small number.
+ */
+static uint64 next_archive_req_id(void)
+{
+    static uint64 reqId = 0;
+    if (reqId == 0) {
+        reqId = ((uint64)time(NULL) << 31) + (uint32)(getpid() & 0x7fffffff);
+    }
+    return ++reqId;
+}
+
+/* common tail of the failure paths in pgarch_archiveXlog */
+static bool pgarch_reportArchiveFailure(char* activitymsg, Size activitymsg_len, const char* xlog)
+{
+    errno_t rc = EOK;
+    g_instance.WalSegmentArchSucceed = false;
+    rc = snprintf_s(activitymsg, activitymsg_len, activitymsg_len - 1, "failed on %s", xlog);
+    securec_check_ss(rc, "\0", "\0");
+    set_ps_display(activitymsg, false);
+    return false;
+}
+#endif /* ENABLE_LITE_MODE */
 
 NON_EXEC_STATIC void PgArchiverMain(knl_thread_arg* arg);
 static void pgarch_exit(SIGNAL_ARGS);
@@ -893,33 +1017,128 @@ static bool pgarch_archiveXlog(char* xlog)
     if (!CheckArchiveCmdExecuterExists(&pid, false)) {
         ereport(WARNING, (errmsg("Skip as archive command executer process doesn't exist.")));
         SendPostmasterSignal(PMSIGNAL_START_ARCHIVE_CMD_AGENT);
+        g_instance.WalSegmentArchSucceed = false;
+        rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "failed on %s", xlog);
+        securec_check_ss(rc, "\0", "\0");
+        set_ps_display(activitymsg, false);
+        return false;
     }
 
-    rc = write(g_instance.attr.attr_common.archiveCmdExecutePipe[1], xlogarchcmd, strlen(xlogarchcmd));
-    if (rc == -1) {
+    if (g_instance.attr.attr_common.archiveCmdExecutePipe[1] < 0 ||
+        g_instance.attr.attr_common.archiveCmdResultPipe[0] < 0) {
+        ereport(WARNING, (errmsg("archive command pipe not initialized")));
+        g_instance.WalSegmentArchSucceed = false;
+        rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "failed on %s", xlog);
+        securec_check_ss(rc, "\0", "\0");
+        set_ps_display(activitymsg, false);
+        return false;
+    }
+
+    /*
+     * Send the command to the agent, tagged with a request id. The agent
+     * echoes the id back with the exit code, so a result written for an
+     * earlier, abandoned command can never be mistaken for the result of
+     * this one.
+     */
+    ArchiveCmdMsg cmdMsg;
+    rc = memset_s(&cmdMsg, sizeof(cmdMsg), 0, sizeof(cmdMsg));
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(cmdMsg.cmd, MAXPGPATH, xlogarchcmd);
+    securec_check(rc, "\0", "\0");
+    cmdMsg.reqId = next_archive_req_id();
+    if (!write_full(g_instance.attr.attr_common.archiveCmdExecutePipe[1], &cmdMsg, sizeof(cmdMsg))) {
+        ereport(WARNING,
+            (errmsg("failed to write archive command to pipe: %m"),
+                errdetail("The failed archive command was: \"%s\" ", xlogarchcmd)));
+        return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+    }
+
+    /*
+     * Wait for the result of this request. A command abandoned after a
+     * timeout is still finished by the agent, and its result stays in the
+     * pipe; such stale results are recognized by the request id, discarded,
+     * and every command keeps being judged by its own exit code.
+     */
+    ArchiveCmdResultMsg result;
+    rc = memset_s(&result, sizeof(result), 0, sizeof(result));
+    securec_check(rc, "\0", "\0");
+    bool gotResult = false;
+    int64 resultDeadline = now_ms() + ARCHIVE_RESULT_TIMEOUT;
+    while (!gotResult) {
+        struct pollfd result_fd;
+        result_fd.fd = g_instance.attr.attr_common.archiveCmdResultPipe[0];
+        result_fd.events = POLLIN;
+        int poll_ret = poll_deadline(&result_fd, resultDeadline);
+        if (poll_ret < 0) {
+            ereport(WARNING,
+                (errmsg("poll failed while waiting for archive result: %m"),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+            return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+        } else if (poll_ret == 0) {
+            ereport(WARNING,
+                (errmsg("archive command timeout after %d seconds", ARCHIVE_RESULT_TIMEOUT / 1000),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+            return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+        }
+
+        ssize_t read_ret = read_full(result_fd.fd, &result, sizeof(result));
+        if (read_ret == 0) {
+            ereport(WARNING,
+                (errmsg("archive command agent exited while running the command"),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+            return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+        } else if (read_ret != (ssize_t)sizeof(result)) {
+            ereport(WARNING,
+                (errmsg("failed to read archive result from result pipe: %m, read_ret=%zd", read_ret),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+            return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+        }
+
+        if (result.reqId == cmdMsg.reqId) {
+            gotResult = true;
+        } else if (result.reqId > cmdMsg.reqId) {
+            /* cannot happen unless the agent is broken */
+            ereport(WARNING,
+                (errmsg("unexpected archive result request id %lu", (unsigned long)result.reqId),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+            return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+        } else {
+            /*
+             * Stale result of a command the archiver abandoned earlier: it
+             * has already been consumed (and thereby discarded) by the read
+             * above. Do not return here: loop back to the poll at the top
+             * and keep waiting for the result of the request just sent.
+             */
+            ereport(WARNING,
+                (errmsg("discarding stale archive result of request %lu", (unsigned long)result.reqId),
+                    errdetail("The archive command was: \"%s\" ", xlogarchcmd)));
+        }
+    }
+
+    if (result.exitCode != 0) {
+        /*
+         * -1 means the command timed out or its exit status is unknown; that
+         * is a normal archive failure (LOG), not a reason to kill the
+         * archiver with FATAL and make it restart to retry the same file.
+         * Exit codes above 128 keep the shell convention for commands that
+         * died on a signal.
+         */
+        int lev = (result.exitCode > 128) ? FATAL : LOG;
+        if (result.exitCode == -1) {
+            ereport(lev,
+                (errmsg("archive command failed with unknown error or timed out"),
+                    errdetail("The failed archive command was: \"%s\" ", xlogarchcmd)));
+        } else {
+            ereport(lev,
+                (errmsg("archive command failed with exit code %d", result.exitCode),
+                    errdetail("The failed archive command was: \"%s\" ", xlogarchcmd)));
+        }
+        return pgarch_reportArchiveFailure(activitymsg, sizeof(activitymsg), xlog);
+    }
 #else
      rc = gs_popen_security(xlogarchcmd);
      if (rc != 0) {
-#endif
-        /* If execute archive command failed, we report an alarm */
         g_instance.WalSegmentArchSucceed = false;
-
-        /*
-         * If either the shell itself, or a called command, died on a signal,
-         * abort the archiver.	We do this because system() ignores SIGINT and
-         * SIGQUIT while waiting; so a signal is very likely something that
-         * should have interrupted us too.	If we overreact it's no big deal,
-         * the postmaster will just start the archiver again.
-         *
-         * Per the Single Unix Spec, shells report exit status > 128 when a
-         * called command died on a signal.
-         */
-#ifndef ENABLE_LITE_MODE
-        ereport(WARNING,
-            (errmsg("archive command exited with unrecognized status %d", rc),
-                errdetail("The failed archive command was: \"%s\" ", xlogarchcmd)));
-
-#else
         int lev = (WIFSIGNALED(rc) || WEXITSTATUS(rc) > 128) ? FATAL : LOG;
         if (WIFEXITED(rc)) {
             ereport(lev,
@@ -947,14 +1166,12 @@ static bool pgarch_archiveXlog(char* xlog)
                 (errmsg("archive command exited with unrecognized status %d", rc),
                     errdetail("The failed archive command was: \"%s\" ", xlogarchcmd)));
         }
-#endif
         rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "failed on %s", xlog);
         securec_check_ss(rc, "\0", "\0");
-
         set_ps_display(activitymsg, false);
-
         return false;
-    }
+     }
+#endif
     g_instance.WalSegmentArchSucceed = true;
     ereport(DEBUG1, (errmsg("archived transaction log file \"%s\"", xlog)));
 
@@ -1390,6 +1607,14 @@ void CleanArchiveCmdExecuter()
     if (CheckArchiveCmdExecuterExists(&pid, true)) {
         kill(pid, SIGTERM);
     }
+    if (g_instance.attr.attr_common.archiveCmdExecutePipe[1] >= 0) {
+        close(g_instance.attr.attr_common.archiveCmdExecutePipe[1]);
+        g_instance.attr.attr_common.archiveCmdExecutePipe[1] = -1;
+    }
+    if (g_instance.attr.attr_common.archiveCmdResultPipe[0] >= 0) {
+        close(g_instance.attr.attr_common.archiveCmdResultPipe[0]);
+        g_instance.attr.attr_common.archiveCmdResultPipe[0] = -1;
+    }
 }
 
 void SaveArchiveCmdExecuterPid(int pid)
@@ -1414,9 +1639,21 @@ void InitArchiveCmdExecuter()
 {
     g_instance.attr.attr_common.archiveCmdExecutePipe[0] = -1;
     g_instance.attr.attr_common.archiveCmdExecutePipe[1] = -1;
+    g_instance.attr.attr_common.archiveCmdResultPipe[0] = -1;
+    g_instance.attr.attr_common.archiveCmdResultPipe[1] = -1;
     CleanArchiveCmdExecuter();
     if (pipe(g_instance.attr.attr_common.archiveCmdExecutePipe) < 0) {
         ereport(WARNING, (errcode_for_socket_access(), (errmsg("could not create pipe for archive command: %m"))));
+        return;
+    }
+
+    if (pipe(g_instance.attr.attr_common.archiveCmdResultPipe) < 0) {
+        ereport(WARNING, (errcode_for_socket_access(),
+            (errmsg("could not create result pipe for archive command: %m"))));
+        close(g_instance.attr.attr_common.archiveCmdExecutePipe[0]);
+        close(g_instance.attr.attr_common.archiveCmdExecutePipe[1]);
+        g_instance.attr.attr_common.archiveCmdExecutePipe[0] = -1;
+        g_instance.attr.attr_common.archiveCmdExecutePipe[1] = -1;
         return;
     }
 
@@ -1431,21 +1668,35 @@ void InitArchiveCmdExecuter()
             _exit(0);
         }
         close(g_instance.attr.attr_common.archiveCmdExecutePipe[1]);
-        char cmd[MAXPGPATH];
-        ssize_t n;
-        while ((n = read(g_instance.attr.attr_common.archiveCmdExecutePipe[0], cmd, sizeof(cmd)-1)) > 0) {
-            cmd[n] = '\0';
-            if (cmd[n-1] == '\n') {
-                cmd[n-1] = '\0';
+        close(g_instance.attr.attr_common.archiveCmdResultPipe[0]);
+        for (;;) {
+            ArchiveCmdMsg cmdMsg;
+            ssize_t n = read_full(g_instance.attr.attr_common.archiveCmdExecutePipe[0], &cmdMsg, sizeof(cmdMsg));
+            if (n == 0) {
+                /* the archiver closed the pipe: normal shutdown */
+                break;
+            }
+            if (n < 0) {
+                ereport(WARNING, (errmsg("failed to read archive command from pipe: %m")));
+                break;
+            }
+
+            char* cmd = cmdMsg.cmd;
+            size_t cmd_len = strlen(cmd);
+            if (cmd_len > 0 && cmd[cmd_len - 1] == '\n') {
+                cmd[cmd_len - 1] = '\0';
             }
 
             int output_pipe[2];
+            int exit_code = -1;
             if (pipe(output_pipe) < 0) {
                 ereport(WARNING, (errmsg("failed to create output pipe for command: %s, error: %m", cmd)));
             } else {
                 int pid = fork();
                 if (pid == 0) {
                     close(output_pipe[0]);
+                    close(g_instance.attr.attr_common.archiveCmdExecutePipe[0]);
+                    close(g_instance.attr.attr_common.archiveCmdResultPipe[1]);
                     dup2(output_pipe[1], fileno(stdout));
                     dup2(output_pipe[1], fileno(stderr));
                     close(output_pipe[1]);
@@ -1455,48 +1706,151 @@ void InitArchiveCmdExecuter()
                     close(output_pipe[1]);
                     char output_buf[MAXPGPATH] = {0};
                     ssize_t total = 0;
-                    ssize_t bytes_read;
-                    while ((bytes_read = read(output_pipe[0], output_buf + total,
-                            sizeof(output_buf) - 1 - total)) > 0) {
-                        total += bytes_read;
-                        if (total >= (ssize_t)sizeof(output_buf) - 1)
+                    ssize_t bytes_read = 0;
+                    int status = 0;
+                    bool status_valid = false; /* status was filled by a successful waitpid */
+                    bool timed_out = false;
+                    bool wait_failed = false;
+
+                    /*
+                     * Total budget for one command, well below the archiver's
+                     * ARCHIVE_RESULT_TIMEOUT, so the result normally reaches
+                     * the archiver before the archiver abandons the request.
+                     */
+                    const int archive_cmd_timeout_ms = 60 * 1000;
+                    int64 deadline = now_ms() + archive_cmd_timeout_ms;
+
+                    /* read command output until EOF, buffer full, or deadline */
+                    while (total < (ssize_t)sizeof(output_buf) - 1) {
+                        struct pollfd output_fd;
+                        output_fd.fd = output_pipe[0];
+                        output_fd.events = POLLIN | POLLHUP;
+                        int poll_ret = poll_deadline(&output_fd, deadline);
+                        if (poll_ret < 0) {
+                            ereport(WARNING, (errmsg("poll failed for command output: %m")));
                             break;
+                        }
+                        if (poll_ret == 0) {
+                            /* out of time; the wait loop below handles it */
+                            break;
+                        }
+                        if ((output_fd.revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+                            continue;
+                        }
+                        bytes_read = read(output_pipe[0], output_buf + total,
+                            sizeof(output_buf) - 1 - total);
+                        if (bytes_read < 0) {
+                            if (errno == EINTR) {
+                                continue;
+                            }
+                            ereport(WARNING, (errmsg("failed to read command output: %m")));
+                            break;
+                        }
+                        if (bytes_read == 0) {
+                            /* EOF: all writers closed the output */
+                            break;
+                        }
+                        total += bytes_read;
                     }
                     output_buf[total] = '\0';
-                    int status;
-                    waitpid(pid, &status, 0);
-                    close(output_pipe[0]);
-                    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                        ereport(WARNING,
-                            (errmsg("archive command output: %s", total > 0 ? output_buf : "no output from command")));
+
+                    /* wait for the command to exit, bounded by the same deadline */
+                    for (;;) {
+                        pid_t wait_ret = waitpid_retry(pid, &status, WNOHANG);
+                        if (wait_ret < 0) {
+                            wait_failed = true;
+                            break;
+                        }
+                        if (wait_ret > 0) {
+                            status_valid = true;
+                            break;
+                        }
+                        if (now_ms() >= deadline) {
+                            timed_out = true;
+                            break;
+                        }
+                        /*
+                         * Sleep briefly and recheck. A plain sleep is used on
+                         * purpose: polling for POLLHUP here could spin at full
+                         * speed, because POLLHUP stays reported while the
+                         * command keeps its output closed but keeps running.
+                         */
+                        pg_usleep(200 * 1000);
                     }
 
-                    int lev = (WIFSIGNALED(status) || WEXITSTATUS(status) > 128) ? FATAL : LOG;
-                    if (WIFEXITED(status)) {
-                        ereport(lev,
-                            (errmsg("archive command failed with exit code %d", WEXITSTATUS(status)),
-                                errdetail("The failed archive command was: \"%s\" ", cmd)));
+                    if (wait_failed) {
+                        ereport(WARNING, (errmsg("waitpid failed for command: %s: %m", cmd)));
+                        exit_code = -1;
+                    } else if (timed_out) {
+                        ereport(WARNING,
+                            (errmsg("archive command timeout after %d seconds for: %s",
+                                archive_cmd_timeout_ms / 1000, cmd)));
+                        (void)kill(pid, SIGKILL);
+                        /* reap the command; the status only reflects our own kill */
+                        (void)waitpid_retry(pid, &status, 0);
+                        exit_code = -1;
+                    } else if (WIFEXITED(status)) {
+                        exit_code = WEXITSTATUS(status);
                     } else if (WIFSIGNALED(status)) {
-                        ereport(lev,
-                            (errmsg("archive command was terminated by signal %d", WTERMSIG(status)),
-                                errdetail("The failed archive command was: \"%s\" ", cmd)));
+                        /* report signal deaths the way a shell does, so the
+                         * archiver reacts as it did to system() results */
+                        exit_code = 128 + WTERMSIG(status);
                     } else {
-                        ereport(lev,
-                            (errmsg("archive command exited with unrecognized status %d", status),
-                                errdetail("The failed archive command was: \"%s\" ", cmd)));
+                        exit_code = -1;
+                    }
+
+                    close(output_pipe[0]);
+                    if (exit_code != 0) {
+                        ereport(WARNING,
+                            (errmsg("archive command output: %s",
+                                total > 0 ? output_buf : "no output from command")));
+                        if (status_valid && WIFEXITED(status)) {
+                            int lev = WEXITSTATUS(status) > 128 ? FATAL : LOG;
+                            ereport(lev,
+                                (errmsg("archive command failed with exit code %d", WEXITSTATUS(status)),
+                                    errdetail("The failed archive command was: \"%s\" ", cmd)));
+                        } else if (status_valid && WIFSIGNALED(status)) {
+                            ereport(FATAL,
+                                (errmsg("archive command was terminated by signal %d", WTERMSIG(status)),
+                                    errdetail("The failed archive command was: \"%s\" ", cmd)));
+                        } else if (status_valid) {
+                            ereport(LOG,
+                                (errmsg("archive command exited with unrecognized status %d", status),
+                                    errdetail("The failed archive command was: \"%s\" ", cmd)));
+                        }
+                        /*
+                         * Otherwise status was never filled by a successful
+                         * waitpid: the waitpid-failure and timeout paths have
+                         * already logged their own specific message, and
+                         * interpreting the initial status 0 would wrongly
+                         * report "failed with exit code 0".
+                         */
                     }
                 } else {
                     close(output_pipe[0]);
                     close(output_pipe[1]);
+                    exit_code = -1;
                 }
+            }
+
+            ArchiveCmdResultMsg resultMsg;
+            errno_t rc = EOK;
+            rc = memset_s(&resultMsg, sizeof(resultMsg), 0, sizeof(resultMsg));
+            securec_check(rc, "\0", "\0");
+            resultMsg.reqId = cmdMsg.reqId;
+            resultMsg.exitCode = exit_code;
+            if (!write_full(g_instance.attr.attr_common.archiveCmdResultPipe[1], &resultMsg, sizeof(resultMsg))) {
+                ereport(WARNING, (errmsg("failed to write exit code to result pipe: %m")));
             }
         }
         close(g_instance.attr.attr_common.archiveCmdExecutePipe[0]);
+        close(g_instance.attr.attr_common.archiveCmdResultPipe[1]);
         _exit(0);
     }
 
     SaveArchiveCmdExecuterPid(cmdAgentPid);
     close(g_instance.attr.attr_common.archiveCmdExecutePipe[0]);
+    close(g_instance.attr.attr_common.archiveCmdResultPipe[1]);
     return;
 }
 #endif

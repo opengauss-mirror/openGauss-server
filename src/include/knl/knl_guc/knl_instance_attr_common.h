@@ -112,6 +112,7 @@ typedef struct knl_instance_attr_common {
     bool xlog_write_flush_split;
 #ifndef ENABLE_LITE_MODE
     int archiveCmdExecutePipe[2];
+    int archiveCmdResultPipe[2];
 #endif
 } knl_instance_attr_common;
 
