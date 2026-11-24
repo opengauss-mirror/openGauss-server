@@ -84,6 +84,7 @@ ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxS
       m_context(NULL)
 {
     pthread_mutex_init(&m_mutex, NULL);
+    pthread_mutex_init(&m_streamMutex, NULL);
     CPU_ZERO(&m_nodeCpuSet);
     CPU_ZERO(&m_CpuNumaSet);
 
@@ -101,6 +102,7 @@ ThreadPoolGroup::~ThreadPoolGroup()
 
     m_freeStreamList = NULL;
     m_streams = NULL;
+    pthread_mutex_destroy(&m_streamMutex);
 }
 
 void ThreadPoolGroup::Init(bool enableNumaDistribute)
@@ -362,21 +364,23 @@ void ThreadPoolGroup::ShutDownPendingWorkers()
 
 void ThreadPoolGroup::ShutDownThreads()
 {
-    AutoMutexLock alock(&m_mutex);
-    alock.lock();
+    AutoMutexLock workerLock(&m_mutex);
+    workerLock.lock();
     for (int i = 0; i < m_maxWorkerNum; i++) {
         if (m_workers[i].stat.slotStatus != THREAD_SLOT_UNUSE) {
             m_workers[i].worker->WakeUpToUpdate(THREAD_EXIT);
         }
     }
     m_pendingWorkerNum = 0;
+    workerLock.unLock();
 
+    AutoMutexLock streamLock(&m_streamMutex);
+    streamLock.lock();
     for (int i = 0; i < m_maxStreamNum; i++) {
         if (m_streams[i].stat.slotStatus != THREAD_SLOT_UNUSE) {
             m_streams[i].stream->WakeUpToUpdate(THREAD_EXIT);
         }
     }
-    alock.unLock();
 }
 
 bool ThreadPoolGroup::IsGroupTooBusy()
@@ -460,7 +464,7 @@ ThreadId ThreadPoolGroup::GetStreamFromPool(StreamProducer* producer)
 {
     ThreadId tid = InvalidTid;
     ThreadPoolStream* stream = NULL;
-    AutoMutexLock alock(&m_mutex);
+    AutoMutexLock alock(&m_streamMutex);
     alock.lock();
 
     if (m_freeStreamList->IsEmpty()) {
@@ -534,18 +538,18 @@ void ThreadPoolGroup::ReturnStreamToPool(Dlelem* elem)
 
 void ThreadPoolGroup::RemoveStreamFromPool(Dlelem* elem, int idx)
 {
-    pthread_mutex_lock(&m_mutex);
+    pthread_mutex_lock(&m_streamMutex);
     if (elem && m_freeStreamList->RemoveConfirm(elem)) {
         (void)pg_atomic_fetch_sub_u32((volatile uint32*)&m_idleStreamNum, 1);
     }
     m_streams[idx].stat.slotStatus = THREAD_SLOT_UNUSE;
     m_streamNum--;
-    pthread_mutex_unlock(&m_mutex);
+    pthread_mutex_unlock(&m_streamMutex);
 }
 
 void ThreadPoolGroup::ReduceStreams()
 {
-    pthread_mutex_lock(&m_mutex);
+    pthread_mutex_lock(&m_streamMutex);
     int max_reduce_num = m_streamNum - m_defaultWorkerNum;
     if (max_reduce_num > 0) {
         elog(LOG, "Reduce %d stream thread", max_reduce_num);
@@ -559,5 +563,5 @@ void ThreadPoolGroup::ReduceStreams()
             stream->WakeUpToUpdate(THREAD_EXIT);
         }
     }
-    pthread_mutex_unlock(&m_mutex);
+    pthread_mutex_unlock(&m_streamMutex);
 }
