@@ -10733,12 +10733,17 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
              * Evaluate the subscripts, switch into left-to-right order.
              * Like ExecEvalArrayRef(), complain if any subscript is null.
              */
-            bool isNestedArray = ((PLpgSQL_var*)target)->nest_table != NULL;
+            PLpgSQL_var* targetVar = NULL;
+            if (target->dtype == PLPGSQL_DTYPE_VAR ||
+                target->dtype == PLPGSQL_DTYPE_VARRAY ||
+                target->dtype == PLPGSQL_DTYPE_TABLE) {
+                targetVar = (PLpgSQL_var*)target;
+            }
 
-            if (isNestedArray) {
-                Oid subscriptType = ((PLpgSQL_var*)target)->datatype->tableOfIndexType;
-                HTAB* elemTableOfIndex = ((PLpgSQL_var*)target)->tableOfIndex;
-                PLpgSQL_var* innerVar = evalSubsciptsNested(estate, (PLpgSQL_var*)target, subscripts, nsubscripts,
+            if (targetVar != NULL && targetVar->nest_table != NULL) {
+                Oid subscriptType = targetVar->datatype->tableOfIndexType;
+                HTAB* elemTableOfIndex = targetVar->tableOfIndex;
+                PLpgSQL_var* innerVar = evalSubsciptsNested(estate, targetVar, subscripts, nsubscripts,
                                                    0, subscriptvals, subscriptType, elemTableOfIndex);
                 target = (PLpgSQL_datum*)innerVar;
                 /* should assign inner var as an array, copy value's index */
