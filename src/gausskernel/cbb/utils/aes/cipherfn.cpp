@@ -40,6 +40,7 @@
 #endif /* ENABLE_GSS */
 
 #include "tde_key_management/tde_key_manager.h"
+#include "tde_key_management/sdf_tde_provider.h"
 
 #include "openssl/rand.h"
 #include "openssl/evp.h"
@@ -1224,20 +1225,6 @@ void DecryptOptions(List *options, const char** sensitiveOptionsArray, int array
     }
 }
 
-char int2hex(uint8 n)
-{
-    char ret;
-    if (n >= 0x0 && n <= 0x9) {
-        ret = n + '0';
-    } else if (n >= 0xa && n <= 0xf) {
-        ret = (n - 0xa) + 'a';
-    } else {
-        ret = '0';
-    }
-
-    return ret;
-}
-
 uint8 hex2int(char ch)
 {
     uint8 ret;
@@ -1281,6 +1268,8 @@ int GetTdeCipherLenByAlog(uint8 algo)
  */
 void transformTdeInfoFromPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
 {
+    static const char hexDigits[] = "0123456789abcdef";
+    const unsigned int hexShift = 4;
     int i, j;
     int cipher_len;
     errno_t ret;
@@ -1288,8 +1277,8 @@ void transformTdeInfoFromPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
 
     cipher_len = GetTdeCipherLenByAlog(tde_page_info->algo);
     for (i = 0, j = 0; i < cipher_len && j < DEK_CIPHER_LEN - 1; i++, j += 2) {
-        tde_info->dek_cipher[j] = int2hex(tde_page_info->dek_cipher[i] >> 4);
-        tde_info->dek_cipher[j + 1] = int2hex(tde_page_info->dek_cipher[i] & 0x0f);
+        tde_info->dek_cipher[j] = hexDigits[tde_page_info->dek_cipher[i] >> hexShift];
+        tde_info->dek_cipher[j + 1] = hexDigits[tde_page_info->dek_cipher[i] & 0x0f];
     }
 
     if (j < DEK_CIPHER_LEN - 1) {
@@ -1303,8 +1292,8 @@ void transformTdeInfoFromPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
             tde_info->cmk_id[j] = '-';
             continue;
         }
-        tde_info->cmk_id[j] = int2hex(tde_page_info->cmk_id[i] >> 4);
-        tde_info->cmk_id[j + 1] = int2hex(tde_page_info->cmk_id[i] & 0x0f);
+        tde_info->cmk_id[j] = hexDigits[tde_page_info->cmk_id[i] >> hexShift];
+        tde_info->cmk_id[j + 1] = hexDigits[tde_page_info->cmk_id[i] & 0x0f];
         i++;
         j++;
     }
@@ -1357,6 +1346,35 @@ void transformTdeInfoToPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
     securec_check(ret, "\0", "\0");
 }
 
+/* Load a caller-owned binary key without retaining another plaintext cache. */
+static void load_tde_key(const TdeInfo* info, unsigned char* key)
+{
+    const unsigned int hexCharsPerByte = 2;
+    const unsigned int hexShift = 4;
+    char plain_key_buffer[KEY_128BIT_LEN * hexCharsPerByte + 1] = {0};
+    const char* plainKey = plain_key_buffer;
+#ifndef ENABLE_UT
+    TDEKeyManager::get_key(info->cmk_id, info->dek_cipher, plain_key_buffer, sizeof(plain_key_buffer));
+#else
+    (void)info;
+    plainKey = fake_tde_get_key(NULL);
+#endif
+    if (plainKey == NULL || strlen(plainKey) != KEY_128BIT_LEN * hexCharsPerByte) {
+        errno_t rc = memset_s(plain_key_buffer, sizeof(plain_key_buffer), 0, sizeof(plain_key_buffer));
+        securec_check(rc, "\0", "\0");
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("invalid plaintext DEK length")));
+    }
+    for (int i = 0; i < KEY_128BIT_LEN; i++) {
+        key[i] = (hex2int(plainKey[i * hexCharsPerByte]) << hexShift) |
+            hex2int(plainKey[i * hexCharsPerByte + 1]);
+    }
+    errno_t rc = memset_s(plain_key_buffer, sizeof(plain_key_buffer), 0, sizeof(plain_key_buffer));
+    if (rc != EOK) {
+        securec_check(rc, "\0", "\0");
+    }
+}
+
 /*
  * Description:
  * encrypt block or CU exclude header and filling,user data must encrypt,if block or cu encrypt failed,
@@ -1369,32 +1387,30 @@ void transformTdeInfoToPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
 void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
     char* cipherText, size_t* cipherLength, TdeInfo* tdeInfo)
 {
+#ifndef ENABLE_UT
+    if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF) {
+        if ((TdeAlgo)tdeInfo->algo != TDE_ALGO_SM4_CTR) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("SDF TDE supports only SM4-CTR page encryption")));
+        }
+        char errorMsg[512] = {0};
+        if (!SdfTdeCryptPage(tdeInfo->cmk_id, tdeInfo->dek_cipher, tdeInfo->iv,
+            plainText, cipherText, plainLength, true, errorMsg, sizeof(errorMsg))) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("SDF page encryption failed"),
+                errdetail("%s", errorMsg[0] == '\0' ? "SDF provider returned no result" : errorMsg)));
+        }
+        *cipherLength = plainLength;
+        return;
+    }
+#endif
     int retryCnt = 3; /* retry at most three times when encrypt failed */
     unsigned char* iv = tdeInfo->iv;
     TdeAlgo algo = (TdeAlgo)tdeInfo->algo;
     unsigned char key[KEY_128BIT_LEN] = {0};
-    const char* plain_key = NULL;
-    unsigned int i, j;
     errno_t ret = 0;
 
-#ifndef ENABLE_UT
-    /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
-    TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
-    tde_key_manager->init();
-    plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
-#else
-    /* ugly hook for TDEKeyManager->get_key() function, fake_tde_get_key should be mocked in ut */
-    plain_key = fake_tde_get_key(plain_key);
-#endif
-    Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
-
-    /* transform tde plaintext from hex string to int array */
-    for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
-        key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
-    }
-#ifndef ENABLE_UT
-    DELETE_EX2(tde_key_manager);
-#endif
+    load_tde_key(tdeInfo, key);
 
     do {
         if (encrypt_partial_mode(plainText, plainLength, cipherText, cipherLength, key, iv, algo)) {
@@ -1426,32 +1442,30 @@ void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
 void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength,
     char* plainText, size_t* plainLength, TdeInfo* tdeInfo)
 {
+#ifndef ENABLE_UT
+    if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF) {
+        if ((TdeAlgo)tdeInfo->algo != TDE_ALGO_SM4_CTR) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("SDF TDE supports only SM4-CTR page encryption")));
+        }
+        char errorMsg[512] = {0};
+        if (!SdfTdeCryptPage(tdeInfo->cmk_id, tdeInfo->dek_cipher, tdeInfo->iv,
+            cipherText, plainText, cipherLength, false, errorMsg, sizeof(errorMsg))) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("SDF page decryption failed"),
+                errdetail("%s", errorMsg[0] == '\0' ? "SDF provider returned no result" : errorMsg)));
+        }
+        *plainLength = cipherLength;
+        return;
+    }
+#endif
     int retryCnt = 3; /* retry at most three times when decrypt failed */
     unsigned char* iv = tdeInfo->iv;
     TdeAlgo algo = (TdeAlgo)tdeInfo->algo;
     unsigned char key[KEY_128BIT_LEN] = {0};
-    const char* plain_key = NULL;
-    unsigned int i, j;
     errno_t ret = 0;
 
-#ifndef ENABLE_UT
-    /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
-    TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
-    tde_key_manager->init();
-    plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
-#else
-    /* ugly hook for TDEKeyManager->get_key() function, fake_tde_get_key should be mocked in ut */
-    plain_key = fake_tde_get_key(plain_key);
-#endif
-    Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
-
-    /* transform tde plaintext from hex string to int array */
-    for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
-        key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
-    }
-#ifndef ENABLE_UT
-    DELETE_EX2(tde_key_manager);
-#endif
+    load_tde_key(tdeInfo, key);
 
     do {
         if (decrypt_partial_mode(cipherText, cipherLength, plainText, plainLength, key, iv, algo)) {

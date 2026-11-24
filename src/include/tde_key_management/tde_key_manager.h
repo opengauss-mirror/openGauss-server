@@ -31,12 +31,15 @@ class TDEKeyManager : public BaseObject {
 public:
     TDEKeyManager();
     ~TDEKeyManager();
+    /* Exit callback argument is the address of a volatile manager pointer. */
+    static void cleanup(int code, Datum arg);
 
     void init();
     const TDEData* create_dek();
     const TDEData* get_dek(const char* cmk_id, const char* dek_cipher);
     bool save_key(const TDEData* tde_data);
-    const char* get_key(const char* cmk_id, const char* dek_cipher);
+    /* Fill the caller's buffer, or report ERROR. */
+    static void get_key(const char* cmk_id, const char* dek_cipher, char* dek_plaintext, Size output_size);
 
 private:
     char* get_cmk_id();

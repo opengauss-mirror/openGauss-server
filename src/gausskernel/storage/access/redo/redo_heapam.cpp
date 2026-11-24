@@ -360,9 +360,7 @@ void HeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool i
          * And set TDE flag which on the PAGE to the enabled state.
          */
         if (tde) {
-            phdr->pd_upper -= sizeof(TdePageInfo);
-            phdr->pd_special -= sizeof(TdePageInfo);
-            PageSetTDE(page);
+            PageInitTdeInfoFromCache(page, buffer->blockinfo.rnode);
         }
     }
     xlrec = (xl_heap_insert *)rec_data;
@@ -442,9 +440,7 @@ void HeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, const void *recored
          * And set TDE flag which on the PAGE to the enabled state.
          */
         if (tde) {
-            phdr->pd_upper -= sizeof(TdePageInfo);
-            phdr->pd_special -= sizeof(TdePageInfo);
-            PageSetTDE(page);
+            PageInitTdeInfoFromCache(page, buffer->blockinfo.rnode);
         }
     }
     xl_heap_multi_insert *xlrec = (xl_heap_multi_insert *)rec_data;
@@ -634,9 +630,7 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
          * And set TDE flag which on the PAGE to the enabled state.
          */
         if (tde) {
-            phdr->pd_upper -= sizeof(TdePageInfo);
-            phdr->pd_special -= sizeof(TdePageInfo);
-            PageSetTDE(page);
+            PageInitTdeInfoFromCache(page, buffer->blockinfo.rnode);
         }
     }
     xlrec = (xl_heap_update *)rec_data;

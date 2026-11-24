@@ -230,9 +230,11 @@ static XLogRecParseState *segpage_parse_new_page(XLogReaderState *record, uint32
 
 void segpage_redo_new_page_for_standby_read(XLogBlockSegNewPage *block_data_rec, RedoBufferInfo *buf_info)
 {
-    Page src_page = block_data_rec->mainData + sizeof(BufferTag);
+    Page src_page = block_data_rec->mainData + sizeof(XLogCopyExtent);
     errno_t rc = memcpy_s(buf_info->pageinfo.page, BLCKSZ, src_page, BLCKSZ);
     securec_check(rc, "\0", "\0");
+    /* Copy records may contain disk ciphertext; reconstructed buffers must be plaintext. */
+    PageDataDecryptIfNeed(buf_info->pageinfo.page);
     PageSetLSN(buf_info->pageinfo.page, buf_info->lsn);
     MakeRedoBufferDirty(buf_info);
 }
@@ -461,7 +463,7 @@ void SegPageRedoNewPage(XLogBlockHead *blockhead, XLogBlockSegNewPage *newPageIn
 {
     Assert(newPageInfo->dataLen != 0);
     seg_redo_new_page_copy_and_flush((BufferTag*)newPageInfo->mainData,
-                                     newPageInfo->mainData + sizeof(BufferTag),
+                                     newPageInfo->mainData + sizeof(XLogCopyExtent),
                                      blockhead->start_ptr,
                                      blockhead->end_ptr);
 }

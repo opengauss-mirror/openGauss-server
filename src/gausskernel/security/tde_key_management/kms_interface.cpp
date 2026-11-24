@@ -67,7 +67,10 @@ char* KMSInterface::get_kms_dek(const char* cmk_id, const char* dek_cipher)
     tde_list_free(http_msg_list);
     if (dek_plain == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
-            errmsg("get KMS DEK plaintext is NULL")));
+            errmsg("get KMS DEK plaintext is NULL"),
+            errhint("Verify that tde_key_provider matches the provider used to create this data; "
+                "changing the setting does not migrate encrypted keys. "
+                "Check the KMS connection, permissions and original CMK.")));
         return NULL;
     }
     return dek_plain;
@@ -272,7 +275,9 @@ char* KMSInterface::parser_http_string(AdvStrList* http_msg_list, ResetApiType a
             ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
                 errmsg("KMS dek json key is NULL"), errdetail("N/A"), 
                 errcause("KMS return value error"), 
-                erraction("check KMS config parameter")));
+                erraction("check KMS config parameter"),
+                errhint("Verify that tde_key_provider matches the provider used to create this data. "
+                    "Changing the setting does not migrate encrypted keys.")));
         }
         json_string = cJSON_GetObjectItem(dek_json, data_key)->valuestring;
         if (json_string == NULL) {
@@ -280,7 +285,9 @@ char* KMSInterface::parser_http_string(AdvStrList* http_msg_list, ResetApiType a
             ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
                 errmsg("get kms dek is NULL"), errdetail("N/A"), 
                 errcause("connect KMS failed"), 
-                erraction("check if your env can connect with KMS server")));
+                erraction("check if your env can connect with KMS server"),
+                errhint("Verify that tde_key_provider matches the provider used to create this data. "
+                    "Changing the setting does not migrate encrypted keys.")));
         }
         result = (char*)palloc0(strlen(json_string) + 1);
         rc = memcpy_s(result, (strlen(json_string) + 1), json_string, (strlen(json_string) + 1));

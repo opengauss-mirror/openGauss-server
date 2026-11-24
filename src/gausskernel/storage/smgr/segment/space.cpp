@@ -629,6 +629,11 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
             copy_logic_blknum =  copy_logic_start_blocknum + i;
         }
 
+        /* Prepare the WAL/write image without encrypting the shared buffer in place.
+         * Disk images already encrypted retain their original key and ciphertext. */
+        char* write_page = BufferIsValid(buf) ?
+            PageDataEncryptForBuffer(pagedata, BufferGetBufferDescriptor(buf), true) :
+            PageDataEncryptForPhysicalWrite(pagedata);
         START_CRIT_SECTION();
         {
             BufferTag tag = {
@@ -644,20 +649,21 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
             /* 1. xlog insert and set lsn */
             XLogBeginInsert();
             XLogRegisterData((char *)&xlog_data, sizeof(xlog_data));
-            XLogRegisterData(pagedata, BLCKSZ);
+            XLogRegisterData(write_page, BLCKSZ);
             XLogRecPtr recptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_NEW_PAGE);
             PageSetLSN(pagedata, recptr);
+            PageSetLSN(write_page, recptr);
 
             /* 2. double write */
             if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
                 bool flush_old_file = false;
-                uint16 pos = seg_dw_single_flush_without_buffer(tag, (Block)pagedata, &flush_old_file);
+                uint16 pos = seg_dw_single_flush_without_buffer(tag, (Block)write_page, &flush_old_file);
                 t_thrd.proc->dw_pos = pos;
                 t_thrd.proc->flush_new_dw = !flush_old_file;
-                PageSetChecksumInplace((Page)pagedata, to_block);
+                PageSetChecksumInplace((Page)write_page, to_block);
                 spc_write_block(rel->seg_space,
                                 EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
-                                                   logic_rnode.opt), forknum, pagedata, to_block);
+                                                   logic_rnode.opt), forknum, write_page, to_block);
 
                 if (flush_old_file) {
                     g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
@@ -666,10 +672,10 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
                 }
                 t_thrd.proc->dw_pos = -1;
             } else {
-                PageSetChecksumInplace((Page)pagedata, to_block);
+                PageSetChecksumInplace((Page)write_page, to_block);
                 spc_write_block(rel->seg_space, EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
                                                                    logic_rnode.opt),
-                                forknum, pagedata, to_block);
+                                forknum, write_page, to_block);
             }
         }
         END_CRIT_SECTION();

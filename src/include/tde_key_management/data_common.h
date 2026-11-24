@@ -33,6 +33,8 @@
 #define DEK_CIPHER_AES256_LEN_PAGE 156 /* The length of dek cipher on page is 156 for AES256 */
 #define DEK_CIPHER_AES128_LEN_PAGE 140 /* The length of dek cipher on page is 140 for AES128 and SE4 */
 #define CMK_ID_LEN 40       /* cmk id string length is 36 from kms */
+#define CMK_ID_TEXT_LEN 36  /* UUID characters, excluding the terminating NUL. */
+#define DEK_PLAIN_HEX_LEN 32 /* 128-bit DEK encoded as hexadecimal, excluding NUL. */
 #define CMK_ID_LEN_PAGE 16
 #define RANDOM_IV_LEN 16
 #define GCM_TAG_LEN 16
@@ -118,7 +120,7 @@ typedef struct {
     char* key_cipher;
     /* dek_plaintext and timestamp are values */
     char* dek_plaintext;
-    TimestampTz timestamp;
+    TimestampTz timestamp;       /* insertion time: fixed one-hour expiry, never refreshed */
 } TDECacheEntry;
 
 /* TDE buffer cache entry key is RelFileNode  value is TdeInfo */

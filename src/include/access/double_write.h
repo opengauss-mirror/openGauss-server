@@ -359,7 +359,7 @@ extern void dw_extend_file(int fd, const void *buf, int buf_size, int64 size,
 
 extern void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag);
 uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr page_lsn,
-    bool encrypt, BufferTag phy_tag);
+    BufferTag phy_tag);
 
 extern uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flush_old_file);
 extern uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file);

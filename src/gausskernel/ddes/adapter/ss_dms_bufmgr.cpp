@@ -321,6 +321,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         Block bufBlock = BufHdrGetBlock(buf_desc);
         Page page = (Page)(bufBlock);
+        buf_desc->extra->encrypt = PageIsTDE(page);
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
 
 #ifdef USE_ASSERT_CHECKING

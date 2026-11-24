@@ -276,6 +276,7 @@
 #include "executor/node/nodeExtensible.h"
 #include "tde_key_management/tde_key_storage.h"
 #include "tde_key_management/ckms_message.h"
+#include "tde_key_management/sdf_tde_provider.h"
 
 #include "gs_ledger/blockchain.h"
 #include "communication/commproxy_interface.h"
@@ -338,6 +339,7 @@ static bool isNeedGetLCName = true;
 #define PM_BUSY_ALARM_US 1000000L
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
+#define TDE_CACHE_POLL_INTERVAL_US (SECS_PER_MINUTE * USECS_PER_SEC)
 #define CHECK_TIMES 10
 #define InvalidPid ((ThreadId)(-1))
 
@@ -442,6 +444,7 @@ static void BackendInitialize(Port* port);
 static int BackendRun(Port* port);
 static int ServerLoop(void);
 static int BackendStartup(Port* port, bool isConnectHaPort);
+static volatile sig_atomic_t g_sdfReloadRequested = false;
 static void processCancelRequest(Port* port, void* pkt);
 static void processStopRequest(Port* port, void* pkt);
 #ifndef HAVE_POLL
@@ -2931,9 +2934,9 @@ int PostmasterMain(int argc, char* argv[])
     on_proc_exit(CloseServerPorts, 0);
 
     /* init gstrace context */
-    int errcode = gstrace_init(g_instance.attr.attr_network.PostPortNumber);
-    if (errcode != 0) {
-        ereport(LOG, (errmsg("gstrace initializes with failure. errno = %d.", errcode)));
+    int gstraceResult = gstrace_init(g_instance.attr.attr_network.PostPortNumber);
+    if (gstraceResult != 0) {
+        ereport(LOG, (errmsg("gstrace initializes with failure. errno = %d.", gstraceResult)));
     }
 
     InitGlobalBcm();
@@ -3167,13 +3170,33 @@ int PostmasterMain(int argc, char* argv[])
 #endif
     }
     if (g_instance.attr.attr_security.enable_tde) {
-        /* init cloud KMS message instance */
-        TDE::CKMSMessage::get_instance().init();
-        TDE::CKMSMessage::get_instance().load_user_info();
-        /* init TDE storage hash table */
+        if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_KMS) {
+            /* init cloud KMS message instance */
+            TDE::CKMSMessage::get_instance().init();
+            TDE::CKMSMessage::get_instance().load_user_info();
+        }
+        /* KMS uses the shared plaintext-DEK cache; both providers use the relation metadata cache. */
         if (IS_PGXC_DATANODE) {
-            TDE::TDEKeyStorage::get_instance().init();
+            if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_KMS) {
+                TDE::TDEKeyStorage::get_instance().init();
+            }
             TDE::TDEBufferCache::get_instance().init();
+        }
+        if (g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF) {
+            if (!ENABLE_DMS || !ENABLE_DSS) {
+                ereport(FATAL, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("SDF TDE requires resource pooling with DMS and DSS enabled"),
+                    errdetail("ss_enable_dms and ss_enable_dss must both be enabled."),
+                    errhint("Use tde_key_provider = kms for deployments without resource pooling.")));
+            }
+            char error[512] = {0};
+            if (!SdfTdeInitialize(error, sizeof(error))) {
+                ereport(FATAL, (errmsg("could not initialize SDF TDE provider"), errdetail("%s", error),
+                    errhint("Check tde_config/sdf_info.json under the data directory. Required fields: "
+                        "kek_index (1-1000), library_path, password_file. "
+                        "Example: {\"kek_index\":106,\"library_path\":\"/usr/lib64/libsdf.so\","
+                        "\"password_file\":\"/data/ss_env/tde_sdf.password\"}.")));
+            }
         }
     }
 
@@ -4846,11 +4869,20 @@ static int ServerLoop(void)
             g_instance.pid_cxt.TsCompactionAuxiliaryPID = initialize_util_thread(TS_COMPACTION_AUXILIAY);
         }
 #endif   /* ENABLE_MULTIPLE_NODES */
+        if (g_sdfReloadRequested) {
+            g_sdfReloadRequested = false;
+            char error[512] = {0};
+            if (!SdfTdeReload(error, sizeof(error))) {
+                ereport(WARNING, (errmsg("could not reload SDF TDE password file; keeping previous credentials"),
+                    errdetail("%s", error)));
+            }
+        }
         /* TDE cache timer checking */
-        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+        if (g_instance.attr.attr_security.enable_tde &&
+            g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_KMS && IS_PGXC_DATANODE) {
             /* TDE cache watchdog */
             current_poll_time = mc_timers_us();
-            if ((current_poll_time - last_poll_time) >= PM_POLL_TIMEOUT_MINUTE) {
+            if ((current_poll_time - last_poll_time) >= TDE_CACHE_POLL_INTERVAL_US) {
                 TDE::TDEKeyStorage::get_instance().cache_watch_dog();
                 last_poll_time = current_poll_time;
             }
@@ -6233,6 +6265,10 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         release_file_lock(&filelock);
         LWLockRelease(ConfigFileLock);
         NotifyGscSigHup();
+        if (g_instance.attr.attr_security.enable_tde &&
+            g_instance.attr.attr_security.tde_key_provider == TDE_KEY_PROVIDER_SDF) {
+            g_sdfReloadRequested = true;
+        }
 
         (void)SignalChildren(SIGHUP);
         if (ENABLE_THREAD_POOL) {

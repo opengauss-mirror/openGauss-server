@@ -3625,10 +3625,8 @@ bool check_cn_dn_parameter_is_valid()
                                    "not work on finance mode.\n",
                     config_param[para_num]);
             }
-            /* enable_tde does not working on finance mode */
-            char* enableTde = "enable_tde";
-            len = (strlen(tmp) > strlen(enableTde)) ? strlen(tmp) : strlen(enableTde);
-            if (strncmp(tmp, enableTde, len) == 0) {
+            /* TDE providers do not work on finance mode */
+            if (strcmp(tmp, "enable_tde") == 0 || strcmp(tmp, "tde_key_provider") == 0) {
                 all_valid = false;
                 (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. "
                                 "not work on finance mode.\n",

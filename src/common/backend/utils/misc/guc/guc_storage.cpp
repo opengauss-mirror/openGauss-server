@@ -7798,12 +7798,14 @@ static void assign_enable_ub_ha(bool newval, void *extra)
         return;
     }
 
+    /* Worker GUC initialization must not disable global UB access. */
+    if (t_thrd.proc_cxt.MyProcPid != PostmasterPid) {
+        return;
+    }
+
     g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
 
     if (!ENABLE_DMS || !g_instance.dms_cxt.dmsInited) {
-        return;
-    }
-    if (t_thrd.proc_cxt.MyProcPid != PostmasterPid) {
         return;
     }
     if (pg_strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "SHM") != 0) {

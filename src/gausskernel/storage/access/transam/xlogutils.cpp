@@ -817,7 +817,7 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
         mode = get_cleanup_lock ? RBM_ZERO_AND_CLEANUP_LOCK : RBM_ZERO_AND_LOCK;
     }
 
-    if (record->isTde) {
+    if (record->blocks[block_id].tdeinfo != NULL) {
         tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
     }
 

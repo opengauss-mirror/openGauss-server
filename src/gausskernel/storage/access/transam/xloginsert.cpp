@@ -67,8 +67,9 @@ typedef struct registered_buffer {
 #define SizeOfXlogOrigin (sizeof(RepOriginId) + sizeof(char))
 
 #define HEADER_SCRATCH_SIZE \
-    (SizeOfXLogRecord + MaxSizeOfXLogRecordBlockHeader * (XLR_MAX_BLOCK_ID + 1) + \
-    SizeOfXLogRecordDataHeaderLong + SizeOfXlogOrigin)
+    (SizeOfXLogRecord + (MaxSizeOfXLogRecordBlockHeader + sizeof(TdeInfo) + sizeof(uint16) + \
+    sizeof(XLogRecPtr) + sizeof(uint8) + sizeof(BlockNumber)) * (XLR_MAX_BLOCK_ID + 1) + \
+    SizeOfXLogRecordDataHeaderLong + SizeOfXlogOrigin + sizeof(uint8) + sizeof(TransactionId))
 
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_info, XLogRecPtr *fpw_lsn,
                                        int bucket_id = -1, bool istoast = false, TransactionId xid = InvalidTransactionId);
@@ -900,7 +901,10 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
             rdt_datas_last = regbuf->rdata_tail;
         }
 
-        if (prev_regbuf && RelFileNodeEquals(regbuf->rnode, prev_regbuf->rnode)) {
+        /* SAME_REL also reuses TDE metadata: do not cross heap/VM encryption contexts. */
+        if (prev_regbuf && RelFileNodeEquals(regbuf->rnode, prev_regbuf->rnode) &&
+            regbuf->encrypt == prev_regbuf->encrypt &&
+            (!regbuf->encrypt || regbuf->forkno == prev_regbuf->forkno)) {
             samerel = true;
             bkpb.fork_flags |= BKPBLOCK_SAME_REL;
         } else

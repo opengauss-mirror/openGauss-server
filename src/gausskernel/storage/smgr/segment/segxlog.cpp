@@ -817,7 +817,9 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr rea
     er = memcpy_s(page, BLCKSZ, data, BLCKSZ);
     securec_check(er, "\0", "\0");
     PageSetLSN(page, lsn);
-    PageSetChecksumInplace(page, tag->blockNum);
+    /* New copy records contain ciphertext; also protect plaintext TDE images in old WAL. */
+    char* writePage = PageDataEncryptForPhysicalWrite(page);
+    PageSetChecksumInplace(writePage, tag->blockNum);
 
     if (FORCE_FINISH_ENABLED) {
         update_max_page_flush_lsn(lsn, t_thrd.proc_cxt.MyProcPid, false);
@@ -825,12 +827,12 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr rea
 
     if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
         bool flush_old_file = false;
-        uint16 pos = seg_dw_single_flush_without_buffer(*tag, (Block)page, &flush_old_file);
+        uint16 pos = seg_dw_single_flush_without_buffer(*tag, (Block)writePage, &flush_old_file);
         t_thrd.proc->dw_pos = pos;
         t_thrd.proc->flush_new_dw = !flush_old_file;
         SegSpace *spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false);
         SegmentCheck(spc != NULL);
-        seg_physical_write(spc, tag->rnode, tag->forkNum, tag->blockNum, page, true);
+        seg_physical_write(spc, tag->rnode, tag->forkNum, tag->blockNum, writePage, true);
         if (flush_old_file) {
             g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
         } else {
@@ -840,7 +842,7 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr rea
     } else {
         SegSpace *spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false);
         SegmentCheck(spc != NULL);
-        seg_physical_write(spc, tag->rnode, tag->forkNum, tag->blockNum, page, true);
+        seg_physical_write(spc, tag->rnode, tag->forkNum, tag->blockNum, writePage, true);
     }
 }
 

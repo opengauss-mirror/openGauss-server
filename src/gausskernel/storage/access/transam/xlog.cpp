@@ -12362,7 +12362,21 @@ bool RepairPageForSpecificPage(xl_invalid_page* entry, HTAB* invalidHashTable)
     if (isRepaired) {
         /* repair success */
         if (!pageIsInMemory) {
-            smgrwrite(smgr, key.forknum, key.blocknum, page, true);
+            BlockNumber checksum_block = key.blocknum;
+            if (!PageIsNew(page) && PageIsTDE(page) && !PageIsEncrypt(page) &&
+                IsSegmentLogicalRelNode(key.relfilenode)) {
+                checksum_block = seg_get_physical_location(key.relfilenode, key.forknum, key.blocknum).blocknum;
+            }
+            char* writePage = PageDataEncryptForPhysicalWrite(page);
+            if (writePage != page) {
+                errno_t rc = memcpy_s(page, BLCKSZ, writePage, BLCKSZ);
+                if (rc != EOK) {
+                    securec_check(rc, "\0", "\0");
+                }
+                writePage = page;
+                PageSetChecksumInplace(writePage, checksum_block);
+            }
+            smgrwrite(smgr, key.forknum, key.blocknum, writePage, true);
             pfree(page);
         } else {
             MarkBufferDirty(buf);

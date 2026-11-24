@@ -1914,6 +1914,10 @@ void CopyDataFromOldReader(XLogReaderState *newReaderState, const XLogReaderStat
   		    ((uintptr_t)oldReaderState->blocks[i].data - (uintptr_t)oldReaderState->decoded_record));
             newReaderState->blocks[i].data_len = oldReaderState->blocks[i].data_len;
         }
+        if (oldReaderState->blocks[i].tdeinfo != NULL) {
+            newReaderState->blocks[i].tdeinfo = (TdeInfo *)((uintptr_t)newReaderState->decoded_record +
+                ((uintptr_t)oldReaderState->blocks[i].tdeinfo - (uintptr_t)oldReaderState->decoded_record));
+        }
     }
     if (oldReaderState->main_data_len > 0) {
         newReaderState->main_data =

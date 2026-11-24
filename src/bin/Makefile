@@ -73,6 +73,16 @@ endif
 $(recurse)
 $(recurse_always)
 
+.PHONY: install-tde-sdf uninstall-tde-sdf
+install: install-tde-sdf
+install-tde-sdf:
+	$(MKDIR_P) '$(DESTDIR)$(bindir)'
+	$(INSTALL_SCRIPT) $(srcdir)/scripts/gs_tde_sdf.py '$(DESTDIR)$(bindir)'/gs_tde_sdf
+
+uninstall: uninstall-tde-sdf
+uninstall-tde-sdf:
+	rm -f '$(DESTDIR)$(bindir)'/gs_tde_sdf
+
 # psql and pg_dump need to make subtarget: libpq-ce, if these two targets make parallel, it
 # may cause frontend_parser/gram.o: file not recognized: file truncated. 
 # I'm not sure why this happen, and since we use $(recurse) to make install and make all.

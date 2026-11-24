@@ -2200,12 +2200,13 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     rc = memcpy_s(dest_addr, BLCKSZ, block, BLCKSZ);
     securec_check(rc, "\0", "\0");
 
+    BufferTag logical_tag = buf_desc->tag;
     LWLockRelease(buf_desc->content_lock);
     UnpinBuffer(buf_desc, true);
 
     page_lsn = PageGetLSN(dest_addr);
-    if (buf_desc->extra->encrypt) {
-        dw_encrypt_page(buf_desc->tag, dest_addr);
+    if (PageIsTDE(dest_addr)) {
+        dw_encrypt_page(logical_tag, dest_addr);
     }
 
     dw_set_pg_checksum(dest_addr, phyBlock);
@@ -2498,16 +2499,19 @@ void dw_exit(bool single)
 
 void dw_encrypt_page(BufferTag tag, char* buf)
 {
+    if (PageIsNew(buf) || !PageIsTDE(buf) || PageIsEncrypt(buf)) {
+        return;
+    }
     TdeInfo tde_info = {0};
     TDE::TDEBufferCache::get_instance().search_cache(tag.rnode, &tde_info);
-    if (strlen(tde_info.dek_cipher) == 0) {
-        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-            errmsg("double write copy page get TDE buffer cache entry failed, RelFileNode is %u/%u/%u/%u",
-                   tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
-                   tag.rnode.bucketNode),
-            errdetail("N/A"),
-            errcause("TDE cache miss this key"),
-            erraction("check cache status")));
+    if (tde_info.dek_cipher[0] == '\0') {
+        /* DMS/recovery can supply a page before this DN opens its relation. */
+        char* encrypted = PageDataEncryptForPhysicalWrite(buf);
+        errno_t rc = memcpy_s(buf, BLCKSZ, encrypted, BLCKSZ);
+        if (rc != EOK) {
+            securec_check(rc, "\0", "\0");
+        }
+        return;
     }
     PageDataEncryptIfNeed(buf, &tde_info, false);
     return;

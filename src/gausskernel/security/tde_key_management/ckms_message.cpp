@@ -203,7 +203,7 @@ char* CKMSMessage::read_kms_info_from_file()
 GS_UCHAR* CKMSMessage::get_cipher_rand()
 {
     GS_UCHAR* plain_text = NULL;
-    KeyMode keymode = SERVER_MODE;
+    KeyMode keymode = TDE_MODE;
     char* key_dir = NULL;
     char* data_directory = NULL;
     int path_len = 0;

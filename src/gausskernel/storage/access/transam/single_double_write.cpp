@@ -690,7 +690,7 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     securec_check(rc, "\0", "\0");
 
     XLogWaitFlush(page_lsn);
-    if (buf_desc->extra->encrypt) {
+    if (PageIsTDE(buf)) {
         dw_encrypt_page(buf_desc->tag, buf);
     }
 
@@ -720,7 +720,7 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
 }
 
 uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr page_lsn,
-    bool encrypt, BufferTag phy_tag)
+    BufferTag phy_tag)
 {
     errno_t rc;
     uint16 actual_pos;
@@ -740,7 +740,7 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
     securec_check(rc, "\0", "\0");
 
     XLogWaitFlush(page_lsn);
-    if (encrypt) {
+    if (PageIsTDE(buf)) {
         dw_encrypt_page(tag, buf);
     }
     dw_set_pg_checksum(buf, phy_tag.blockNum);

@@ -91,7 +91,8 @@ typedef enum {
     GDS_MODE,
     USER_MAPPING_MODE,
     SUBSCRIPTION_MODE,
-    OGAI_MODE
+    OGAI_MODE,
+    TDE_MODE
 } KeyMode;
 
 typedef struct {
@@ -114,6 +115,7 @@ typedef enum {
     GSQL_SSL_ENC_TYPE,
 #endif
     GDS_SSL_TYPE,           /* gds ssl connection cipher */
+    TDE_KEY_TYPE,           /* TDE key password */
     CIPHER_TYPE_MAX         /* The max number of types should be at the end */
 } CipherType;
 
