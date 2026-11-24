@@ -38,6 +38,11 @@
 #define CISERR() VISERR(cm->v)
 #define CERR(e) VERR(cm->v, (e))
 
+/* Growth factor for the high colormap array. */
+#define HICOLORMAP_GROWTH 2
+/* One chr can split an existing range in two, adding two new ranges at most. */
+#define CMAP_MAX_NEW_RANGES 2
+
 /*
  * initcm - set up new colormap
  */
@@ -80,7 +85,7 @@ static void initcm(struct vars* v, struct colormap* cm)
     cm->maxarrayrows = 4;        /* arbitrary initial allocation */
     cm->hiarrayrows = 1;         /* but we have only one row/col initially */
     cm->hiarraycols = 1;
-    cm->hicolormap = (color*)MALLOC(cm->maxarrayrows * sizeof(color));
+    cm->hicolormap = MALLOC_ARRAY(color, cm->maxarrayrows);
     if (cm->hicolormap == NULL) {
         CERR(REG_ESPACE);
         return;
@@ -226,15 +231,19 @@ static color newcolor(struct colormap* cm)
         if (n > MAX_COLOR + 1) {
             n = MAX_COLOR + 1;
         }
+        /*
+         * The MAX_COLOR+1 limit ensures these allocation sizes cannot
+         * overflow.
+         */
         if (cm->cd == cm->cdspace) {
-            newCd = (struct colordesc*)MALLOC(n * sizeof(struct colordesc));
+            newCd = MALLOC_ARRAY(struct colordesc, n);
             if (newCd != NULL) {
                 rc = memcpy_s(
                     VS(newCd), n * sizeof(struct colordesc), VS(cm->cdspace), cm->ncds * sizeof(struct colordesc));
                 securec_check(rc, "", "");
             }
         } else
-            newCd = (struct colordesc*)REALLOC(cm->cd, n * sizeof(struct colordesc));
+            newCd = REALLOC_ARRAY(cm->cd, struct colordesc, n);
         if (newCd == NULL) {
             CERR(REG_ESPACE);
             return COLORLESS;
@@ -417,17 +426,17 @@ static int newhicolorrow(struct colormap *cm, int oldrow)
     if (newrow >= cm->maxarrayrows) {
         color *newarray;
 
-        if (cm->maxarrayrows >= INT_MAX / (cm->hiarraycols * 2)) {
+        if (cm->maxarrayrows >= (INT_MAX / HICOLORMAP_GROWTH) / cm->hiarraycols) {
             CERR(REG_ESPACE);
             return 0;
         }
-        newarray = (color *)REALLOC(cm->hicolormap, cm->maxarrayrows * 2 * cm->hiarraycols * sizeof(color));
+        newarray = REALLOC_ARRAY(cm->hicolormap, color, cm->maxarrayrows * HICOLORMAP_GROWTH * cm->hiarraycols);
         if (newarray == NULL) {
             CERR(REG_ESPACE);
             return 0;
         }
         cm->hicolormap = newarray;
-        cm->maxarrayrows *= 2;
+        cm->maxarrayrows *= HICOLORMAP_GROWTH;
     }
     cm->hiarrayrows++;
 
@@ -456,11 +465,11 @@ static void newhicolorcols(struct colormap *cm)
     int r;
     int c;
 
-    if (cm->hiarraycols >= INT_MAX / (cm->maxarrayrows * 2)) {
+    if (cm->hiarraycols >= (INT_MAX / HICOLORMAP_GROWTH) / cm->maxarrayrows) {
         CERR(REG_ESPACE);
         return;
     }
-    newarray = (color *)REALLOC(cm->hicolormap, cm->maxarrayrows * cm->hiarraycols * 2 * sizeof(color));
+    newarray = REALLOC_ARRAY(cm->hicolormap, color, cm->maxarrayrows * cm->hiarraycols * HICOLORMAP_GROWTH);
     if (newarray == NULL) {
         CERR(REG_ESPACE);
         return;
@@ -471,7 +480,7 @@ static void newhicolorcols(struct colormap *cm)
     /* Must work backwards in the array because we realloc'd in place */
     for (r = cm->hiarrayrows - 1; r >= 0; r--) {
         color *oldrowptr = &newarray[r * cm->hiarraycols];
-        color *newrowptr = &newarray[r * cm->hiarraycols * 2];
+        color *newrowptr = &newarray[r * cm->hiarraycols * HICOLORMAP_GROWTH];
         color *newrowptr2 = newrowptr + cm->hiarraycols;
 
         for (c = 0; c < cm->hiarraycols; c++) {
@@ -482,7 +491,7 @@ static void newhicolorcols(struct colormap *cm)
         }
     }
 
-    cm->hiarraycols *= 2;
+    cm->hiarraycols *= HICOLORMAP_GROWTH;
 }
 
 /*
@@ -605,7 +614,7 @@ static void subcoloronechr(struct vars *v, chr ch, struct state *lp, struct stat
      * Potentially, we could need two more colormapranges than we have now, if
      * the given chr is in the middle of some existing range.
      */
-    newranges = (colormaprange *)MALLOC((cm->numcmranges + 2) * sizeof(colormaprange));
+    newranges = MALLOC_ARRAY(colormaprange, cm->numcmranges + CMAP_MAX_NEW_RANGES);
     if (newranges == NULL) {
         CERR(REG_ESPACE);
         return;
