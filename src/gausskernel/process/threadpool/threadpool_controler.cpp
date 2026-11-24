@@ -542,9 +542,8 @@ void ThreadPoolControler::GetSysCpuInfo()
 
     m_cpuInfo.cpuArr = (int**)palloc0(sizeof(int*) * m_cpuInfo.totalNumaNum);
     m_cpuInfo.cpuArrSize = (int*)palloc0(sizeof(int) * m_cpuInfo.totalNumaNum);
-    int cpu_per_numa = m_cpuInfo.totalCpuNum / m_cpuInfo.totalNumaNum;
     for (int i = 0; i < m_cpuInfo.totalNumaNum; i++) {
-        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * cpu_per_numa);
+        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * m_cpuInfo.totalCpuNum);
     }
     m_cpuInfo.activeCpuNum = 0;
     NumaCpuId *sysNumaCpuIdList = (NumaCpuId*)palloc0(sizeof(NumaCpuId) * m_cpuInfo.totalCpuNum);
