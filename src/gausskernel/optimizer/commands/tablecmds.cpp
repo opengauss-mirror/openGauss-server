@@ -4330,7 +4330,7 @@ static bool IsPartitionDeltaCudesc(Oid relOid)
 
     const char *relname = RelationGetRelationName(rel);
     if (strncmp(relname, PARTITION_DELTA_NAME, strlen(PARTITION_DELTA_NAME)) == 0) {
-        attnum = Anum_pg_partition_reltoastrelid;
+        attnum = Anum_pg_partition_deltarelid;
     } else if (strncmp(relname, PARTITION_CUDESC_NAME, strlen(PARTITION_CUDESC_NAME)) == 0) {
         attnum = Anum_pg_partition_relcudescrelid;
     } else {
