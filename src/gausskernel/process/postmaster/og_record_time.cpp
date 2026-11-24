@@ -357,6 +357,10 @@ void OgRecordOperator::exit(const RecordType& record_type)
 // this only called after exit() to report new record again.
 void OgRecordOperator::report_duplicate(NetInfoType net_type, ssize_t str_len)
 {
+    if (u_sess == NULL || get_record_cxt()->og_record_stat == NULL) {
+        return;
+    }
+
     RecordType old = base_record.record_type;
     base_record.record_type = RecordType(net_type, str_len);
     og_record_report_duplicate(base_record);
