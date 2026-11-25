@@ -105,12 +105,17 @@ select COLLATION_NAME,CHARACTER_SET_NAME,IS_DEFAULT,IS_COMPILED,SORTLEN,PAD_ATTR
 --?.*
 (1 row)
 
-select GRANTEE,TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,PRIVILEGE_TYPE,IS_GRANTABLE FROM INFORMATION_SCHEMA.COLUMN_PRIVILEGES order by 1,2,3,4 limit 1;
- grantee | table_catalog | table_schema |  table_name   |   column_name   | privilege_type | is_grantable 
----------+---------------+--------------+---------------+-----------------+----------------+--------------
- PUBLIC  | test_b1       | dbe_perf     | bgwriter_stat | checkpoints_req | SELECT         | NO
+grant SELECT (emp_id) on public.employees to public;
+select grantee, table_catalog, table_schema, table_name, column_name, privilege_type, is_grantable
+from information_schema.column_privileges
+where grantee = 'PUBLIC' and table_schema = 'public' and table_name = 'employees'
+  and privilege_type = 'SELECT' and column_name = 'emp_id';
+ grantee | table_catalog | table_schema | table_name | column_name | privilege_type | is_grantable 
+---------+---------------+--------------+------------+-------------+----------------+--------------
+ PUBLIC  | test_b1       | public       | employees  | emp_id      | SELECT         | NO
 (1 row)
 
+revoke SELECT (emp_id) on public.employees from public;
 select TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,ORDINAL_POSITION,COLUMN_DEFAULT,IS_NULLABLE,DATA_TYPE,CHARACTER_MAXIMUM_LENGTH,CHARACTER_OCTET_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE,DATETIME_PRECISION,CHARACTER_SET_NAME,COLLATION_NAME,COLUMN_TYPE,COLUMN_KEY,EXTRA,PRIVILEGES,COLUMN_COMMENT,GENERATION_EXPRESSION,SRS_ID from INFORMATION_SCHEMA.COLUMNS order by 1,2,3,4 limit 1;
  table_catalog | table_schema |  table_name   | column_name | ordinal_position | column_default | is_nullable | data_type | character_maximum_length | character_octet_length | numeric_precision | numeric_scale | datetime_precision | character_set_name | collation_name | column_type | column_key | extra |           privileges            | column_comment | generation_expression | srs_id 
 ---------------+--------------+---------------+-------------+------------------+----------------+-------------+-----------+--------------------------+------------------------+-------------------+---------------+--------------------+--------------------+----------------+-------------+------------+-------+---------------------------------+----------------+-----------------------+--------
@@ -164,12 +169,17 @@ select TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,NON_UNIQUE,INDEX_SCHEMA,INDEX_NAME,
  test_b1       | db4ai        | snapshot   |          0 | db4ai        | snapshot_pkey |            1 | schema      |           0 |          |        |          | BTREE      |         |               | YES        | 
 (1 row)
 
-select GRANTEE,TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,PRIVILEGE_TYPE,IS_GRANTABLE from INFORMATION_SCHEMA.TABLE_PRIVILEGES order by 1,2,3,4 limit 1;
- grantee | table_catalog | table_schema |  table_name   | privilege_type | is_grantable 
----------+---------------+--------------+---------------+----------------+--------------
- PUBLIC  | test_b1       | dbe_perf     | bgwriter_stat | SELECT         | NO
+grant INSERT on public.employees to public;
+select grantee, table_catalog, table_schema, table_name, privilege_type, is_grantable
+from information_schema.table_privileges
+where grantee = 'PUBLIC' and table_schema = 'public' and table_name = 'employees'
+  and privilege_type = 'INSERT';
+ grantee | table_catalog | table_schema | table_name | privilege_type | is_grantable 
+---------+---------------+--------------+------------+----------------+--------------
+ PUBLIC  | test_b1       | public       | employees  | INSERT         | NO
 (1 row)
 
+revoke INSERT on public.employees from public;
 select TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,TABLE_TYPE,ENGINE,VERSION,ROW_FORMAT,TABLE_ROWS,AVG_ROW_LENGTH,DATA_LENGTH,MAX_DATA_LENGTH,INDEX_LENGTH,DATA_FREE,AUTO_INCREMENT,CREATE_TIME,UPDATE_TIME,CHECK_TIME,TABLE_COLLATION,CHECKSUM,CREATE_OPTIONS,TABLE_COMMENT from information_schema.tables order by 1,2,3,4 limit 1;
  table_catalog | table_schema |  table_name   | table_type | engine | version | row_format | table_rows | avg_row_length | data_length | max_data_length | index_length | data_free | auto_increment | create_time | update_time | check_time | table_collation | checksum |          create_options          | table_comment 
 ---------------+--------------+---------------+------------+--------+---------+------------+------------+----------------+-------------+-----------------+--------------+-----------+----------------+-------------+-------------+------------+-----------------+----------+----------------------------------+---------------
