@@ -8378,7 +8378,9 @@ static void start_gs_clean_load_dolphin()
     start_xact_command();
     char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
     /* start gs_clean to load dolphin while connecting */
-    PGconn* conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+    char* socketDir = g_instance.attr.attr_network.UnixSocketDir;
+    char* host = (socketDir != NULL && socketDir[0] != '\0') ? socketDir : NULL;
+    PGconn* conn = LoginDatabase(host, g_instance.attr.attr_network.PostPortNumber,
         NULL, NULL, dbname, GS_CLEAN, "auto");
 
     if (conn == NULL) {
