@@ -4728,6 +4728,10 @@ static void truncate_identified_by(char* query_string, int query_len)
 
 char* mask_error_password(const char* query_string, int str_len)
 {
+    if (str_len == 0) {
+        return (char*)MemoryContextAllocZero(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), 1);
+    }
+
     char* mask_string = NULL;
     errno_t rc = EOK;
     const char* pass_str = " password ";
