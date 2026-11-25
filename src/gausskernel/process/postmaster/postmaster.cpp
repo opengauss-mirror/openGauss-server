@@ -7942,6 +7942,7 @@ static void reaper(SIGNAL_ARGS)
         }
 
         if (g_threadPoolControler != NULL && pmState == PM_RUN &&
+            g_threadPoolControler->GetScheduler() != NULL &&
             pid == g_threadPoolControler->GetScheduler()->GetThreadId() &&
             g_threadPoolControler->GetScheduler()->HasShutDown() == true) {
             g_threadPoolControler->GetScheduler()->StartUp();
