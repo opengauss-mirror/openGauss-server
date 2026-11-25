@@ -307,7 +307,47 @@ static inline bool pg_mul_s128_overflow(int128 a, int128 b, int128* result)
 #endif
 }
 
+/*
+ * If a + b overflows, return true, otherwise store the result of a + b into
+ * *result. The content of *result is implementation defined in case of
+ * overflow.
+ */
+static inline bool pg_add_size_overflow(size_t a, size_t b, size_t* result)
+{
+#if defined(HAVE__BUILTIN_OP_OVERFLOW)
+    return __builtin_add_overflow(a, b, result);
+#else
+    size_t res = a + b;
 
+    if (res < a) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+    *result = res;
+    return false;
+#endif
+}
+
+/*
+ * If a * b overflows, return true, otherwise store the result of a * b into
+ * *result. The content of *result is implementation defined in case of
+ * overflow.
+ */
+static inline bool pg_mul_size_overflow(size_t a, size_t b, size_t* result)
+{
+#if defined(HAVE__BUILTIN_OP_OVERFLOW)
+    return __builtin_mul_overflow(a, b, result);
+#else
+    size_t res = a * b;
+
+    if (a != 0 && b != res / a) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+    *result = res;
+    return false;
+#endif
+}
 
 #endif /* COMMON_INT_H */
 

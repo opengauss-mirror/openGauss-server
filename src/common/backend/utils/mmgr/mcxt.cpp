@@ -20,6 +20,7 @@
  */
 
 #include "postgres.h"
+#include "common/int.h"
 #include "knl/knl_variable.h"
 #include "postmaster/postmaster.h"
 #include "utils/memutils.h"
@@ -1279,6 +1280,47 @@ void* std_palloc_extended(Size size, int flags)
 void* std_palloc0_noexcept(Size size)
 {
     return palloc_extended(size, MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+}
+
+/*
+ * Support for safe calculation of memory request sizes
+ *
+ * These functions perform the requested calculation, but throw error if the
+ * result overflows.
+ *
+ * An important property of these functions is that if an argument was a
+ * negative signed int before promotion (implying overflow in calculating it)
+ * we will detect that as an error. That happens because we reject results
+ * larger than SIZE_MAX / 2 later on, in the actual allocation step.
+ */
+static pg_noinline void add_size_error(Size s1, Size s2)
+{
+    ereport(ERROR,
+        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("invalid memory allocation request size %zu + %zu", s1, s2)));
+}
+
+Size add_size(Size s1, Size s2)
+{
+    Size result;
+
+    if (unlikely(pg_add_size_overflow(s1, s2, &result)))
+        add_size_error(s1, s2);
+    return result;
+}
+
+static pg_noinline void mul_size_error(Size s1, Size s2)
+{
+    ereport(ERROR,
+        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("invalid memory allocation request size %zu * %zu", s1, s2)));
+}
+
+Size mul_size(Size s1, Size s2)
+{
+    Size result;
+
+    if (unlikely(pg_mul_size_overflow(s1, s2, &result)))
+        mul_size_error(s1, s2);
+    return result;
 }
 
 /*

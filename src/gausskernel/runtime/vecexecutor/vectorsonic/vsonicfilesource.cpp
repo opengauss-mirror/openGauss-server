@@ -1331,12 +1331,11 @@ void SonicHashCharFileSource::initBatchBuf()
     if (u_sess->attr.attr_sql.enable_sonic_optspill) {
         Assert(CurrentMemoryContext == m_context);
 
-        int type_size = 0;
+        Size type_size = 0;
         for (uint32 i = 0; i < m_cols; i++) {
-            type_size += m_fileInfo[i].typeSize + m_fileInfo[i].varheadlen;
+            type_size = add_size(type_size, (Size)(m_fileInfo[i].typeSize + m_fileInfo[i].varheadlen));
         }
-        Size totalSize = mul_size(BatchMaxSize, (Size)type_size);
-        m_batchBuf = (char*)palloc0(totalSize);
+        m_batchBuf = (char*)palloc0(mul_size(BatchMaxSize, type_size));
         /* prepare the header info for the fixed data type. */
         m_buf = m_batchBuf;
 
@@ -1359,7 +1358,7 @@ void SonicHashCharFileSource::initBatchBuf()
     } else {
         Assert(CurrentMemoryContext == m_context);
 
-        m_batchBuf = (char*)palloc0((m_desc.typeSize + m_varheadlen) * BatchMaxSize);
+        m_batchBuf = (char*)palloc0(mul_size(m_desc.typeSize + m_varheadlen, BatchMaxSize));
         m_buf = m_batchBuf;
 
         /* prepare the header info for the data type. */
@@ -1546,7 +1545,7 @@ void SonicHashFixLenFileSource::initBatchBuf()
         for (uint32 i = 0; i < m_cols; i++) {
             type_size += m_fileInfo[i].typeSize + m_varheadlen;
         }
-        m_batchBuf = (char*)palloc0(type_size * BatchMaxSize);
+        m_batchBuf = (char*)palloc0(mul_size(type_size, BatchMaxSize));
         /* prepare the header info for the fixed data type. */
         m_buf = m_batchBuf;
 
@@ -1559,7 +1558,7 @@ void SonicHashFixLenFileSource::initBatchBuf()
     } else {
         Assert(CurrentMemoryContext == m_context);
 
-        m_batchBuf = (char*)palloc0((m_desc.typeSize + m_varheadlen) * BatchMaxSize);
+        m_batchBuf = (char*)palloc0(mul_size(m_desc.typeSize + m_varheadlen, BatchMaxSize));
         m_buf = m_batchBuf;
 
         /* prepare the header info for the fixed data type. */

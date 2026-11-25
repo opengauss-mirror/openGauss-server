@@ -255,6 +255,29 @@ extern THR_LOCAL MemoryContext AlignMemoryContext;
 extern void pfree(void* pointer);
 extern void opt_pfree(void* pointer);
 
+/*
+ * Support for safe calculation of memory request sizes
+ */
+extern Size add_size(Size s1, Size s2);
+extern Size mul_size(Size s1, Size s2);
+
+/*
+ * Variants with easier notation and more type safety
+ *
+ * Allocate space for "count" objects of type "type"
+ *
+ * These expand palloc/palloc0/repalloc directly at the call site so that the
+ * allocation is attributed to the caller's file/line, not to mcxt.cpp.
+ */
+#define palloc_array(type, count) ((type*)palloc(mul_size(sizeof(type), (count))))
+#define palloc0_array(type, count) ((type*)palloc0(mul_size(sizeof(type), (count))))
+
+/*
+ * Change size of allocation pointed to by "pointer" to have space for "count"
+ * objects of type "type"
+ */
+#define repalloc_array(pointer, type, count) ((type*)repalloc((pointer), mul_size(sizeof(type), (count))))
+
 #define selfpfree(ptr) pfree((ptr))
 
 template <typename T>

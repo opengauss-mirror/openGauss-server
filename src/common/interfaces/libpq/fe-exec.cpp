@@ -22,6 +22,7 @@
 #include "libpq/libpq-fe.h"
 #include "libpq/libpq-int.h"
 
+#include "common/int.h"
 #include "mb/pg_wchar.h"
 
 #ifdef WIN32
@@ -3572,6 +3573,12 @@ size_t PQescapeString(char* to, const char* from, size_t length)
  * a newly allocated buffer.  If we fail due to an encoding violation or out
  * of memory condition, we return NULL, storing an error message into conn.
  */
+
+/* Two quote characters, plus a NUL terminator. */
+#define QUOTES_AND_NUL_EXTRA 3
+/* Length of the " E" escape-string-syntax prefix. */
+#define E_PREFIX_EXTRA 2
+
 static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as_ident)
 {
     const char* s = NULL;
@@ -3638,9 +3645,26 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
 
     /* Allocate output buffer. */
     input_len = s - str;
-    result_size = input_len + num_quotes + 3; /* two quotes, plus a NUL */
+    /*
+     * Protect against overflow, in case the caller has allocated a large
+     * fraction of the available size_t.
+     */
+    if (pg_add_size_overflow(input_len, num_quotes, &result_size) ||
+        pg_add_size_overflow(result_size, QUOTES_AND_NUL_EXTRA, &result_size)) {
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
+        return NULL;
+    }
     if (!as_ident && num_backslashes > 0) {
-        result_size += num_backslashes + 2;
+        if (pg_add_size_overflow(result_size, num_backslashes, &result_size) ||
+            pg_add_size_overflow(result_size, E_PREFIX_EXTRA, &result_size)) {
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
+            return NULL;
+        }
+    }
+    /* Sanity check the final allocation size against a sane upper bound. */
+    if (result_size > (SIZE_MAX >> 1)) {
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
+        return NULL;
     }
     result = rp = (char*)malloc(result_size);
     if (rp == NULL) {
