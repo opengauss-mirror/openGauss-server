@@ -331,3 +331,18 @@ SELECT EXTRACT(TIMEZONE_ABBR FROM 'invalid_timestamp');
 
 SET TIMEZONE TO '-8:30';
 SELECT EXTRACT(TIMEZONE_ABBR FROM TIMESTAMP WITH TIME ZONE '2024-09-02 10:30:00+320');
+
+SELECT date('2024-01-01 12:34:56') AS func_date,
+       date '2024-01-01 12:34:56' AS date_literal,
+       cast('2024-01-01 12:34:56' AS date) AS date_cast;
+
+CREATE TABLE t_prefix_a_date (date varchar(64));
+CREATE INDEX idx_date_a ON t_prefix_a_date (date(10));
+DROP TABLE t_prefix_a_date;
+
+CREATE DATABASE db_pg dbcompatibility 'PG';
+\c db_pg
+SELECT date('2024-01-02 03:04:05');
+SELECT date(timestamptz '2024-01-02 03:04:05+00');
+\c regression
+DROP DATABASE db_pg;
