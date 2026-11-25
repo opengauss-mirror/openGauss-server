@@ -162,6 +162,16 @@ publication_deparse_ddl_command_start(PG_FUNCTION_ARGS)
                                      AccessExclusiveLock,
                                      true);
         if (!OidIsValid(address.objectId)) {
+            /*
+             * For DROP ... IF EXISTS, the object may legitimately be absent.
+             * Leave it to the command itself, which reports a NOTICE and skips
+             * it, and do not log a DDL message for a non-existent object.
+             */
+            if (stmt->missing_ok) {
+                pfree(commandbuf.data);
+                pfree(removetype);
+                continue;
+            }
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                                 errmsg("%s \"%s\" does not exist",
                                 removetype, objname)));
