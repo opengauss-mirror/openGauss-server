@@ -498,7 +498,7 @@ static void sortins(struct nfa* nfa, struct state* s)
     if (n <= 1)
         return; /* nothing to do */
     /* make an array of arc pointers ... */
-    sortarray = (struct arc**)MALLOC(n * sizeof(struct arc*));
+    sortarray = MALLOC_ARRAY(struct arc*, n);
     if (sortarray == NULL) {
         NERR(REG_ESPACE);
         return;
@@ -560,7 +560,7 @@ static void sortouts(struct nfa* nfa, struct state* s)
     if (n <= 1)
         return; /* nothing to do */
     /* make an array of arc pointers ... */
-    sortarray = (struct arc**)MALLOC(n * sizeof(struct arc*));
+    sortarray = MALLOC_ARRAY(struct arc*, n);
     if (sortarray == NULL) {
         NERR(REG_ESPACE);
         return;
@@ -1702,7 +1702,7 @@ static void fixempties(struct nfa* nfa, FILE* f) /* for debug output; NULL none 
      * overestimate of the space needed, but the NFA is unlikely to be large
      * enough at this point to make it worth being smarter.
      */
-    arcarray = (struct arc**)MALLOC(totalinarcs * sizeof(struct arc*));
+    arcarray = MALLOC_ARRAY(struct arc*, totalinarcs);
     if (arcarray == NULL) {
         NERR(REG_ESPACE);
         FREE(inarcsorig);
@@ -2175,7 +2175,7 @@ static void clonesuccessorstates(struct nfa* nfa, struct state* ssource, struct 
     /* If this state hasn't already got a donemap, create one */
     donemap = curdonemap;
     if (donemap == NULL) {
-        donemap = (char*)MALLOC(nstates * sizeof(char));
+        donemap = MALLOC_ARRAY(char, nstates);
         if (donemap == NULL) {
             NERR(REG_ESPACE);
             return;
@@ -2466,9 +2466,9 @@ static void compact(struct nfa* nfa, struct cnfa* cnfa)
         narcs += s->nouts + 1; /* need one extra for endmarker */
     }
 
-    cnfa->stflags = (char*)MALLOC(nstates * sizeof(char));
-    cnfa->states = (struct carc**)MALLOC(nstates * sizeof(struct carc*));
-    cnfa->arcs = (struct carc*)MALLOC(narcs * sizeof(struct carc));
+    cnfa->stflags = MALLOC_ARRAY(char, nstates);
+    cnfa->states = MALLOC_ARRAY(struct carc*, nstates);
+    cnfa->arcs = MALLOC_ARRAY(struct carc, narcs);
     if (cnfa->stflags == NULL || cnfa->states == NULL || cnfa->arcs == NULL) {
         if (cnfa->stflags != NULL)
             FREE(cnfa->stflags);
@@ -2504,6 +2504,11 @@ static void compact(struct nfa* nfa, struct cnfa* cnfa)
                     break;
                 case LACON:
                     Assert(s->no != cnfa->pre);
+                    /* Check for overflow of the color number. */
+                    if ((size_t)cnfa->ncolors + (size_t)a->co > MAX_COLOR) {
+                        NERR(REG_ETOOBIG);
+                        return;
+                    }
                     ca->co = (color)(cnfa->ncolors + a->co);
                     ca->to = a->to->no;
                     ca++;

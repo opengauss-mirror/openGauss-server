@@ -4337,7 +4337,8 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
     /*
      * Allocate workspace for result as C string
      */
-    result = (char*)palloc((fmt_len * DCH_MAX_ITEM_SIZ) + 1);
+    Size result_buflen = mul_size(fmt_len, DCH_MAX_ITEM_SIZ) + 1;
+    result = (char*)palloc(result_buflen);
     *result = '\0';
 
     /*
@@ -4345,7 +4346,7 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
      * not use cache (call parser always)
      */
     if (fmt_len > DCH_CACHE_SIZE) {
-        format = (FormatNode*)palloc((fmt_len + 1) * sizeof(FormatNode));
+        format = palloc_array(FormatNode, fmt_len + 1);
         incache = FALSE;
 
         parse_format(format, fmt_str, DCH_keywords, DCH_suff, DCH_index, DCH_TO_CHAR_TYPE, NULL);
@@ -4375,7 +4376,7 @@ text* datetime_to_char_body(TmToChar* tmtc, text* fmt, bool is_interval, Oid col
     }
 
     /* The real work is here */
-    DCH_to_char(format, is_interval, tmtc, result, (fmt_len * DCH_MAX_ITEM_SIZ) + 1, collid);
+    DCH_to_char(format, is_interval, tmtc, result, (int)result_buflen, collid);
 
     if (!incache)
         pfree_ext(format);
@@ -5160,7 +5161,7 @@ static FormatNode* get_format(char* fmt_str, int fmt_len, bool* in_cache)
      * and not use cache (call parser always)
      */
     if (fmt_len > DCH_CACHE_SIZE) {
-        format = (FormatNode*)palloc((fmt_len + 1) * sizeof(FormatNode));
+        format = palloc_array(FormatNode, fmt_len + 1);
         *in_cache = false;
 
         parse_format(format, fmt_str, DCH_keywords, DCH_suff, DCH_index, DCH_TO_TIMESTAMP_TYPE, NULL);
@@ -5678,7 +5679,7 @@ static FormatNode* NUM_cache(int len, NUMDesc* Num, text* pars_str, bool* should
      * true, accordingly.
      */
     if (unlikely(len > NUM_CACHE_SIZE)) {
-        format = (FormatNode*)palloc((len + 1) * sizeof(FormatNode));
+        format = palloc_array(FormatNode, len + 1);
 
         *shouldFree = true;
 

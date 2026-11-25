@@ -351,7 +351,7 @@ Datum hstore_recv(PG_FUNCTION_ARGS)
                     pcount,
                     (int)(MaxAllocSize / sizeof(Pairs)))));
 
-    pairs = (Pairs*)palloc(pcount * sizeof(Pairs));
+    pairs = palloc_array(Pairs, pcount);
 
     for (i = 0; i < pcount; ++i) {
         int rawlen = pq_getmsgint(buf, 4);
@@ -484,7 +484,7 @@ Datum hstore_from_arrays(PG_FUNCTION_ARGS)
         Assert(key_count == value_count);
     }
 
-    pairs = (Pairs*)palloc(key_count * sizeof(Pairs));
+    pairs = palloc_array(Pairs, key_count);
 
     for (i = 0; i < key_count; ++i) {
         if (key_nulls[i])
@@ -563,7 +563,7 @@ Datum hstore_from_array(PG_FUNCTION_ARGS)
                     count,
                     (int)(MaxAllocSize / sizeof(Pairs)))));
 
-    pairs = (Pairs*)palloc(count * sizeof(Pairs));
+    pairs = palloc_array(Pairs, count);
 
     for (i = 0; i < count; ++i) {
         if (in_nulls[i * 2])
@@ -676,7 +676,7 @@ Datum hstore_from_record(PG_FUNCTION_ARGS)
     }
 
     Assert(ncolumns <= MaxTupleAttributeNumber); /* thus, no overflow */
-    pairs = (Pairs*)palloc(ncolumns * sizeof(Pairs));
+    pairs = palloc_array(Pairs, ncolumns);
 
     if (rec) {
         /* Build a temporary HeapTuple control structure */

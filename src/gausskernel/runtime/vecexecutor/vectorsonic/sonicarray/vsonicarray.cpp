@@ -246,7 +246,7 @@ void SonicDatumArray::genNewArray(bool gen_bit_map)
     }
 
     atom* at = (atom*)palloc(sizeof(atom));
-    at->data = (char*)palloc0(m_atomTypeSize * m_atomSize);
+    at->data = (char*)palloc0(mul_size(m_atomTypeSize, m_atomSize));
     if (gen_bit_map)
         at->nullFlag = (char*)palloc0(sizeof(bool) * m_atomSize);
     else

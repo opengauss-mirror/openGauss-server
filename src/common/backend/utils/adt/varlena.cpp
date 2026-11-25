@@ -102,6 +102,14 @@ typedef struct {
  */
 #define TEXTBUFLEN 1024
 
+/*
+ * When converting a UTF-8 string on WIN32, the working buffer is sized at
+ * twice the input length to fit the converted characters, plus a small
+ * margin for the terminator.
+ */
+#define UTF8_BUF_LEN_FACTOR 2
+#define UTF8_BUF_LEN_EXTRA 2
+
 #define DatumGetUnknownP(X) ((unknown*)PG_DETOAST_DATUM(X))
 #define DatumGetUnknownPCopy(X) ((unknown*)PG_DETOAST_DATUM_COPY(X))
 #define PG_GETARG_UNKNOWN_P(n) DatumGetUnknownP(PG_GETARG_DATUM(n))
@@ -1863,20 +1871,24 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
 #ifdef WIN32
         /* Win32 does not have UTF-8, so we need to map to UTF-16 */
         if (GetDatabaseEncoding() == PG_UTF8) {
-            int a1len;
-            int a2len;
+            Size a1len;
+            Size a2len;
             int r;
 
+            /*
+             * In a 32-bit build, twice the input length can overflow, so we must
+             * be careful to compute the buffer size in a 64-bit type.
+             */
             if (len1 >= TEXTBUFLEN / 2) {
-                a1len = len1 * 2 + 2;
-                a1p = palloc(a1len);
+                a1len = (Size)len1 * UTF8_BUF_LEN_FACTOR + UTF8_BUF_LEN_EXTRA;
+                a1p = (char*)palloc(a1len);
             } else {
                 a1len = TEXTBUFLEN;
                 a1p = a1buf;
             }
             if (len2 >= TEXTBUFLEN / 2) {
-                a2len = len2 * 2 + 2;
-                a2p = palloc(a2len);
+                a2len = (Size)len2 * UTF8_BUF_LEN_FACTOR + UTF8_BUF_LEN_EXTRA;
+                a2p = (char*)palloc(a2len);
             } else {
                 a2len = TEXTBUFLEN;
                 a2p = a2buf;
