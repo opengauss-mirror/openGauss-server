@@ -1,21 +1,18 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
- *
- * openGauss is licensed under Mulan PSL v2.
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * openGauss-server is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
- *
  *          http://license.coscl.org.cn/MulanPSL2
- *
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
+ *
  * -------------------------------------------------------------------------
  *
  * This is a modification of code taken from https://gitee.com/ascend/samples.
  * The original copyright notice follows:
- * Copyright [2022-2023] [Huawei Technologies Co.,Ltd]
 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
