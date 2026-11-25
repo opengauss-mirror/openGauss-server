@@ -238,9 +238,9 @@ function install_gaussdb()
     make -sj 20 >> "$LOG_FILE" 2>&1
     make install -sj 8>> "$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
-        make install -sj 8>> "$LOG_FILE" 2>&1
+        make install>> "$LOG_FILE" 2>&1
         if [ $? -ne 0 ]; then
-            make install -sj 8>> "$LOG_FILE" 2>&1
+            make install>> "$LOG_FILE" 2>&1
             if [ $? -ne 0 ]; then
                 die "make install failed."
             fi

@@ -177,25 +177,12 @@ get_pg_config(PG_CFLAGS --cflags)
 get_pg_config(PG_LDFLAGS --ldflags)
 get_pg_config(PG_LIBS --libs)
 
-find_path(PG_SOURCE_DIR
-  src/include/pg_config.h.in
-  HINTS
-  $ENV{HOME}
-  $ENV{HOME}/projects
-  $ENV{HOME}/Projects
-  $ENV{HOME}/development
-  $ENV{HOME}/Development
-  $ENV{HOME}/workspace
-  PATH_SUFFIXES
-  postgres
-  postgresql
-  pgsql
-  DOC
-  "The path to the PostgreSQL source tree")
+set(PG_SOURCE_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  CACHE PATH
+  "The path to the openGauss source tree")
 
-if (PG_SOURCE_DIR)
-  message(STATUS "Found PostgreSQL source in ${PG_SOURCE_DIR}")
-endif (PG_SOURCE_DIR)
+message(STATUS "Using openGauss source in ${PG_SOURCE_DIR}")
 
 set(EXT_CONTROL_FILE ${PROJECT_NAME}.control)
 configure_file(${EXT_CONTROL_FILE}.in ${EXT_CONTROL_FILE})
