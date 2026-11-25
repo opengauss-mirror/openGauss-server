@@ -173,6 +173,24 @@ extern void copyStringInfo(StringInfo to, StringInfo from);
  */
 void enlargeBuffer(int needed, int len, int* maxlen, char** data);
 
+/* ------------------------
+ * enlargeBufferIfNeeded
+ * Inline fast path for enlargeBuffer(): checks the same "enough space
+ * already" condition (len + needed + 1 <= maxlen) and only calls the
+ * extern enlargeBuffer() when the buffer must actually grow. Use this
+ * instead of hand-writing the capacity check so the condition stays in
+ * one place. Returns true if the buffer was enlarged.
+ * ------------------------
+ */
+static inline bool enlargeBufferIfNeeded(int needed, int len, int* maxlen, char** data)
+{
+    if (unlikely((Size)len + (Size)needed + 1 > (Size)*maxlen)) {
+        enlargeBuffer(needed, len, maxlen, data);
+        return true;
+    }
+    return false;
+}
+
 void enlargeBufferSize(int needed, int len, size_t* maxlen, char** data);
 
 /* ------------------------

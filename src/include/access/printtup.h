@@ -42,6 +42,8 @@ typedef struct {       /* Per-attribute information */
     Oid typoutput;     /* Oid for the type's text output fn */
     Oid typsend;       /* Oid for the type's binary output fn */
     bool typisvarlena; /* is it varlena (ie possibly toastable)? */
+    bool attisdropped; /* cached from TupleDesc: dropped attribute (per-column constant, hot-loop use) */
+    bool is_anyarray;  /* cached from TupleDesc: attribute type is ANYARRAY (per-column constant, hot-loop use) */
     int16 format;      /* format code for this column */
     FmgrInfo finfo;    /* Precomputed call info for output fn */
     int encoding;      /* The character set of the text type attribute, valid when different from server_encoding */
@@ -60,6 +62,7 @@ typedef struct {
 #ifndef ENABLE_MULTIPLE_NODES
     List* target_list; /* output target list item */
 #endif
+    bool has_binary_format; /* any column in binary format? (per-result-set constant, hot-loop use) */
 } DR_printtup;
 
 typedef struct {
