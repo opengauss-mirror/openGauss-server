@@ -1,6 +1,6 @@
 # 使用 BentoML 和 openGauss 构建 RAG
 
-[BentoML](https://www.bentoml.com/) 是一个开源的 AI 模型服务化框架，用于将机器学习模型打包、部署并作为高性能 API 服务运行。它支持自适应批处理、请求队列、CPU/GPU 资源调度，以及一键 Docker 容器化和 BentoCloud 部署。
+[BentoML](https://github.com/bentoml/BentoML) 是一个开源的 AI 模型服务化框架，用于将机器学习模型打包、部署并作为高性能 API 服务运行。它支持自适应批处理、请求队列、CPU/GPU 资源调度，以及一键 Docker 容器化和 BentoCloud 部署。
 
 在本教程中，我们将向您展示如何使用 BentoML（模型服务化）、DeepSeek（LLM）、FastEmbed（本地向量嵌入）与 openGauss（向量存储）构建一套完整的检索增强生成（RAG）管道。该管道集成了 BentoML Service（RAG 管道服务化）、FastEmbed（本地文本向量化）、openGauss DataVec（向量存储与检索）和 DeepSeek LLM（答案生成），最终通过 BentoML Service 对外提供统一的 API 接口。
 
