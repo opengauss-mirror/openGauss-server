@@ -1307,7 +1307,9 @@ static void get_proc_coverage(Oid func_oid, int* coverage)
 {
     PGconn* conn = NULL;
     char* dbName = u_sess->proc_cxt.MyProcPort->database_name;
-    conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+    char* socketDir = g_instance.attr.attr_network.UnixSocketDir;
+    char* host = (socketDir != NULL && socketDir[0] != '\0') ? socketDir : NULL;
+    conn = LoginDatabase(host, g_instance.attr.attr_network.PostPortNumber,
     NULL, NULL, "postgres", "gs_clean", "auto");
 
     if (PQstatus(conn) == CONNECTION_OK) {

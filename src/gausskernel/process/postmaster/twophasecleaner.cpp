@@ -1210,8 +1210,10 @@ static bool DropTempNamespace()
     DatabaseNames* dbList = NULL;
     DatabaseNames* curDatabase = NULL;
 
+    char* socketDir = g_instance.attr.attr_network.UnixSocketDir;
+    char* host = (socketDir != NULL && socketDir[0] != '\0') ? socketDir : NULL;
     PGconn* conn = NULL;
-    conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+    conn = LoginDatabase(host, g_instance.attr.attr_network.PostPortNumber,
         NULL, NULL, DEFAULT_DATABASE, PGXC_CLEAN, "auto");
 
     /* Get database list. */
@@ -1222,7 +1224,7 @@ static bool DropTempNamespace()
 
     if (dbList != NULL) {
         for (curDatabase = dbList; curDatabase != NULL; curDatabase = curDatabase->next) {
-            conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+            conn = LoginDatabase(host, g_instance.attr.attr_network.PostPortNumber,
                 NULL, NULL, curDatabase->databaseName, PGXC_CLEAN, "auto");
 
             if (conn == NULL) {
