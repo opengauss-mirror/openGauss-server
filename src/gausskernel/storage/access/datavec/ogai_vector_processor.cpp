@@ -1440,8 +1440,7 @@ static void InternalParallelVectorize()
     if (successWorkers == 0) {
         LeaderFreeTaskEmbeddings(shared);
         pfree_ext(shared);
-        pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
-        t_thrd.bgworker_cxt.bgwcontext = NULL;
+        pfree_ext(t_thrd.bgworker_cxt.subbgwcontext);
         PopActiveSnapshot();
         if (ownTransaction) {
             AbortCurrentTransaction();
