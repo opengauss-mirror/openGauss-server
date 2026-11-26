@@ -57,6 +57,10 @@
 #define INVALID_INTERVAL_STR "Undefined Range"
 #define INVALID_INTERVAL_STR_LEN (sizeof(INVALID_INTERVAL_STR) - 1)
 
+/* timeofday() buffer sizes: '.' + 6 microseconds digits + ' ' + '\0' + margin */
+#define TIMEOFDAY_PART_LEN 128
+#define TIMEOFDAY_SEP_LEN 10
+
 #define ABSTIMEMIN(t1, t2) \
     (DatumGetBool(DirectFunctionCall2(abstimele, AbsoluteTimeGetDatum(t1), AbsoluteTimeGetDatum(t2))) ? (t1) : (t2))
 #define ABSTIMEMAX(t1, t2) \
@@ -1447,14 +1451,26 @@ bogus:
 Datum timeofday(PG_FUNCTION_ARGS)
 {
     struct timeval tp;
-    char templ[128];
-    char buf[128];
     pg_time_t tt;
+    struct pg_tm* tm;
+    char part1[TIMEOFDAY_PART_LEN];
+    char part2[TIMEOFDAY_PART_LEN];
+    char buf[TIMEOFDAY_PART_LEN + TIMEOFDAY_PART_LEN + TIMEOFDAY_SEP_LEN];
 
     gettimeofday(&tp, NULL);
     tt = (pg_time_t)tp.tv_sec;
-    pg_strftime(templ, sizeof(templ), "%a %b %d %H:%M:%S.%%06d %Y %Z", pg_localtime(&tt, session_timezone));
-    errno_t ss_rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, templ, tp.tv_usec);
+    tm = pg_localtime(&tt, session_timezone);
+
+    /*
+     * Each part is guaranteed to fit: part1 is at most ~25 bytes for "%a %b %d
+     * %H:%M:%S", and part2 is at most ~62 bytes since the %Z abbreviation is
+     * limited to TZ_MAX_CHARS (50) by tzfile.h.  pg_strftime() returns 0 and
+     * an empty string only if these bounds are violated (e.g. by changing the
+     * format here or enlarging the abbreviation limit elsewhere).
+     */
+    pg_strftime(part1, sizeof(part1), "%a %b %d %H:%M:%S", tm);
+    pg_strftime(part2, sizeof(part2), "%Y %Z", tm);
+    errno_t ss_rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%s.%06d %s", part1, (int)tp.tv_usec, part2);
     securec_check_ss(ss_rc, "\0", "\0");
 
     PG_RETURN_TEXT_P(cstring_to_text(buf));
