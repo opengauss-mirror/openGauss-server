@@ -5784,6 +5784,7 @@ ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue
     int *lbs;
     int ndims;
     int nitems;
+    int newnitems;
     int ndatabytes;
     char* data;
     int i;
@@ -5820,6 +5821,12 @@ ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue
     data = ARR_DATA_PTR(arg);
     nitems = ArrayGetNItems(ndims, dims);
     ndatabytes = ARR_SIZE(arg) - ARR_DATA_OFFSET(arg);
+
+    /* Check that the array doesn't grow too large */
+    newnitems = astate->nitems + nitems;
+    if (newnitems > MaxArraySize)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("array size exceeds the maximum allowed (%zu)", (Size)MaxArraySize)));
 
     if (astate->ndims == 0) {
         /* First input; check/save the dimensionality info */
@@ -5882,8 +5889,6 @@ ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue
 
     /* Deal with null bitmap if needed */
     if (astate->nullbitmap || ARR_HASNULL(arg)) {
-        int newnitems = astate->nitems + nitems;
-
         if (astate->nullbitmap == NULL) {
             /*
              * First input with nulls; we must retrospectively handle any
@@ -5902,7 +5907,7 @@ ArrayBuildStateArr* accumArrayResultArr(ArrayBuildStateArr* astate, Datum dvalue
         array_bitmap_copy(astate->nullbitmap, astate->nitems, ARR_NULLBITMAP(arg), 0, nitems);
     }
 
-    astate->nitems += nitems;
+    astate->nitems = newnitems;
     astate->dims[0] += 1;
 
     MemoryContextSwitchTo(oldcontext);

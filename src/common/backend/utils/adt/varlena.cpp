@@ -1886,13 +1886,21 @@ void optimize_varstr_cmp(FmgrInfo* finfo, Oid collation)
     }
 }
 
-/* varstr_cmp_locale()
+/*
+ * varstr_cmp_locale()
  * General locale-aware path: strcoll / wcscoll.
  *
  * Copies the inputs into NUL-terminated buffers because strcoll() cannot be
  * given a length.  The copy-free variant used for btree comparisons is
  * varstr_cmp_locale_n().
+ *
+ * When converting a UTF-8 string on WIN32, the working buffer is sized at
+ * twice the input length to fit the converted characters, plus a small
+ * margin for the terminator.
  */
+#define UTF8_BUF_LEN_FACTOR 2
+#define UTF8_BUF_LEN_EXTRA 2
+
 int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid)
 {
     int result;
@@ -1923,20 +1931,24 @@ int varstr_cmp_locale(char* arg1, int len1, char* arg2, int len2, Oid collid)
 
 #ifdef WIN32
     if (GetDatabaseEncoding() == PG_UTF8) {
-        int a1len;
-        int a2len;
+        Size a1len;
+        Size a2len;
         int r;
 
+        /*
+         * In a 32-bit build, twice the input length can overflow, so we must
+         * be careful to compute the buffer size in a 64-bit type.
+         */
         if (len1 >= TEXTBUFLEN / 2) {
-            a1len = len1 * 2 + 2;
-            a1p = palloc(a1len);
+            a1len = (Size)len1 * UTF8_BUF_LEN_FACTOR + UTF8_BUF_LEN_EXTRA;
+            a1p = (char*)palloc(a1len);
         } else {
             a1len = TEXTBUFLEN;
             a1p = a1buf;
         }
         if (len2 >= TEXTBUFLEN / 2) {
-            a2len = len2 * 2 + 2;
-            a2p = palloc(a2len);
+            a2len = (Size)len2 * UTF8_BUF_LEN_FACTOR + UTF8_BUF_LEN_EXTRA;
+            a2p = (char*)palloc(a2len);
         } else {
             a2len = TEXTBUFLEN;
             a2p = a2buf;
