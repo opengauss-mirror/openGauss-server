@@ -58,9 +58,10 @@ SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u W
 (3 rows)
 
 -- dump all views
-\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self --disable-progress | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
+\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self --disable-progress --restrict-key=ViewDefinerTest | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
 \! cat @abs_bindir@/definer_view_dump.sql
 
+\restrict ViewDefinerTest
 CREATE SCHEMA "Test_User";
 ALTER SCHEMA "Test_User" OWNER TO "Test_User";
 CREATE SCHEMA test_user2;
@@ -92,6 +93,7 @@ ALTER TABLE public.tab_1107262 OWNER TO "Root_Test";
 COPY public.tab_1107262 (id, c1) FROM stdin;
 \.
 ;
+\unrestrict ViewDefinerTest
 \! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp --disable-progress
 --?gs_dump[port='@portstring@'][test_db].*
 --?gs_dump[port='@portstring@'][test_db].*

@@ -33,7 +33,7 @@ end;
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%' order by view_name;
 
 -- dump all views
-\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self --disable-progress | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
+\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self --disable-progress --restrict-key=ViewDefinerTest | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^DROP'| tr -s '\n' > @abs_bindir@/definer_view_dump.sql 2>&1
 \! cat @abs_bindir@/definer_view_dump.sql
 \! @abs_bindir@/gs_dump test_db -p @portstring@ -F c -f @abs_bindir@/definer_view_dump.dmp --disable-progress
 CREATE DATABASE target DBCOMPATIBILITY 'B';

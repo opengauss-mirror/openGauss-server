@@ -449,6 +449,8 @@ SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
 (1 row)
 
 SELECT gs_fault_inject(1,'1','1','1','1','1');
+WARNING:  unsupported fault injection
+CONTEXT:  referenced column: gs_fault_inject
  gs_fault_inject 
 -----------------
                0

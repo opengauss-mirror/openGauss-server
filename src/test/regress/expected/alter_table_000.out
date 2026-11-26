@@ -531,7 +531,7 @@ explain (verbose true, costs false) insert into test_drop_column_1 select * from
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  [Bypass]
- Insert on public.test_drop_column_1
+ Insert (batch mode) on public.test_drop_column_1
    ->  Seq Scan on public.test_drop_column_2
          Output: test_drop_column_2.a, test_drop_column_2.b, NULL::integer
 (4 rows)
@@ -540,7 +540,7 @@ insert into test_drop_column_1 select * from test_drop_column_2;
 explain (verbose true, costs false) insert into test_drop_column_1 select * from test_drop_column_2 order by 2;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Insert on public.test_drop_column_1
+ Insert (batch mode) on public.test_drop_column_1
    ->  Subquery Scan on "*SELECT*"
          Output: "*SELECT*".a, "*SELECT*".b, NULL::integer
          ->  Sort
@@ -554,7 +554,7 @@ insert into test_drop_column_1 select * from test_drop_column_2 order by 2;
 explain (verbose true, costs false) insert into test_drop_column_1 select test_drop_column_2.a, test_drop_column_3.a from test_drop_column_2, test_drop_column_3 where test_drop_column_2.a = test_drop_column_3.a;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
- Insert on public.test_drop_column_1
+ Insert (batch mode) on public.test_drop_column_1
    ->  Hash Join
          Output: test_drop_column_2.a, test_drop_column_3.a, NULL::integer
          Hash Cond: (test_drop_column_2.a = test_drop_column_3.a)
@@ -570,7 +570,7 @@ insert into test_drop_column_1 select test_drop_column_2.a, test_drop_column_3.a
 explain (verbose true, costs false) insert into test_drop_column_1 select test_drop_column_2.a, test_drop_column_3.a from test_drop_column_2, test_drop_column_3 where test_drop_column_2.a = test_drop_column_3.b;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
- Insert on public.test_drop_column_1
+ Insert (batch mode) on public.test_drop_column_1
    ->  Hash Join
          Output: test_drop_column_2.a, test_drop_column_3.a, NULL::integer
          Hash Cond: (test_drop_column_2.a = test_drop_column_3.b)
@@ -586,7 +586,7 @@ insert into test_drop_column_1 select test_drop_column_2.a, test_drop_column_3.a
 explain (verbose true, costs false) insert into test_drop_column_1 select test_drop_column_2.a, test_drop_column_3.a from test_drop_column_2, test_drop_column_3 where test_drop_column_2.a = test_drop_column_3.b order by 1, 2;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
- Insert on public.test_drop_column_1
+ Insert (batch mode) on public.test_drop_column_1
    ->  Subquery Scan on "*SELECT*"
          Output: "*SELECT*".a, "*SELECT*".a, NULL::integer
          ->  Sort

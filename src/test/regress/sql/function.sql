@@ -119,7 +119,10 @@ drop table distribute_function_t1;
 drop table distribute_function_t2;
 
 
---object inside procedure be searched and new table/view/etc be created in. This is to adapt behaviar of Ora.
+-- Test Oracle-style search path binding in an A-compatible database.
+create database pl_test_function_bind DBCOMPATIBILITY 'A';
+\c pl_test_function_bind;
+set search_path = public;
 
 create schema dist_func1;
 create schema dist_func2;
@@ -877,6 +880,8 @@ drop schema sche1 cascade;
 -- clear option
 reset search_path;
 
+\c pl_test_funcion;
+drop database pl_test_function_bind;
 CREATE OR REPLACE FUNCTION func_increment_sql_1(i int, out result_1 bigint, out result_2 bigint)
 returns SETOF RECORD
 as $$
