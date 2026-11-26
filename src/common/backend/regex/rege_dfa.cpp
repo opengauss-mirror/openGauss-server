@@ -401,16 +401,27 @@ static struct dfa* newdfa(
         d->cptsmalloced = 0;
         d->mallocarea = (smallwas == NULL) ? (char*)sml : NULL;
     } else {
+        /*
+         * Restrict the ranges of nstates and ncolors enough that the arrays
+         * we allocate below have no more than INT_MAX members.  This
+         * protects not only the allocation calculations just below, but
+         * later indexing into these arrays.
+         */
+        if (wordsper >= INT_MAX / (nss + WORK) || cnfa->ncolors >= INT_MAX / nss) {
+            ERR(REG_ETOOBIG);
+            return NULL;
+        }
+
         d = (struct dfa*)MALLOC(sizeof(struct dfa));
         if (d == NULL) {
             ERR(REG_ESPACE);
             return NULL;
         }
-        d->ssets = (struct sset*)MALLOC(nss * sizeof(struct sset));
-        d->statesarea = (unsigned*)MALLOC((nss + WORK) * wordsper * sizeof(unsigned));
+        d->ssets = MALLOC_ARRAY(struct sset, nss);
+        d->statesarea = MALLOC_ARRAY(unsigned, (nss + WORK) * wordsper);
         d->work = &d->statesarea[nss * wordsper];
-        d->outsarea = (struct sset**)MALLOC(nss * cnfa->ncolors * sizeof(struct sset*));
-        d->incarea = (struct arcp*)MALLOC(nss * cnfa->ncolors * sizeof(struct arcp));
+        d->outsarea = MALLOC_ARRAY(struct sset*, nss * cnfa->ncolors);
+        d->incarea = MALLOC_ARRAY(struct arcp, nss * cnfa->ncolors);
         d->cptsmalloced = 1;
         d->mallocarea = (char*)d;
         if (d->ssets == NULL || d->statesarea == NULL || d->outsarea == NULL || d->incarea == NULL) {

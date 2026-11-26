@@ -72,6 +72,16 @@
 #ifndef FREE
 #define FREE(p) selfpfree(VS(p))
 #endif
+/*
+ * Overflow-checked variants for allocating an array.  mul_size() throws an
+ * error if the array size would exceed the limits of size_t.
+ */
+#ifndef MALLOC_ARRAY
+#define MALLOC_ARRAY(type, n) ((type*)selfpalloc(mul_size(sizeof(type), (n))))
+#endif
+#ifndef REALLOC_ARRAY
+#define REALLOC_ARRAY(p, type, n) ((type*)selfrepalloc(VS(p), mul_size(sizeof(type), (n))))
+#endif
 
 /* want size of a char in bits, and max value in bounded quantifiers */
 #ifndef CHAR_BIT

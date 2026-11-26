@@ -62,6 +62,7 @@ extern pg_atomic_uint64 rackUsedSize;
 
 #define AllocSizeIsValid(size) ((Size)(size) <= MaxAllocSize)
 
+/* Do not make this any bigger; see add_size() and mul_size() */
 #define MaxAllocHugeSize ((Size)-1 >> 1) /* SIZE_MAX / 2 */
 
 #define AllocHugeSizeIsValid(size) ((Size)(size) <= MaxAllocHugeSize)

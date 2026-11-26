@@ -17,6 +17,8 @@
  */
 #include "postgres_fe.h"
 
+#include "common/int.h"
+
 #include <signal.h>
 
 #ifdef WIN32
@@ -183,7 +185,17 @@ void PQprint(FILE* fout, const PGresult* res, const PQprintOpt* po)
         }
 
         if (!po->expanded && (po->align || po->html3)) {
-            if ((fields = (char**)calloc(nFields * (nTups + 1), sizeof(char*))) == NULL) {
+            size_t fieldsCount;
+            if (pg_mul_size_overflow(nFields, nTups + 1, &fieldsCount) ||
+                pg_mul_size_overflow(fieldsCount, sizeof(char*), &fieldsCount)) {
+                fprintf(stderr, libpq_gettext("out of memory\n"));
+                abort();
+            }
+            if (fieldsCount > (SIZE_MAX >> 1)) {
+                fprintf(stderr, libpq_gettext("out of memory\n"));
+                abort();
+            }
+            if ((fields = (char**)calloc(fieldsCount, 1)) == NULL) {
                 fprintf(stderr, libpq_gettext("out of memory\n"));
                 abort();
             }
@@ -343,11 +355,11 @@ static void do_field(const PQprintOpt* po, const PGresult* res, const int i, con
             if (plen > fieldMax[j]) {
                 fieldMax[j] = plen;
             }
-            if ((fields[i * nFields + j] = (char*)malloc(plen + 1)) == NULL) {
+            if ((fields[(size_t)i * nFields + j] = (char*)malloc(plen + 1)) == NULL) {
                 fprintf(stderr, libpq_gettext("out of memory\n"));
                 abort();
             }
-            check_strcpy_s(strcpy_s(fields[i * nFields + j], plen + 1, pval));
+            check_strcpy_s(strcpy_s(fields[(size_t)i * nFields + j], plen + 1, pval));
         } else {
             if (po->expanded) {
                 if (po->html3)
@@ -377,25 +389,51 @@ static void do_field(const PQprintOpt* po, const PGresult* res, const int i, con
     }
 }
 
+/*
+ * Two extra '-' characters for each field, and two more characters for the
+ * leading and trailing border marks, when printing in standard format.
+ */
+#define STANDARD_BORDER_EXTRA 2
+
 static char* do_header(FILE* fout, const PQprintOpt* po, const int nFields, int* fieldMax, const char** fieldNames,
     unsigned char* fieldNotNum, const int fs_len, const PGresult* res)
 {
-
     int j; /* for loop index */
     char* border = NULL;
 
     if (po->html3)
         fputs("<tr>", fout);
     else {
-        int tot = 0;
+        size_t tot = 0;
         int n = 0;
         char* p = NULL;
 
-        for (; n < nFields; n++)
-            tot += fieldMax[n] + fs_len + (po->standard ? 2 : 0);
-        if (po->standard)
-            tot += fs_len * 2 + 2;
-        border = (char*)malloc(tot + 1);
+        for (; n < nFields; n++) {
+            /* Field plus separator, plus 2 extra '-' in standard format. */
+            if (pg_add_size_overflow(tot, fieldMax[n], &tot) || pg_add_size_overflow(tot, fs_len, &tot) ||
+                (po->standard && pg_add_size_overflow(tot, STANDARD_BORDER_EXTRA, &tot))) {
+                fprintf(stderr, libpq_gettext("out of memory\n"));
+                abort();
+            }
+        }
+        if (po->standard) {
+            /* An extra separator at the front and back. */
+            if (pg_add_size_overflow(tot, fs_len, &tot) || pg_add_size_overflow(tot, fs_len, &tot) ||
+                pg_add_size_overflow(tot, STANDARD_BORDER_EXTRA, &tot)) {
+                fprintf(stderr, libpq_gettext("out of memory\n"));
+                abort();
+            }
+        }
+        if (pg_add_size_overflow(tot, 1, &tot)) { /* terminator */
+            fprintf(stderr, libpq_gettext("out of memory\n"));
+            abort();
+        }
+        /* Sanity check the final allocation size against a sane upper bound. */
+        if (tot > (SIZE_MAX >> 1)) {
+            fprintf(stderr, libpq_gettext("out of memory\n"));
+            abort();
+        }
+        border = (char*)malloc(tot);
         if (border == NULL) {
             fprintf(stderr, libpq_gettext("out of memory\n"));
             abort();
@@ -461,7 +499,7 @@ static void output_row(FILE* fout, const PQprintOpt* po, const int nFields, char
     else if (po->standard)
         fputs(po->fieldSep, fout);
     for (field_index = 0; field_index < nFields; field_index++) {
-        char* p = fields[row_index * nFields + field_index];
+        char* p = fields[(size_t)row_index * nFields + field_index];
 
         if (po->html3)
             fprintf(fout, "<td align=\"%s\">%s</td>", fieldNotNum[field_index] ? "left" : "right", p != NULL ? p : "");
