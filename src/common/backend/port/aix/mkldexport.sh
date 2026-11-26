@@ -21,7 +21,19 @@
 # setting this to nm -B might be better
 # ... due to changes in AIX 4.x ...
 # ... let us search in different directories - Gerhard Reithofer
-# Copyright: (c) Huawei Technologies Co., Ltd. 2021. All rights reserved.
+# Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+# Portions Copyright (c) 1994, Regents of the University of California
+# SPDX-License-Identifier: PostgreSQL
+#
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# openGauss-server is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
 if [ -x /usr/ucb/nm ]
 then NM=/usr/ucb/nm
 elif [ -x /usr/bin/nm ]
