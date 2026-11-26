@@ -495,13 +495,13 @@ static void moresubs(struct vars* v, int wanted) /* want enough room for this on
     n = (size_t)wanted * 3 / 2 + 1;
 
     if (v->subs == v->sub10) {
-        p = (struct subre**)MALLOC(n * sizeof(struct subre*));
+        p = MALLOC_ARRAY(struct subre*, n);
         if (p != NULL) {
             errno_t rc = memcpy_s(VS(p), n * sizeof(struct subre*), VS(v->subs), v->nsubs * sizeof(struct subre*));
             securec_check(rc, "\0", "\0");
         }
     } else {
-        p = (struct subre**)REALLOC(v->subs, n * sizeof(struct subre*));
+        p = REALLOC_ARRAY(v->subs, struct subre*, n);
     }
     if (p == NULL) {
         ERR(REG_ESPACE);
@@ -1776,11 +1776,11 @@ static int newlacon(struct vars* v, struct state* begin, struct state* end, int 
     struct subre* sub = NULL;
 
     if (v->nlacons == 0) {
-        v->lacons = (struct subre*)MALLOC(2 * sizeof(struct subre));
+        v->lacons = MALLOC_ARRAY(struct subre, 2);
         n = 1; /* skip 0th */
         v->nlacons = 2;
     } else {
-        v->lacons = (struct subre*)REALLOC(v->lacons, (v->nlacons + 1) * sizeof(struct subre));
+        v->lacons = REALLOC_ARRAY(v->lacons, struct subre, v->nlacons + 1);
         n = v->nlacons++;
     }
     if (v->lacons == NULL) {

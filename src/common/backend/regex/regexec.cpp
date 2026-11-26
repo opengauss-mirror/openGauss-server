@@ -227,7 +227,7 @@ int pg_regexec(regex_t* re, const chr* string, size_t len, size_t search_start, 
     if (n <= LOCALDFAS)
         v->subdfas = subdfas;
     else {
-        v->subdfas = (struct dfa**)MALLOC(n * sizeof(struct dfa*));
+        v->subdfas = MALLOC_ARRAY(struct dfa*, n);
         if (v->subdfas == NULL) {
             st = REG_ESPACE;
             goto cleanup;
@@ -239,15 +239,15 @@ int pg_regexec(regex_t* re, const chr* string, size_t len, size_t search_start, 
     Assert(v->g->nlacons >= 0);
     n = (size_t)v->g->nlacons;
     if (n > 0) {
-        v->ladfas = (struct dfa**)MALLOC(n * sizeof(struct dfa*));
+        v->ladfas = MALLOC_ARRAY(struct dfa*, n);
         if (v->ladfas == NULL) {
             st = REG_ESPACE;
             goto cleanup;
         }
         for (i = 0; i < n; i++)
             v->ladfas[i] = NULL;
-        v->lblastcss = (struct sset**)MALLOC(n * sizeof(struct sset*));
-        v->lblastcp = (chr**)MALLOC(n * sizeof(chr*));
+        v->lblastcss = MALLOC_ARRAY(struct sset*, n);
+        v->lblastcp = MALLOC_ARRAY(chr*, n);
         if (v->lblastcss == NULL || v->lblastcp == NULL) {
             st = REG_ESPACE;
             goto cleanup;
@@ -956,7 +956,7 @@ static int citerdissect(struct vars* v, struct subre* t, chr* begin, /* beginnin
         max_matches = t->max;
     if (max_matches < (size_t)min_matches)
         max_matches = min_matches;
-    endpts = (chr**)MALLOC((max_matches + 1) * sizeof(chr*));
+    endpts = MALLOC_ARRAY(chr*, max_matches + 1);
     if (endpts == NULL)
         return REG_ESPACE;
     endpts[0] = begin;
@@ -1136,7 +1136,7 @@ static int creviterdissect(struct vars* v, struct subre* t, chr* begin, /* begin
         max_matches = t->max;
     if (max_matches < (size_t)min_matches)
         max_matches = min_matches;
-    endpts = (chr**)MALLOC((max_matches + 1) * sizeof(chr*));
+    endpts = MALLOC_ARRAY(chr*, max_matches + 1);
     if (endpts == NULL)
         return REG_ESPACE;
     endpts[0] = begin;

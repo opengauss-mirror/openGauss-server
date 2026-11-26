@@ -91,7 +91,7 @@ void SonicCharDatumArray::initFunc()
 void SonicCharDatumArray::initResultBuf()
 {
     AutoContextSwitch mem_guard(m_cxt);
-    m_resultBuf = (char*)palloc0(m_desc.typeMod * BatchMaxSize);
+    m_resultBuf = (char*)palloc0(mul_size(m_desc.typeMod, BatchMaxSize));
     m_resultBufIndx = 0;
 
     char* buf = m_resultBuf;
@@ -421,7 +421,7 @@ void SonicCharDatumArray::loadDatumFlagArray(void* file_source, int rows)
     if (unlikely(m_arrIdx == 0)) {
         AutoContextSwitch mem_guard(m_cxt);
         m_atomTypeSize = m_desc.typeSize;
-        m_curAtom->data = (char*)repalloc(m_curAtom->data, m_atomTypeSize * m_atomSize);
+        m_curAtom->data = (char*)repalloc(m_curAtom->data, mul_size(m_atomTypeSize, m_atomSize));
         initResultBuf();
         /* change put function. */
         m_putFunc = &SonicCharDatumArray::putCharDatumArrayWithNullCheck;
@@ -460,7 +460,7 @@ void SonicCharDatumArray::loadDatumFlagArrayByRow(void* file_source, int left_ro
     if (unlikely(m_arrIdx == 0 && m_atomIdx == 1)) {
         AutoContextSwitch mem_guard(m_cxt);
         m_atomTypeSize = m_desc.typeSize;
-        m_curAtom->data = (char*)repalloc(m_curAtom->data, m_atomTypeSize * m_atomSize);
+        m_curAtom->data = (char*)repalloc(m_curAtom->data, mul_size(m_atomTypeSize, m_atomSize));
         initResultBuf();
         /* change put function. */
         m_putFunc = &SonicCharDatumArray::putCharDatumArrayWithNullCheck;
@@ -513,7 +513,7 @@ inline Datum SonicCharDatumArray::getCharDatum(int arr_idx, int atom_idx)
 void SonicCharDatumArray::rebuildFromDict()
 {
     AutoContextSwitch mem_guard(m_cxt);
-    char* new_vals = (char*)palloc0(m_atomTypeSize * m_atomSize);
+    char* new_vals = (char*)palloc0(mul_size(m_atomTypeSize, m_atomSize));
     char* dst = new_vals;
     Datum data;
     errno_t rc;
