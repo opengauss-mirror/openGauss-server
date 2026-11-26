@@ -161,7 +161,12 @@ void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int 
     }
     if (unlikely(p != str)) { /* actual conversion has been done? */
         slen = strlen(p);
-        enlargeBuffer(slen + sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
+        /*
+         * Keep the buffer guaranteed large enough for the raw writes below;
+         * enlargeBufferIfNeeded() holds the same capacity condition as
+         * enlargeBuffer(), so pq_writeint32/memcpy_sp can write unchecked.
+         */
+        (void)enlargeBufferIfNeeded(slen + (int)sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
         pq_writeint32(buf, (uint32)slen);
         errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), p, (size_t)slen);
         securec_check(rc, "\0", "\0");
@@ -170,7 +175,7 @@ void pq_sendcountedtext_printtup(StringInfo buf, const char* str, int slen, int 
         pfree(p);
         p = NULL;
     } else {
-        enlargeBuffer(slen + sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
+        (void)enlargeBufferIfNeeded(slen + (int)sizeof(uint32), buf->len, &buf->maxlen, &buf->data);
         pq_writeint32(buf, (uint32)slen);
         errno_t rc = memcpy_sp(buf->data + buf->len, (size_t)(buf->maxlen - buf->len), str, (size_t)slen);
         securec_check(rc, "\0", "\0");

@@ -24,6 +24,9 @@
 #include "common/int.h"
 #include "utils/builtins.h"
 
+/* forward declaration: defined later in this file, used by pg_ultoa_printtup() */
+extern int pg_ultoa_n(uint32 value, char *a);
+
 /*
  * A table of all two-digit numbers. This is used to speed up decimal digit
  * generation by copying pairs of digits into the final output.
@@ -503,6 +506,21 @@ char *pg_ltoa_printtup(int32 value, int *len)
     a[*len] = '\0';
 
     return u_sess->utils_cxt.int4output_buffer;
+}
+
+/*
+ * pg_ultoa_printtup: convert a 32-bit unsigned integer (oid) to its string
+ * representation in the shared int4output_buffer, reusing pg_ultoa_n. The
+ * result (at most 10 digits) always fits the 32-byte buffer.
+ */
+char *pg_ultoa_printtup(uint32 value, int *len)
+{
+    char *a = u_sess->utils_cxt.int4output_buffer;
+
+    *len = pg_ultoa_n(value, a);
+    a[*len] = '\0';
+
+    return a;
 }
 
 /*

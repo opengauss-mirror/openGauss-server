@@ -211,7 +211,7 @@ static void set_var_from_num(Numeric value, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
 static void init_var_from_var(const NumericVar *value, NumericVar *dest);
 static char* get_str_from_var(NumericVar* var);
-static char* output_get_str_from_var(NumericVar* var);
+static char* output_get_str_from_var(NumericVar* var, int* out_len);
 static char* get_str_from_var_sci(NumericVar* var, int rscale);
 
 static void apply_typmod(NumericVar* var, int32 typmod);
@@ -258,7 +258,7 @@ static void trunc_var(NumericVar* var, int rscale);
 static void strip_var(NumericVar* var);
 static void compute_bucket(
     Numeric operand, Numeric bound1, Numeric bound2, NumericVar* count_var, NumericVar* result_var);
-static void remove_tail_zero(char *ascii);
+static int remove_tail_zero(char *ascii);
 
 static void accum_sum_add(NumericSumAccum *accum, NumericVar *var1);
 static void accum_sum_rescale(NumericSumAccum *accum, NumericVar *val);
@@ -463,18 +463,25 @@ Datum numeric_out(PG_FUNCTION_ARGS)
  *
  *      Output function for numeric data type.
  *      include bi64 and bi128 type
+ *      out_len (optional): receives the length of the returned string, so the
+ *      caller (printtup hot path) can skip a strlen() pass.
  */
-char* output_numeric_out(Numeric num)
+char* output_numeric_out(Numeric num, int* out_len)
 {
     NumericVar x;
     char* str = NULL;
+    int str_len = 0;
     int scale = 0;
 
     /*
      * Handle NaN
      */
-    if (NUMERIC_IS_NAN(num))
+    if (NUMERIC_IS_NAN(num)) {
+        if (out_len != NULL) {
+            *out_len = 3;
+        }
         return pstrdup("NaN");
+    }
 
     /*
      * If numeric is big integer, call int64_out/int128_out
@@ -484,25 +491,36 @@ char* output_numeric_out(Numeric num)
         int64 val64 = NUMERIC_64VALUE(num);
         scale = NUMERIC_BI_SCALE(num);
         Datum numeric_out_bi64 = bi64_out(val64, scale);
-        return DatumGetCString(numeric_out_bi64);
+        str = DatumGetCString(numeric_out_bi64);
+        if (out_len != NULL) {
+            *out_len = (int)strlen(str);
+        }
+        return str;
     } else if (NUMERIC_FLAG_IS_BI128(numFlags)) {
         int128 val128 = 0;
         errno_t rc = memcpy_s(&val128, sizeof(int128), (num)->choice.n_bi.n_data, sizeof(int128));
         securec_check(rc, "\0", "\0");
         scale = NUMERIC_BI_SCALE(num);
         Datum numeric_out_bi128 =  bi128_out(val128, scale);
-        return DatumGetCString(numeric_out_bi128);
+        str = DatumGetCString(numeric_out_bi128);
+        if (out_len != NULL) {
+            *out_len = (int)strlen(str);
+        }
+        return str;
     }
     /*
      * Get the number in the variable format
      */
     init_var_from_num(num, &x);
-    str = output_get_str_from_var(&x);
+    str = output_get_str_from_var(&x, &str_len);
 
     if (TRUNC_NUMERIC_TAIL_ZERO) {
-        remove_tail_zero(str);
+        str_len = remove_tail_zero(str);
     }
 
+    if (out_len != NULL) {
+        *out_len = str_len;
+    }
     return str;
 }
 
@@ -4718,10 +4736,14 @@ init_var_from_var(const NumericVar *value, NumericVar *dest)
     }
 }
 
-static void remove_tail_zero(char *ascii)
+/*
+ * Trim trailing fractional zeroes in place. Returns the length of the result
+ * string, so callers that already need the length avoid an extra strlen().
+ */
+static int remove_tail_zero(char *ascii)
 {
     if (ascii == NULL) {
-        return;
+        return 0;
     }
     int len = 0;
     bool is_decimal = false;
@@ -4732,7 +4754,7 @@ static void remove_tail_zero(char *ascii)
         len++;
     }
     if (!is_decimal) {
-        return;
+        return len;
     }
     len--;
     while (ascii[len] == '0') {
@@ -4748,8 +4770,9 @@ static void remove_tail_zero(char *ascii)
         ascii[len] = '0';
         len++;
         ascii[len] = '\0';
+        return len;
     }
-    return;
+    return len + 1;
 }
 
 /*
@@ -4895,7 +4918,7 @@ static char* get_str_from_var(NumericVar* var)
  *      CAUTION: var's contents may be modified by rounding!
  *      Returns a palloc'd string.
  */
-static char* output_get_str_from_var(NumericVar* var)
+static char* output_get_str_from_var(NumericVar* var, int* out_len)
 {
     int dscale;
     char* str = NULL;
@@ -4905,6 +4928,7 @@ static char* output_get_str_from_var(NumericVar* var)
     int d;
     NumericDigit dig;
     int len;
+    int str_len = 0;
 
 #if DEC_DIGITS > 1
     NumericDigit d1;
@@ -5024,8 +5048,12 @@ static char* output_get_str_from_var(NumericVar* var)
      * terminate the string and return it
      */
     *cp = '\0';
+    str_len = (int)(cp - str);
     if (HIDE_TAILING_ZERO) {
-        remove_tail_zero(str);
+        str_len = remove_tail_zero(str);
+    }
+    if (out_len != NULL) {
+        *out_len = str_len;
     }
 
     return str;

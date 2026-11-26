@@ -387,6 +387,80 @@ Datum float4in(PG_FUNCTION_ARGS)
 }
 
 /*
+ * float_to_str_printtup: shared body of float4out()/float8out() and their
+ * printtup fast-path variants. Formats num into the caller-provided buffer
+ * (at least width+1 bytes), applying the same special-value spellings,
+ * extra_float_digits digits and DISPLAY_LEADING_ZERO rules, and returns the
+ * length of the result string. Leading-zero removal (0.123 -> .123,
+ * -0.123 -> -.123) is done in place.
+ */
+static int float_to_str_printtup(float8 num, int base_dig, int width, char* ascii)
+{
+    errno_t rc = EOK;
+
+    if (isnan(num)) {
+        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+            rc = strcpy_s(ascii, width + 1, "Nan");
+        } else {
+            rc = strcpy_s(ascii, width + 1, "NaN");
+        }
+        securec_check_ss(rc, "\0", "\0");
+        return strlen(ascii);
+    }
+
+    switch (is_infinite(num)) {
+        case 1:
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, width + 1, "Inf");
+            } else {
+                rc = strcpy_s(ascii, width + 1, "Infinity");
+            }
+            securec_check_ss(rc, "\0", "\0");
+            break;
+        case -1:
+            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
+                rc = strcpy_s(ascii, width + 1, "-Inf");
+            } else {
+                rc = strcpy_s(ascii, width + 1, "-Infinity");
+            }
+            securec_check_ss(rc, "\0", "\0");
+            break;
+        default: {
+            int ndig = base_dig + u_sess->attr.attr_common.extra_float_digits;
+
+            if (ndig < 1) {
+                ndig = 1;
+            }
+
+            rc = snprintf_s(ascii, width + 1, width, "%.*g", ndig, num);
+            securec_check_ss(rc, "\0", "\0");
+        } break;
+    }
+
+    if (DISPLAY_LEADING_ZERO || !((num > 0 && num < 1) || (num > -1 && num < 0))) {
+        return strlen(ascii);
+    }
+
+    // Delete 0 before decimal in place.
+    // For Example: convert 0.123 to .123, or -0.123 to -.123
+    {
+        char* ascii_copy = ascii;
+
+        if ('-' == *ascii_copy) {
+            ascii_copy++;
+        }
+
+        // Skip 0 before decimal
+        if ('0' == *ascii_copy) {
+            rc = memmove_s(ascii_copy, width, ascii_copy + 1, strlen(ascii_copy + 1) + 1);
+            securec_check(rc, "\0", "\0");
+        }
+    }
+
+    return strlen(ascii);
+}
+
+/*
  *		float4out		- converts a float4 number to a string
  *						  using a standard output format
  */
@@ -394,74 +468,10 @@ Datum float4out(PG_FUNCTION_ARGS)
 {
     float4 num = PG_GETARG_FLOAT4(0);
     char* ascii = (char*)palloc(MAXFLOATWIDTH + 1);
-    errno_t rc = EOK;
 
-    if (isnan(num)) {
-        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Nan");
-        } else {
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
-        }
-        securec_check_ss(rc, "\0", "\0");
-        PG_RETURN_CSTRING(ascii);
-    }
+    (void)float_to_str_printtup(num, FLT_DIG, MAXFLOATWIDTH, ascii);
 
-    switch (is_infinite(num)) {
-        case 1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Inf");
-            } else {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
-            }
-            securec_check_ss(rc, "\0", "\0");
-            break;
-        case -1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Inf");
-            } else {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
-            }
-            securec_check_ss(rc, "\0", "\0");
-            break;
-        default: {
-            int ndig = FLT_DIG + u_sess->attr.attr_common.extra_float_digits;
-
-            if (ndig < 1)
-                ndig = 1;
-
-            rc = snprintf_s(ascii, MAXFLOATWIDTH + 1, MAXFLOATWIDTH, "%.*g", ndig, num);
-            securec_check_ss(rc, "\0", "\0");
-        } break;
-    }
-    if (DISPLAY_LEADING_ZERO) {
-        PG_RETURN_CSTRING(ascii);
-    }
-
-    if (!((num > 0 && num < 1) || (num > -1 && num < 0))) {
-        PG_RETURN_CSTRING(ascii);
-    }
-    // Delete 0 before decimal.
-    // For Example: convert 0.123 to .123, or -0.123 to -.123
-    else {
-        char* final_ascii = (char*)palloc0(MAXFLOATWIDTH + 1);
-        char* ascii_copy = ascii;
-
-        if ('-' == *ascii_copy) {
-            *final_ascii = *ascii_copy++;
-        }
-
-        // Skip 0 before decimal
-        if ('0' == *ascii_copy) {
-            ascii_copy++;
-        }
-
-        rc = strncat_s(final_ascii, MAXFLOATWIDTH + 1, ascii_copy, strlen(ascii_copy));
-        securec_check(rc, "\0", "\0");
-
-        pfree_ext(ascii);
-
-        PG_RETURN_CSTRING(final_ascii);
-    }
+    PG_RETURN_CSTRING(ascii);
 }
 
 /*
@@ -636,73 +646,29 @@ Datum float8out(PG_FUNCTION_ARGS)
 {
     float8 num = PG_GETARG_FLOAT8(0);
     char* ascii = (char*)palloc(MAXDOUBLEWIDTH + 1);
-    errno_t rc = EOK;
 
-    if (isnan(num)) {
-        if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Nan");
-        } else {
-            rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "NaN");
-        }
-        securec_check(rc, "\0", "\0");
-        PG_RETURN_CSTRING(ascii);
-    }
-    switch (is_infinite(num)) {
-        case 1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Inf");
-            } else {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "Infinity");
-            }
-            securec_check(rc, "\0", "\0");
-            break;
-        case -1:
-            if (u_sess->attr.attr_sql.enable_binary_special_o_format) {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Inf");
-            } else {
-                rc = strcpy_s(ascii, MAXDOUBLEWIDTH + 1, "-Infinity");
-            }
-            securec_check(rc, "\0", "\0");
-            break;
-        default: {
-            int ndig = DBL_DIG + u_sess->attr.attr_common.extra_float_digits;
+    (void)float_to_str_printtup(num, DBL_DIG, MAXDOUBLEWIDTH, ascii);
 
-            if (ndig < 1)
-                ndig = 1;
+    PG_RETURN_CSTRING(ascii);
+}
 
-            rc = snprintf_s(ascii, MAXDOUBLEWIDTH + 1, MAXDOUBLEWIDTH, "%.*g", ndig, num);
-            securec_check_ss(rc, "\0", "\0");
-        } break;
-    }
-    if (DISPLAY_LEADING_ZERO) {
-        PG_RETURN_CSTRING(ascii);
-    }
+/*
+ * pg_ftoa_printtup / pg_dtoa_printtup: printtup fast-path variants of
+ * float4out()/float8out(). Format into the caller-provided buffer (at least
+ * MAXDOUBLEWIDTH + 1 bytes) instead of a freshly palloc'd string, and report
+ * the result length. The formatting itself is shared with float4out()/
+ * float8out() via float_to_str_printtup(), so it stays byte-identical.
+ */
+char* pg_ftoa_printtup(float4 num, char* ascii, int* len)
+{
+    *len = float_to_str_printtup(num, FLT_DIG, MAXFLOATWIDTH, ascii);
+    return ascii;
+}
 
-    if (!((num > 0 && num < 1) || (num > -1 && num < 0))) {
-        PG_RETURN_CSTRING(ascii);
-    }
-    // Delete 0 before decimal.
-    // For Example: convert 0.123 to .123, or -0.123 to -.123
-    else {
-        char* final_ascii = (char*)palloc0(MAXFLOATWIDTH + 1);
-        char* ascii_copy = ascii;
-
-        if ('-' == *ascii_copy) {
-            *final_ascii = *ascii_copy++;
-        }
-
-        /* Skip 0 before decimal */
-        if ('0' == *ascii_copy) {
-            ascii_copy++;
-        }
-
-        rc = strncat_s(final_ascii, MAXFLOATWIDTH + 1, ascii_copy, strlen(ascii_copy));
-        securec_check(rc, "\0", "\0");
-
-        pfree_ext(ascii);
-
-        PG_RETURN_CSTRING(final_ascii);
-    }
+char* pg_dtoa_printtup(float8 num, char* ascii, int* len)
+{
+    *len = float_to_str_printtup(num, DBL_DIG, MAXDOUBLEWIDTH, ascii);
+    return ascii;
 }
 
 /*

@@ -861,10 +861,10 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
 
     myState->attrinfo = typeinfo;
     myState->nattrs = numAttrs;
+    myState->has_binary_format = false;
     if (numAttrs <= 0) {
         return;
     }
-
 
     if (myState->portal != NULL && myState->portal->tupDesc != NULL) {
 #ifdef USE_ASSERT_CHECKING
@@ -890,6 +890,13 @@ static void printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int 
          */
         if (typeinfo->attrs[i].attisdropped) {
             typeinfo->attrs[i].atttypid = UNKNOWNOID;
+        }
+
+        /* cache per-column constants once, to avoid re-reading TupleDesc in the per-row hot loop */
+        thisState->attisdropped = typeinfo->attrs[i].attisdropped;
+        thisState->is_anyarray = (typeinfo->attrs[i].atttypid == ANYARRAYOID);
+        if (format != 0) {
+            myState->has_binary_format = true;
         }
 
         thisState->format = format;
@@ -1153,10 +1160,6 @@ void printBatch(VectorBatch *batch, DestReceiver *self)
     pq_endmessage_reuse(buf);
 }
 
-static inline bool check_need_free_varchar_output(const char* str)
-{
-    return ((char*)str == u_sess->utils_cxt.varcharoutput_buffer);
-}
 static inline bool check_need_free_numeric_output(const char* str)
 {
     return ((char*)str == u_sess->utils_cxt.numericoutput_buffer);
@@ -1177,7 +1180,6 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
     int natts = typeinfo->natts;
     int i;
     bool need_free = false;
-    bool binary = false;
     /* just as we define in backend/commands/analyze.cpp */
 #define WIDTH_THRESHOLD 1024
 
@@ -1192,22 +1194,14 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
      * if the client has asked for any attribute to be sent in a binary format,
      * then we must decode the datarow and send every attribute in the format
      * that the client has asked for. Otherwise its ok to just forward the
-     * datarow as it is
+     * datarow as it is.
+     *
+     * The format codes are per-result-set constants and have already been folded
+     * into myState->has_binary_format by printtup_prepare_info, so there is no
+     * need to scan all attributes again on every row.
      */
-    for (i = 0; i < natts; ++i) {
-        PrinttupAttrInfo *thisState = myState->myinfo + i;
-        if (thisState->format != 0) {
-            binary = true;
-            break;
-        }
-    }
-
-    /*
-     * If we are having DataRow-based tuple we do not have to encode attribute
-     * values, just send over the DataRow message as we received it from the
-     * Datanode
-     */
-    if (slot->tts_dataRow != NULL && (pg_get_client_encoding() == GetDatabaseEncoding()) && !binary) {
+    if (slot->tts_dataRow != NULL && (pg_get_client_encoding() == GetDatabaseEncoding()) &&
+        !myState->has_binary_format) {
         pq_beginmessage_reuse(buf, 'D');
         appendBinaryStringInfo(buf, slot->tts_dataRow, slot->tts_dataLen);
         AddCheckInfo(buf);
@@ -1227,6 +1221,15 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 
     pq_sendint16(buf, natts);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * callPrint is only read by textout()'s huge-CLOB placeholder branch, which can
+     * only be reached from the output function calls inside the loop below. Set it
+     * once per row instead of twice per attribute.
+     */
+    t_thrd.xact_cxt.callPrint = true;
+#endif
+
     /*
      * send the attributes of this tuple
      */
@@ -1238,12 +1241,12 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
          * skip null value attribute,
          * we need to skip the droped columns for analyze global stats.
          */
-        if (slot->tts_isnull[i] || typeinfo->attrs[i].attisdropped) {
+        if (slot->tts_isnull[i] || thisState->attisdropped) {
             pq_sendint32(buf, (uint32)-1);
             continue;
         }
 
-        if (typeinfo->attrs[i].atttypid == ANYARRAYOID && slot->tts_dataRow != NULL) {
+        if (thisState->is_anyarray && slot->tts_dataRow != NULL) {
             /*
              * For ANYARRAY type, the not null DataRow-based tuple indicates the value in
              * attr had been converted to CSTRING type previously by using anyarray_out.
@@ -1254,17 +1257,13 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
             if (thisState->format == 0) {
                 /* Text output */
                 char *outputstr = NULL;
-#ifndef ENABLE_MULTIPLE_NODES
-                t_thrd.xact_cxt.callPrint = true;
-#endif
+                /* set by fast paths that know their output length; -1 = use strlen() */
+                int out_len = -1;
                 need_free = false;
                 switch (thisState->typoutput) {
                     case F_INT4OUT: {
                         int length32 = 0;
                         outputstr = pg_ltoa_printtup(DatumGetInt32(attr), &length32);
-#ifndef ENABLE_MULTIPLE_NODES
-                        t_thrd.xact_cxt.callPrint = false;
-#endif
                         pq_sendcountedtext_printtup(buf, outputstr, length32, thisState->encoding,
                                                     (void *)&thisState->convert_finfo);
                         continue;
@@ -1272,26 +1271,110 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     case F_INT8OUT: {
                         int length64 = 0;
                         outputstr = pg_lltoa_printtup(DatumGetInt64(attr), &length64);
-#ifndef ENABLE_MULTIPLE_NODES
-                        t_thrd.xact_cxt.callPrint = false;
-#endif
                         pq_sendcountedtext_printtup(buf, outputstr, length64, thisState->encoding,
                                                     (void *)&thisState->convert_finfo);
                         continue;
                     }
-                    case F_BPCHAROUT: 
+                    case F_INT2OUT: {
+                        /* int2 digits are identical to int4 for all in-range values, reuse the int4 buffer */
+                        int length16 = 0;
+                        outputstr = pg_ltoa_printtup((int32)DatumGetInt16(attr), &length16);
+                        pq_sendcountedtext_printtup(buf, outputstr, length16, thisState->encoding,
+                                                    (void *)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_BOOLOUT: {
+                        /* boolout: constant single-char output, no function call and no buffer */
+                        pq_sendcountedtext_printtup(buf, DatumGetBool(attr) ? "t" : "f", 1, thisState->encoding,
+                                                    (void *)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_OIDOUT: {
+                        /* oidout ("%u"): mirror of pg_ltoa_printtup on the shared int4 buffer */
+                        int oidlen = 0;
+
+                        outputstr = pg_ultoa_printtup(DatumGetObjectId(attr), &oidlen);
+                        pq_sendcountedtext_printtup(buf, outputstr, oidlen, thisState->encoding,
+                                                    (void *)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_FLOAT4OUT:
+                    case F_FLOAT8OUT: {
+                        /* float4/float8 formatting into a stack buffer, byte-identical to float4out()/float8out() */
+                        char floatbuf[130]; /* MAXDOUBLEWIDTH(128) + NUL + 1 */
+                        int flen = 0;
+
+                        if (thisState->typoutput == F_FLOAT4OUT) {
+                            outputstr = pg_ftoa_printtup(DatumGetFloat4(attr), floatbuf, &flen);
+                        } else {
+                            outputstr = pg_dtoa_printtup(DatumGetFloat8(attr), floatbuf, &flen);
+                        }
+                        pq_sendcountedtext_printtup(buf, outputstr, flen, thisState->encoding,
+                                                    (void *)&thisState->convert_finfo);
+                        continue;
+                    }
+                    case F_BPCHAROUT:
                         /* support dolphin customizing bpcharout */
                         if (u_sess->attr.attr_sql.dolphin) {
                             outputstr = OutputFunctionCall(&thisState->finfo, attr);
                             need_free = true;
                             break;
                         }
-                    case F_VARCHAROUT: 
-                        outputstr = output_text_to_cstring((text*)DatumGetPointer(attr));
-                        need_free = !check_need_free_varchar_output(outputstr);
-                        break;
-                    case F_NUMERIC_OUT: 
-                        outputstr = output_numeric_out(DatumGetNumeric(attr));
+                        /* fall through: non-dolphin bpcharout output is byte-identical to varcharout */
+                    case F_VARCHAROUT:
+                    case F_TEXTOUT: {
+                        /*
+                         * Zero-copy text output: the varlena payload is byte-identical to what
+                         * textout()/varcharout() would return, so send it straight from the
+                         * datum instead of round-tripping through a palloc'd C string.
+                         */
+                        struct varlena *vl = (struct varlena *)DatumGetPointer(attr);
+                        struct varlena *unpacked = NULL;
+                        int vlen = 0;
+
+                        if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(vl))) {
+                            if (thisState->typoutput == F_TEXTOUT) {
+#ifndef ENABLE_MULTIPLE_NODES
+                                /* same placeholder as textout()'s huge-CLOB branch while callPrint is set */
+                                pq_sendcountedtext_printtup(buf, "<CLOB>", strlen("<CLOB>"), thisState->encoding,
+                                                            (void *)&thisState->convert_finfo);
+                                continue;
+#else
+                                /* distributed builds leave callPrint unset: textout() errors out */
+                                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                    errmsg("textout() could not support larger than 1GB clob/blob data"),
+                                        errcause("parameter larger than 1GB"),
+                                        erraction("parameter must less than 1GB")));
+#endif
+                            }
+                            /* same huge-pointer rejection as output_text_to_cstring() */
+                            FUNC_CHECK_HUGE_POINTER(false, vl, "text_to_cstring()");
+                        }
+                        unpacked = pg_detoast_datum_packed(vl);
+                        vlen = VARSIZE_ANY_EXHDR(unpacked);
+#ifdef ENABLE_MULTIPLE_NODES
+                        /*
+                         * keep the analyze-sample width truncation the generic path performs
+                         * (compute_scalar_stats skips detoasting beyond WIDTH_THRESHOLD)
+                         */
+                        if (self->forAnalyzeSampleTuple && thisState->typisvarlena && vlen > WIDTH_THRESHOLD * 2 &&
+                            (typeinfo->attrs[i].atttypid == BYTEAOID || typeinfo->attrs[i].atttypid == CHAROID ||
+                             typeinfo->attrs[i].atttypid == TEXTOID || typeinfo->attrs[i].atttypid == BLOBOID ||
+                             typeinfo->attrs[i].atttypid == CLOBOID || typeinfo->attrs[i].atttypid == RAWOID ||
+                             typeinfo->attrs[i].atttypid == BPCHAROID || typeinfo->attrs[i].atttypid == VARCHAROID ||
+                             typeinfo->attrs[i].atttypid == NVARCHAR2OID)) {
+                            vlen = WIDTH_THRESHOLD + 4;
+                        }
+#endif
+                        pq_sendcountedtext_printtup(buf, VARDATA_ANY(unpacked), vlen, thisState->encoding,
+                                                    (void *)&thisState->convert_finfo);
+                        if (unpacked != vl) {
+                            pfree(unpacked);
+                        }
+                        continue;
+                    }
+                    case F_NUMERIC_OUT:
+                        outputstr = output_numeric_out(DatumGetNumeric(attr), &out_len);
                         need_free = !check_need_free_numeric_output(outputstr);
                         break;
                     case F_DATE_OUT:
@@ -1346,12 +1429,12 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
 
                     outputstr = TextDatumGetCString(str);
                     pfree(result);
+                    /* outputstr was replaced: invalidate any fast-path length */
+                    out_len = -1;
                 }
 #endif
-#ifndef ENABLE_MULTIPLE_NODES
-                t_thrd.xact_cxt.callPrint = false;
-#endif
-                pq_sendcountedtext_printtup(buf, outputstr, strlen(outputstr), thisState->encoding, (void*)&thisState->convert_finfo);
+                pq_sendcountedtext_printtup(buf, outputstr, out_len >= 0 ? out_len : (int)strlen(outputstr),
+                                            thisState->encoding, (void*)&thisState->convert_finfo);
                 if (need_free) {
                     pfree(outputstr);
                 }
@@ -1366,6 +1449,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
             }
         }
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    t_thrd.xact_cxt.callPrint = false;
+#endif
 
     (void)MemoryContextSwitchTo(old_context);
 
