@@ -37,6 +37,7 @@
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "communication/commproxy_interface.h"
 #include "executor/executor.h"
 #include "executor/exec/execStream.h"
 #include "executor/node/nodeModifyTable.h"
@@ -313,29 +314,31 @@ static void PerformAuthentication(Port* port)
      * during authentication.  Since we're inside a transaction and might do
      * database access, we have to use the statement_timeout infrastructure.
      */
-    if (!enable_sig_alarm(u_sess->attr.attr_security.AuthenticationTimeout * 1000, true))
+    extern bool enable_sig_alarm(int delayms, bool isStatementTimeout, pgsocket authenticationSocket);
+    extern THR_LOCAL volatile bool g_authenticationTimedOut;
+    const int authTimeout = u_sess->attr.attr_security.AuthenticationTimeout;
+    const pgsocket socket = port->sock;
+    const bool useKernelSocket = IS_THREAD_POOL_WORKER && socket != PGINVALID_SOCKET && AmIKernelModeSockfd(socket);
+    g_authenticationTimedOut = false;
+    /* Convert the authentication timeout to milliseconds (1000 milliseconds per second). */
+    if (!enable_sig_alarm(authTimeout * 1000, true, useKernelSocket ? socket : PGINVALID_SOCKET))
         ereport(FATAL, (errmsg("could not set timer for authorization timeout")));
 
-    /*
-     * Unblock SIGUSR2 so that SIGALRM can be triggered when perform authentication timeout.
-     */
+    /* Unblock SIGUSR2 so the authentication timer can fire during the protocol exchange. */
     old_sigset = gs_signal_unblock_sigusr2();
-
-    /*
-     * Now perform authentication exchange.
-     */
     port->protocol_config->fn_authenticate(port);
-
-    /*
-     * recover the signal mask before call ClientAuthentication.
-     */
     gs_signal_recover_mask(old_sigset);
 
-    /*
-     * Done with authentication.  Disable the timeout, and log if needed.
-     */
+    /* Stop the timer before checking whether it shut down the socket. */
     if (!disable_sig_alarm(true))
         ereport(FATAL, (errmsg("could not disable timer for authorization timeout")));
+
+    if (g_authenticationTimedOut) {
+        /* The password may have arrived just before the read side was shut down. */
+        ereport(LOG, (errcode(ERRCODE_QUERY_CANCELED),
+            errmsg("terminate because authentication timeout(%ds)", authTimeout)));
+        proc_exit(0);
+    }
 
     if (u_sess->attr.attr_storage.Log_connections) {
         if (AM_WAL_SENDER)
@@ -465,22 +468,22 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
 
     /* Fetch our pg_database row normally, via syscache */
     tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(u_sess->proc_cxt.MyDatabaseId));
-
     if (!HeapTupleIsValid(tup))
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("cache lookup failed for database %u", u_sess->proc_cxt.MyDatabaseId)));
 
+    /* Recheck that the database name still matches the catalog entry. */
     dbform = (Form_pg_database)GETSTRUCT(tup);
-
-    /* This recheck is strictly paranoia */
-    if (strcmp(name, NameStr(dbform->datname)) != 0)
-        ereport(FATAL,
+    if (strcmp(name, NameStr(dbform->datname)) != 0) {
+        int elevel = check_error_or_fatal_for_tplworker(u_sess);
+        ereport(elevel,
             (errcode(ERRCODE_UNDEFINED_DATABASE),
                 errmsg("database \"%s\" has disappeared from pg_database", name),
                 errdetail("Database OID %u now seems to belong to \"%s\".",
                     u_sess->proc_cxt.MyDatabaseId,
                     NameStr(dbform->datname))));
+    }
 
     /*
      * Check permissions to connect to the database.
@@ -507,11 +510,13 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
          * and save a few cycles.)
          */
         if (!am_superuser &&
-            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK)
-            ereport(FATAL,
+            pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CONNECT) != ACLCHECK_OK) {
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
                     errdetail("User does not have CONNECT privilege.")));
+        }
 
         /*
          * Check connection limit for this database.
@@ -528,7 +533,8 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
             CountDBBackends(u_sess->proc_cxt.MyDatabaseId) > dbform->datconnlimit) {
             ReportAlarmTooManyDatabaseConn(name);
 
-            ereport(FATAL,
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for database \"%s\"", name)));
         } else if (!am_superuser) {
             ReportResumeTooManyDatabaseConn(name);
@@ -553,7 +559,8 @@ static void CheckConnAuthority(const char* name, bool am_superuser)
         /* Database Security: Check privilege to connect to the database.
          * Only superuser on the local machine can connect to "template1".*/
         if (strcmp(name, "template1") == 0 && IsConnFromApp() && !(am_superuser && isLocalAddr)) {
-            ereport(FATAL,
+            int elevel = check_error_or_fatal_for_tplworker(u_sess);
+            ereport(elevel,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
                     errdetail("User does not have CONNECT privilege.")));
@@ -2622,7 +2629,8 @@ void PostgresInitializer::SetDatabaseByName()
             m_indbname);
         securec_check_ss(rc, "\0", "\0");
         pgaudit_user_login(FALSE, (char*)m_indbname, m_details);
-        ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
+        int elevel = check_error_or_fatal_for_tplworker(u_sess);
+        ereport(elevel, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
     // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 

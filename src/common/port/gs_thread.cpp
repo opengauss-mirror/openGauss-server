@@ -895,15 +895,11 @@ void ThreadExitCXX(int code)
 {
     t_thrd.port_cxt.thread_is_exiting = true;
 
-    try {
 #ifdef WIN32
-        _endthreadex((unsigned)(code));
+    _endthreadex((unsigned)(code));
 #else
-        pthread_exit((void*)(size_t)(code));
+    pthread_exit((void*)(size_t)(code));
 #endif
-    } catch (abi::__forced_unwind&) {
-        throw;
-    }
 }
 
 int ShowThreadName(const char* name)

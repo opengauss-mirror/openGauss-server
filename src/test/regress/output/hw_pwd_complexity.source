@@ -156,9 +156,9 @@ SELECT gs_password_notifytime();
 --test null password for '-W' in exists and noexists user condition
 create user exists_user password 'Gauss@123';
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U exists_user -W ''
-gsql: FATAL:  Invalid username/password,login denied.
+gsql: ERROR:  Invalid username/password,login denied.
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U noexists_user -W ''
-gsql: FATAL:  Invalid username/password,login denied.
+gsql: ERROR:  Invalid username/password,login denied.
 select type,result,username,database,object_name,detail_info from pg_query_audit('1111-1-1','3333-3-3') where username = 'exists_user';
      type     | result |  username   | database | object_name |                detail_info                
 --------------+--------+-------------+----------+-------------+-------------------------------------------

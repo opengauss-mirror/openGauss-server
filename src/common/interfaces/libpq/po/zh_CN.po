@@ -126,8 +126,8 @@ msgid "Crypt authentication not supported\n"
 msgstr "不支持Crypt认证\n"
 
 #: fe-auth.cpp:1237
-msgid "FATAL:  Invalid username/password,login denied.\n"
-msgstr "FATAL:  无效的用户名/密码，拒绝登录.\n"
+msgid "ERROR:  Invalid username/password,login denied.\n"
+msgstr "ERROR:  无效的用户名/密码，拒绝登录.\n"
 
 # fe-auth.c:640
 #: fe-auth.cpp:1253

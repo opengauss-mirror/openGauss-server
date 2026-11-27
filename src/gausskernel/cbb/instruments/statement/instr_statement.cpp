@@ -2578,7 +2578,7 @@ static void mark_session_bms(uint32 index, uint64 total_duration, bool is_init)
 void instr_stmt_copy_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL) {
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || u_sess->statement_cxt.wait_events == NULL) {
         return;
     }
 
@@ -2653,7 +2653,7 @@ void instr_stmt_copy_wait_events()
 void instr_stmt_diff_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (!u_sess->statement_cxt.enable_wait_events_bitmap) {
+    if (!u_sess->statement_cxt.enable_wait_events_bitmap || u_sess->statement_cxt.wait_events == NULL) {
         return;
     }
     /*

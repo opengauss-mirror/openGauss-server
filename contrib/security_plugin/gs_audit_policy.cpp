@@ -48,6 +48,7 @@
 
 /* audit policy */
 static THR_LOCAL gs_policy_set *loaded_auditing_policies = NULL;
+static THR_LOCAL Oid audit_database_id = InvalidOid;
 
 /* audit access */
 static THR_LOCAL gs_policy_base_map *loaded_access = NULL;
@@ -136,6 +137,17 @@ int get_access_type(const char *name)
     return CMD_UNKNOWN;
 }
 
+static bool PrepareAuditCache()
+{
+    const Oid databaseId = u_sess->proc_cxt.MyDatabaseId;
+    if (audit_database_id != databaseId) {
+        /* A cleared cache is reloaded even when the policy versions match. */
+        clear_thread_local_auditing();
+        audit_database_id = databaseId;
+    }
+    return OidIsValid(databaseId);
+}
+
 bool reload_audit_policy()
 {
     load_policy_accesses(true);
@@ -147,10 +159,14 @@ bool reload_audit_policy()
 
 bool load_audit_policies(bool reload)
 {
+    if (!PrepareAuditCache()) {
+        return false;
+    }
     if (!reload) {
         pg_atomic_add_fetch_u64(&audit_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&audit_global_version, (uint64*)&audit_local_version, audit_global_version)) {
+    if (pg_atomic_compare_exchange_u64(&audit_global_version, (uint64*)&audit_local_version, audit_global_version) &&
+        loaded_auditing_policies != NULL) {
         /* Latest audit policy, changes nothing */
         return false;
     }
@@ -201,13 +217,14 @@ gs_policy_set *get_audit_policies(const char *dbname)
 
 bool load_policy_accesses(bool reload)
 {
-    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+    if (!PrepareAuditCache()) {
         return false;
     }
     if (!reload) {
         pg_atomic_add_fetch_u64(&access_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&access_global_version, (uint64*)&access_local_version, access_global_version)) {
+    if (pg_atomic_compare_exchange_u64(&access_global_version, (uint64*)&access_local_version, access_global_version) &&
+        loaded_access != NULL) {
         /* Latest policy access, changes nothing */
         return false;
     }
@@ -284,14 +301,14 @@ void reset_policy_filters()
 
 bool load_policy_filters(bool reload)
 {
-    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+    if (!PrepareAuditCache()) {
         return false;
     }
     if (!reload) {
         pg_atomic_add_fetch_u64(&audit_filter_global_version, 1);
     }
     if (pg_atomic_compare_exchange_u64(&audit_filter_global_version, (uint64*)&filter_local_version,
-                                       audit_filter_global_version)) {
+                                      audit_filter_global_version) && loaded_policy_filters != NULL) {
         /* Latest audit filter, changes nothing */
         return false;
     }
@@ -575,6 +592,7 @@ bool check_audit_policy_access(const PolicyLabelItem *item, const PolicyLabelIte
 
 bool check_audited_privilige(int privilige)
 {
+    (void)load_policy_privileges(true);
     access_privilege_set *tmp = loaded_audited_privileges;
     if (tmp) {
         if (tmp->find(privilige) != tmp->end()) {
@@ -587,14 +605,15 @@ bool check_audited_privilige(int privilige)
 
 bool load_policy_privileges(bool reload)
 {
-    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+    if (!PrepareAuditCache()) {
         return false;
     }
 
     if (!reload) {
         pg_atomic_add_fetch_u64(&priv_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&priv_global_version, (uint64*)&priv_local_version, priv_global_version)) {
+    if (pg_atomic_compare_exchange_u64(&priv_global_version, (uint64*)&priv_local_version, priv_global_version) &&
+        loaded_privileges != NULL) {
         /* Latest audit priviledges, changes nothing */
         return false;
     }

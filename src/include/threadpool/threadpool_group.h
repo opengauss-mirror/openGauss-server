@@ -168,6 +168,7 @@ private:
 
     ThreadStreamSentry* m_streams;
     DllistWithLock* m_freeStreamList;
+    pthread_mutex_t m_streamMutex;
 
     instr_time m_current_time;
     uint64 m_sessionId;

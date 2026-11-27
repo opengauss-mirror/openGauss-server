@@ -1234,7 +1234,7 @@ int pg_fe_sendauth(AuthRequest areq, PGconn* conn)
 
                 if (password == NULL || password[0] == '\0') {
                     printfPQExpBuffer(
-                        &conn->errorMessage, libpq_gettext("FATAL:  Invalid username/password,login denied.\n"));
+                        &conn->errorMessage, libpq_gettext("ERROR:  Invalid username/password,login denied.\n"));
                     return STATUS_ERROR;
                 }
                 if ((status = pg_password_sendauth(conn, password, areq)) != STATUS_OK) {

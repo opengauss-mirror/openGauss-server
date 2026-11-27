@@ -122,7 +122,7 @@ revoke insert on test2 from 'test_user_host'@'127.0.%';
 --?.*
 \! sleep 2
 --?.*
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 --?.*
        current_user       
 --------------------------

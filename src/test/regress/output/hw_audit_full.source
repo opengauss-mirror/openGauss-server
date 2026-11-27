@@ -51,7 +51,7 @@ END$$;
 -- user_logout
 -- user_audit3, login_failed
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_audit3 -W audit@2022 -c "CREATE TABLE t_audit_login (id INTEGER, col1 VARCHAR(20));"
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
  
 -- 用户访问越权审计 audit_user_violation
 -- user_audit3, user_violation

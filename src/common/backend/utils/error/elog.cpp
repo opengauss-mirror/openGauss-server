@@ -64,6 +64,7 @@
 #include "nodes/parsenodes.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "distributelayer/streamMain.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
@@ -77,6 +78,7 @@
 #include "storage/proc.h"
 #include "storage/dss/fio_dss.h"
 #include "tcop/tcopprot.h"
+#include "threadpool/threadpool_stream.h"
 #include "utils/be_module.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -715,6 +717,28 @@ void errfinish(int dummy, ...)
         if (edata->output_to_client) {
             /* report NOTICE to consumer here. */
             u_sess->stream_cxt.producer_obj->reportNotice();
+        }
+    } else if (StreamThreadAmI() && u_sess->stream_cxt.producer_obj == NULL &&
+        t_thrd.threadpool_cxt.payload != NULL && elevel == FATAL) {
+        switch (t_thrd.role) {
+            case STREAM_WORKER: {
+                StreamProducer* proObj = (StreamProducer*)t_thrd.threadpool_cxt.payload;
+                SetStreamWorkerInfo(proObj);
+                ((StreamProducer*)u_sess->stream_cxt.producer_obj)->reportError();
+                break;
+            }
+            case THREADPOOL_STREAM: {
+                t_thrd.threadpool_cxt.stream = (ThreadPoolStream*)t_thrd.threadpool_cxt.payload;
+                t_thrd.threadpool_cxt.group = t_thrd.threadpool_cxt.stream->GetGroup();
+                StreamProducer* proObj = t_thrd.threadpool_cxt.stream->GetProducer();
+                SetStreamWorkerInfo(proObj);
+                ((StreamProducer*)u_sess->stream_cxt.producer_obj)->reportError();
+                break;
+            }
+            default: {
+                Assert(0);
+                break;
+            }
         }
     } else {
         /* Emit the message to the right places */
