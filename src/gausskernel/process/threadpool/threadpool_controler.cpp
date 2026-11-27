@@ -346,8 +346,10 @@ void ThreadPoolControler::ParseBindCpu()
 
     ptoken = TrimStr(strtok_r(scpu, pdelimiter, &psave));
     ptoken = pg_strtolower(ptoken);
-
-    if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
+    if (ptoken == NULL) {
+        INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', 'nodebind' and 'numabind' "
+            "are valid attribute."));
+    } else if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
         m_cpuInfo.bindType = NO_CPU_BIND;
         return;
     } else if (strncmp("allbind", ptoken, strlen("allbind")) == 0) {
@@ -540,9 +542,8 @@ void ThreadPoolControler::GetSysCpuInfo()
 
     m_cpuInfo.cpuArr = (int**)palloc0(sizeof(int*) * m_cpuInfo.totalNumaNum);
     m_cpuInfo.cpuArrSize = (int*)palloc0(sizeof(int) * m_cpuInfo.totalNumaNum);
-    int cpu_per_numa = m_cpuInfo.totalCpuNum / m_cpuInfo.totalNumaNum;
     for (int i = 0; i < m_cpuInfo.totalNumaNum; i++) {
-        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * cpu_per_numa);
+        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * m_cpuInfo.totalCpuNum);
     }
     m_cpuInfo.activeCpuNum = 0;
     NumaCpuId *sysNumaCpuIdList = (NumaCpuId*)palloc0(sizeof(NumaCpuId) * m_cpuInfo.totalCpuNum);

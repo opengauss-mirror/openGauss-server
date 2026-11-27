@@ -52,6 +52,7 @@
 #include "replication/walsender.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
+#include "threadpool/threadpool.h"
 #include "funcapi.h"
 #include "utils/acl.h"
 #include "utils/guc.h"
@@ -1830,7 +1831,7 @@ static void check_hba(hbaPort* port)
                 } else {
                     ConnAuthMethodCorrect = false;
                     pfree_ext(hba);
-                    ereport(FATAL,
+                    ereport(IS_THREAD_POOL_WORKER ? ERROR : FATAL,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                             errmsg("Forbid remote connection with trust method!")));
                 }

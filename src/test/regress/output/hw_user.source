@@ -1058,9 +1058,9 @@ ERROR:  Only system admin can disable user's password.
 alter user iam_auth_user01 password disable;
 alter user iam_auth_user02 identified by disable;
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W gauss@123 -c "\q"
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W gauss@123 -c "\q"
-gsql: FATAL:  Invalid username/password,login denied.
+--?gsql: (?:ERROR|FATAL):  Invalid username/password,login denied\x2e$
 alter user iam_auth_user01 password 'gauss@234';
 alter user iam_auth_user02 identified by 'gauss@234' replace 'gauss@34';
 drop user iam_auth_user01;

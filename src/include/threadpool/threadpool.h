@@ -66,4 +66,19 @@ extern void ThreadPoolListenerIAm();
 extern void PreventSignal();
 extern void AllowSignal();
 
+/*
+ * In some cases a thread pool worker reporting FATAL will exit.
+ * Use this check with caution to let ERROR recover during session initialization.
+ */
+static inline int check_error_or_fatal_for_tplworker(const knl_session_context* session)
+{
+    if (unlikely(session == nullptr)) {
+        return FATAL;
+    }
+    if (IS_THREAD_POOL_WORKER && session->status == KNL_SESS_UNINIT) {
+        return ERROR;
+    }
+    return FATAL;
+}
+
 #endif /* THREAD_POOL_H */

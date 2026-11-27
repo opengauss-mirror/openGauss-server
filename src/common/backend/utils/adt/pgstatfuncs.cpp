@@ -61,6 +61,7 @@
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/globalplancache.h"
+#include "utils/hsearch.h"
 #include "utils/inet.h"
 #include "utils/timestamp.h"
 #include "utils/lsyscache.h"
@@ -3656,12 +3657,71 @@ Datum pg_stat_get_status(PG_FUNCTION_ARGS)
     rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
     rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-    if (!PG_ARGISNULL(0)) {
-        f.hasTid = true;
-        f.threadId = PG_GETARG_INT64(0);
-    }
+    f.hasTid = !PG_ARGISNULL(0);
+    if (f.hasTid || !ENABLE_THREAD_POOL) {
+        if (f.hasTid) {
+            f.threadId = PG_GETARG_INT64(0);
+        }
+        (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_status, &f);
+    } else {
+        struct ThreadStatusEntry {
+            ThreadId tid;
+            bool sessionSlot;
+        };
+        const int maxSnapshotRetries = 2;
+        const int firstSessionSlot = GLOBAL_RESERVE_SESSION_NUM;
+        const int endSessionSlot = MAX_BACKEND_SLOT;
+        PgBackendStatus* entries = t_thrd.shemem_ptr_cxt.BackendStatusArray;
+        MemoryContext scanContext =
+            AllocSetContextCreate(CurrentMemoryContext, "Thread pool wait status scan", ALLOCSET_DEFAULT_SIZES);
+        MemoryContext queryContext = MemoryContextSwitchTo(scanContext);
 
-    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_status, &f);
+        for (int retryCount = 0;; retryCount++) {
+            HASHCTL ctl = {};
+            ctl.keysize = sizeof(ThreadId);
+            ctl.entrysize = sizeof(ThreadStatusEntry);
+            ctl.hcxt = scanContext;
+            HTAB* seenThreads = hash_create("wait status thread IDs", firstSessionSlot, &ctl,
+                HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            PgBackendStatus* localentry = (PgBackendStatus*)palloc0(sizeof(PgBackendStatus));
+            bool retry = false;
+
+            /* Read validated snapshots in reverse order to prefer sessions over their workers. */
+            for (int i = BackendStatusArray_size - 1; i >= 0; i--) {
+                if (!gs_stat_encap_status_info(localentry, &entries[i])) {
+                    continue;
+                }
+                if (localentry->st_procpid != 0) {
+                    bool found = false;
+                    ThreadStatusEntry* entry = (ThreadStatusEntry*)hash_search(
+                        seenThreads, &localentry->st_procpid, HASH_ENTER, &found);
+                    bool sessionSlot = i >= firstSessionSlot && i < endSessionSlot;
+                    if (found) {
+                        /*
+                         * A worker moved between two sessions during the scan. Take a fresh
+                         * sample when possible. The last scan keeps one row for each thread.
+                         */
+                        if (sessionSlot && entry->sessionSlot && retryCount < maxSnapshotRetries) {
+                            retry = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    entry->sessionSlot = sessionSlot;
+                }
+                insert_pg_stat_get_status(rsinfo->setResult, rsinfo->setDesc, localentry, &f);
+            }
+            if (!retry) {
+                break;
+            }
+            tuplestore_clear(rsinfo->setResult);
+            MemoryContextReset(scanContext);
+            CHECK_FOR_INTERRUPTS();
+        }
+
+        (void)MemoryContextSwitchTo(queryContext);
+        MemoryContextDelete(scanContext);
+    }
 
     MemoryContextSwitchTo(oldcontext);
     /* clean up and return the tuplestore */

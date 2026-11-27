@@ -842,9 +842,9 @@ static int memoryUsageCompare(const void* p1, const void* p2)
     SessMemoryUsage* m2 = (SessMemoryUsage*)p2;
     /* release idle session first */
     if (m1->state != m2->state) {
-        return m1->state < m2->state;
+        return m1->state - m2->state;
     }
-    return m1->usedSize > m2->usedSize;
+    return m2->usedSize - m1->usedSize;
 }
 
 /*

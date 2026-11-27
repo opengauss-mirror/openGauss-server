@@ -148,7 +148,7 @@ void ThreadPoolScheduler::DynamicAdjustThreadPool()
 {
     for (int i = 0; i < m_groupNum; i++) {
         pg_memory_barrier();
-        if (pmState == PM_RUN && m_canAdjustPool) {
+        if ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && m_canAdjustPool) {
             AdjustWorkerPool(i);
             AdjustStreamPool(i);
         }
@@ -189,6 +189,10 @@ void ThreadPoolScheduler::ShutDown() const
 
 void ThreadPoolScheduler::AdjustWorkerPool(int idx)
 {
+    if (pmState != PM_RUN) {
+        return;
+    }
+
     ThreadPoolGroup* group = m_groups[idx];
     /* When no idle worker and no task has been processed, the system may hang. */
     if (group->IsGroupTooBusy()) {
