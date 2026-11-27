@@ -269,7 +269,7 @@ test: single_node_random transactions_test autocommit_test
 test: prefixkey_index invisible_index
 test: hash_index_001
 test: hash_index_002
-test: single_node_update 
+test: single_node_update
 #test single_node_namespace
 #test: single_node_prepared_xacts 
 #test: single_node_delete
@@ -1157,3 +1157,6 @@ test: on_update_session1 on_update_session2
 
 test: ts_gb18030_utf8
 test: backup_tool_audit
+
+# Recovery lock retries must preserve partition tags.
+test: standby_partition_lock
