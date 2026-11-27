@@ -102,6 +102,7 @@ ALTER SYSTEM SET autovacuum_mode to 123;
 ALTER SYSTEM SET autovacuum_mode to lalala;
 ALTER SYSTEM SET io_control_unit TO -100;
 ALTER SYSTEM SET io_control_unit TO 1.1;
+ALTER SYSTEM SET data_replicate_buffer_size TO 4095;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
 

@@ -281,6 +281,8 @@ ALTER SYSTEM SET io_control_unit TO -100;
 ERROR:  -100 is outside the valid range for parameter "io_control_unit" (1000 .. 1000000)
 ALTER SYSTEM SET io_control_unit TO 1.1;
 ERROR:  invalid value for parameter "io_control_unit": "1.1"
+ALTER SYSTEM SET data_replicate_buffer_size TO 4095;
+ERROR:  4095 is outside the valid range for parameter "data_replicate_buffer_size" (4096 .. 1072693248)
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
 ERROR:  parameter "vacuum_defer_cleanup_age" requires a numeric value
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
@@ -537,4 +539,3 @@ SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM 
  set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_UNit          | ALTER SYSTEM SET "io_control_UNit" TO 90000;
  set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_unIT          | ALTER SYSTEM SET "io_control_unIT" TO 6000;
 (21 rows)
-
